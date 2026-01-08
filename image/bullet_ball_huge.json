@@ -1,0 +1,613 @@
+{
+  "__image_filename": "bullet/bullet_ball_huge.png",
+  "sprites": {
+    "ball_huge1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "ball_huge_dark8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    },
+    "fade_ball_huge_dark8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        13.5,
+        13.5
+      ],
+      "image_path": "THlib//bullet//bullet_ball_huge.png"
+    }
+  }
+}

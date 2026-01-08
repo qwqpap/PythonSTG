@@ -1,0 +1,613 @@
+{
+  "__image_filename": "bullet/bullet5.png",
+  "sprites": {
+    "ball_light1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "ball_light_dark8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark1": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark2": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark3": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark4": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark5": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark6": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark7": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    },
+    "fade_ball_light_dark8": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ],
+      "center": [
+        32,
+        32
+      ],
+      "radius": 32,
+      "rotate": true,
+      "scale": [
+        11.5,
+        11.5
+      ],
+      "image_path": "THlib//bullet//bullet5.png"
+    }
+  }
+}

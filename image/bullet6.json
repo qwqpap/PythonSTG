@@ -1,0 +1,157 @@
+{
+  "__image_filename": "bullet/bullet6.png",
+  "sprites": {
+    "silence1": {
+      "rect": [
+        192,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    },
+    "silence2": {
+      "rect": [
+        192,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    },
+    "silence3": {
+      "rect": [
+        192,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    },
+    "silence4": {
+      "rect": [
+        192,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    },
+    "silence5": {
+      "rect": [
+        192,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    },
+    "silence6": {
+      "rect": [
+        192,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    },
+    "silence7": {
+      "rect": [
+        192,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    },
+    "silence8": {
+      "rect": [
+        192,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.5,
+        4.5
+      ],
+      "image_path": "THlib//bullet//bullet6.png"
+    }
+  }
+}

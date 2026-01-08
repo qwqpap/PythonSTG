@@ -1,0 +1,1069 @@
+{
+  "__image_filename": "bullet/bullet4.png",
+  "sprites": {
+    "star_big_b1": {
+      "rect": [
+        32,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "star_big_b2": {
+      "rect": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "star_big_b3": {
+      "rect": [
+        32,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "star_big_b4": {
+      "rect": [
+        32,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "star_big_b5": {
+      "rect": [
+        32,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "star_big_b6": {
+      "rect": [
+        32,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "star_big_b7": {
+      "rect": [
+        32,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "star_big_b8": {
+      "rect": [
+        32,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        6.0,
+        6.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b1": {
+      "rect": [
+        64,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b2": {
+      "rect": [
+        64,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b3": {
+      "rect": [
+        64,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b4": {
+      "rect": [
+        64,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b5": {
+      "rect": [
+        64,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b6": {
+      "rect": [
+        64,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b7": {
+      "rect": [
+        64,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_b8": {
+      "rect": [
+        64,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid1": {
+      "rect": [
+        96,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid2": {
+      "rect": [
+        96,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid3": {
+      "rect": [
+        96,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid4": {
+      "rect": [
+        96,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid5": {
+      "rect": [
+        96,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid6": {
+      "rect": [
+        96,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid7": {
+      "rect": [
+        96,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "arrow_mid8": {
+      "rect": [
+        96,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        24.0,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart1": {
+      "rect": [
+        128,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart2": {
+      "rect": [
+        128,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart3": {
+      "rect": [
+        128,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart4": {
+      "rect": [
+        128,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart5": {
+      "rect": [
+        128,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart6": {
+      "rect": [
+        128,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart7": {
+      "rect": [
+        128,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "heart8": {
+      "rect": [
+        128,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        9.0,
+        9.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b1": {
+      "rect": [
+        192,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b2": {
+      "rect": [
+        192,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b3": {
+      "rect": [
+        192,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b4": {
+      "rect": [
+        192,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b5": {
+      "rect": [
+        192,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b6": {
+      "rect": [
+        192,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b7": {
+      "rect": [
+        192,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "knife_b8": {
+      "rect": [
+        192,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        3.5,
+        3.5
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money1": {
+      "rect": [
+        168,
+        0,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money2": {
+      "rect": [
+        168,
+        16,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money3": {
+      "rect": [
+        168,
+        32,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money4": {
+      "rect": [
+        168,
+        48,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money5": {
+      "rect": [
+        168,
+        64,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money6": {
+      "rect": [
+        168,
+        80,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money7": {
+      "rect": [
+        168,
+        96,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "money8": {
+      "rect": [
+        168,
+        112,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        4.0,
+        4.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d1": {
+      "rect": [
+        168,
+        128,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d2": {
+      "rect": [
+        168,
+        144,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d3": {
+      "rect": [
+        168,
+        160,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d4": {
+      "rect": [
+        168,
+        176,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d5": {
+      "rect": [
+        168,
+        192,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d6": {
+      "rect": [
+        168,
+        208,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d7": {
+      "rect": [
+        168,
+        224,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    },
+    "ball_mid_d8": {
+      "rect": [
+        168,
+        240,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet4.png"
+    }
+  }
+}
