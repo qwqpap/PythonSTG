@@ -301,7 +301,7 @@ def main():
                     bullet_pool.data['alive'][collided_bullet] = 0
 
         # 获取活跃子弹的位置、角度和精灵ID数据
-        positions, _, angles, sprite_ids = bullet_pool.get_active_bullets()
+        positions, angles, sprite_ids = bullet_pool.get_active_bullets()
         active_count = len(positions)
 
         # 每10帧打印一次调试信息到控制台

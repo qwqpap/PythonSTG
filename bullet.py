@@ -6,6 +6,25 @@ import math
 # 动态方法可以在弹幕描述脚本里面实现
 # 或者新的modifier_bullet.py文件里面实现
 
+class SpawnRequest:
+    """生成请求"""
+    def __init__(self, x, y, angle, speed, sprite_id='', init=None, delay=0):
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.speed = speed
+        self.sprite_id = sprite_id
+        self.init = init  # 初始化回调
+        self.delay = delay  # 延迟帧数
+
+class DeathEvent:
+    """死亡事件"""
+    def __init__(self, idx, x, y, handler=None):
+        self.idx = idx
+        self.x = x
+        self.y = y
+        self.handler = handler  # 死亡处理回调
+
 class BulletPool:
     def __init__(self, max_bullets=50000):
         """
@@ -20,7 +39,6 @@ class BulletPool:
             ('vel', 'f4', 2),      # 速度 (vx, vy)
             ('angle', 'f4'),       # 角度（弧度）
             ('speed', 'f4'),       # 速度大小
-            ('color', 'f4', 3),    # 颜色 (r, g, b)
             ('alive', 'i4'),       # 活跃状态 (0: 非活跃, 1: 活跃)
             ('sprite_id', 'U32')   # 精灵ID
         ])
@@ -28,20 +46,30 @@ class BulletPool:
         # 初始化子弹池
         self.data = np.zeros(max_bullets, dtype=self.dtype)
         
-        # 预生成随机颜色
-        self.data['color'] = np.random.uniform(0.0, 1.0, (max_bullets, 3)).astype('f4')
+        # 生成队列和死亡队列
+        self.spawn_queue = []  # 生成请求队列
+        self.death_queue = []  # 死亡事件队列
         
-    def spawn_bullet(self, x, y, angle, speed, color=None, sprite_id=''):
+        # 上一帧的活跃状态，用于检测死亡
+        self.last_alive = np.zeros(max_bullets, dtype='i4')
+    
+    def spawn_bullet(self, x, y, angle, speed, sprite_id='', init=None, delay=0):
         """
         生成子弹（从池子里找空位）
         :param x: 初始x坐标
         :param y: 初始y坐标
         :param angle: 角度（弧度）
         :param speed: 速度大小
-        :param color: 颜色 (r, g, b)，如果为None则使用预生成的随机颜色
         :param sprite_id: 精灵ID，用于指定使用的精灵资源
+        :param init: 初始化回调
+        :param delay: 延迟帧数
         :return: 子弹索引，如果没有空位则返回-1
         """
+        # 如果有延迟，添加到生成队列
+        if delay > 0:
+            self.spawn_queue.append(SpawnRequest(x, y, angle, speed, sprite_id, init, delay))
+            return -1
+        
         # 找到第一个非活跃的子弹
         dead_indices = np.where(self.data['alive'] == 0)[0]
         if len(dead_indices) > 0:
@@ -60,17 +88,17 @@ class BulletPool:
             self.data['speed'][idx] = speed
             self.data['sprite_id'][idx] = sprite_id
             
-            # 如果提供了颜色，则使用提供的颜色
-            if color is not None:
-                self.data['color'][idx] = color
-            
             # 激活子弹
             self.data['alive'][idx] = 1
+            
+            # 执行初始化回调
+            if init:
+                init(self, idx)
             
             return idx
         return -1
     
-    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, color=None, sprite_id=''):
+    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, sprite_id=''):
         """
         生成一个圆形扩散的子弹图案
         :param x: 中心x坐标
@@ -79,7 +107,6 @@ class BulletPool:
         :param speed: 速度大小
         :param count: 子弹数量
         :param angle_spread: 角度扩散范围（弧度）
-        :param color: 颜色 (r, g, b)
         :param sprite_id: 精灵ID，用于指定使用的精灵资源
         """
         # 向量化生成多个子弹，避免每次调用 spawn_bullet 时进行 O(n) 的 np.where 搜索
@@ -110,41 +137,136 @@ class BulletPool:
         self.data['speed'][use_indices] = speed
         self.data['sprite_id'][use_indices] = sprite_id
 
-        if color is not None:
-            self.data['color'][use_indices] = color
-
         # 标记为活跃
         self.data['alive'][use_indices] = 1
+    
+    def kill_bullet(self, idx, handler=None):
+        """
+        杀死子弹
+        :param idx: 子弹索引
+        :param handler: 死亡处理回调
+        """
+        if 0 <= idx < self.max_bullets and self.data['alive'][idx]:
+            # 标记为非活跃
+            self.data['alive'][idx] = 0
+            
+            # 添加到死亡队列
+            x, y = self.data['pos'][idx]
+            self.death_queue.append(DeathEvent(idx, x, y, handler))
     
     def update(self, dt):
         """
         更新所有活跃子弹
         :param dt: 时间步长
         """
+        # 保存当前活跃状态
+        self.last_alive[:] = self.data['alive']
+        
         # 调用Numba加速的更新函数
         _update_bullets(self.data, dt)
-
+        
+        # 收集死亡事件
+        self._collect_deaths()
+        
+        # 处理死亡队列
+        self._process_death_queue()
+        
+        # 处理生成队列
+        self._process_spawn_queue()
+    
+    def _collect_deaths(self):
+        """
+        收集死亡事件
+        """
+        # 找出刚死亡的子弹
+        died_indices = np.where((self.last_alive == 1) & (self.data['alive'] == 0))[0]
+        
+        for idx in died_indices:
+            x, y = self.data['pos'][idx]
+            self.death_queue.append(DeathEvent(idx, x, y))
+    
+    def _process_death_queue(self):
+        """
+        处理死亡队列
+        """
+        for event in self.death_queue:
+            if event.handler:
+                event.handler(self, event)
+        
+        # 清空死亡队列
+        self.death_queue.clear()
+    
+    def _process_spawn_queue(self):
+        """
+        处理生成队列
+        """
+        # 处理延迟为0的生成请求
+        new_queue = []
+        for req in self.spawn_queue:
+            if req.delay <= 0:
+                # 直接生成子弹
+                self._spawn_from_request(req)
+            else:
+                # 减少延迟
+                req.delay -= 1
+                new_queue.append(req)
+        
+        # 更新生成队列
+        self.spawn_queue = new_queue
+    
+    def _spawn_from_request(self, req):
+        """
+        从生成请求生成子弹
+        :param req: 生成请求
+        """
+        # 找到第一个非活跃的子弹
+        dead_indices = np.where(self.data['alive'] == 0)[0]
+        if len(dead_indices) > 0:
+            idx = dead_indices[0]
+            
+            # 设置位置
+            self.data['pos'][idx] = (req.x, req.y)
+            
+            # 计算速度向量
+            vx = math.cos(req.angle) * req.speed
+            vy = math.sin(req.angle) * req.speed
+            self.data['vel'][idx] = (vx, vy)
+            
+            # 设置其他属性
+            self.data['angle'][idx] = req.angle
+            self.data['speed'][idx] = req.speed
+            self.data['sprite_id'][idx] = req.sprite_id
+            
+            # 激活子弹
+            self.data['alive'][idx] = 1
+            
+            # 执行初始化回调
+            if req.init:
+                req.init(self, idx)
+    
     def get_active_bullets(self):
         """
         获取所有活跃的子弹数据
-        :return: 活跃子弹的位置、颜色、角度和精灵ID数据
+        :return: 活跃子弹的位置、角度和精灵ID数据
         """
         active_mask = self.data['alive'] == 1
         active_data = self.data[active_mask]
         
         if len(active_data) > 0:
             positions = active_data['pos']
-            colors = active_data['color']
             angles = active_data['angle']
             sprite_ids = active_data['sprite_id']
-            return positions, colors, angles, sprite_ids
-        return np.array([]), np.array([]), np.array([]), np.array([])
+            return positions, angles, sprite_ids
+        return np.array([]), np.array([]), np.array([])
 
     def clear_all(self):
         """
         清空所有子弹（设置为非活跃）
         """
         self.data['alive'] = 0
+        self.spawn_queue.clear()
+        self.death_queue.clear()
+    
     def pre_update(self, dt):
         """以后加上子弹的其他处理"""
         pass
