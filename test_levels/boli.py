@@ -3,7 +3,55 @@ import random
 
 # 多种华丽弹幕模式集合：螺旋、扇形波、花朵环
 
-def spiral_coroutine(bp, player, origin=(0, 0.5)):
+class ExplosionManager:
+    """管理延迟爆炸的子弹"""
+    def __init__(self):
+        self.pending_explosions = []  # 存储待爆炸的子弹信息：(爆炸时间, x, y)
+
+    def add_explosion(self, explode_frame, x, y):
+        """添加一个待爆炸的子弹"""
+        self.pending_explosions.append((explode_frame, x, y))
+
+    def check_explosions(self, current_frame, bullet_pool):
+        """检查并处理已到爆炸时间的子弹"""
+        exploded = []
+        for i, (explode_frame, x, y) in enumerate(self.pending_explosions):
+            if current_frame >= explode_frame:
+                # 爆炸效果：生成多个子弹
+                for _ in range(8):  # 爆炸生成8颗子弹
+                    angle = random.uniform(0, 2 * math.pi)
+                    speed = random.uniform(0.3, 1.0)
+                    bullet_pool.spawn_bullet(x, y, angle, speed, sprite_id='grain_a2')
+                exploded.append(i)
+        
+        # 移除已爆炸的记录
+        for i in reversed(exploded):
+            self.pending_explosions.pop(i)
+
+
+explosion_manager = ExplosionManager()
+
+def explosion_manager_coroutine(stage_manager, bullet_pool):
+    """管理延迟爆炸的协程"""
+    while True:
+        current_frame = stage_manager.get_frame_count()
+        explosion_manager.check_explosions(current_frame, bullet_pool)
+        yield 1
+
+def spawn_delayed_explosion_bullet(bp, stage_manager, x, y, angle, speed, delay_frames, sprite_id='grain_a4'):
+    """生成延迟爆炸的子弹"""
+    # 生成初始子弹
+    bullet_idx = bp.spawn_bullet(x, y, angle, speed, sprite_id=sprite_id)
+    
+    # 计算爆炸时间
+    explode_frame = stage_manager.get_frame_count() + delay_frames
+    
+    # 添加到爆炸管理器
+    explosion_manager.add_explosion(explode_frame, x, y)
+    
+    return bullet_idx
+
+def spiral_coroutine_original(bp, player, origin=(0, 0.5)):
     """持续螺旋弹幕：每帧发射1颗子弹，角度逐渐旋转并形成彩色螺旋。"""
     x, y = origin
     angle = 0.0
@@ -52,7 +100,7 @@ def flower_bloom_coroutine(bp, player, origin=(0, 0.5)):
             a0 = random.random() * math.radians(360)
             for i in range(count):
                 a = a0 + (i / count) * 2 * math.pi
-                bp.spawn_bullet(x, y, a, speeds[ring_idx], sprite_id='grain_a5')   
+                bp.spawn_bullet(x, y, a, speeds[ring_idx], sprite_id='grain_a5')
             # 环与环之间短暂停顿
             for _ in range(8):
                 yield 1
@@ -60,20 +108,21 @@ def flower_bloom_coroutine(bp, player, origin=(0, 0.5)):
         for _ in range(120):
             yield 1
 
-def spiral_coroutine(bp, player, origin=(0, 0.5)):
-    """从中心散开的八组不动的放射弹幕"""
-    x, y = origin
-    for _ in range(600):
-        angles = [i * math.pi / 4 for i in range(8)]  # 八个方向
-        for angle in angles:
-            bp.spawn_bullet(x, y, angle, 0.5, sprite_id='grain_a1')
-        yield 1
+def spiral_coroutine_with_explosions(bp, player, stage_manager):
+    """带延迟爆炸效果的螺旋弹幕"""
+    for i in range(200, 50, -5):
+        for j in range(50, -50, -5):
+            # 转换坐标到游戏坐标系
+            x = i / 100.0  # 调整缩放因子
+            y = j / 100.0
+            spawn_delayed_explosion_bullet(bp, stage_manager, x, y, 0, 0, 120, 'grain_a4')
+            yield 1  # 每生成一颗子弹等待1帧
 
-def level_1(stage_manager, bullet_pool, player):
+
+def level_1(stage_manager, bullet_pool, player):   
     """第一关：组合三种华丽弹幕，形成叠加效果。"""
-    # 螺旋：持续存在
-    stage_manager.add_coroutine(lambda: spiral_coroutine(bullet_pool, player))
-    # 花朵绽放：周期性大范围视觉效果
-    stage_manager.add_coroutine(lambda: flower_bloom_coroutine(bullet_pool, player))
-    # 放射弹幕注册
-    stage_manager.add_coroutine(lambda:spiral_coroutine(bullet_pool, player))
+    # 添加爆炸管理器协程
+    stage_manager.add_coroutine(lambda: explosion_manager_coroutine(stage_manager, bullet_pool))
+
+    # 添加带爆炸效果的螺旋弹幕
+    stage_manager.add_coroutine(lambda: spiral_coroutine_with_explosions(bullet_pool, player, stage_manager))
