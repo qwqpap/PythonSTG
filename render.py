@@ -5,7 +5,8 @@ import numpy as np
 import sys
 from bullet import BulletPool
 from player import Player, check_collisions
-from stage import StageManager, level_1
+from stage import StageManager
+from test_levels.boli import level_1
 from sprite_manager import SpriteManager
 import math
 
@@ -64,9 +65,9 @@ def main():
                 sprite_data = sprite_manager.get_sprite(sprite_id)
                 sprite_rect = sprite_data['rect']
                 uv_left = sprite_rect[0] / img_width
-                uv_top = sprite_rect[1] / img_height
+                uv_top = (img_height - (sprite_rect[1] + sprite_rect[3])) / img_height  # 翻转Y轴
                 uv_right = (sprite_rect[0] + sprite_rect[2]) / img_width
-                uv_bottom = (sprite_rect[1] + sprite_rect[3]) / img_height
+                uv_bottom = (img_height - sprite_rect[1]) / img_height  # 翻转Y轴
                 texture_uv_map[texture_path][sprite_id] = [uv_left, uv_top, uv_right, uv_bottom]
     
     # 如果没有加载到纹理，使用默认图片
@@ -84,9 +85,9 @@ def main():
             sprite_data = sprite_manager.get_sprite(default_sprite_id)
             sprite_rect = sprite_data['rect']
             uv_left = sprite_rect[0] / img_width
-            uv_top = sprite_rect[1] / img_height
+            uv_top = (img_height - (sprite_rect[1] + sprite_rect[3])) / img_height  # 翻转Y轴
             uv_right = (sprite_rect[0] + sprite_rect[2]) / img_width
-            uv_bottom = (sprite_rect[1] + sprite_rect[3]) / img_height
+            uv_bottom = (img_height - sprite_rect[1]) / img_height  # 翻转Y轴
             texture_uv_map[bullet_texture_path][default_sprite_id] = [uv_left, uv_top, uv_right, uv_bottom]
     
     # 创建一个综合的UV映射，方便查找
@@ -96,17 +97,15 @@ def main():
             sprite_uv_map[sprite_id] = uv_coords
 
     # --- 3. 编写着色器 (GLSL 语言) ---
-    # 顶点着色器：接收位置并转换到裁剪空间，支持实例化偏移、颜色、角度和UV坐标
+    # 顶点着色器：接收位置并转换到裁剪空间，支持实例化偏移、角度和UV坐标
     vertex_shader = """
     #version 330
     in vec2 in_vert;
     in vec2 in_uv_base;
     in vec2 in_offset;
-    in vec3 in_color;
     in float in_angle;
     in vec4 in_uv_offset;
     
-    out vec3 v_color;
     out vec2 v_uv;
     
     void main() {
@@ -119,21 +118,19 @@ def main():
         // 宽高比校正：384x448屏幕，宽高比为6:7，保持x轴[-1,1]，y轴需要乘以(384.0/448.0)
         position.y *= 384.0 / 448.0;
         gl_Position = vec4(position, 0.0, 1.0);
-        v_color = in_color;
         // 使用实例化的UV坐标
         v_uv = in_uv_base * vec2(in_uv_offset.z - in_uv_offset.x, in_uv_offset.w - in_uv_offset.y) + in_uv_offset.xy;
     }
     """
-    # 片元着色器：使用纹理采样和颜色
+    # 片元着色器：使用纹理采样
     fragment_shader = """
     #version 330
     uniform sampler2D u_texture;
-    in vec3 v_color;
     in vec2 v_uv;
     out vec4 f_color;
     void main() {
         vec4 tex_color = texture(u_texture, v_uv);
-        f_color = tex_color * vec4(v_color, 1.0);
+        f_color = tex_color;
     }
     """
     program = ctx.program(vertex_shader=vertex_shader, fragment_shader=fragment_shader)
@@ -201,7 +198,6 @@ def main():
     vao = ctx.vertex_array(program, 
                            [(vbo, '2f 2f', 'in_vert', 'in_uv_base'),
                             (instance_vbo, '2f/i', 'in_offset'),
-                            (color_vbo, '3f/i', 'in_color'),
                             (angle_vbo, '1f/i', 'in_angle'),
                             (uv_vbo, '4f/i', 'in_uv_offset')])
     # 预创建玩家用的着色器和 VBO/VAO，避免每帧重新创建造成开销
@@ -304,8 +300,8 @@ def main():
                     # 标记碰撞的子弹为非活跃
                     bullet_pool.data['alive'][collided_bullet] = 0
 
-        # 获取活跃子弹的位置、颜色、角度和精灵ID数据
-        positions, colors, angles, sprite_ids = bullet_pool.get_active_bullets()
+        # 获取活跃子弹的位置、角度和精灵ID数据
+        positions, _, angles, sprite_ids = bullet_pool.get_active_bullets()
         active_count = len(positions)
 
         # 每10帧打印一次调试信息到控制台
@@ -339,13 +335,11 @@ def main():
                 # 准备当前组子弹的数据
                 group_size = len(bullet_indices)
                 group_positions = positions[bullet_indices]
-                group_colors = colors[bullet_indices]
                 group_angles = angles[bullet_indices]
                 group_sprite_ids = sprite_ids[bullet_indices]
                 
                 # 更新VBO数据
                 instance_vbo.write(group_positions.tobytes())
-                color_vbo.write(group_colors.tobytes())
                 angle_vbo.write(group_angles.tobytes())
                 
                 # 为每个子弹准备UV坐标数据

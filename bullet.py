@@ -155,7 +155,7 @@ def _update_bullets(data, dt):
             data[i]['pos'][0] += data[i]['vel'][0] * dt
             data[i]['pos'][1] += data[i]['vel'][1] * dt
             
-            # 边界检测（假设屏幕范围是-1到1）
+            # 边界检测（假设屏幕范围是-1到1，子弹离开屏幕一定距离后再消失）
             x, y = data[i]['pos']
-            if x < -1.1 or x > 1.1 or y < -1.1 or y > 1.1:
+            if x < -1.5 or x > 1.5 or y < -1.5 or y > 1.5:
                 data[i]['alive'] = 0

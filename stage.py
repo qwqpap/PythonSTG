@@ -7,6 +7,7 @@ class StageManager:
         self.engine = engine
         self.frame_count = 0
         self.events = []  # 存储格式: [ [frame, function, args], ... ]
+        self.coroutines = []  # 存储协程: [ [coroutine, next_frame], ... ]
 
     def add_event(self, frame, func, *args):
         """
@@ -40,13 +41,30 @@ class StageManager:
 
     def update(self):
         """
-        每帧更新，检查并执行待触发的事件
+        每帧更新，检查并执行待触发的事件和协程
         """
         self.frame_count += 1
         # 检查有没有当前帧需要触发的任务
         while self.events and self.events[0][0] <= self.frame_count:
             frame, func, args = self.events.pop(0)
             func(*args)  # 执行用户定义的发射逻辑
+        
+        # 检查并执行协程
+        completed_coroutines = []
+        for i, (coroutine, next_frame) in enumerate(self.coroutines):
+            if self.frame_count >= next_frame:
+                try:
+                    # 执行协程的下一步
+                    wait_frames = next(coroutine)
+                    # 更新协程的下一次执行帧数
+                    self.coroutines[i][1] = self.frame_count + wait_frames
+                except StopIteration:
+                    # 协程执行完毕，标记为完成
+                    completed_coroutines.append(i)
+        
+        # 移除已完成的协程（从后往前移除，避免索引偏移）
+        for i in reversed(completed_coroutines):
+            self.coroutines.pop(i)
 
     def get_frame_count(self):
         """
@@ -64,6 +82,17 @@ class StageManager:
         """
         absolute_frame = self.frame_count + relative_frames
         self.add_event(absolute_frame, func, *args)
+    
+    def add_coroutine(self, coroutine):
+        """
+        添加一个协程到管理器
+        :param coroutine: 一个使用yield关键字的生成器函数
+        """
+        # 创建协程对象
+        if callable(coroutine):
+            coroutine = coroutine()
+        # 存储协程和下一次执行的帧数
+        self.coroutines.append([coroutine, self.frame_count])
 
 # 示例发射器函数
 def spawn_ring(bullet_pool, center, count, speed, angle=0.0, sprite_id='star_small1'):
@@ -78,7 +107,7 @@ def spawn_ring(bullet_pool, center, count, speed, angle=0.0, sprite_id='star_sma
     """
     bullet_pool.spawn_pattern(center[0], center[1], angle, speed, count=count, angle_spread=3.1415926 * 2, sprite_id=sprite_id)
 
-def spawn_aiming(bullet_pool, center, player_pos, speed, sprite_id='star_small1'):
+def spawn_aiming(bullet_pool, center, player_pos, speed, sprite_id='grain_a5'):
     """
     发射自机狙弹幕（追踪玩家）
     :param bullet_pool: 子弹池
@@ -93,44 +122,17 @@ def spawn_aiming(bullet_pool, center, player_pos, speed, sprite_id='star_small1'
     angle = math.atan2(dy, dx)
     bullet_pool.spawn_bullet(center[0], center[1], angle, speed, sprite_id=sprite_id)
 
-# 示例关卡定义
-def level_1(stage_manager, bullet_pool, player):
+# 示例协程函数
+def boss_pattern_1(sm, bp, player):
     """
-    第一关示例
-    :param stage_manager: 关卡管理器
-    :param bullet_pool: 子弹池
+    示例Boss弹幕模式（使用协程）
+    :param sm: 关卡管理器
+    :param bp: 子弹池
     :param player: 玩家对象
     """
-    # 第 60 帧开始，每 30 帧发射一圈环形弹幕（循环执行，角度随帧数递增）
-    def create_spawn_ring_task():
-        base_angle = 0.0
-        angle_increment = 0.1  # 每次递增的角度
-        
-        def spawn_ring_task():
-            nonlocal base_angle
-            spawn_ring(bullet_pool, (0, 0.5), 36, 0.15, angle=base_angle, sprite_id='arrow_big11')  # 增加速度并使用动态角度，使用star_small2子弹类型
-            base_angle += angle_increment
-        
-        return spawn_ring_task
-    
-    spawn_ring_task = create_spawn_ring_task()
-    stage_manager.add_repeat_event(60, 30, 800, spawn_ring_task)  # 从第60帧开始，每30帧执行一次，持续800帧
-    
-    # 第 120 帧到 600 帧，每 10 帧发一个自机狙
-    def spawn_aiming_task():
-        spawn_aiming(bullet_pool, (0, 0.5), player.pos, 0.5)  # 增加速度
-    
-    stage_manager.add_repeat_event(120, 10, 4800, spawn_aiming_task)
-    
-    # 第 700 帧开始，每 50 帧从四个角落发射扇形弹幕
-    def spawn_fan():
-        # 左上角
-        bullet_pool.spawn_pattern(-0.8, 0.8, 0.0, 0.15, count=12, angle_spread=1.0, sprite_id='ball_small1')  # 使用ball_small1子弹类型
-        # 右上角
-        bullet_pool.spawn_pattern(0.8, 0.8, 3.1415926, 0.15, count=12, angle_spread=1.0, sprite_id='star_small2')  # 使用star_small2子弹类型
-        # 左下角
-        bullet_pool.spawn_pattern(-0.8, -0.8, 1.5707963, 0.15, count=12, angle_spread=1.0, sprite_id='ball_small1')  # 使用ball_small1子弹类型   
-        # 右下角
-        bullet_pool.spawn_pattern(0.8, -0.8, 4.712389, 0.15, count=12, angle_spread=1.0, sprite_id='star_small1')  # 增加速度
-    
-    stage_manager.add_repeat_event(700, 50, 4000, spawn_fan)  # 从第700帧开始，每50帧执行一次，持续400帧
+    for _ in range(5):
+        spawn_ring(bp, (0, 0.5), 36, 0.1)
+        yield 60  # 告诉管理器：等 60 帧再继续执行下一行
+        spawn_aiming(bp, (0, 0.5), player.pos, 0.2)
+        yield 30
+
