@@ -117,7 +117,15 @@ class SpriteConfigTool:
         
         # 添加精灵按钮
         self.add_sprite_btn = ttk.Button(prop_frame, text="添加精灵", command=self.add_sprite)
-        self.add_sprite_btn.grid(row=6, column=0, columnspan=2, pady=10)
+        self.add_sprite_btn.grid(row=6, column=0, columnspan=2, pady=5)
+        
+        # 保存修改按钮
+        self.save_edit_btn = ttk.Button(prop_frame, text="保存修改", command=self.save_sprite_edit)
+        self.save_edit_btn.grid(row=7, column=0, columnspan=2, pady=5)
+        
+        # 保存配置按钮
+        self.save_btn = ttk.Button(prop_frame, text="保存配置", command=self.save_json)
+        self.save_btn.grid(row=8, column=0, columnspan=2, pady=5)
         
         # 精灵列表
         sprite_list_frame = ttk.LabelFrame(main_frame, text="精灵列表", padding="5")
@@ -182,8 +190,23 @@ class SpriteConfigTool:
                     json_dir = os.path.dirname(file_path)
                     image_path = os.path.join(json_dir, image_filename)
                     
-                    if os.path.exists(image_path):
-                        self.image_path = image_path
+                    # 尝试在不同位置查找图片文件
+                    possible_paths = [
+                        image_path,  # 原始路径
+                        os.path.join(json_dir, 'bullet', image_filename),  # 尝试在bullet子目录
+                        os.path.join(os.path.dirname(json_dir), image_filename),  # 尝试在上一级目录
+                        os.path.join(os.path.dirname(json_dir), 'bullet', image_filename)  # 尝试在上一级目录的bullet子目录
+                    ]
+                    
+                    # 找到第一个存在的路径
+                    valid_image_path = None
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            valid_image_path = path
+                            break
+                    
+                    if valid_image_path:
+                        self.image_path = valid_image_path
                         self.load_image()
                         
                         # 提取精灵数据
@@ -207,7 +230,11 @@ class SpriteConfigTool:
                         self.refresh_sprite_list()
                         messagebox.showinfo("成功", "配置文件加载成功！")
                     else:
-                        messagebox.showerror("错误", f"无法找到图片文件：{image_path}")
+                        # 显示所有尝试过的路径，方便用户排查问题
+                        error_message = f"无法找到图片文件：{image_filename}\n\n尝试过的路径：\n"
+                        for path in possible_paths:
+                            error_message += f"- {path}\n"
+                        messagebox.showerror("错误", error_message)
                 else:
                     messagebox.showerror("错误", "JSON文件中没有包含图片文件名信息")
                 
@@ -414,6 +441,62 @@ class SpriteConfigTool:
         self.radius_entry.insert(0, str(config['radius']))
         
         self.rotate_var.set(config['is_rotating'])
+        
+        # 记录当前正在编辑的精灵ID
+        self.current_edit_id = sprite_id
+    
+    def save_sprite_edit(self):
+        # 获取当前正在编辑的精灵ID
+        if hasattr(self, 'current_edit_id') and self.current_edit_id in self.sprites:
+            sprite_id = self.current_edit_id
+        else:
+            # 如果没有记录正在编辑的ID，尝试从输入框获取
+            sprite_id = self.sprite_id_entry.get().strip()
+            if not sprite_id or sprite_id not in self.sprites:
+                messagebox.showerror("错误", "请先选择要编辑的精灵")
+                return
+        
+        # 获取修改后的属性值
+        try:
+            # 解析矩形坐标
+            rect_text = self.rect_label.cget("text")
+            parts = rect_text.split(", ")
+            x = int(parts[0].split(": ")[1])
+            y = int(parts[1].split(": ")[1])
+            width = int(parts[2].split(": ")[1])
+            height = int(parts[3].split(": ")[1])
+            rect = [x, y, width, height]
+            
+            # 获取中心点
+            center_x = int(self.center_x_entry.get())
+            center_y = int(self.center_y_entry.get())
+            center = [center_x, center_y]
+            
+            # 获取碰撞半径
+            radius = float(self.radius_entry.get())
+            
+            # 获取旋转设置
+            rotating = self.rotate_var.get()
+            
+            # 更新精灵配置
+            self.sprites[sprite_id] = {
+                "rect": rect,
+                "center": center,
+                "radius": radius,
+                "is_rotating": rotating
+            }
+            
+            # 刷新精灵列表
+            self.refresh_sprite_list()
+            
+            # 清除当前编辑状态
+            delattr(self, 'current_edit_id')
+            
+            messagebox.showinfo("成功", f"精灵 {sprite_id} 的修改已保存")
+            
+        except (IndexError, ValueError) as e:
+            messagebox.showerror("错误", f"属性值解析失败：{str(e)}")
+            return
         
     def save_json(self):
         if not self.sprites:

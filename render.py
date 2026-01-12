@@ -12,7 +12,12 @@ import math
 def main():
     # --- 1. 初始化 Pygame 并创建 OpenGL 窗口 ---
     pygame.init()
-    screen_size = (800, 800)
+    # 基础尺寸（用于坐标计算）
+    base_size = (384, 448)
+    # 缩放因子
+    scale_factor = 2
+    # 计算实际窗口尺寸
+    screen_size = (base_size[0] * scale_factor, base_size[1] * scale_factor)
     screen = pygame.display.set_mode(screen_size, pygame.OPENGL | pygame.DOUBLEBUF)
     
     
@@ -110,7 +115,10 @@ def main():
         float c = cos(in_angle);
         vec2 rotated = vec2(in_vert.x * c - in_vert.y * s, in_vert.x * s + in_vert.y * c);
         // 应用旋转和偏移
-        gl_Position = vec4(rotated + in_offset, 0.0, 1.0);
+        vec2 position = rotated + in_offset;
+        // 宽高比校正：384x448屏幕，宽高比为6:7，保持x轴[-1,1]，y轴需要乘以(384.0/448.0)
+        position.y *= 384.0 / 448.0;
+        gl_Position = vec4(position, 0.0, 1.0);
         v_color = in_color;
         // 使用实例化的UV坐标
         v_uv = in_uv_base * vec2(in_uv_offset.z - in_uv_offset.x, in_uv_offset.w - in_uv_offset.y) + in_uv_offset.xy;
@@ -140,8 +148,8 @@ def main():
         default_sprite_size = [sprite_data['rect'][2], sprite_data['rect'][3]]
     
     # 计算精灵的半宽和半高（转换为归一化坐标）
-    # 注意：这里假设屏幕范围是[-1, 1]，需要根据实际情况调整缩放比例
-    scale_factor = 0.01  # 缩放因子，将像素坐标转换为归一化坐标
+    # 根据基础窗口尺寸计算缩放因子
+    scale_factor = 2.0 / base_size[1]  # 基于基础高度的缩放因子
     width = default_sprite_size[0] * scale_factor
     height = default_sprite_size[1] * scale_factor
     half_width = width / 2.0
@@ -206,7 +214,10 @@ def main():
         out vec3 v_color;
         
         void main() {
-            gl_Position = vec4(in_vert, 0.0, 1.0);
+            vec2 position = in_vert;
+            // 宽高比校正：384x448屏幕，宽高比为6:7，保持x轴[-1,1]，y轴需要乘以(384.0/448.0)
+            position.y *= 384.0 / 448.0;
+            gl_Position = vec4(position, 0.0, 1.0);
             v_color = in_color;
         }
         """,
@@ -243,7 +254,10 @@ def main():
         #version 330
         in vec2 in_vert;
         void main() {
-            gl_Position = vec4(in_vert, 0.0, 1.0);
+            vec2 position = in_vert;
+            // 宽高比校正：384x448屏幕，宽高比为6:7，保持x轴[-1,1]，y轴需要乘以(384.0/448.0)
+            position.y *= 384.0 / 448.0;
+            gl_Position = vec4(position, 0.0, 1.0);
         }
         """,
         fragment_shader="""

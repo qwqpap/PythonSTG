@@ -31,9 +31,29 @@ class SpriteManager:
             image_filename = config_data.get('__image_filename', '')
             image_path = os.path.join(config_dir, image_filename)
             
+            # 尝试在不同位置查找图片文件
+            possible_paths = [
+                image_path,  # 原始路径
+                os.path.join(config_dir, 'bullet', image_filename),  # 尝试在bullet子目录
+                os.path.join(os.path.dirname(config_dir), image_filename),  # 尝试在上一级目录
+                os.path.join(os.path.dirname(config_dir), 'bullet', image_filename)  # 尝试在上一级目录的bullet子目录
+            ]
+            
+            # 找到第一个存在的路径
+            valid_image_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    valid_image_path = path
+                    break
+            
             # 加载图片
-            if os.path.exists(image_path) and image_path not in self.image_cache:
-                self.image_cache[image_path] = pygame.image.load(image_path)
+            if valid_image_path:
+                if valid_image_path not in self.image_cache:
+                    self.image_cache[valid_image_path] = pygame.image.load(valid_image_path)
+                image_path = valid_image_path  # 使用找到的有效路径
+            else:
+                print(f"警告: 图片文件不存在: {image_path}")
+                # 即使图片不存在，也继续加载精灵数据，只是不会缓存图片
             
             # 解析精灵数据
             if 'sprites' in config_data:
@@ -139,3 +159,84 @@ class SpriteManager:
         self.sprites.clear()
         self.image_cache.clear()
         self.config_path = None
+    
+    def save_sprite_config(self, config_path):
+        """
+        保存精灵配置到指定文件
+        :param config_path: 保存路径
+        :return: 是否保存成功
+        """
+        try:
+            # 按图片路径分组精灵数据
+            sprites_by_image = {}
+            for sprite_id, sprite_data in self.sprites.items():
+                image_path = sprite_data['image_path']
+                if image_path not in sprites_by_image:
+                    sprites_by_image[image_path] = {}
+                sprites_by_image[image_path][sprite_id] = {
+                    'rect': sprite_data['rect'],
+                    'center': sprite_data['center'],
+                    'radius': sprite_data['radius'],
+                    'is_rotating': sprite_data['is_rotating']
+                }
+            
+            # 为每个图片路径创建一个配置文件
+            for image_path, sprites_data in sprites_by_image.items():
+                # 计算相对路径作为__image_filename
+                config_dir = os.path.dirname(config_path)
+                relative_image_path = os.path.relpath(image_path, config_dir)
+                
+                # 创建配置数据
+                config_data = {
+                    '__image_filename': relative_image_path,
+                    'sprites': sprites_data
+                }
+                
+                # 保存到文件
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"精灵配置已保存到: {config_path}")
+            return True
+        except Exception as e:
+            print(f"保存精灵配置失败: {e}")
+            return False
+    
+    def save_sprite_config_by_image(self, image_path, config_path):
+        """
+        按图片路径保存精灵配置
+        :param image_path: 图片路径
+        :param config_path: 保存路径
+        :return: 是否保存成功
+        """
+        try:
+            # 收集使用指定图片的精灵
+            sprites_data = {}
+            for sprite_id, sprite_data in self.sprites.items():
+                if sprite_data['image_path'] == image_path:
+                    sprites_data[sprite_id] = {
+                        'rect': sprite_data['rect'],
+                        'center': sprite_data['center'],
+                        'radius': sprite_data['radius'],
+                        'is_rotating': sprite_data['is_rotating']
+                    }
+            
+            # 计算相对路径作为__image_filename
+            config_dir = os.path.dirname(config_path)
+            relative_image_path = os.path.relpath(image_path, config_dir)
+            
+            # 创建配置数据
+            config_data = {
+                '__image_filename': relative_image_path,
+                'sprites': sprites_data
+            }
+            
+            # 保存到文件
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"精灵配置已保存到: {config_path}")
+            return True
+        except Exception as e:
+            print(f"保存精灵配置失败: {e}")
+            return False
