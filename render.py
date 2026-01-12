@@ -51,7 +51,7 @@ def main():
     # 为每个纹理创建纹理对象
     for texture_path in sprite_manager.get_all_texture_paths():
         img = pygame.image.load(texture_path).convert_alpha()
-        texture = ctx.texture(img.get_size(), 4, pygame.image.tostring(img, "RGBA", True))
+        texture = ctx.texture(img.get_size(), 4, pygame.image.tobytes(img, "RGBA", True))
         texture.filter = (moderngl.NEAREST, moderngl.NEAREST)  # 像素风格
         textures[texture_path] = texture
         
@@ -74,7 +74,7 @@ def main():
     if not textures:
         bullet_texture_path = "image/bullet/bullet1.png"
         img = pygame.image.load(bullet_texture_path).convert_alpha()
-        texture = ctx.texture(img.get_size(), 4, pygame.image.tostring(img, "RGBA", True))
+        texture = ctx.texture(img.get_size(), 4, pygame.image.tobytes(img, "RGBA", True))
         texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
         textures[bullet_texture_path] = texture
         

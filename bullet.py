@@ -2,6 +2,10 @@ import numpy as np
 from numba import njit
 import math
 
+# 不要往里面写动态方法：加速度，角加速度，跟踪等
+# 动态方法可以在弹幕描述脚本里面实现
+# 或者新的modifier_bullet.py文件里面实现
+
 class BulletPool:
     def __init__(self, max_bullets=50000):
         """
@@ -141,6 +145,9 @@ class BulletPool:
         清空所有子弹（设置为非活跃）
         """
         self.data['alive'] = 0
+    def pre_update(self, dt):
+        """以后加上子弹的其他处理"""
+        pass
 
 @njit
 def _update_bullets(data, dt):
@@ -159,3 +166,5 @@ def _update_bullets(data, dt):
             x, y = data[i]['pos']
             if x < -1.5 or x > 1.5 or y < -1.5 or y > 1.5:
                 data[i]['alive'] = 0
+
+                

@@ -1,42 +1,79 @@
-from stage import spawn_ring, spawn_aiming, boss_pattern_1
 import math
+import random
 
-# 新的弹幕模式：从Boss位置开始每一秒发射五个角度均匀分布的子弹
-def boss_pattern_coroutine(bp, player):
-    """
-    Boss弹幕模式（使用协程）
-    :param bp: 子弹池
-    :param player: 玩家对象
-    """
-    boss_pos = (0, 0.5)  # Boss位置
-    base_angle = 0.0  # 基础角度
-    x = 0  # 一次函数变量，每帧增加1
-    bullet_count = 5  # 每次发射的子弹数量
-    angle_interval = math.radians(360 / bullet_count)  # 角度间隔，转换为弧度
-    fire_interval = 1  # 发射间隔（帧数，1秒=60帧）
-    
-    # 持续运行
+# 多种华丽弹幕模式集合：螺旋、扇形波、花朵环
+
+def spiral_coroutine(bp, player, origin=(0, 0.5)):
+    """持续螺旋弹幕：每帧发射1颗子弹，角度逐渐旋转并形成彩色螺旋。"""
+    x, y = origin
+    angle = 0.0
+    speed = 0.8
+    hue = 0
     while True:
-        # 发射5个均匀分布的子弹
-        for i in range(bullet_count):
-            angle = base_angle + i * angle_interval
-            bp.spawn_bullet(boss_pos[0], boss_pos[1], angle, 1, sprite_id='grain_a4')
-        
-        # 等待60帧（1秒），同时每帧增加角度
-        for _ in range(fire_interval):
-            # 角度增加量是一次函数，与x成正比
-            angle_increment_per_frame = math.radians(x)  # x每帧增加1，角度增加量线性增长
-            base_angle += angle_increment_per_frame
-            x += 0.1  # 每帧x增加1
+        # 每帧发一颗，少量抖动让轨迹更有机
+        jitter = (random.random() - 0.5) * math.radians(2)
+        bp.spawn_bullet(x, y, angle + jitter, speed, sprite_id='grain_a4')
+        angle += math.radians(8)  # 每帧旋转8度
+        speed += 0.0008  # 慢慢加速，制造密集外圈
+        hue = (hue + 5) % 360
+        yield 1
+
+
+def fan_wave_coroutine(bp, player, origin=(0, 0.5)):
+    """间歇扇形波：每隔若干帧发射多层扇形，层与层之间角度微移，形成流动感。"""
+    x, y = origin
+    base_angle = 0.0
+    frames_between_bursts = 40
+    bullets_per_burst = 14
+    spread = math.radians(80)
+    layer_count = 3
+    while True:
+        # 发射多层扇形
+        for layer in range(layer_count):
+            radius_speed = 0.9 + 0.15 * layer
+            angle_offset = base_angle + layer * math.radians(6)
+            for i in range(bullets_per_burst):
+                t = i / (bullets_per_burst - 1) if bullets_per_burst > 1 else 0
+                a = angle_offset - spread / 2 + t * spread
+                bp.spawn_bullet(x, y, a, radius_speed, sprite_id='grain_a3')
+        # 轻微旋转基角，制造波动
+        base_angle += math.radians(6)
+        for _ in range(frames_between_bursts):
             yield 1
 
-# 新的弹幕模式：从Boss位置开始每一秒发射五个角度均匀分布的子弹
+
+def flower_bloom_coroutine(bp, player, origin=(0, 0.5)):
+    """花朵绽放：周期性发出多圈环形，环内子弹速度不同形成层次感。"""
+    x, y = origin
+    for _ in range(6):  # 弹幕执行6*(120+3*8)个循环后结束这个协程之函数
+        ring_counts = [10, 16, 22]
+        speeds = [0.6, 1.0, 1.6]
+        for ring_idx, count in enumerate(ring_counts):
+            a0 = random.random() * math.radians(360)
+            for i in range(count):
+                a = a0 + (i / count) * 2 * math.pi
+                bp.spawn_bullet(x, y, a, speeds[ring_idx], sprite_id='grain_a5')   
+            # 环与环之间短暂停顿
+            for _ in range(8):
+                yield 1
+        # 大花朵冷却一段时间
+        for _ in range(120):
+            yield 1
+
+def spiral_coroutine(bp, player, origin=(0, 0.5)):
+    """从中心散开的八组不动的放射弹幕"""
+    x, y = origin
+    for _ in range(600):
+        angles = [i * math.pi / 4 for i in range(8)]  # 八个方向
+        for angle in angles:
+            bp.spawn_bullet(x, y, angle, 0.5, sprite_id='grain_a1')
+        yield 1
+
 def level_1(stage_manager, bullet_pool, player):
-    """
-    第一关示例
-    :param stage_manager: 关卡管理器
-    :param bullet_pool: 子弹池
-    :param player: 玩家对象
-    """
-    # 添加协程弹幕模式
-    stage_manager.add_coroutine(lambda: boss_pattern_coroutine(bullet_pool, player))
+    """第一关：组合三种华丽弹幕，形成叠加效果。"""
+    # 螺旋：持续存在
+    stage_manager.add_coroutine(lambda: spiral_coroutine(bullet_pool, player))
+    # 花朵绽放：周期性大范围视觉效果
+    stage_manager.add_coroutine(lambda: flower_bloom_coroutine(bullet_pool, player))
+    # 放射弹幕注册
+    stage_manager.add_coroutine(lambda:spiral_coroutine(bullet_pool, player))
