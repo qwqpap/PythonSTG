@@ -8,7 +8,7 @@ import math
 
 class SpawnRequest:
     """生成请求"""
-    def __init__(self, x, y, angle, speed, sprite_id='', init=None, delay=0):
+    def __init__(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=5.0):
         self.x = x
         self.y = y
         self.angle = angle
@@ -16,6 +16,8 @@ class SpawnRequest:
         self.sprite_id = sprite_id
         self.init = init  # 初始化回调
         self.delay = delay  # 延迟帧数
+        self.on_death = on_death  # 死亡处理回调
+        self.max_lifetime = max_lifetime  # 最大生命周期（秒）
 
 class DeathEvent:
     """死亡事件"""
@@ -33,6 +35,10 @@ class BulletPool:
         """
         self.max_bullets = max_bullets
         
+        # 死亡处理类型常量
+        self.DEATH_NONE = 0
+        self.DEATH_EXPLODE = 1
+        
         # 创建结构化数组存储子弹数据
         self.dtype = np.dtype([
             ('pos', 'f4', 2),      # 位置 (x, y)
@@ -40,8 +46,13 @@ class BulletPool:
             ('angle', 'f4'),       # 角度（弧度）
             ('speed', 'f4'),       # 速度大小
             ('alive', 'i4'),       # 活跃状态 (0: 非活跃, 1: 活跃)
-            ('sprite_id', 'U32')   # 精灵ID
+            ('sprite_id', 'U32'),  # 精灵ID
+            ('lifetime', 'f4'),    # 生命周期（秒）
+            ('max_lifetime', 'f4') # 最大生命周期（秒）
         ])
+        
+        # 存储子弹索引到死亡处理函数的映射
+        self.death_handlers = {}
         
         # 初始化子弹池
         self.data = np.zeros(max_bullets, dtype=self.dtype)
@@ -53,7 +64,7 @@ class BulletPool:
         # 上一帧的活跃状态，用于检测死亡
         self.last_alive = np.zeros(max_bullets, dtype='i4')
     
-    def spawn_bullet(self, x, y, angle, speed, sprite_id='', init=None, delay=0):
+    def spawn_bullet(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=0.0):
         """
         生成子弹（从池子里找空位）
         :param x: 初始x坐标
@@ -63,11 +74,13 @@ class BulletPool:
         :param sprite_id: 精灵ID，用于指定使用的精灵资源
         :param init: 初始化回调
         :param delay: 延迟帧数
+        :param on_death: 死亡处理回调函数
+        :param max_lifetime: 最大生命周期（秒）
         :return: 子弹索引，如果没有空位则返回-1
         """
         # 如果有延迟，添加到生成队列
         if delay > 0:
-            self.spawn_queue.append(SpawnRequest(x, y, angle, speed, sprite_id, init, delay))
+            self.spawn_queue.append(SpawnRequest(x, y, angle, speed, sprite_id, init, delay, on_death, max_lifetime))
             return -1
         
         # 找到第一个非活跃的子弹
@@ -87,6 +100,14 @@ class BulletPool:
             self.data['angle'][idx] = angle
             self.data['speed'][idx] = speed
             self.data['sprite_id'][idx] = sprite_id
+            self.data['lifetime'][idx] = 0.0
+            self.data['max_lifetime'][idx] = max_lifetime
+            
+            # 存储死亡处理函数
+            if on_death:
+                self.death_handlers[idx] = on_death
+            elif idx in self.death_handlers:
+                del self.death_handlers[idx]
             
             # 激活子弹
             self.data['alive'][idx] = 1
@@ -98,7 +119,7 @@ class BulletPool:
             return idx
         return -1
     
-    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, sprite_id=''):
+    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, sprite_id='', on_death=None, max_lifetime=0.0):
         """
         生成一个圆形扩散的子弹图案
         :param x: 中心x坐标
@@ -108,6 +129,8 @@ class BulletPool:
         :param count: 子弹数量
         :param angle_spread: 角度扩散范围（弧度）
         :param sprite_id: 精灵ID，用于指定使用的精灵资源
+        :param on_death: 死亡处理回调函数
+        :param max_lifetime: 最大生命周期（秒）
         """
         # 向量化生成多个子弹，避免每次调用 spawn_bullet 时进行 O(n) 的 np.where 搜索
         if count <= 0:
@@ -136,6 +159,13 @@ class BulletPool:
         self.data['angle'][use_indices] = angles[:n]
         self.data['speed'][use_indices] = speed
         self.data['sprite_id'][use_indices] = sprite_id
+        self.data['lifetime'][use_indices] = 0.0
+        self.data['max_lifetime'][use_indices] = max_lifetime
+
+        # 存储死亡处理函数
+        if on_death:
+            for idx in use_indices:
+                self.death_handlers[idx] = on_death
 
         # 标记为活跃
         self.data['alive'][use_indices] = 1
@@ -144,11 +174,18 @@ class BulletPool:
         """
         杀死子弹
         :param idx: 子弹索引
-        :param handler: 死亡处理回调
+        :param handler: 死亡处理回调（如果为None，则使用子弹创建时指定的处理函数）
         """
         if 0 <= idx < self.max_bullets and self.data['alive'][idx]:
             # 标记为非活跃
             self.data['alive'][idx] = 0
+            
+            # 获取死亡处理函数
+            if handler is None:
+                handler = self.death_handlers.get(idx)
+                # 从字典中移除
+                if idx in self.death_handlers:
+                    del self.death_handlers[idx]
             
             # 添加到死亡队列
             x, y = self.data['pos'][idx]
@@ -183,7 +220,12 @@ class BulletPool:
         
         for idx in died_indices:
             x, y = self.data['pos'][idx]
-            self.death_queue.append(DeathEvent(idx, x, y))
+            # 从字典中获取死亡处理函数
+            handler = self.death_handlers.get(idx)
+            # 从字典中移除，避免内存泄漏
+            if idx in self.death_handlers:
+                del self.death_handlers[idx]
+            self.death_queue.append(DeathEvent(idx, x, y, handler))
     
     def _process_death_queue(self):
         """
@@ -236,6 +278,14 @@ class BulletPool:
             self.data['angle'][idx] = req.angle
             self.data['speed'][idx] = req.speed
             self.data['sprite_id'][idx] = req.sprite_id
+            self.data['lifetime'][idx] = 0.0
+            self.data['max_lifetime'][idx] = req.max_lifetime
+            
+            # 存储死亡处理函数
+            if req.on_death:
+                self.death_handlers[idx] = req.on_death
+            elif idx in self.death_handlers:
+                del self.death_handlers[idx]
             
             # 激活子弹
             self.data['alive'][idx] = 1
@@ -280,6 +330,14 @@ def _update_bullets(data, dt):
     """
     for i in range(len(data)):
         if data[i]['alive']:
+            # 更新生命周期
+            data[i]['lifetime'] += dt
+            
+            # 检查生命周期是否超过最大值（只有当max_lifetime > 0时才检查）
+            if data[i]['max_lifetime'] > 0 and data[i]['lifetime'] > data[i]['max_lifetime']:
+                data[i]['alive'] = 0
+                continue
+            
             # 更新位置
             data[i]['pos'][0] += data[i]['vel'][0] * dt
             data[i]['pos'][1] += data[i]['vel'][1] * dt

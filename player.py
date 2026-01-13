@@ -50,8 +50,10 @@ class Player:
             self.pos[0] += current_speed * dt * 60
         
         # 限制玩家在屏幕范围内
+        # 考虑渲染时的宽高比校正（384/448），调整Y轴边界
+        aspect_ratio = 384.0 / 448.0
         self.pos[0] = np.clip(self.pos[0], -1.0, 1.0)
-        self.pos[1] = np.clip(self.pos[1], -1.0, 1.0)
+        self.pos[1] = np.clip(self.pos[1], -1.0 / aspect_ratio, 1.0 / aspect_ratio)
     
     def get_speed(self):
         """
