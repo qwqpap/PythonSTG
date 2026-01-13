@@ -58,7 +58,64 @@ def test_explosion_array_coroutine(bp, stage_manager):
     for _ in range(180):
         yield 1
 
+def repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=3, interval_seconds=5):
+    """
+    重复执行爆炸弹幕阵列，中间有间隔
+    :param bullet_pool: 子弹池
+    :param stage_manager: 关卡管理器
+    :param repeat_count: 重复次数
+    :param interval_seconds: 每次间隔的秒数
+    """
+    # 转换间隔秒数为帧数（假设60帧/秒）
+    interval_frames = int(interval_seconds * 60)
+    
+    # 重复执行
+    for _ in range(repeat_count):
+        # 执行爆炸弹幕阵列
+        yield from test_explosion_array_coroutine(bullet_pool, stage_manager)
+        # 等待指定的帧数
+        for _ in range(interval_frames):
+            yield 1
+
+def rain_bullets_coroutine(bullet_pool, stage_manager, duration_seconds=30, spawn_interval_frames=2):
+    """
+    从天上往下面掉随机子弹的弹幕
+    :param bullet_pool: 子弹池
+    :param stage_manager: 关卡管理器
+    :param duration_seconds: 持续时间（秒）
+    :param spawn_interval_frames: 生成子弹的间隔帧数
+    """
+    # 转换持续时间为帧数（假设60帧/秒）
+    duration_frames = int(duration_seconds * 60)
+    frame_count = 0
+    
+    # 持续生成子弹
+    while frame_count < duration_frames:
+        # 每隔指定的帧数生成一颗子弹
+        if frame_count % spawn_interval_frames == 0:
+            # 随机生成子弹的x坐标（屏幕宽度范围内）
+            random_x = random.uniform(-1.0, 1.0)
+            # 子弹从屏幕顶部开始（y坐标大于1）
+            start_y = 1.2
+            # 随机生成子弹的角度（主要向下，有一些随机偏差）
+            random_angle = random.uniform(math.pi * 1.3, math.pi * 1.7)  # 大约向下的角度
+            # 随机生成子弹的速度
+            random_speed = random.uniform(0.5, 1.5)
+            # 生成子弹
+            bullet_pool.spawn_bullet(
+                random_x, start_y,
+                random_angle, random_speed,
+                sprite_id='grain_a2'
+            )
+        # 增加帧数计数
+        frame_count += 1
+        # 等待一帧
+        yield 1
+
 def level_1(stage_manager, bullet_pool, player):   
     """第一关：测试延迟爆炸弹幕"""
-    # 添加测试爆炸阵列弹幕
-    stage_manager.add_coroutine(lambda: test_explosion_array_coroutine(bullet_pool, stage_manager))
+    # 添加重复执行的爆炸阵列弹幕，重复3次，每次间隔5秒
+    stage_manager.add_coroutine(lambda: repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=3, interval_seconds=5))
+    # 添加从天上掉子弹的弹幕，持续30秒
+    stage_manager.add_coroutine(lambda: rain_bullets_coroutine(bullet_pool, stage_manager))
+    
