@@ -8,7 +8,7 @@ import math
 
 class SpawnRequest:
     """生成请求"""
-    def __init__(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=5.0):
+    def __init__(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=5.0, radius=0.0):
         self.x = x
         self.y = y
         self.angle = angle
@@ -18,6 +18,7 @@ class SpawnRequest:
         self.delay = delay  # 延迟帧数
         self.on_death = on_death  # 死亡处理回调
         self.max_lifetime = max_lifetime  # 最大生命周期（秒）
+        self.radius = radius  # 碰撞半径
 
 class DeathEvent:
     """死亡事件"""
@@ -47,6 +48,7 @@ class BulletPool:
             ('speed', 'f4'),       # 速度大小
             ('alive', 'i4'),       # 活跃状态 (0: 非活跃, 1: 活跃)
             ('sprite_id', 'U32'),  # 精灵ID
+            ('radius', 'f4'),      # 碰撞半径
             ('lifetime', 'f4'),    # 生命周期（秒）
             ('max_lifetime', 'f4') # 最大生命周期（秒）
         ])
@@ -64,7 +66,7 @@ class BulletPool:
         # 上一帧的活跃状态，用于检测死亡
         self.last_alive = np.zeros(max_bullets, dtype='i4')
     
-    def spawn_bullet(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=0.0):
+    def spawn_bullet(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=0.0, radius=0.0):
         """
         生成子弹（从池子里找空位）
         :param x: 初始x坐标
@@ -80,7 +82,7 @@ class BulletPool:
         """
         # 如果有延迟，添加到生成队列
         if delay > 0:
-            self.spawn_queue.append(SpawnRequest(x, y, angle, speed, sprite_id, init, delay, on_death, max_lifetime))
+            self.spawn_queue.append(SpawnRequest(x, y, angle, speed, sprite_id, init, delay, on_death, max_lifetime, radius))
             return -1
         
         # 找到第一个非活跃的子弹
@@ -100,6 +102,7 @@ class BulletPool:
             self.data['angle'][idx] = angle
             self.data['speed'][idx] = speed
             self.data['sprite_id'][idx] = sprite_id
+            self.data['radius'][idx] = radius
             self.data['lifetime'][idx] = 0.0
             self.data['max_lifetime'][idx] = max_lifetime
             
@@ -119,7 +122,7 @@ class BulletPool:
             return idx
         return -1
     
-    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, sprite_id='', on_death=None, max_lifetime=0.0):
+    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, sprite_id='', on_death=None, max_lifetime=0.0, radius=0.0):
         """
         生成一个圆形扩散的子弹图案
         :param x: 中心x坐标
@@ -159,6 +162,7 @@ class BulletPool:
         self.data['angle'][use_indices] = angles[:n]
         self.data['speed'][use_indices] = speed
         self.data['sprite_id'][use_indices] = sprite_id
+        self.data['radius'][use_indices] = radius
         self.data['lifetime'][use_indices] = 0.0
         self.data['max_lifetime'][use_indices] = max_lifetime
 
@@ -278,6 +282,7 @@ class BulletPool:
             self.data['angle'][idx] = req.angle
             self.data['speed'][idx] = req.speed
             self.data['sprite_id'][idx] = req.sprite_id
+            self.data['radius'][idx] = req.radius if hasattr(req, 'radius') else 0.0
             self.data['lifetime'][idx] = 0.0
             self.data['max_lifetime'][idx] = req.max_lifetime
             

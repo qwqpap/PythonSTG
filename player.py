@@ -91,8 +91,8 @@ def check_collisions(player_pos, player_radius, bullet_data):
             dist_sq = dx*dx + dy*dy
             
             # 判定半径通常是：玩家半径 + 子弹半径
-            # 这里假设子弹半径也是一个固定值
-            combined_r = player_radius + 0.005
+ 
+            combined_r = player_radius + bullet_data[i]['radius']
             if dist_sq < combined_r * combined_r:
                 return i  # 返回撞到的子弹索引
     return -1
