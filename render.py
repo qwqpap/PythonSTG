@@ -295,13 +295,14 @@ def main():
             collided_bullet = check_collisions(player.pos, player.hit_radius, bullet_pool.data)
             if collided_bullet != -1:
                 # 玩家受伤
+                # 清屏所有子弹 todo
                 if player.take_damage():
                     print(f"Player hit! Lives left: {player.lives}")
                     # 标记碰撞的子弹为非活跃
                     bullet_pool.data['alive'][collided_bullet] = 0
-
+                    
         # 获取活跃子弹的位置、角度和精灵ID数据
-        positions, angles, sprite_ids = bullet_pool.get_active_bullets()
+        positions, colors, angles, sprite_ids = bullet_pool.get_active_bullets()
         active_count = len(positions)
 
         # 每10帧打印一次调试信息到控制台

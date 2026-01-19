@@ -8,17 +8,19 @@ import math
 
 class SpawnRequest:
     """生成请求"""
-    def __init__(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=5.0, radius=0.0):
+    def __init__(self, x, y, angle, speed, color=None, sprite_id='', init=None, delay=0, acc=None, on_death=None, max_lifetime=0.0, modifiers=None):
         self.x = x
         self.y = y
         self.angle = angle
         self.speed = speed
+        self.color = color
         self.sprite_id = sprite_id
         self.init = init  # 初始化回调
         self.delay = delay  # 延迟帧数
-        self.on_death = on_death  # 死亡处理回调
+        self.acc = acc or (0.0, 0.0)  # 加速度 (ax, ay)
+        self.on_death = on_death  # 死亡回调
         self.max_lifetime = max_lifetime  # 最大生命周期（秒）
-        self.radius = radius  # 碰撞半径
+        self.modifiers = modifiers or []  # modifier列表
 
 class DeathEvent:
     """死亡事件"""
@@ -28,6 +30,70 @@ class DeathEvent:
         self.y = y
         self.handler = handler  # 死亡处理回调
 
+# Modifier系统
+class Modifier:
+    """modifier基类，定义统一的接口"""
+    def update(self, bullet_data, idx, dt):
+        """
+        更新子弹数据
+        :param bullet_data: 子弹数据数组
+        :param idx: 子弹索引
+        :param dt: 时间步长
+        """
+        pass
+
+class AccelerationModifier(Modifier):
+    """加速度modifier，用于添加恒定加速度"""
+    def __init__(self, ax, ay):
+        """
+        :param ax: x方向加速度
+        :param ay: y方向加速度
+        """
+        self.ax = ax
+        self.ay = ay
+    
+    def update(self, bullet_data, idx, dt):
+        """
+        应用加速度效果
+        :param bullet_data: 子弹数据数组
+        :param idx: 子弹索引
+        :param dt: 时间步长
+        """
+        # 更新速度
+        bullet_data[idx]['vel'][0] += self.ax * dt
+        bullet_data[idx]['vel'][1] += self.ay * dt
+
+class AngularAccelerationModifier(Modifier):
+    """角加速度modifier，用于添加恒定角加速度"""
+    def __init__(self, angular_acc):
+        """
+        :param angular_acc: 角加速度（弧度/秒²）
+        """
+        self.angular_acc = angular_acc
+    
+    def update(self, bullet_data, idx, dt):
+        """
+        应用角加速度效果
+        :param bullet_data: 子弹数据数组
+        :param idx: 子弹索引
+        :param dt: 时间步长
+        """
+        from math import cos, sin, sqrt, atan2
+        
+        # 获取当前速度大小和角度
+        speed = bullet_data[idx]['speed']
+        angle = bullet_data[idx]['angle']
+        
+        # 更新角度
+        new_angle = angle + self.angular_acc * dt
+        
+        # 重新计算速度向量
+        bullet_data[idx]['vel'][0] = speed * cos(new_angle)
+        bullet_data[idx]['vel'][1] = speed * sin(new_angle)
+        
+        # 更新角度
+        bullet_data[idx]['angle'] = new_angle
+
 class BulletPool:
     def __init__(self, max_bullets=50000):
         """
@@ -36,28 +102,26 @@ class BulletPool:
         """
         self.max_bullets = max_bullets
         
-        # 死亡处理类型常量
-        self.DEATH_NONE = 0
-        self.DEATH_EXPLODE = 1
-        
         # 创建结构化数组存储子弹数据
         self.dtype = np.dtype([
             ('pos', 'f4', 2),      # 位置 (x, y)
             ('vel', 'f4', 2),      # 速度 (vx, vy)
+            ('acc', 'f4', 2),      # 加速度 (ax, ay)
             ('angle', 'f4'),       # 角度（弧度）
             ('speed', 'f4'),       # 速度大小
+            ('color', 'f4', 3),    # 颜色 (r, g, b)
             ('alive', 'i4'),       # 活跃状态 (0: 非活跃, 1: 活跃)
-            ('sprite_id', 'U32'),  # 精灵ID
-            ('radius', 'f4'),      # 碰撞半径
-            ('lifetime', 'f4'),    # 生命周期（秒）
-            ('max_lifetime', 'f4') # 最大生命周期（秒）
+            ('sprite_id', 'U32'),   # 精灵ID
+            ('lifetime', 'f4'),     # 当前生命周期
+            ('max_lifetime', 'f4'),  # 最大生命周期
+            ('radius', 'f4')        # 碰撞半径
         ])
-        
-        # 存储子弹索引到死亡处理函数的映射
-        self.death_handlers = {}
         
         # 初始化子弹池
         self.data = np.zeros(max_bullets, dtype=self.dtype)
+        
+        # 预生成随机颜色
+        self.data['color'] = np.random.uniform(0.0, 1.0, (max_bullets, 3)).astype('f4')
         
         # 生成队列和死亡队列
         self.spawn_queue = []  # 生成请求队列
@@ -65,24 +129,42 @@ class BulletPool:
         
         # 上一帧的活跃状态，用于检测死亡
         self.last_alive = np.zeros(max_bullets, dtype='i4')
+        
+        # 存储子弹死亡回调函数
+        self.on_death_handlers = {}
+        
+        # 存储子弹的生命周期
+        self.lifetimes = np.zeros(max_bullets, dtype='f4')
+        self.max_lifetimes = np.zeros(max_bullets, dtype='f4')
+        
+        # Modifier系统：存储每个子弹的modifier列表
+        self.bullet_modifiers = {}
+        # Modifier系统：存储所有使用中的modifier，用于全局管理
+        self.active_modifiers = set()
     
-    def spawn_bullet(self, x, y, angle, speed, sprite_id='', init=None, delay=0, on_death=None, max_lifetime=0.0, radius=0.0):
+    def spawn_bullet(self, x, y, angle, speed, color=None, sprite_id='', init=None, delay=0, acc=None, on_death=None, max_lifetime=0.0, modifiers=None):
         """
         生成子弹（从池子里找空位）
         :param x: 初始x坐标
         :param y: 初始y坐标
         :param angle: 角度（弧度）
         :param speed: 速度大小
+        :param color: 颜色 (r, g, b)，如果为None则使用预生成的随机颜色
         :param sprite_id: 精灵ID，用于指定使用的精灵资源
         :param init: 初始化回调
         :param delay: 延迟帧数
-        :param on_death: 死亡处理回调函数
-        :param max_lifetime: 最大生命周期（秒）
+        :param acc: 加速度 (ax, ay)，如果为None则使用(0, 0)
+        :param on_death: 死亡回调函数
+        :param max_lifetime: 最大生命周期（秒），0表示无限
+        :param modifiers: modifier列表，用于添加动态效果
         :return: 子弹索引，如果没有空位则返回-1
         """
+        acc = acc or (0.0, 0.0)
+        modifiers = modifiers or []
+        
         # 如果有延迟，添加到生成队列
         if delay > 0:
-            self.spawn_queue.append(SpawnRequest(x, y, angle, speed, sprite_id, init, delay, on_death, max_lifetime, radius))
+            self.spawn_queue.append(SpawnRequest(x, y, angle, speed, color, sprite_id, init, delay, acc, on_death, max_lifetime, modifiers))
             return -1
         
         # 找到第一个非活跃的子弹
@@ -98,19 +180,34 @@ class BulletPool:
             vy = math.sin(angle) * speed
             self.data['vel'][idx] = (vx, vy)
             
+            # 设置加速度
+            self.data['acc'][idx] = acc
+            
             # 设置其他属性
             self.data['angle'][idx] = angle
             self.data['speed'][idx] = speed
             self.data['sprite_id'][idx] = sprite_id
-            self.data['radius'][idx] = radius
+            
+            # 如果提供了颜色，则使用提供的颜色
+            if color is not None:
+                self.data['color'][idx] = color
+            
+            # 设置生命周期
             self.data['lifetime'][idx] = 0.0
             self.data['max_lifetime'][idx] = max_lifetime
             
-            # 存储死亡处理函数
+            # 设置碰撞半径（默认值）
+            self.data['radius'][idx] = 0.01  # 默认碰撞半径
+            
+            # 存储死亡回调
             if on_death:
-                self.death_handlers[idx] = on_death
-            elif idx in self.death_handlers:
-                del self.death_handlers[idx]
+                self.on_death_handlers[idx] = on_death
+            else:
+                self.on_death_handlers.pop(idx, None)
+            
+            # 添加modifier
+            for modifier in modifiers:
+                self.add_modifier(idx, modifier)
             
             # 激活子弹
             self.data['alive'][idx] = 1
@@ -122,7 +219,7 @@ class BulletPool:
             return idx
         return -1
     
-    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, sprite_id='', on_death=None, max_lifetime=0.0, radius=0.0):
+    def spawn_pattern(self, x, y, angle, speed, count=18, angle_spread=math.pi*2, color=None, sprite_id='', acc=None):
         """
         生成一个圆形扩散的子弹图案
         :param x: 中心x坐标
@@ -131,14 +228,15 @@ class BulletPool:
         :param speed: 速度大小
         :param count: 子弹数量
         :param angle_spread: 角度扩散范围（弧度）
+        :param color: 颜色 (r, g, b)
         :param sprite_id: 精灵ID，用于指定使用的精灵资源
-        :param on_death: 死亡处理回调函数
-        :param max_lifetime: 最大生命周期（秒）
+        :param acc: 加速度 (ax, ay)，如果为None则使用(0, 0)
         """
         # 向量化生成多个子弹，避免每次调用 spawn_bullet 时进行 O(n) 的 np.where 搜索
         if count <= 0:
             return
 
+        acc = acc or (0.0, 0.0)
         angle_step = angle_spread / count
         angles = np.array([angle + i * angle_step for i in range(count)], dtype='f4')
 
@@ -159,17 +257,17 @@ class BulletPool:
         self.data['pos'][use_indices, 1] = y
         self.data['vel'][use_indices, 0] = vxs[:n]
         self.data['vel'][use_indices, 1] = vys[:n]
+        self.data['acc'][use_indices, 0] = acc[0]
+        self.data['acc'][use_indices, 1] = acc[1]
         self.data['angle'][use_indices] = angles[:n]
         self.data['speed'][use_indices] = speed
         self.data['sprite_id'][use_indices] = sprite_id
-        self.data['radius'][use_indices] = radius
+        self.data['radius'][use_indices] = 0.01  # 默认碰撞半径
         self.data['lifetime'][use_indices] = 0.0
-        self.data['max_lifetime'][use_indices] = max_lifetime
+        self.data['max_lifetime'][use_indices] = 0.0  # 无限生命周期
 
-        # 存储死亡处理函数
-        if on_death:
-            for idx in use_indices:
-                self.death_handlers[idx] = on_death
+        if color is not None:
+            self.data['color'][use_indices] = color
 
         # 标记为活跃
         self.data['alive'][use_indices] = 1
@@ -178,18 +276,11 @@ class BulletPool:
         """
         杀死子弹
         :param idx: 子弹索引
-        :param handler: 死亡处理回调（如果为None，则使用子弹创建时指定的处理函数）
+        :param handler: 死亡处理回调
         """
         if 0 <= idx < self.max_bullets and self.data['alive'][idx]:
             # 标记为非活跃
             self.data['alive'][idx] = 0
-            
-            # 获取死亡处理函数
-            if handler is None:
-                handler = self.death_handlers.get(idx)
-                # 从字典中移除
-                if idx in self.death_handlers:
-                    del self.death_handlers[idx]
             
             # 添加到死亡队列
             x, y = self.data['pos'][idx]
@@ -203,8 +294,27 @@ class BulletPool:
         # 保存当前活跃状态
         self.last_alive[:] = self.data['alive']
         
-        # 调用Numba加速的更新函数
+        # 调用Numba加速的更新函数（基础物理更新）
         _update_bullets(self.data, dt)
+        
+        # 应用所有modifier效果（Python层面，支持复杂逻辑）
+        # 遍历所有有modifier的子弹索引
+        bullet_indices = list(self.bullet_modifiers.keys())
+        for idx in bullet_indices:
+            # 检查子弹是否仍然活跃
+            if self.data['alive'][idx]:
+                # 应用所有modifier
+                for modifier in self.bullet_modifiers[idx]:
+                    modifier.update(self.data, idx, dt)
+                
+                # 更新速度大小和角度（确保与速度向量一致）
+                vx = self.data['vel'][idx][0]
+                vy = self.data['vel'][idx][1]
+                self.data['speed'][idx] = np.sqrt(vx**2 + vy**2)
+                self.data['angle'][idx] = np.arctan2(vy, vx)
+            else:
+                # 子弹已经死亡，清理modifier
+                self.remove_all_modifiers(idx)
         
         # 收集死亡事件
         self._collect_deaths()
@@ -224,11 +334,8 @@ class BulletPool:
         
         for idx in died_indices:
             x, y = self.data['pos'][idx]
-            # 从字典中获取死亡处理函数
-            handler = self.death_handlers.get(idx)
-            # 从字典中移除，避免内存泄漏
-            if idx in self.death_handlers:
-                del self.death_handlers[idx]
+            # 获取on_death回调
+            handler = self.on_death_handlers.pop(idx, None)
             self.death_queue.append(DeathEvent(idx, x, y, handler))
     
     def _process_death_queue(self):
@@ -278,19 +385,34 @@ class BulletPool:
             vy = math.sin(req.angle) * req.speed
             self.data['vel'][idx] = (vx, vy)
             
+            # 设置加速度
+            self.data['acc'][idx] = req.acc
+            
             # 设置其他属性
             self.data['angle'][idx] = req.angle
             self.data['speed'][idx] = req.speed
             self.data['sprite_id'][idx] = req.sprite_id
-            self.data['radius'][idx] = req.radius if hasattr(req, 'radius') else 0.0
+            
+            # 如果提供了颜色，则使用提供的颜色
+            if req.color is not None:
+                self.data['color'][idx] = req.color
+            
+            # 设置生命周期
             self.data['lifetime'][idx] = 0.0
             self.data['max_lifetime'][idx] = req.max_lifetime
             
-            # 存储死亡处理函数
+            # 设置碰撞半径（默认值）
+            self.data['radius'][idx] = 0.01  # 默认碰撞半径
+            
+            # 存储死亡回调
             if req.on_death:
-                self.death_handlers[idx] = req.on_death
-            elif idx in self.death_handlers:
-                del self.death_handlers[idx]
+                self.on_death_handlers[idx] = req.on_death
+            else:
+                self.on_death_handlers.pop(idx, None)
+            
+            # 添加modifier
+            for modifier in req.modifiers:
+                self.add_modifier(idx, modifier)
             
             # 激活子弹
             self.data['alive'][idx] = 1
@@ -302,17 +424,18 @@ class BulletPool:
     def get_active_bullets(self):
         """
         获取所有活跃的子弹数据
-        :return: 活跃子弹的位置、角度和精灵ID数据
+        :return: 活跃子弹的位置、颜色、角度和精灵ID数据
         """
         active_mask = self.data['alive'] == 1
         active_data = self.data[active_mask]
         
         if len(active_data) > 0:
             positions = active_data['pos']
+            colors = active_data['color']
             angles = active_data['angle']
             sprite_ids = active_data['sprite_id']
-            return positions, angles, sprite_ids
-        return np.array([]), np.array([]), np.array([])
+            return positions, colors, angles, sprite_ids
+        return np.array([]), np.array([]), np.array([]), np.array([])
 
     def clear_all(self):
         """
@@ -321,6 +444,60 @@ class BulletPool:
         self.data['alive'] = 0
         self.spawn_queue.clear()
         self.death_queue.clear()
+        # 清空modifier
+        self.bullet_modifiers.clear()
+        self.active_modifiers.clear()
+        self.on_death_handlers.clear()
+    
+    def add_modifier(self, idx, modifier):
+        """
+        为子弹添加modifier
+        :param idx: 子弹索引
+        :param modifier: Modifier实例
+        """
+        if idx not in self.bullet_modifiers:
+            self.bullet_modifiers[idx] = []
+        self.bullet_modifiers[idx].append(modifier)
+        self.active_modifiers.add(modifier)
+    
+    def remove_modifier(self, idx, modifier):
+        """
+        从子弹移除modifier
+        :param idx: 子弹索引
+        :param modifier: Modifier实例
+        """
+        if idx in self.bullet_modifiers:
+            if modifier in self.bullet_modifiers[idx]:
+                self.bullet_modifiers[idx].remove(modifier)
+                # 如果子弹没有modifier了，移除该索引
+                if not self.bullet_modifiers[idx]:
+                    del self.bullet_modifiers[idx]
+            # 如果modifier不再被任何子弹使用，从活跃集合中移除
+            still_used = False
+            for mods in self.bullet_modifiers.values():
+                if modifier in mods:
+                    still_used = True
+                    break
+            if not still_used:
+                self.active_modifiers.remove(modifier)
+    
+    def remove_all_modifiers(self, idx):
+        """
+        移除子弹的所有modifier
+        :param idx: 子弹索引
+        """
+        if idx in self.bullet_modifiers:
+            # 从活跃集合中移除不再使用的modifier
+            for modifier in self.bullet_modifiers[idx]:
+                still_used = False
+                for mods in self.bullet_modifiers.values():
+                    if modifier in mods and idx != mods:
+                        still_used = True
+                        break
+                if not still_used:
+                    self.active_modifiers.remove(modifier)
+            # 移除该子弹的所有modifier
+            del self.bullet_modifiers[idx]
     
     def pre_update(self, dt):
         """以后加上子弹的其他处理"""
@@ -338,14 +515,24 @@ def _update_bullets(data, dt):
             # 更新生命周期
             data[i]['lifetime'] += dt
             
-            # 检查生命周期是否超过最大值（只有当max_lifetime > 0时才检查）
-            if data[i]['max_lifetime'] > 0 and data[i]['lifetime'] > data[i]['max_lifetime']:
+            # 检查最大生命周期
+            if data[i]['max_lifetime'] > 0.0 and data[i]['lifetime'] >= data[i]['max_lifetime']:
                 data[i]['alive'] = 0
                 continue
+            
+            # 更新速度（加速度）
+            data[i]['vel'][0] += data[i]['acc'][0] * dt
+            data[i]['vel'][1] += data[i]['acc'][1] * dt
             
             # 更新位置
             data[i]['pos'][0] += data[i]['vel'][0] * dt
             data[i]['pos'][1] += data[i]['vel'][1] * dt
+            
+            # 更新速度大小
+            data[i]['speed'] = np.sqrt(data[i]['vel'][0]**2 + data[i]['vel'][1]**2)
+            
+            # 更新角度
+            data[i]['angle'] = np.arctan2(data[i]['vel'][1], data[i]['vel'][0])
             
             # 边界检测（假设屏幕范围是-1到1，子弹离开屏幕一定距离后再消失）
             x, y = data[i]['pos']
