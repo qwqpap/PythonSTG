@@ -74,27 +74,29 @@ class Player:
         return False
 
 @njit
-def check_collisions(player_pos, player_radius, bullet_data):
+def check_collisions(player_x, player_y, player_radius, bullet_data):
     """
     检查玩家与子弹的碰撞
-    :param player_pos: 玩家位置
+    :param player_x: 玩家x坐标
+    :param player_y: 玩家y坐标
     :param player_radius: 玩家判定半径
     :param bullet_data: 子弹数据数组
     :return: 碰撞的子弹索引，-1表示无碰撞
     """
-    # 只需要检查 alive == 1 的子弹
-    for i in range(len(bullet_data)):
-        if bullet_data[i]['alive']:
-            # 计算欧几里得距离的平方（避免开方运算，提升性能）
-            dx = bullet_data[i]['pos'][0] - player_pos[0]
-            dy = bullet_data[i]['pos'][1] - player_pos[1]
-            dist_sq = dx*dx + dy*dy
-            
-            # 判定半径通常是：玩家半径 + 子弹半径
- 
-            combined_r = player_radius + bullet_data[i]['radius']
-            if dist_sq < combined_r * combined_r:
-                return i  # 返回撞到的子弹索引
+    # 直接遍历所有子弹，跳过非活跃的，避免使用np.where
+    for idx in range(bullet_data.shape[0]):
+        if bullet_data[idx]['alive'] == 0:
+            continue
+        
+        # 计算欧几里得距离的平方（避免开方运算，提升性能）
+        dx = bullet_data[idx]['pos'][0] - player_x
+        dy = bullet_data[idx]['pos'][1] - player_y
+        dist_sq = dx*dx + dy*dy
+        
+        # 判定半径：玩家半径 + 子弹半径
+        combined_r = player_radius + bullet_data[idx]['radius']
+        if dist_sq < combined_r * combined_r:
+            return idx  # 返回撞到的子弹索引
     return -1
 
 # 导入pygame，避免循环导入

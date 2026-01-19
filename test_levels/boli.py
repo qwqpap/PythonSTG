@@ -22,15 +22,15 @@ def pixel_to_normalized(x, y):
 def explosion_handler(bp, event):
     """爆炸处理函数"""
     # 爆炸效果：生成多个子弹
-    for _ in range(8):  # 爆炸生成8颗子弹
+    for _ in range(888):  # 爆炸生成8颗子弹
         angle = random.uniform(0, 2 * math.pi)
-        speed = random.uniform(0.2, 1.0)
+        speed = random.uniform(0.5, 1.5)  # 增加速度，让子弹更明显
         # 添加很小的随机加速度，让爆炸效果更自然
         # 加速度方向与速度方向一致，大小随机
         acc_magnitude = random.uniform(0.05, 0.2)
         acc_x = math.cos(angle) * acc_magnitude
         acc_y = math.sin(angle) * acc_magnitude
-        bp.spawn_bullet(event.x, event.y, angle, speed, acc=(acc_x, acc_y), sprite_id='grain_a2')
+        bp.spawn_bullet(event.x, event.y, angle, speed, acc=(acc_x, acc_y), sprite_id='star_small1')
 
 def test_explosion_array_coroutine(bp, stage_manager):
     """测试弹幕：生成延迟三秒爆炸的子弹阵列"""

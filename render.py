@@ -13,6 +13,8 @@ import math
 def main():
     # --- 1. 初始化 Pygame 并创建 OpenGL 窗口 ---
     pygame.init()
+    # 初始化字体
+    pygame.font.init()
     # 基础尺寸（用于坐标计算）
     base_size = (384, 448)
     # 缩放因子
@@ -42,6 +44,9 @@ def main():
     
     # 设置默认精灵ID为star_small1
     default_sprite_id = 'star_small1' if 'star_small1' in sprite_manager.get_all_sprite_ids() else next(iter(sprite_manager.get_all_sprite_ids()), None)
+    
+    # 创建字体对象用于FPS显示
+    font = pygame.font.SysFont("Arial", 24)  # 使用Arial字体，大小24
     
     # --- 3. 加载纹理图片 ---
     # 加载所有在精灵配置中引用的纹理图片
@@ -292,7 +297,7 @@ def main():
 
         # 检测碰撞
         if player.invincible_timer <= 0:
-            collided_bullet = check_collisions(player.pos, player.hit_radius, bullet_pool.data)
+            collided_bullet = check_collisions(player.pos[0], player.pos[1], player.hit_radius, bullet_pool.data)
             if collided_bullet != -1:
                 # 玩家受伤
                 # 清屏所有子弹 todo
@@ -305,9 +310,10 @@ def main():
         positions, colors, angles, sprite_ids = bullet_pool.get_active_bullets()
         active_count = len(positions)
 
-        # 每10帧打印一次调试信息到控制台
+        # 每10帧打印一次调试信息到控制台，包含FPS
+        current_fps = int(clock.get_fps())
         if pygame.time.get_ticks() % 100 < 16:  # 约每10帧打印一次
-            print(f"Active bullets: {active_count}, Lives: {player.lives}, Focus: {player.is_focused}, Position: ({player.pos[0]:.2f}, {player.pos[1]:.2f}), Frame: {stage_manager.get_frame_count()}")
+            print(f"FPS: {current_fps}, Active bullets: {active_count}, Lives: {player.lives}, Focus: {player.is_focused}, Position: ({player.pos[0]:.2f}, {player.pos[1]:.2f}), Frame: {stage_manager.get_frame_count()}")
 
         # 渲染逻辑
         ctx.clear(0.1, 0.1, 0.1) # 深灰色背景
@@ -389,7 +395,7 @@ def main():
             circle_vbo.write(circle_vertices.tobytes())
             circle_vao.render(moderngl.LINE_STRIP)
 
-        # 更新屏幕
+        # 更新显示（只调用一次，避免闪烁）
         pygame.display.flip()
 
 if __name__ == "__main__":

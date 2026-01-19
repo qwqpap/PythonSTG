@@ -141,6 +141,9 @@ class BulletPool:
         self.bullet_modifiers = {}
         # Modifier系统：存储所有使用中的modifier，用于全局管理
         self.active_modifiers = set()
+        
+        # 空闲子弹索引列表，优化spawn_bullet性能
+        self.free_indices = list(range(max_bullets))
     
     def spawn_bullet(self, x, y, angle, speed, color=None, sprite_id='', init=None, delay=0, acc=None, on_death=None, max_lifetime=0.0, modifiers=None):
         """
@@ -167,10 +170,9 @@ class BulletPool:
             self.spawn_queue.append(SpawnRequest(x, y, angle, speed, color, sprite_id, init, delay, acc, on_death, max_lifetime, modifiers))
             return -1
         
-        # 找到第一个非活跃的子弹
-        dead_indices = np.where(self.data['alive'] == 0)[0]
-        if len(dead_indices) > 0:
-            idx = dead_indices[0]
+        # 从空闲列表中获取空闲子弹索引
+        if len(self.free_indices) > 0:
+            idx = self.free_indices.pop()
             
             # 设置位置
             self.data['pos'][idx] = (x, y)
@@ -299,24 +301,33 @@ class BulletPool:
         
         # 应用所有modifier效果（Python层面，支持复杂逻辑）
         # 遍历所有有modifier的子弹索引
-        bullet_indices = list(self.bullet_modifiers.keys())
-        for idx in bullet_indices:
-            # 检查子弹是否仍然活跃
-            if self.data['alive'][idx]:
-                # 应用所有modifier
-                for modifier in self.bullet_modifiers[idx]:
-                    modifier.update(self.data, idx, dt)
-                
-                # 更新速度大小和角度（确保与速度向量一致）
-                vx = self.data['vel'][idx][0]
-                vy = self.data['vel'][idx][1]
-                self.data['speed'][idx] = np.sqrt(vx**2 + vy**2)
-                self.data['angle'][idx] = np.arctan2(vy, vx)
-            else:
-                # 子弹已经死亡，清理modifier
-                self.remove_all_modifiers(idx)
+        if self.bullet_modifiers:
+            # 优化：创建副本避免字典在遍历过程中被修改
+            bullet_indices = list(self.bullet_modifiers.keys())
+            for idx in bullet_indices:
+                # 检查子弹是否仍然活跃
+                if self.data['alive'][idx]:
+                    # 应用所有modifier，优化：只有速度改变时才更新speed和angle
+                    modifiers = self.bullet_modifiers[idx]
+                    if modifiers:
+                        # 保存当前速度，用于检查是否改变
+                        old_vx, old_vy = self.data['vel'][idx]
+                        
+                        for modifier in modifiers:
+                            modifier.update(self.data, idx, dt)
+                    
+                        # 检查速度是否改变
+                        new_vx, new_vy = self.data['vel'][idx]
+                        if old_vx != new_vx or old_vy != new_vy:
+                            # 速度改变了，更新speed和angle
+                            self.data['speed'][idx] = np.sqrt(new_vx**2 + new_vy**2)
+                            self.data['angle'][idx] = np.arctan2(new_vy, new_vx)
+                else:
+                    # 子弹已经死亡，清理modifier
+                    # 优化：直接删除键，避免调用复杂的remove_all_modifiers
+                    del self.bullet_modifiers[idx]
         
-        # 收集死亡事件
+        # 收集死亡事件（修复：移除了提前return，确保死亡事件被处理）
         self._collect_deaths()
         
         # 处理死亡队列
@@ -337,6 +348,8 @@ class BulletPool:
             # 获取on_death回调
             handler = self.on_death_handlers.pop(idx, None)
             self.death_queue.append(DeathEvent(idx, x, y, handler))
+            # 将死亡的子弹索引添加回空闲列表
+            self.free_indices.append(idx)
     
     def _process_death_queue(self):
         """
@@ -372,10 +385,9 @@ class BulletPool:
         从生成请求生成子弹
         :param req: 生成请求
         """
-        # 找到第一个非活跃的子弹
-        dead_indices = np.where(self.data['alive'] == 0)[0]
-        if len(dead_indices) > 0:
-            idx = dead_indices[0]
+        # 从空闲列表中获取空闲子弹索引
+        if len(self.free_indices) > 0:
+            idx = self.free_indices.pop()
             
             # 设置位置
             self.data['pos'][idx] = (req.x, req.y)
@@ -490,8 +502,8 @@ class BulletPool:
             # 从活跃集合中移除不再使用的modifier
             for modifier in self.bullet_modifiers[idx]:
                 still_used = False
-                for mods in self.bullet_modifiers.values():
-                    if modifier in mods and idx != mods:
+                for other_idx, mods in self.bullet_modifiers.items():
+                    if other_idx != idx and modifier in mods:
                         still_used = True
                         break
                 if not still_used:
