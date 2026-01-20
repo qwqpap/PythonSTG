@@ -1,0 +1,17 @@
+{
+  "bullet1": {
+    "rect": [
+      -8,
+      -2,
+      31,
+      27
+    ],
+    "center": [
+      15,
+      13
+    ],
+    "radius": 8.0,
+    "is_rotating": true
+  },
+  "__image_filename": "bullet1.png"
+}
