@@ -5,6 +5,7 @@ import sys
 from ..game.bullet import BulletPool
 from ..game.player import Player, check_collisions
 from ..game.stage import StageManager
+from ..game.boss import BossManager
 from levels.boli import level_1
 from ..resource.sprite import SpriteManager
 import math
@@ -169,6 +170,9 @@ def main():
     player = Player()
     bullet_pool = BulletPool(max_bullets=50000)
     
+    # 初始化Boss管理器
+    boss_manager = BossManager()
+    
     # 初始化关卡管理器
     # 创建一个简单的引擎包装器，包含子弹池和玩家
     class EngineWrapper:
@@ -179,8 +183,11 @@ def main():
     engine = EngineWrapper(bullet_pool, player)
     stage_manager = StageManager()
     
-    # 加载第一关
-    level_1(stage_manager, bullet_pool, player)
+    # 设置Boss管理器到关卡管理器
+    stage_manager.set_boss_manager(boss_manager)
+    
+    # 加载第一关（将level_1作为协程添加）
+    stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
     
     # 准备用于渲染的VBO
     # 位置VBO - 会动态更新
@@ -373,6 +380,22 @@ def main():
         ], dtype='f4')
         player_vbo.write(player_vertices.tobytes())
         player_vao.render(moderngl.TRIANGLES)
+        
+        # 渲染Boss（如果有活跃的Boss）
+        active_boss = stage_manager.get_active_boss()
+        if active_boss and active_boss.alive:
+            # 简单的Boss渲染：使用一个小方块
+            boss_size = 0.05
+            boss_vertices = np.array([
+                active_boss.pos[0] - boss_size, active_boss.pos[1] + boss_size,
+                active_boss.pos[0] - boss_size, active_boss.pos[1] - boss_size,
+                active_boss.pos[0] + boss_size, active_boss.pos[1] + boss_size,
+                active_boss.pos[0] + boss_size, active_boss.pos[1] + boss_size,
+                active_boss.pos[0] - boss_size, active_boss.pos[1] - boss_size,
+                active_boss.pos[0] + boss_size, active_boss.pos[1] - boss_size,
+            ], dtype='f4')
+            player_vbo.write(boss_vertices.tobytes())
+            player_vao.render(moderngl.TRIANGLES)
         
         # 当按住Shift时，显示玩家的判定点
         if player.is_focused:

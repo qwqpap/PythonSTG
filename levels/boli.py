@@ -1,5 +1,6 @@
 import math
 import random
+from src.game.boss import Boss
 
 # 游戏基础尺寸
 BASE_WIDTH = 384
@@ -16,6 +17,41 @@ def pixel_to_normalized(x, y):
     norm_x = (x / BASE_WIDTH) * 2 - 1
     norm_y = (y / BASE_HEIGHT) * 2 - 1
     return norm_x, norm_y
+
+# Boss弹幕模式
+def boss_spiral_pattern(boss, bullet_pool, timer):
+    """Boss螺旋弹幕模式"""
+    # 每隔一定时间生成螺旋子弹
+    if timer % 0.1 < 0.016:  # 每0.1秒生成一次
+        angle = timer * 5  # 旋转角度
+        speed = 0.3
+        bullet_pool.spawn_bullet(
+            boss.pos[0], boss.pos[1],
+            angle, speed,
+            sprite_id='star_small1'
+        )
+        # 生成第二层螺旋
+        bullet_pool.spawn_bullet(
+            boss.pos[0], boss.pos[1],
+            angle + math.pi, speed * 0.7,
+            sprite_id='grain_a2'
+        )
+    yield 1
+
+def boss_circle_pattern(boss, bullet_pool, timer):
+    """Boss圆形弹幕模式"""
+    # 每隔一定时间生成圆形弹幕
+    if timer % 0.5 < 0.016:  # 每0.5秒生成一次
+        count = 12
+        for i in range(count):
+            angle = (2 * math.pi / count) * i + timer
+            speed = 0.4
+            bullet_pool.spawn_bullet(
+                boss.pos[0], boss.pos[1],
+                angle, speed,
+                sprite_id='grain_a4'
+            )
+    yield 1
 
 # 多种华丽弹幕模式集合：螺旋、扇形波、花朵环
 
@@ -56,12 +92,11 @@ def test_explosion_array_coroutine(bp, stage_manager):
             norm_x, norm_y = pixel_to_normalized(x, y)
             # 生成静止的子弹，直接传递死亡处理函数，生命周期为3秒
             bp.spawn_bullet(norm_x, norm_y, 0, 0, sprite_id='grain_a4', on_death=explosion_handler, max_lifetime=3.0)
-            yield 1  # 每生成一颗子弹等待1帧
+            yield from stage_manager.wait(1)  # 每生成一颗子弹等待1帧
     
     # 这里不再需要手动触发爆炸，子弹会在离开屏幕时自动爆炸
     # 让子弹存在一段时间
-    for _ in range(180):
-        yield 1
+    yield from stage_manager.wait(180)  # 等待3秒（180帧）
 
 def repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=3, interval_seconds=5):
     """
@@ -79,8 +114,7 @@ def repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=3, inter
         # 执行爆炸弹幕阵列
         yield from test_explosion_array_coroutine(bullet_pool, stage_manager)
         # 等待指定的帧数
-        for _ in range(interval_frames):
-            yield 1
+        yield from stage_manager.wait(interval_frames)
 
 def rain_bullets_coroutine(bullet_pool, stage_manager, duration_seconds=30, spawn_interval_frames=2):
     """
@@ -115,13 +149,35 @@ def rain_bullets_coroutine(bullet_pool, stage_manager, duration_seconds=30, spaw
         # 增加帧数计数
         frame_count += 1
         # 等待一帧
-        yield 1
+        yield from stage_manager.wait(1)
 
 def level_1(stage_manager, bullet_pool, player):   
     """第一关：测试延迟爆炸弹幕"""
-    # 添加重复执行的爆炸阵列弹幕，重复3次，每次间隔5秒
-    stage_manager.add_coroutine(lambda: repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=3, interval_seconds=5))
+    # 添加重复执行的爆炸阵列弹幕，重复2次，每次间隔5秒
+    stage_manager.add_coroutine(lambda: repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=2, interval_seconds=5))
  
     # 添加从天上掉子弹的弹幕，持续30秒
     stage_manager.add_coroutine(lambda: rain_bullets_coroutine(bullet_pool, stage_manager))
+    
+    # 等待前面的弹幕执行完毕（大约35秒）
+    yield from stage_manager.wait(210)  # 35秒 * 60帧/秒 = 2100帧
+    
+    # 创建Boss
+    boss = Boss(
+        boss_id='test_boss',
+        pos=(0.0, 0.5),  # Boss位置在屏幕上方
+        sprite_id='boss',
+        max_hp=500  # Boss生命值
+    )
+    
+    # 添加Boss弹幕模式
+    boss.add_pattern('spiral', boss_spiral_pattern)
+    boss.add_pattern('circle', boss_circle_pattern)
+    
+    # 将Boss添加到关卡管理器
+    stage_manager.add_boss(boss)
+    
+    # Boss战斗持续一段时间
+    yield from stage_manager.wait(1800)  # 30秒 * 60帧/秒 = 1800帧
+
     

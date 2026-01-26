@@ -105,3 +105,12 @@ class StageManager:
         if self.boss_manager:
             return self.boss_manager.get_active_boss()
         return None
+    
+    def wait(self, frames):
+        """
+        等待指定帧数（生成器函数）
+        :param frames: 要等待的帧数
+        :return: 生成器对象
+        """
+        for _ in range(frames):
+            yield
