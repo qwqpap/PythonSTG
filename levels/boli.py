@@ -1,6 +1,7 @@
 import math
 import random
 from src.game.boss import Boss
+from src.game.enemy import Enemy
 
 # 游戏基础尺寸
 BASE_WIDTH = 384
@@ -52,6 +53,62 @@ def boss_circle_pattern(boss, bullet_pool, timer):
                 sprite_id='grain_a4'
             )
     yield 1
+
+# 敌人攻击模式
+def enemy_basic_pattern(enemy, bullet_pool, timer):
+    """敌人基础攻击模式"""
+    # 每隔一定时间生成子弹
+    if timer % 1.0 < 0.016:  # 每1秒生成一次
+        # 向玩家方向发射子弹
+        angle = math.pi  # 简单示例，向下发射
+        speed = 0.5
+        bullet_pool.spawn_bullet(
+            enemy.pos[0], enemy.pos[1],
+            angle, speed,
+            sprite_id='grain_a2'
+        )
+    yield 1
+
+def spawn_enemies_coroutine(stage_manager, bullet_pool):
+    """生成敌人的协程"""
+    # 生成多个敌人
+    for i in range(5):
+        # 计算敌人的初始位置
+        enemy_x = random.uniform(-0.8, 0.8)
+        enemy_y = 1.2  # 从屏幕顶部进入
+        
+        # 创建敌人
+        enemy = Enemy(
+            enemy_id=f'enemy_{i}',
+            pos=(enemy_x, enemy_y),
+            sprite_id='grain_a4',
+            max_hp=50
+        )
+        
+        # 添加攻击模式
+        enemy.add_attack_pattern('basic', enemy_basic_pattern)
+        
+        # 设置死亡回调
+        def on_death_callback(enemy_instance):
+            print(f"Enemy {enemy_instance.enemy_id} has been defeated!")
+        
+        enemy.set_on_death_callback(on_death_callback)
+        
+        # 设置被击中回调
+        def on_hit_callback(enemy_instance, damage):
+            print(f"Enemy {enemy_instance.enemy_id} hit! HP: {enemy_instance.current_hp}/{enemy_instance.max_hp}")
+        
+        enemy.set_on_hit_callback(on_hit_callback)
+        
+        # 添加敌人到关卡
+        stage_manager.add_enemy(enemy)
+        
+        # 让敌人移动到指定位置
+        target_y = random.uniform(0.2, 0.6)
+        enemy.move_to((enemy_x, target_y), 2.0)  # 2秒内移动到目标位置
+        
+        # 等待一段时间再生成下一个敌人
+        yield from stage_manager.wait(60)  # 等待1秒
 
 # 多种华丽弹幕模式集合：螺旋、扇形波、花朵环
 
@@ -153,14 +210,20 @@ def rain_bullets_coroutine(bullet_pool, stage_manager, duration_seconds=30, spaw
 
 def level_1(stage_manager, bullet_pool, player):   
     """第一关：测试延迟爆炸弹幕"""
-    # 添加重复执行的爆炸阵列弹幕，重复2次，每次间隔5秒
-    stage_manager.add_coroutine(lambda: repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=2, interval_seconds=5))
- 
-    # 添加从天上掉子弹的弹幕，持续30秒
-    stage_manager.add_coroutine(lambda: rain_bullets_coroutine(bullet_pool, stage_manager))
+    # 首先生成敌人
+    stage_manager.add_coroutine(lambda: spawn_enemies_coroutine(stage_manager, bullet_pool))
     
-    # 等待前面的弹幕执行完毕（大约35秒）
-    yield from stage_manager.wait(210)  # 35秒 * 60帧/秒 = 2100帧
+    # 等待敌人生成完毕
+    yield from stage_manager.wait(300)  
+    
+    # 添加重复执行的爆炸阵列弹幕，重复1次
+    stage_manager.add_coroutine(lambda: repeat_explosion_coroutine(bullet_pool, stage_manager, repeat_count=1, interval_seconds=5))
+ 
+    # 添加从天上掉子弹的弹幕，持续10秒
+    stage_manager.add_coroutine(lambda: rain_bullets_coroutine(bullet_pool, stage_manager, duration_seconds=10))
+    
+    # 等待前面的弹幕执行完毕
+    yield from stage_manager.wait(600)  
     
     # 创建Boss
     boss = Boss(

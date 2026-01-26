@@ -12,6 +12,7 @@ class StageManager:
         self.stage_number = 1
         self.is_paused = False
         self.boss_manager = None
+        self.enemy_manager = None
     
     def set_boss_manager(self, boss_manager):
         """
@@ -19,6 +20,13 @@ class StageManager:
         :param boss_manager: Boss管理器对象
         """
         self.boss_manager = boss_manager
+    
+    def set_enemy_manager(self, enemy_manager):
+        """
+        设置敌人管理器
+        :param enemy_manager: 敌人管理器对象
+        """
+        self.enemy_manager = enemy_manager
     
     def add_coroutine(self, coro_func):
         """
@@ -44,6 +52,10 @@ class StageManager:
         # 更新Boss
         if self.boss_manager:
             self.boss_manager.update(dt, bullet_pool)
+        
+        # 更新敌人
+        if self.enemy_manager:
+            self.enemy_manager.update(dt, bullet_pool)
         
         # 更新协程
         new_coroutines = []
@@ -88,6 +100,8 @@ class StageManager:
         self.frame_count = 0
         if self.boss_manager:
             self.boss_manager.clear()
+        if self.enemy_manager:
+            self.enemy_manager.clear()
     
     def add_boss(self, boss):
         """
@@ -97,6 +111,14 @@ class StageManager:
         if self.boss_manager:
             self.boss_manager.add_boss(boss)
     
+    def add_enemy(self, enemy):
+        """
+        添加敌人到关卡
+        :param enemy: Enemy对象
+        """
+        if self.enemy_manager:
+            self.enemy_manager.add_enemy(enemy)
+    
     def get_active_boss(self):
         """
         获取当前活跃的Boss
@@ -105,6 +127,15 @@ class StageManager:
         if self.boss_manager:
             return self.boss_manager.get_active_boss()
         return None
+    
+    def get_active_enemies(self):
+        """
+        获取当前活跃的敌人
+        :return: 活跃敌人列表，或空列表
+        """
+        if self.enemy_manager:
+            return self.enemy_manager.get_active_enemies()
+        return []
     
     def wait(self, frames):
         """

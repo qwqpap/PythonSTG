@@ -6,6 +6,7 @@ from ..game.bullet import BulletPool
 from ..game.player import Player, check_collisions
 from ..game.stage import StageManager
 from ..game.boss import BossManager
+from ..game.enemy import EnemyManager
 from levels.boli import level_1
 from ..resource.sprite import SpriteManager
 import math
@@ -173,6 +174,9 @@ def main():
     # 初始化Boss管理器
     boss_manager = BossManager()
     
+    # 初始化敌人管理器
+    enemy_manager = EnemyManager()
+    
     # 初始化关卡管理器
     # 创建一个简单的引擎包装器，包含子弹池和玩家
     class EngineWrapper:
@@ -185,6 +189,9 @@ def main():
     
     # 设置Boss管理器到关卡管理器
     stage_manager.set_boss_manager(boss_manager)
+    
+    # 设置敌人管理器到关卡管理器
+    stage_manager.set_enemy_manager(enemy_manager)
     
     # 加载第一关（将level_1作为协程添加）
     stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
@@ -396,6 +403,23 @@ def main():
             ], dtype='f4')
             player_vbo.write(boss_vertices.tobytes())
             player_vao.render(moderngl.TRIANGLES)
+        
+        # 渲染敌人（如果有活跃的敌人）
+        active_enemies = stage_manager.get_active_enemies()
+        for enemy in active_enemies:
+            if enemy.alive:
+                # 简单的敌人渲染：使用一个小方块
+                enemy_size = 0.03
+                enemy_vertices = np.array([
+                    enemy.pos[0] - enemy_size, enemy.pos[1] + enemy_size,
+                    enemy.pos[0] - enemy_size, enemy.pos[1] - enemy_size,
+                    enemy.pos[0] + enemy_size, enemy.pos[1] + enemy_size,
+                    enemy.pos[0] + enemy_size, enemy.pos[1] + enemy_size,
+                    enemy.pos[0] - enemy_size, enemy.pos[1] - enemy_size,
+                    enemy.pos[0] + enemy_size, enemy.pos[1] - enemy_size,
+                ], dtype='f4')
+                player_vbo.write(enemy_vertices.tobytes())
+                player_vao.render(moderngl.TRIANGLES)
         
         # 当按住Shift时，显示玩家的判定点
         if player.is_focused:
