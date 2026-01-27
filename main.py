@@ -3,6 +3,7 @@
 """
 import sys
 import os
+import json
 import pygame
 import moderngl
 
@@ -19,6 +20,7 @@ from src.game.laser import LaserPool, get_laser_texture_data
 from src.resource.sprite import SpriteManager
 from src.resource.asset_manager import AssetManager
 from src.ui import HUD, UIRenderer
+from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from levels.boli import level_1
 from levels.laser_test import laser_test_level
@@ -192,16 +194,30 @@ def main():
     font_manager = get_font_manager()
     font_manager.load_font('score', 'assets/images/ui/font/score.fnt')
     
-    # UI 面板位置（在游戏视口右侧留16px间距，再加32px右边距）
-    panel_origin_x = game_viewport[0] + game_viewport[2] + 16
+    # 加载 HUD 布局配置
+    hud_layout_cfg = load_hud_layout('assets/ui/hud_layout.json')
+    panel_cfg = hud_layout_cfg.get('panel', {}) if hud_layout_cfg else {}
+    gap_to_game = panel_cfg.get('gap_to_game', 16)
+    margin_right = panel_cfg.get('margin_right', 32)
+    bg_color = tuple(panel_cfg.get('bg_color', [16, 16, 32]))
+    bg_alpha = panel_cfg.get('bg_alpha', 0.6)
+    layout_override = hud_layout_cfg.get('layout') if hud_layout_cfg else None
+
+    # UI 面板位置（根据配置/窗口尺寸计算）
+    panel_origin_x = game_viewport[0] + game_viewport[2] + gap_to_game
     panel_origin_y = game_viewport[1]
-    panel_width = screen_size[0] - panel_origin_x - 32
-    panel_height = game_viewport[3]
+    available_width = screen_size[0] - panel_origin_x - margin_right
+    default_panel_size = [max(200, available_width), game_viewport[3]]
+    panel_size_cfg = panel_cfg.get('size', default_panel_size)
+    panel_width = panel_size_cfg[0]
+    panel_height = panel_size_cfg[1] if len(panel_size_cfg) > 1 else default_panel_size[1]
     hud = HUD(screen_width=screen_size[0], screen_height=screen_size[1],
               panel_origin=(panel_origin_x, panel_origin_y),
               panel_size=(panel_width, panel_height),
               game_origin=(game_viewport[0], game_viewport[1]),
-              game_size=(game_viewport[2], game_viewport[3]))
+              game_size=(game_viewport[2], game_viewport[3]),
+              bg_color=bg_color, bg_alpha=bg_alpha,
+              layout_override=layout_override)
     ui_renderer = UIRenderer(ctx, screen_width=screen_size[0], screen_height=screen_size[1])
     
     # 初始化游戏对象
@@ -267,16 +283,8 @@ def main():
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])
         ui_renderer.render_hud(hud)
         
-        # 每10帧打印调试信息
-        current_fps = int(clock.get_fps())
-        if pygame.time.get_ticks() % 100 < 16:
-            positions, _, _, _ = bullet_pool.get_active_bullets()
-            active_count = len(positions)
-            laser_count = laser_pool.laser_count
-            bent_laser_count = laser_pool.bent_laser_count
-            print(f"FPS: {current_fps}, Bullets: {active_count}, Lasers: {laser_count}, Bent Lasers: {bent_laser_count}, "
-                  f"Lives: {player.lives}, Focus: {player.is_focused}, "
-                  f"Position: ({player.pos[0]:.2f}, {player.pos[1]:.2f}), Frame: {stage_manager.get_frame_count()}")
+        # 更新FPS用于屏幕显示
+        hud.state.fps = int(clock.get_fps())
         
         # 更新屏幕
         pygame.display.flip()
