@@ -17,13 +17,16 @@ from src.game.stage import StageManager
 from src.game.boss import BossManager
 from src.game.enemy import EnemyManager
 from src.game.laser import LaserPool, get_laser_texture_data
+from src.game.item import ItemPool, ItemConfig
 from src.resource.sprite import SpriteManager
 from src.resource.asset_manager import AssetManager
+from src.render.item_renderer import ItemRenderer
 from src.ui import HUD, UIRenderer
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from levels.boli import level_1
 from levels.laser_test import laser_test_level
+from levels.item_test import simple_item_demo
 
 
 def initialize_pygame_and_context():
@@ -154,6 +157,7 @@ def initialize_game_objects():
     player = Player()
     bullet_pool = BulletPool(max_bullets=50000)
     laser_pool = LaserPool(max_lasers=100)
+    item_pool = ItemPool(max_items=1000)
     boss_manager = BossManager()
     enemy_manager = EnemyManager()
     stage_manager = StageManager()
@@ -162,11 +166,12 @@ def initialize_game_objects():
     stage_manager.set_boss_manager(boss_manager)
     stage_manager.set_enemy_manager(enemy_manager)
     
-    # 加载第一关（可选择：level_1 或 laser_test_level）
+    # 加载关卡（可选择不同关卡）
     # stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
-    stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
+    # stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
+    stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
     
-    return player, bullet_pool, laser_pool, stage_manager
+    return player, bullet_pool, laser_pool, item_pool, stage_manager
 
 
 def main():
@@ -220,8 +225,12 @@ def main():
               layout_override=layout_override)
     ui_renderer = UIRenderer(ctx, screen_width=screen_size[0], screen_height=screen_size[1])
     
+    # 初始化物品渲染器
+    item_renderer = ItemRenderer(ctx, base_size)
+    item_renderer.load_texture("assets/images/item/item.png")
+    
     # 初始化游戏对象
-    player, bullet_pool, laser_pool, stage_manager = initialize_game_objects()
+    player, bullet_pool, laser_pool, item_pool, stage_manager = initialize_game_objects()
     
     # 游戏主循环
     clock = pygame.time.Clock()
@@ -244,6 +253,12 @@ def main():
         stage_manager.update(dt, bullet_pool, player)
         bullet_pool.update(dt)
         laser_pool.update()  # 更新激光
+        item_pool.update(player.pos[0], player.pos[1], dt)  # 更新物品
+        
+        # 同步物品统计到玩家和HUD
+        player.score = item_pool.stats.score
+        player.power = item_pool.stats.get_power_float()
+        player.lives = item_pool.stats.lives
         
         # 碰撞检测 - 子弹
         if player.invincible_timer <= 0:
@@ -272,12 +287,19 @@ def main():
         
         # 更新 HUD 状态
         hud.update_from_player(player)
+        hud.state.graze = item_pool.stats.graze
+        hud.state.bombs = item_pool.stats.bombs
+        hud.state.point_value = item_pool.stats.point_rate
         active_boss = stage_manager.get_active_boss()
         if active_boss:
             hud.update_from_boss(active_boss)
         
         # 渲染游戏场景（限定到左侧游戏视口）
         renderer.render_frame(bullet_pool, player, stage_manager, laser_pool, viewport_rect=game_viewport)
+        
+        # 渲染物品（在游戏视口内）
+        ctx.viewport = game_viewport
+        item_renderer.render_items(item_pool.get_active_items())
         
         # 将视口恢复为全窗口，渲染HUD
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])
@@ -291,6 +313,7 @@ def main():
     
     # 清理资源
     renderer.cleanup()
+    item_renderer.cleanup()
     ui_renderer.cleanup()
     asset_manager.clear_all()
     pygame.quit()
