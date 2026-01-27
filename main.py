@@ -18,6 +18,8 @@ from src.game.enemy import EnemyManager
 from src.game.laser import LaserPool, get_laser_texture_data
 from src.resource.sprite import SpriteManager
 from src.resource.asset_manager import AssetManager
+from src.ui import HUD, UIRenderer
+from src.ui.bitmap_font import get_font_manager
 from levels.boli import level_1
 from levels.laser_test import laser_test_level
 
@@ -26,12 +28,18 @@ def initialize_pygame_and_context():
     """初始化Pygame和ModernGL上下文"""
     pygame.init()
     
-    # 基础尺寸（用于坐标计算）
+    # 游戏逻辑尺寸（坐标系使用）
     base_size = (384, 448)
-    # 缩放因子
-    scale_factor = 2
-    # 计算实际窗口尺寸
-    screen_size = (base_size[0] * scale_factor, base_size[1] * scale_factor)
+    game_scale = 2  # 游戏区域放大倍数
+    game_view_size = (base_size[0] * game_scale, base_size[1] * game_scale)
+    
+    # 窗口尺寸（包含右侧信息栏）
+    screen_size = (1280, 960)
+    # 游戏视口放在左侧，留出右侧信息面板空间
+    margin_x = 32
+    margin_y = (screen_size[1] - game_view_size[1]) // 2
+    game_viewport = (margin_x, margin_y, game_view_size[0], game_view_size[1])
+    
     screen = pygame.display.set_mode(screen_size, pygame.OPENGL | pygame.DOUBLEBUF)
     pygame.display.set_caption("弹幕游戏")
     
@@ -42,7 +50,7 @@ def initialize_pygame_and_context():
     ctx.enable(moderngl.BLEND)
     ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
     
-    return screen, ctx, base_size
+    return screen, ctx, base_size, screen_size, game_viewport
 
 
 def load_resources(ctx, sprite_manager):
@@ -162,7 +170,7 @@ def initialize_game_objects():
 def main():
     """游戏主函数"""
     # 初始化Pygame和OpenGL
-    screen, ctx, base_size = initialize_pygame_and_context()
+    screen, ctx, base_size, screen_size, game_viewport = initialize_pygame_and_context()
     
     # 初始化资产管理器
     asset_manager = AssetManager(asset_root="assets")
@@ -179,6 +187,22 @@ def main():
     
     # 初始化渲染器
     renderer = Renderer(ctx, base_size, sprite_manager, textures, sprite_uv_map)
+    
+    # 初始化 UI 系统
+    font_manager = get_font_manager()
+    font_manager.load_font('score', 'assets/images/ui/font/score.fnt')
+    
+    # UI 面板位置（在游戏视口右侧留16px间距，再加32px右边距）
+    panel_origin_x = game_viewport[0] + game_viewport[2] + 16
+    panel_origin_y = game_viewport[1]
+    panel_width = screen_size[0] - panel_origin_x - 32
+    panel_height = game_viewport[3]
+    hud = HUD(screen_width=screen_size[0], screen_height=screen_size[1],
+              panel_origin=(panel_origin_x, panel_origin_y),
+              panel_size=(panel_width, panel_height),
+              game_origin=(game_viewport[0], game_viewport[1]),
+              game_size=(game_viewport[2], game_viewport[3]))
+    ui_renderer = UIRenderer(ctx, screen_width=screen_size[0], screen_height=screen_size[1])
     
     # 初始化游戏对象
     player, bullet_pool, laser_pool, stage_manager = initialize_game_objects()
@@ -230,8 +254,18 @@ def main():
                         print(f"Player hit by bent laser! Lives left: {player.lives}")
                         break
         
-        # 渲染
-        renderer.render_frame(bullet_pool, player, stage_manager, laser_pool)
+        # 更新 HUD 状态
+        hud.update_from_player(player)
+        active_boss = stage_manager.get_active_boss()
+        if active_boss:
+            hud.update_from_boss(active_boss)
+        
+        # 渲染游戏场景（限定到左侧游戏视口）
+        renderer.render_frame(bullet_pool, player, stage_manager, laser_pool, viewport_rect=game_viewport)
+        
+        # 将视口恢复为全窗口，渲染HUD
+        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ui_renderer.render_hud(hud)
         
         # 每10帧打印调试信息
         current_fps = int(clock.get_fps())
@@ -249,6 +283,7 @@ def main():
     
     # 清理资源
     renderer.cleanup()
+    ui_renderer.cleanup()
     asset_manager.clear_all()
     pygame.quit()
     sys.exit()
