@@ -167,9 +167,9 @@ def initialize_game_objects():
     stage_manager.set_enemy_manager(enemy_manager)
     
     # 加载关卡（可选择不同关卡）
-    # stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
+    stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
     # stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
-    stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
+    # stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
     
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
