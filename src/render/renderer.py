@@ -40,7 +40,7 @@ class Renderer:
     
     def _init_bullet_shader(self):
         """初始化子弹渲染着色器和VAO"""
-        # 顶点着色器：接收位置并转换到裁剪空间，支持实例化偏移、角度和UV坐标
+        # 顶点着色器：接收位置并转换到裁剪空间，支持实例化偏移、角度、UV坐标和尺寸
         vertex_shader = """
         #version 330
         in vec2 in_vert;
@@ -48,14 +48,17 @@ class Renderer:
         in vec2 in_offset;
         in float in_angle;
         in vec4 in_uv_offset;
+        in vec2 in_scale;  // 每个子弹的独立尺寸
         
         out vec2 v_uv;
         
         void main() {
+            // 先应用缩放，再旋转
+            vec2 scaled = in_vert * in_scale;
             // 计算旋转矩阵
             float s = sin(in_angle);
             float c = cos(in_angle);
-            vec2 rotated = vec2(in_vert.x * c - in_vert.y * s, in_vert.x * s + in_vert.y * c);
+            vec2 rotated = vec2(scaled.x * c - scaled.y * s, scaled.x * s + scaled.y * c);
             // 应用旋转和偏移
             vec2 position = rotated + in_offset;
             // 宽高比校正：384x448屏幕，宽高比为6:7，保持x轴[-1,1]，y轴需要乘以(384.0/448.0)
@@ -81,25 +84,18 @@ class Renderer:
         self.bullet_program = self.ctx.program(vertex_shader=vertex_shader, fragment_shader=fragment_shader)
         self.bullet_program['u_texture'].value = 0
         
-        # 准备顶点数据
-        default_sprite_size = [16, 16]
-        if self.default_sprite_id:
-            sprite_data = self.sprite_manager.get_sprite(self.default_sprite_id)
-            default_sprite_size = [sprite_data['rect'][2], sprite_data['rect'][3]]
+        # 保存缩放因子供渲染时使用
+        self.bullet_scale_factor = 2.0 / self.base_size[1]
         
-        scale_factor = 2.0 / self.base_size[1]
-        width = default_sprite_size[0] * scale_factor
-        height = default_sprite_size[1] * scale_factor
-        half_width = width / 2.0
-        half_height = height / 2.0
-        
+        # 准备顶点数据 - 使用单位正方形，实际尺寸由in_scale控制
+        # 半尺寸为0.5，缩放后会乘以实际像素尺寸
         vertices = np.array([
-            -half_width,  half_height, 0.0, 0.0,
-            -half_width, -half_height, 0.0, 1.0,
-             half_width,  half_height, 1.0, 0.0,
-             half_width,  half_height, 1.0, 0.0,
-            -half_width, -half_height, 0.0, 1.0,
-             half_width, -half_height, 1.0, 1.0,
+            -0.5,  0.5, 0.0, 0.0,
+            -0.5, -0.5, 0.0, 1.0,
+             0.5,  0.5, 1.0, 0.0,
+             0.5,  0.5, 1.0, 0.0,
+            -0.5, -0.5, 0.0, 1.0,
+             0.5, -0.5, 1.0, 1.0,
         ], dtype='f4')
         
         self.bullet_vbo = self.ctx.buffer(vertices.tobytes())
@@ -108,6 +104,7 @@ class Renderer:
         self.instance_vbo = self.ctx.buffer(reserve=50000 * 2 * 4)
         self.angle_vbo = self.ctx.buffer(reserve=50000 * 1 * 4)
         self.uv_vbo = self.ctx.buffer(reserve=50000 * 4 * 4)
+        self.scale_vbo = self.ctx.buffer(reserve=50000 * 2 * 4)  # 每个子弹的尺寸 (width, height)
         
         # 创建VAO
         self.bullet_vao = self.ctx.vertex_array(
@@ -115,11 +112,13 @@ class Renderer:
             [(self.bullet_vbo, '2f 2f', 'in_vert', 'in_uv_base'),
              (self.instance_vbo, '2f/i', 'in_offset'),
              (self.angle_vbo, '1f/i', 'in_angle'),
-             (self.uv_vbo, '4f/i', 'in_uv_offset')]
+             (self.uv_vbo, '4f/i', 'in_uv_offset'),
+             (self.scale_vbo, '2f/i', 'in_scale')]
         )
     
     def _init_player_shader(self):
         """初始化玩家/敌人/Boss渲染着色器和VAO"""
+        # 纯色渲染shader（用于备用）
         self.player_program = self.ctx.program(
             vertex_shader="""
             #version 330
@@ -161,6 +160,46 @@ class Renderer:
             [(self.player_vbo, '2f', 'in_vert'),
              (self.player_color_vbo, '3f', 'in_color')]
         )
+        
+        # 纹理渲染shader（用于玩家精灵）
+        self.player_tex_program = self.ctx.program(
+            vertex_shader="""
+            #version 330
+            in vec2 in_vert;
+            in vec2 in_uv;
+            
+            out vec2 v_uv;
+            
+            void main() {
+                vec2 position = in_vert;
+                position.y *= 384.0 / 448.0;
+                gl_Position = vec4(position, 0.0, 1.0);
+                v_uv = in_uv;
+            }
+            """,
+            fragment_shader="""
+            #version 330
+            uniform sampler2D tex;
+            in vec2 v_uv;
+            out vec4 f_color;
+            
+            void main() {
+                f_color = texture(tex, v_uv);
+                if (f_color.a < 0.1) discard;
+            }
+            """
+        )
+        
+        # 玩家纹理渲染缓冲
+        self.player_tex_vbo = self.ctx.buffer(reserve=6 * 4 * 4)  # 6 vertices * 4 floats (x,y,u,v)
+        self.player_tex_vao = self.ctx.vertex_array(
+            self.player_tex_program,
+            [(self.player_tex_vbo, '2f 2f', 'in_vert', 'in_uv')]
+        )
+        
+        # 玩家纹理缓存
+        self.player_texture = None
+        self.player_texture_size = None
     
     def _init_circle_shader(self):
         """初始化判定圆圈渲染着色器和VAO"""
@@ -263,21 +302,147 @@ class Renderer:
                 self.instance_vbo.write(group_positions.tobytes())
                 self.angle_vbo.write(group_angles.tobytes())
                 
-                # 准备UV数据
+                # 准备UV数据和尺寸数据
                 uv_data = np.zeros((group_size, 4), dtype='f4')
+                scale_data = np.zeros((group_size, 2), dtype='f4')
+                default_size = 16.0  # 默认尺寸
+                
                 for j, sprite_id in enumerate(group_sprite_ids):
+                    # UV数据
                     if sprite_id in self.sprite_uv_map:
                         uv_data[j] = self.sprite_uv_map[sprite_id]
                     elif self.default_sprite_id and self.default_sprite_id in self.sprite_uv_map:
                         uv_data[j] = self.sprite_uv_map[self.default_sprite_id]
                     else:
                         uv_data[j] = [0.0, 0.0, 1.0, 1.0]
+                    
+                    # 尺寸数据 - 从精灵配置获取实际尺寸
+                    sprite_data = self.sprite_manager.get_sprite(sprite_id)
+                    if sprite_data and 'rect' in sprite_data:
+                        width = sprite_data['rect'][2] * self.bullet_scale_factor
+                        height = sprite_data['rect'][3] * self.bullet_scale_factor
+                        scale_data[j] = [width, height]
+                    else:
+                        scale_data[j] = [default_size * self.bullet_scale_factor, 
+                                        default_size * self.bullet_scale_factor]
                 
                 self.uv_vbo.write(uv_data.tobytes())
+                self.scale_vbo.write(scale_data.tobytes())
                 self.bullet_vao.render(moderngl.TRIANGLES, instances=group_size)
     
     def _render_player(self, player):
         """渲染玩家"""
+        # 检查玩家是否有纹理和精灵信息
+        if hasattr(player, 'get_current_sprite') and hasattr(player, 'texture_path'):
+            self._render_player_sprite(player)
+        else:
+            self._render_player_fallback(player)
+    
+    def _render_player_sprite(self, player):
+        """使用纹理渲染玩家"""
+        import os
+        from PIL import Image
+        
+        # 延迟加载玩家纹理（不翻转，与sakuya_test.py一致）
+        if self.player_texture is None and hasattr(player, 'texture_path'):
+            texture_path = player.texture_path
+            if os.path.exists(texture_path):
+                img = Image.open(texture_path).convert('RGBA')
+                # 不翻转纹理，保持原始方向
+                self.player_texture = self.ctx.texture(img.size, 4, img.tobytes())
+                self.player_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+                self.player_texture_size = img.size
+                print(f"已加载玩家纹理: {texture_path} ({img.size[0]}x{img.size[1]})")
+        
+        if self.player_texture is None:
+            self._render_player_fallback(player)
+            return
+        
+        # 获取当前精灵帧
+        sprite_info = player.get_current_sprite()
+        if sprite_info is None:
+            self._render_player_fallback(player)
+            return
+        
+        # 计算UV坐标（v=0在顶部，v=1在底部）
+        tex_w, tex_h = self.player_texture_size
+        rect = sprite_info.get('rect', [0, 0, 32, 48])
+        u0 = rect[0] / tex_w
+        v0 = rect[1] / tex_h                    # 顶部
+        u1 = (rect[0] + rect[2]) / tex_w
+        v1 = (rect[1] + rect[3]) / tex_h        # 底部
+        
+        # 计算屏幕位置（转换精灵像素大小到归一化坐标）
+        sprite_w = rect[2] / 192.0  # 192 是半屏宽度的像素数
+        sprite_h = rect[3] / 192.0
+        
+        px, py = player.pos[0], player.pos[1]
+        
+        # 6个顶点（2个三角形），UV: v0=顶部, v1=底部
+        vertices = np.array([
+            # 位置x, 位置y, u, v
+            px - sprite_w/2, py - sprite_h/2, u0, v1,  # 左下
+            px + sprite_w/2, py - sprite_h/2, u1, v1,  # 右下
+            px + sprite_w/2, py + sprite_h/2, u1, v0,  # 右上
+            px - sprite_w/2, py - sprite_h/2, u0, v1,  # 左下
+            px + sprite_w/2, py + sprite_h/2, u1, v0,  # 右上
+            px - sprite_w/2, py + sprite_h/2, u0, v0,  # 左上
+        ], dtype='f4')
+        
+        self.player_tex_vbo.write(vertices.tobytes())
+        self.player_texture.use(0)
+        self.player_tex_vao.render(moderngl.TRIANGLES)
+        
+        # 渲染 Options
+        if hasattr(player, 'get_option_positions'):
+            self._render_options(player)
+    
+    def _render_options(self, player):
+        """渲染玩家的 Options"""
+        if self.player_texture is None:
+            return
+        
+        option_positions = player.get_option_positions()
+        if not option_positions:
+            return
+        
+        # 获取 Option 精灵
+        option_sprite = None
+        if hasattr(player, 'sprites') and player.sprites:
+            # 查找 option 精灵
+            for key, val in player.sprites.items():
+                if 'option' in key.lower():
+                    option_sprite = val
+                    break
+        
+        if option_sprite is None:
+            return
+        
+        tex_w, tex_h = self.player_texture_size
+        rect = option_sprite.get('rect', [0, 0, 16, 16])
+        u0 = rect[0] / tex_w
+        v0 = rect[1] / tex_h
+        u1 = (rect[0] + rect[2]) / tex_w
+        v1 = (rect[1] + rect[3]) / tex_h
+        
+        sprite_w = rect[2] / 192.0
+        sprite_h = rect[3] / 192.0
+        
+        for ox, oy in option_positions:
+            vertices = np.array([
+                ox - sprite_w/2, oy - sprite_h/2, u0, v1,
+                ox + sprite_w/2, oy - sprite_h/2, u1, v1,
+                ox + sprite_w/2, oy + sprite_h/2, u1, v0,
+                ox - sprite_w/2, oy - sprite_h/2, u0, v1,
+                ox + sprite_w/2, oy + sprite_h/2, u1, v0,
+                ox - sprite_w/2, oy + sprite_h/2, u0, v0,
+            ], dtype='f4')
+            
+            self.player_tex_vbo.write(vertices.tobytes())
+            self.player_tex_vao.render(moderngl.TRIANGLES)
+    
+    def _render_player_fallback(self, player):
+        """备用：纯色渲染玩家"""
         player_size = 0.01 if player.is_focused else 0.02
         player_vertices = np.array([
             player.pos[0] - player_size, player.pos[1] + player_size,

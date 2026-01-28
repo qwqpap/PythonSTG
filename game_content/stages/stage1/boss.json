@@ -1,0 +1,59 @@
+{
+  "id": "rumia",
+  "name": "露米娅",
+  "texture": "rumia.png",
+  "animations": {
+    "idle": {"frames": [0, 1], "speed": 10},
+    "left": {"frames": [2, 3], "speed": 8},
+    "right": {"frames": [4, 5], "speed": 8},
+    "spellcard": {"frames": [6, 7, 8], "speed": 6}
+  },
+  "phases": [
+    {
+      "type": "nonspell",
+      "hp": 800,
+      "time": 30,
+      "script": "nonspell_1",
+      "practice_unlock": false,
+      "comment": "第一段非符"
+    },
+    {
+      "type": "spellcard",
+      "name": "月符「Moonlight Ray」",
+      "hp": 1200,
+      "time": 60,
+      "script": "spell_1",
+      "bonus": 1000000,
+      "practice_unlock": true,
+      "comment": "第一张符卡"
+    },
+    {
+      "type": "nonspell",
+      "hp": 1000,
+      "time": 30,
+      "script": "nonspell_2",
+      "practice_unlock": false,
+      "comment": "第二段非符"
+    },
+    {
+      "type": "spellcard",
+      "name": "夜符「Night Bird」",
+      "hp": 1500,
+      "time": 60,
+      "script": "spell_2",
+      "bonus": 1500000,
+      "practice_unlock": true,
+      "comment": "第二张符卡 - 比较难"
+    },
+    {
+      "type": "spellcard",
+      "name": "闇符「Demarcation」",
+      "hp": 2000,
+      "time": 75,
+      "script": "spell_3",
+      "bonus": 2000000,
+      "practice_unlock": true,
+      "comment": "最终符卡"
+    }
+  ]
+}

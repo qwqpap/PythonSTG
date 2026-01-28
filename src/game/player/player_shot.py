@@ -78,6 +78,11 @@ class PlayerShotSystem:
         self.fire_timer = 0.0
         self.is_shooting = False
         
+        # 动态参数（由PlayerBase传入）
+        self.spread_range: Optional[float] = None   # 散射角度范围
+        self.target_angle: Optional[float] = None   # 瞄准角度
+        self.damage_bonus: float = 1.0              # 伤害加成
+        
         # 音效回调
         self.on_shot_sound: Optional[Callable[[str], None]] = None
     
@@ -92,7 +97,9 @@ class PlayerShotSystem:
         self.option_positions = [(opt.offset_x, opt.offset_y) for opt in options]
     
     def update(self, dt: float, player_x: float, player_y: float, 
-               is_shooting: bool, is_focused: bool, power: float):
+               is_shooting: bool, is_focused: bool, power: float,
+               spread_range: float = None, target_angle: float = None,
+               damage_bonus: float = 1.0):
         """
         更新射击系统
         :param dt: 时间步长
@@ -101,8 +108,14 @@ class PlayerShotSystem:
         :param is_shooting: 是否按住射击键
         :param is_focused: 是否低速模式
         :param power: 当前power值
+        :param spread_range: 子机散射角度范围（可选）
+        :param target_angle: 自动瞄准角度（可选）
+        :param damage_bonus: 伤害加成倍率
         """
         self.is_shooting = is_shooting
+        self.spread_range = spread_range
+        self.target_angle = target_angle
+        self.damage_bonus = damage_bonus
         
         # 更新Option位置（低速模式收拢）
         self._update_option_positions(player_x, player_y, is_focused, dt)
@@ -146,10 +159,16 @@ class PlayerShotSystem:
         
         # 玩家本体发射
         for pattern in patterns:
+            # 如果启用了自动瞄准，替换角度
+            actual_angle = pattern.angle
+            if self.target_angle is not None:
+                actual_angle = self.target_angle
+            
             self._spawn_bullet(
                 player_x + pattern.offset_x,
                 player_y + pattern.offset_y,
-                pattern
+                pattern,
+                angle_override=actual_angle
             )
             
             # 播放音效（只播放一次）
@@ -165,13 +184,34 @@ class PlayerShotSystem:
             opt_x, opt_y = self.option_positions[i]
             
             for pattern in opt.shot_patterns:
-                self._spawn_bullet(opt_x + pattern.offset_x, 
-                                   opt_y + pattern.offset_y, 
-                                   pattern)
+                # 如果启用了散射范围，使用动态角度
+                actual_angle = pattern.angle
+                if self.target_angle is not None:
+                    actual_angle = self.target_angle
+                
+                # 如果有散射范围，应用到angle_offset
+                actual_offset = pattern.angle_offset
+                if self.spread_range is not None and pattern.angle_offset != 0:
+                    # 按比例缩放散射角度
+                    actual_offset = pattern.angle_offset * (self.spread_range / 15.0)
+                
+                self._spawn_bullet(
+                    opt_x + pattern.offset_x, 
+                    opt_y + pattern.offset_y, 
+                    pattern,
+                    angle_override=actual_angle,
+                    angle_offset_override=actual_offset
+                )
     
-    def _spawn_bullet(self, x: float, y: float, pattern: ShotPattern):
+    def _spawn_bullet(self, x: float, y: float, pattern: ShotPattern,
+                      angle_override: float = None, angle_offset_override: float = None):
         """生成单颗子弹"""
-        angle_rad = math.radians(pattern.angle + pattern.angle_offset)
+        angle = angle_override if angle_override is not None else pattern.angle
+        angle_offset = angle_offset_override if angle_offset_override is not None else pattern.angle_offset
+        angle_rad = math.radians(angle + angle_offset)
+        
+        # 应用伤害加成
+        damage = pattern.damage * self.damage_bonus
         
         self.bullet_pool.spawn(
             x=x,
@@ -179,7 +219,7 @@ class PlayerShotSystem:
             angle=angle_rad,
             speed=pattern.speed,
             sprite_id=pattern.bullet_sprite,
-            damage=pattern.damage,
+            damage=damage,
             bullet_type=pattern.bullet_type,
             homing_strength=pattern.homing_strength,
             scale=pattern.scale,
@@ -206,42 +246,32 @@ def create_shot_type_from_config(config: dict) -> ShotType:
         fire_rate=config.get('fire_rate', 0.05)
     )
     
-    # 解析基础pattern
-    for p_config in config.get('patterns', []):
-        pattern = ShotPattern(
-            offset_x=p_config.get('offset', [0, 0])[0] if 'offset' in p_config else p_config.get('offset_x', 0),
-            offset_y=p_config.get('offset', [0, 0])[1] if 'offset' in p_config else p_config.get('offset_y', 0),
-            angle=p_config.get('angle', 90),
-            angle_offset=p_config.get('angle_offset', 0),
-            speed=p_config.get('speed', 0.8),
-            bullet_sprite=p_config.get('bullet', ''),
-            damage=p_config.get('damage', 10),
-            bullet_type=1 if p_config.get('homing', False) else 0,
-            homing_strength=p_config.get('homing_strength', 5.0) if p_config.get('homing', False) else 0,
-            scale=p_config.get('scale', 1.0),
-            sound=p_config.get('sound', '')
-        )
-        shot_type.patterns.append(pattern)
+    # 解析基础pattern（如果是列表格式）
+    base_patterns = config.get('patterns', [])
+    if isinstance(base_patterns, list):
+        for p_config in base_patterns:
+            pattern = _parse_pattern_config(p_config)
+            shot_type.patterns.append(pattern)
+    elif isinstance(base_patterns, dict):
+        # patterns 是按power分组的字典
+        for power_str, p_list in base_patterns.items():
+            power_threshold = float(power_str)
+            extra_patterns = []
+            
+            bullets = p_list.get('bullets', []) if isinstance(p_list, dict) else p_list
+            for p_config in bullets:
+                pattern = _parse_pattern_config(p_config)
+                extra_patterns.append(pattern)
+            
+            shot_type.power_patterns[power_threshold] = extra_patterns
     
-    # 解析power等级pattern
+    # 解析power等级pattern（旧格式兼容）
     for power_str, p_list in config.get('power_patterns', {}).items():
         power_threshold = float(power_str)
         extra_patterns = []
         
         for p_config in p_list:
-            pattern = ShotPattern(
-                offset_x=p_config.get('offset', [0, 0])[0] if 'offset' in p_config else p_config.get('offset_x', 0),
-                offset_y=p_config.get('offset', [0, 0])[1] if 'offset' in p_config else p_config.get('offset_y', 0),
-                angle=p_config.get('angle', 90),
-                angle_offset=p_config.get('angle_offset', 0),
-                speed=p_config.get('speed', 0.8),
-                bullet_sprite=p_config.get('bullet', ''),
-                damage=p_config.get('damage', 10),
-                bullet_type=1 if p_config.get('homing', False) else 0,
-                homing_strength=p_config.get('homing_strength', 5.0) if p_config.get('homing', False) else 0,
-                scale=p_config.get('scale', 1.0),
-                sound=p_config.get('sound', '')
-            )
+            pattern = _parse_pattern_config(p_config)
             extra_patterns.append(pattern)
         
         shot_type.power_patterns[power_threshold] = extra_patterns
@@ -249,32 +279,100 @@ def create_shot_type_from_config(config: dict) -> ShotType:
     return shot_type
 
 
-def create_options_from_config(config: list) -> List[OptionConfig]:
+def _parse_pattern_config(p_config: dict) -> ShotPattern:
+    """解析单个pattern配置"""
+    # 处理offset格式
+    if 'offset' in p_config:
+        offset = p_config['offset']
+        offset_x = offset[0] if isinstance(offset, list) else 0
+        offset_y = offset[1] if isinstance(offset, list) else 0
+    else:
+        offset_x = p_config.get('offset_x', 0)
+        offset_y = p_config.get('offset_y', 0)
+    
+    # 获取精灵ID
+    sprite = p_config.get('sprite', p_config.get('bullet', ''))
+    
+    return ShotPattern(
+        offset_x=offset_x / 100.0,  # 转换到归一化坐标
+        offset_y=offset_y / 100.0,
+        angle=p_config.get('angle', 90),
+        angle_offset=p_config.get('angle_offset', 0),
+        speed=p_config.get('speed', 0.8) / 1000.0,  # 转换速度
+        bullet_sprite=sprite,
+        damage=p_config.get('damage', 10),
+        bullet_type=1 if p_config.get('homing', False) else 0,
+        homing_strength=p_config.get('homing_strength', 5.0) if p_config.get('homing', False) else 0,
+        scale=p_config.get('scale', 1.0),
+        sound=p_config.get('sound', '')
+    )
+
+
+def create_options_from_config(config) -> List[OptionConfig]:
     """从配置创建Option列表"""
     options = []
     
-    for opt_config in config:
-        opt = OptionConfig(
-            offset_x=opt_config.get('offset', [0, 0])[0],
-            offset_y=opt_config.get('offset', [0, 0])[1],
-            focused_offset_x=opt_config.get('focused_offset', [0, 0])[0],
-            focused_offset_y=opt_config.get('focused_offset', [0, 0])[1],
-            sprite=opt_config.get('sprite', '')
-        )
+    # 支持新格式（按模式分组）和旧格式（列表）
+    if isinstance(config, dict):
+        # 新格式：按 unfocused/focused 分组
+        # 暂时只处理 unfocused 的位置
+        positions_config = config.get('unfocused', {}).get('positions', {})
+        bullet_config = config.get('unfocused', {}).get('bullet', {})
         
-        # 解析Option的射击pattern
-        for p_config in opt_config.get('shot_patterns', []):
-            pattern = ShotPattern(
-                offset_x=p_config.get('offset', [0, 0])[0] if 'offset' in p_config else 0,
-                offset_y=p_config.get('offset', [0, 0])[1] if 'offset' in p_config else 0,
-                angle=p_config.get('angle', 90),
-                speed=p_config.get('speed', 0.8),
-                bullet_sprite=p_config.get('bullet', ''),
-                damage=p_config.get('damage', 5),
-                scale=p_config.get('scale', 0.8)
+        # 获取最高power等级的option数量
+        max_power = max([float(k) for k in positions_config.keys()], default=1.0)
+        opt_list = positions_config.get(str(max_power), positions_config.get(f'{max_power}', []))
+        
+        for opt_config in opt_list:
+            offset = opt_config.get('offset', [0, 0])
+            target_offset = opt_config.get('target_offset', offset)
+            
+            opt = OptionConfig(
+                offset_x=offset[0] / 100.0,
+                offset_y=offset[1] / 100.0,
+                focused_offset_x=target_offset[0] / 100.0,
+                focused_offset_y=target_offset[1] / 100.0,
+                sprite=opt_config.get('sprite', '')
             )
-            opt.shot_patterns.append(pattern)
-        
-        options.append(opt)
+            
+            # 根据bullet配置创建射击pattern
+            if bullet_config:
+                spread_count = bullet_config.get('spread_count', 1)
+                spread_angle = bullet_config.get('spread_angle', 0)
+                
+                for i in range(spread_count):
+                    angle_offset = (i - spread_count // 2) * spread_angle
+                    pattern = ShotPattern(
+                        angle=90,
+                        angle_offset=angle_offset,
+                        speed=bullet_config.get('speed', 24) / 1000.0,
+                        bullet_sprite=bullet_config.get('sprite', ''),
+                        damage=bullet_config.get('damage', 5),
+                        bullet_type=1 if bullet_config.get('homing', False) else 0,
+                        homing_strength=0.03 if bullet_config.get('homing', False) else 0,
+                    )
+                    opt.shot_patterns.append(pattern)
+            
+            options.append(opt)
+    else:
+        # 旧格式：直接列表
+        for opt_config in config:
+            offset = opt_config.get('offset', [0, 0])
+            focused_offset = opt_config.get('focused_offset', offset)
+            
+            opt = OptionConfig(
+                offset_x=offset[0] / 100.0,
+                offset_y=offset[1] / 100.0,
+                focused_offset_x=focused_offset[0] / 100.0,
+                focused_offset_y=focused_offset[1] / 100.0,
+                sprite=opt_config.get('sprite', '')
+            )
+            
+            # 解析Option的射击pattern
+            for p_config in opt_config.get('shot_patterns', []):
+                pattern = _parse_pattern_config(p_config)
+                opt.shot_patterns.append(pattern)
+            
+            options.append(opt)
     
     return options

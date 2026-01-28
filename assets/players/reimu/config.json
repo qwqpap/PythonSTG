@@ -1,124 +1,152 @@
 {
-  "name": "博丽灵梦",
-  "description": "博丽神社的巫女，擅长使用灵符和追踪弹",
-  "author": "ZUN",
-  
-  "texture": "reimu.png",
-  "preview_sprite": "reimu_idle_0",
-  
-  "stats": {
-    "speed_high": 0.02,
-    "speed_low": 0.008,
-    "hit_radius": 0.01,
-    "graze_radius": 0.05
+  "version": "2.0",
+  "texture": "41.png",
+  "sprites": {
+    "reimu_idle_0": {
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ]
+    },
+    "reimu_idle_1": {
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ]
+    },
+    "reimu_idle_2": {
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ]
+    },
+    "reimu_idle_3": {
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ]
+    },
+    "reimu_idle_4": {
+      "rect": [
+        256,
+        0,
+        64,
+        64
+      ]
+    },
+    "reimu_idle_5": {
+      "rect": [
+        320,
+        0,
+        64,
+        64
+      ]
+    },
+    "reimu_move_left_0": {
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ]
+    },
+    "reimu_move_left_1": {
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ]
+    },
+    "reimu_move_left_2": {
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ]
+    },
+    "reimu_move_left_3": {
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ]
+    },
+    "reimu_move_right_0": {
+      "rect": [
+        0,
+        128,
+        64,
+        64
+      ]
+    },
+    "reimu_move_right_1": {
+      "rect": [
+        64,
+        128,
+        64,
+        64
+      ]
+    },
+    "reimu_move_right_2": {
+      "rect": [
+        128,
+        128,
+        64,
+        64
+      ]
+    },
+    "reimu_move_right_3": {
+      "rect": [
+        192,
+        128,
+        64,
+        64
+      ]
+    }
   },
-  
-  "initial": {
-    "lives": 3,
-    "bombs": 3,
-    "power": 1.0
-  },
-  
   "animations": {
-    "transition_speed": 8.0,
-    "move_threshold": 0.001,
-    "full_tilt_frames": 8,
-    "animations": {
-      "idle": {
-        "frames": ["reimu_idle_0", "reimu_idle_1", "reimu_idle_2", "reimu_idle_3"],
-        "fps": 8,
-        "loop": true
-      },
-      "move_left": {
-        "frames": ["reimu_left_0", "reimu_left_1", "reimu_left_2", "reimu_left_3"],
-        "fps": 12,
-        "loop": true
-      },
-      "move_right": {
-        "frames": ["reimu_right_0", "reimu_right_1", "reimu_right_2", "reimu_right_3"],
-        "fps": 12,
-        "loop": true
-      }
-    }
-  },
-  
-  "shot_types": {
-    "unfocused": {
-      "name": "灵符「梦想妙珠」",
-      "fire_rate": 0.05,
-      "patterns": [
-        { "offset": [-0.03, 0.02], "angle": 90, "speed": 0.8, "bullet": "player_shot_1", "damage": 10, "sound": "se_shot" },
-        { "offset": [0.03, 0.02], "angle": 90, "speed": 0.8, "bullet": "player_shot_1", "damage": 10 }
+    "idle": {
+      "frames": [
+        "reimu_idle_0",
+        "reimu_idle_1",
+        "reimu_idle_2",
+        "reimu_idle_3",
+        "reimu_idle_4",
+        "reimu_idle_5"
       ],
-      "power_patterns": {
-        "2.0": [
-          { "offset": [-0.06, 0.01], "angle": 85, "speed": 0.75, "bullet": "player_shot_1", "damage": 8 },
-          { "offset": [0.06, 0.01], "angle": 95, "speed": 0.75, "bullet": "player_shot_1", "damage": 8 }
-        ],
-        "3.0": [
-          { "offset": [-0.09, 0.0], "angle": 80, "speed": 0.7, "bullet": "player_shot_1", "damage": 6 },
-          { "offset": [0.09, 0.0], "angle": 100, "speed": 0.7, "bullet": "player_shot_1", "damage": 6 }
-        ],
-        "4.0": [
-          { "offset": [-0.12, -0.01], "angle": 75, "speed": 0.65, "bullet": "player_shot_1", "damage": 5 },
-          { "offset": [0.12, -0.01], "angle": 105, "speed": 0.65, "bullet": "player_shot_1", "damage": 5 }
-        ]
-      }
+      "fps": 8,
+      "loop": true
     },
-    "focused": {
-      "name": "灵符「博丽幻想」",
-      "fire_rate": 0.04,
-      "patterns": [
-        { "offset": [0, 0.03], "angle": 90, "speed": 0.6, "bullet": "player_homing", "damage": 15, "homing": true, "homing_strength": 8.0 }
+    "move_left": {
+      "frames": [
+        "reimu_move_left_0",
+        "reimu_move_left_1",
+        "reimu_move_left_2",
+        "reimu_move_left_3"
       ],
-      "power_patterns": {
-        "2.0": [
-          { "offset": [-0.015, 0.025], "angle": 90, "speed": 0.55, "bullet": "player_homing", "damage": 12, "homing": true, "homing_strength": 7.0 },
-          { "offset": [0.015, 0.025], "angle": 90, "speed": 0.55, "bullet": "player_homing", "damage": 12, "homing": true, "homing_strength": 7.0 }
-        ],
-        "3.0": [
-          { "offset": [-0.03, 0.02], "angle": 88, "speed": 0.5, "bullet": "player_homing", "damage": 10, "homing": true, "homing_strength": 6.0 },
-          { "offset": [0.03, 0.02], "angle": 92, "speed": 0.5, "bullet": "player_homing", "damage": 10, "homing": true, "homing_strength": 6.0 }
-        ],
-        "4.0": [
-          { "offset": [-0.045, 0.015], "angle": 85, "speed": 0.45, "bullet": "player_homing", "damage": 8, "homing": true, "homing_strength": 5.0 },
-          { "offset": [0.045, 0.015], "angle": 95, "speed": 0.45, "bullet": "player_homing", "damage": 8, "homing": true, "homing_strength": 5.0 }
-        ]
-      }
-    }
-  },
-  
-  "options": [
-    {
-      "sprite": "reimu_option",
-      "offset": [-0.1, 0.0],
-      "focused_offset": [-0.03, 0.05],
-      "shot_patterns": [
-        { "angle": 90, "speed": 0.7, "bullet": "player_shot_small", "damage": 5 }
-      ]
+      "fps": 8,
+      "loop": true
     },
-    {
-      "sprite": "reimu_option",
-      "offset": [0.1, 0.0],
-      "focused_offset": [0.03, 0.05],
-      "shot_patterns": [
-        { "angle": 90, "speed": 0.7, "bullet": "player_shot_small", "damage": 5 }
-      ]
+    "move_right": {
+      "frames": [
+        "reimu_move_right_0",
+        "reimu_move_right_1",
+        "reimu_move_right_2",
+        "reimu_move_right_3"
+      ],
+      "fps": 8,
+      "loop": true
     }
-  ],
-  
-  "spellcards": [
-    {
-      "name": "梦符「封魔阵」",
-      "cost": 100,
-      "script": "reimu_spell_barrier",
-      "description": "在自机周围展开强力结界，清除范围内的敌弹"
-    },
-    {
-      "name": "霊符「夢想封印」",
-      "cost": 150,
-      "script": "reimu_spell_seal",
-      "description": "释放大量追踪灵符攻击敌人"
-    }
-  ]
+  }
 }

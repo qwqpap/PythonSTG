@@ -1,0 +1,46 @@
+{
+  "id": "stage1",
+  "name": "Stage 1",
+  "title": "赤より紅い夢",
+  "subtitle": "A Dream More Scarlet than Red",
+  "bgm": "stage1.ogg",
+  "boss_bgm": "boss1.ogg",
+  "background": "stage1_bg",
+  "sections": [
+    {
+      "type": "wave",
+      "script": "wave_1",
+      "comment": "开场小怪波次"
+    },
+    {
+      "type": "wait",
+      "duration": 120,
+      "comment": "等待2秒"
+    },
+    {
+      "type": "wave",
+      "script": "wave_2",
+      "comment": "第二波敌人"
+    },
+    {
+      "type": "midboss",
+      "boss": "midboss",
+      "comment": "道中Boss"
+    },
+    {
+      "type": "wave",
+      "script": "wave_3",
+      "comment": "中Boss后的敌人"
+    },
+    {
+      "type": "dialogue",
+      "script": "dialogue_1",
+      "comment": "Boss前对话"
+    },
+    {
+      "type": "boss",
+      "boss": "boss",
+      "comment": "关底Boss"
+    }
+  ]
+}

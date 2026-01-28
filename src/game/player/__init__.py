@@ -1,6 +1,7 @@
 """
 玩家系统模块
 提供可配置的玩家类、射击系统、动画状态机等
+支持通过脚本定义自机行为
 """
 
 # 导入子模块
@@ -25,9 +26,15 @@ from .player_config import (
     load_player,
     generate_config_template
 )
+from .player_script import PlayerScript, load_player_script
 
 # 兼容旧代码：Player 别名指向 PlayerBase
 Player = PlayerBase
+
+# 提供便捷函数：通过配置文件加载特定角色
+def load_sakuya(config_path: str = None) -> PlayerBase:
+    """加载咲夜角色（通过配置文件和脚本）"""
+    return load_player("sakuya")
 
 __all__ = [
     # 主要类
@@ -37,6 +44,7 @@ __all__ = [
     'PlayerShotSystem',
     'PlayerAnimationStateMachine',
     'PlayerConfigLoader',
+    'PlayerScript',
     
     # 数据类
     'ShotPattern',
@@ -48,6 +56,8 @@ __all__ = [
     
     # 工具函数
     'load_player',
+    'load_sakuya',
+    'load_player_script',
     'create_shot_type_from_config',
     'create_options_from_config',
     'generate_config_template',

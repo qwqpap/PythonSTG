@@ -1,0 +1,254 @@
+{
+  "name": "Izayoi Sakuya",
+  "version": "2.0",
+  "texture": "sakuya.png",
+  
+  "stats": {
+    "speed_high": 0.018,
+    "speed_low": 0.008,
+    "hitbox_radius": 3,
+    "graze_radius": 24
+  },
+  
+  "initial": {
+    "lives": 3,
+    "bombs": 3,
+    "power": 1.0
+  },
+  
+  "sprites": {
+    "sakuya_idle_0": { "rect": [0, 0, 32, 48] },
+    "sakuya_idle_1": { "rect": [32, 0, 32, 48] },
+    "sakuya_idle_2": { "rect": [64, 0, 32, 48] },
+    "sakuya_idle_3": { "rect": [96, 0, 32, 48] },
+    "sakuya_idle_4": { "rect": [128, 0, 32, 48] },
+    "sakuya_idle_5": { "rect": [160, 0, 32, 48] },
+    "sakuya_idle_6": { "rect": [192, 0, 32, 48] },
+    "sakuya_idle_7": { "rect": [224, 0, 32, 48] },
+    
+    "sakuya_move_left_0": { "rect": [0, 48, 32, 48] },
+    "sakuya_move_left_1": { "rect": [32, 48, 32, 48] },
+    "sakuya_move_left_2": { "rect": [64, 48, 32, 48] },
+    "sakuya_move_left_3": { "rect": [96, 48, 32, 48] },
+    "sakuya_move_left_4": { "rect": [128, 48, 32, 48] },
+    "sakuya_move_left_5": { "rect": [160, 48, 32, 48] },
+    "sakuya_move_left_6": { "rect": [192, 48, 32, 48] },
+    "sakuya_move_left_7": { "rect": [224, 48, 32, 48] },
+    
+    "sakuya_move_right_0": { "rect": [0, 96, 32, 48] },
+    "sakuya_move_right_1": { "rect": [32, 96, 32, 48] },
+    "sakuya_move_right_2": { "rect": [64, 96, 32, 48] },
+    "sakuya_move_right_3": { "rect": [96, 96, 32, 48] },
+    "sakuya_move_right_4": { "rect": [128, 96, 32, 48] },
+    "sakuya_move_right_5": { "rect": [160, 96, 32, 48] },
+    "sakuya_move_right_6": { "rect": [192, 96, 32, 48] },
+    "sakuya_move_right_7": { "rect": [224, 96, 32, 48] },
+    
+    "sakuya_option_0": { "rect": [128, 144, 16, 16] },
+    "sakuya_option_1": { "rect": [144, 144, 16, 16] },
+    "sakuya_option_2": { "rect": [160, 144, 16, 16] },
+    "sakuya_option_3": { "rect": [176, 144, 16, 16] },
+    "sakuya_option_4": { "rect": [192, 144, 16, 16] },
+    "sakuya_option_5": { "rect": [208, 144, 16, 16] },
+    "sakuya_option_6": { "rect": [224, 144, 16, 16] },
+    "sakuya_option_7": { "rect": [240, 144, 16, 16] },
+    "sakuya_option_8": { "rect": [128, 160, 16, 16] },
+    "sakuya_option_9": { "rect": [144, 160, 16, 16] },
+    "sakuya_option_10": { "rect": [160, 160, 16, 16] },
+    "sakuya_option_11": { "rect": [176, 160, 16, 16] },
+    "sakuya_option_12": { "rect": [192, 160, 16, 16] },
+    "sakuya_option_13": { "rect": [208, 160, 16, 16] },
+    "sakuya_option_14": { "rect": [224, 160, 16, 16] },
+    "sakuya_option_15": { "rect": [240, 160, 16, 16] },
+    
+    "knife_red": { "rect": [0, 144, 32, 16], "center": [16, 8] },
+    "knife_blue": { "rect": [0, 160, 32, 16], "center": [16, 8] },
+    "knife_green": { "rect": [0, 176, 32, 16], "center": [16, 8] },
+    "bigknife_red": { "rect": [0, 192, 64, 16], "center": [16, 8] },
+    "bigknife_green": { "rect": [128, 192, 64, 16], "center": [16, 8] }
+  },
+  
+  "animations": {
+    "idle": {
+      "frames": ["sakuya_idle_0", "sakuya_idle_1", "sakuya_idle_2", "sakuya_idle_3", 
+                 "sakuya_idle_4", "sakuya_idle_5", "sakuya_idle_6", "sakuya_idle_7"],
+      "frame_duration": 5
+    },
+    "move_left": {
+      "frames": ["sakuya_move_left_0", "sakuya_move_left_1", "sakuya_move_left_2", "sakuya_move_left_3"],
+      "frame_duration": 4
+    },
+    "move_left_full": {
+      "frames": ["sakuya_move_left_4", "sakuya_move_left_5", "sakuya_move_left_6", "sakuya_move_left_7"],
+      "frame_duration": 4
+    },
+    "move_right": {
+      "frames": ["sakuya_move_right_0", "sakuya_move_right_1", "sakuya_move_right_2", "sakuya_move_right_3"],
+      "frame_duration": 4
+    },
+    "move_right_full": {
+      "frames": ["sakuya_move_right_4", "sakuya_move_right_5", "sakuya_move_right_6", "sakuya_move_right_7"],
+      "frame_duration": 4
+    },
+    "option": {
+      "frames": ["sakuya_option_0", "sakuya_option_1", "sakuya_option_2", "sakuya_option_3",
+                 "sakuya_option_4", "sakuya_option_5", "sakuya_option_6", "sakuya_option_7",
+                 "sakuya_option_8", "sakuya_option_9", "sakuya_option_10", "sakuya_option_11",
+                 "sakuya_option_12", "sakuya_option_13", "sakuya_option_14", "sakuya_option_15"],
+      "frame_duration": 3
+    }
+  },
+  
+  "shot_types": {
+    "unfocused": {
+      "fire_rate": 4,
+      "patterns": {
+        "1.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" }
+          ]
+        },
+        "2.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" }
+          ]
+        },
+        "3.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" }
+          ]
+        },
+        "4.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red" }
+          ]
+        }
+      }
+    },
+    "focused": {
+      "fire_rate": 4,
+      "auto_aim": true,
+      "patterns": {
+        "1.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true }
+          ]
+        },
+        "2.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true }
+          ]
+        },
+        "3.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true }
+          ]
+        },
+        "4.0": {
+          "bullets": [
+            { "type": "knife", "offset": [6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true },
+            { "type": "knife", "offset": [-6, 0], "angle": 90, "speed": 24, "damage": 2.0, "sprite": "bigknife_red", "homing": true }
+          ]
+        }
+      }
+    }
+  },
+  
+  "options": {
+    "unfocused": {
+      "fire_rate": 8,
+      "spread_range": 15,
+      "spread_speed": 1.5,
+      "positions": {
+        "1.0": [],
+        "2.0": [
+          { "offset": [0, -32], "target_offset": [0, -32] }
+        ],
+        "3.0": [
+          { "offset": [-30, -10], "target_offset": [-15, -20] },
+          { "offset": [30, -10], "target_offset": [15, -20] }
+        ],
+        "4.0": [
+          { "offset": [-30, -10], "target_offset": [-15, -20] },
+          { "offset": [30, -10], "target_offset": [15, -20] },
+          { "offset": [0, -32], "target_offset": [0, -32] }
+        ]
+      },
+      "bullet": {
+        "type": "knife",
+        "speed": 24,
+        "damage": 0.15,
+        "sprite": "knife_blue",
+        "spread_count": 9,
+        "spread_angle": 1
+      }
+    },
+    "focused": {
+      "fire_rate": 8,
+      "spread_range": 0.5,
+      "spread_speed": 1.5,
+      "positions": {
+        "1.0": [],
+        "2.0": [
+          { "offset": [0, -32], "target_offset": [0, -32] }
+        ],
+        "3.0": [
+          { "offset": [-30, -10], "target_offset": [-15, -20] },
+          { "offset": [30, -10], "target_offset": [15, -20] }
+        ],
+        "4.0": [
+          { "offset": [-30, -10], "target_offset": [-15, -20] },
+          { "offset": [30, -10], "target_offset": [15, -20] },
+          { "offset": [0, -32], "target_offset": [0, -32] }
+        ]
+      },
+      "bullet": {
+        "type": "knife",
+        "speed": 24,
+        "damage": 0.15,
+        "sprite": "knife_blue",
+        "spread_count": 9,
+        "spread_angle": 1,
+        "homing": true
+      }
+    }
+  },
+  
+  "script": "script.py",
+  "script_config": {
+    "spread_unfocused": 15.0,
+    "spread_focused": 0.5,
+    "spread_lerp_speed": 0.1,
+    "option_layouts": {
+      "1": [],
+      "2": [[0, -32, 0, -32]],
+      "3": [[-30, -10, -15, -20], [30, -10, 15, -20]],
+      "4": [[-30, -10, -15, -20], [30, -10, 15, -20], [0, -32, 0, -32]],
+      "5": [[-30, -10, -15, -20], [30, -10, 15, -20], [-15, -32, -7.5, -32], [15, -32, 7.5, -32]]
+    }
+  },
+  
+  "spellcards": {
+    "unfocused": {
+      "name": "幻符「杀人偶」",
+      "duration": 300,
+      "damage": 300,
+      "invincible_time": 360,
+      "type": "knife_storm"
+    },
+    "focused": {
+      "name": "时符「私人时间的停止」",
+      "duration": 240,
+      "damage": 300,
+      "invincible_time": 360,
+      "type": "time_stop"
+    }
+  }
+}

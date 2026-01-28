@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.render import Renderer
 from src.game.bullet import BulletPool
-from src.game.player import Player, check_collisions
+from src.game.player import Player, check_collisions, load_sakuya
 from src.game.stage import StageManager
 from src.game.boss import BossManager
 from src.game.enemy import EnemyManager
@@ -31,6 +31,7 @@ from src.ui.bitmap_font import get_font_manager
 from levels.boli import level_1
 from levels.laser_test import laser_test_level
 from levels.item_test import simple_item_demo
+from levels.spellcard_test import spellcard_test_level
 
 
 def initialize_pygame_and_context():
@@ -100,7 +101,9 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
 
 def initialize_game_objects():
     """初始化游戏对象（玩家、子弹池、关卡管理器等）"""
-    player = Player()
+    # 使用 Sakuya 角色（通过配置和脚本加载）
+    player = load_sakuya()
+    print(f"已加载玩家: {player.name}")
     bullet_pool = BulletPool(max_bullets=50000)
     laser_pool = LaserPool(max_lasers=100)
     item_pool = ItemPool(max_items=1000)
@@ -113,9 +116,10 @@ def initialize_game_objects():
     stage_manager.set_enemy_manager(enemy_manager)
     
     # 加载关卡（可选择不同关卡）
-    stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
+    # stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
     # stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
     # stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
+    stage_manager.add_coroutine(lambda: spellcard_test_level(stage_manager, bullet_pool, player))
     
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
