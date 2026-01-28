@@ -1,10 +1,12 @@
+# PySTG
+
+**Python东方Project风格弹幕射击游戏引擎** - 开发中
+
 <p align="center">
   <img src="docs/logo.png" alt="PySTG Logo" width="200">
 </p>
 
-# PySTG
 
-**Python东方Project风格弹幕射击游戏引擎** - 开发中
 
 ---
 
