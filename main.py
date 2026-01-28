@@ -19,7 +19,11 @@ from src.game.enemy import EnemyManager
 from src.game.laser import LaserPool, get_laser_texture_data
 from src.game.item import ItemPool, ItemConfig
 from src.resource.sprite import SpriteManager
-from src.resource.asset_manager import AssetManager
+from src.resource.texture_asset import (
+    TextureAssetManager, 
+    get_texture_asset_manager, 
+    init_texture_asset_manager
+)
 from src.render.item_renderer import ItemRenderer
 from src.ui import HUD, UIRenderer
 from src.ui.hud import load_hud_layout
@@ -58,97 +62,39 @@ def initialize_pygame_and_context():
     return screen, ctx, base_size, screen_size, game_viewport
 
 
-def load_resources(ctx, sprite_manager):
+def load_resources(ctx, texture_asset_manager: TextureAssetManager):
     """
-    加载游戏资源（精灵配置和纹理）
-    带有改进的错误处理和纹理加载优化
+    加载游戏资源（使用新的统一纹理资产管理系统）
+    
+    Args:
+        ctx: ModernGL上下文
+        texture_asset_manager: 纹理资产管理器
     
     Returns:
         tuple: (textures, sprite_uv_map)
     """
     # 加载精灵配置文件夹
     sprite_config_folder = "assets/images"
-    if not sprite_manager.load_sprite_config_folder(sprite_config_folder):
+    if not texture_asset_manager.load_sprite_config_folder(sprite_config_folder):
         print("Failed to load sprite configurations!")
         pygame.quit()
         sys.exit()
     
     # 设置默认精灵ID
-    default_sprite_id = 'star_small1' if 'star_small1' in sprite_manager.get_all_sprite_ids() else next(iter(sprite_manager.get_all_sprite_ids()), None)
+    all_sprite_ids = texture_asset_manager.get_all_sprite_ids()
+    default_sprite_id = 'star_small1' if 'star_small1' in all_sprite_ids else next(iter(all_sprite_ids), None)
     
-    # 加载纹理图片
-    textures = {}
-    texture_uv_map = {}
-    failed_textures = []
+    # 使用新的资产管理器创建所有GL纹理
+    textures = texture_asset_manager.create_all_gl_textures(ctx, flip_y=True)
     
-    # 为每个纹理创建纹理对象（带错误处理）
-    for texture_path in sprite_manager.get_all_texture_paths():
-        try:
-            if not os.path.exists(texture_path):
-                print(f"Warning: Texture file not found: {texture_path}")
-                failed_textures.append(texture_path)
-                continue
-                
-            img = pygame.image.load(texture_path).convert_alpha()
-            texture = ctx.texture(img.get_size(), 4, pygame.image.tobytes(img, "RGBA", True))
-            texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
-            textures[texture_path] = texture
-            print(f"Loaded texture: {texture_path}")
-            
-            # 为当前纹理预计算所有精灵的UV坐标
-            img_width, img_height = img.get_size()
-            texture_uv_map[texture_path] = {}
-            
-            for sprite_id in sprite_manager.get_all_sprite_ids():
-                if sprite_manager.get_sprite_texture_path(sprite_id) == texture_path:
-                    sprite_data = sprite_manager.get_sprite(sprite_id)
-                    sprite_rect = sprite_data['rect']
-                    uv_left = sprite_rect[0] / img_width
-                    uv_top = (img_height - (sprite_rect[1] + sprite_rect[3])) / img_height
-                    uv_right = (sprite_rect[0] + sprite_rect[2]) / img_width
-                    uv_bottom = (img_height - sprite_rect[1]) / img_height
-                    texture_uv_map[texture_path][sprite_id] = [uv_left, uv_top, uv_right, uv_bottom]
-        except Exception as e:
-            print(f"Error loading texture {texture_path}: {e}")
-            failed_textures.append(texture_path)
+    # 预计算所有精灵的UV坐标
+    sprite_uv_map = texture_asset_manager.compute_all_sprite_uvs(flip_y=True)
     
-    # 如果没有加载到纹理，使用默认图片
-    if not textures:
-        print("No textures loaded, trying default fallback...")
-        bullet_texture_path = "assets/images/bullet/bullet1.png"
-        try:
-            if os.path.exists(bullet_texture_path):
-                img = pygame.image.load(bullet_texture_path).convert_alpha()
-                texture = ctx.texture(img.get_size(), 4, pygame.image.tobytes(img, "RGBA", True))
-                texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
-                textures[bullet_texture_path] = texture
-                print(f"Loaded fallback texture: {bullet_texture_path}")
-                
-                img_width, img_height = img.get_size()
-                texture_uv_map[bullet_texture_path] = {}
-                if default_sprite_id:
-                    sprite_data = sprite_manager.get_sprite(default_sprite_id)
-                    sprite_rect = sprite_data['rect']
-                    uv_left = sprite_rect[0] / img_width
-                    uv_top = (img_height - (sprite_rect[1] + sprite_rect[3])) / img_height
-                    uv_right = (sprite_rect[0] + sprite_rect[2]) / img_width
-                    uv_bottom = (img_height - sprite_rect[1]) / img_height
-                    texture_uv_map[bullet_texture_path][default_sprite_id] = [uv_left, uv_top, uv_right, uv_bottom]
-            else:
-                print(f"Warning: Default texture also not found: {bullet_texture_path}")
-        except Exception as e:
-            print(f"Error loading fallback texture: {e}")
-    
-    # 创建综合UV映射
-    sprite_uv_map = {}
-    for texture_path, uv_map in texture_uv_map.items():
-        for sprite_id, uv_coords in uv_map.items():
-            sprite_uv_map[sprite_id] = uv_coords
-    
-    if failed_textures:
-        print(f"Failed to load {len(failed_textures)} texture(s)")
-    
+    # 打印加载统计
+    stats = texture_asset_manager.get_stats()
+    print(f"资源加载完成: {stats['atlases']} 图集, {stats['sprites']} 精灵, {stats['animations']} 动画")
     print(f"Loaded {len(textures)} texture(s) successfully")
+    
     return textures, sprite_uv_map
 
 
@@ -179,18 +125,21 @@ def main():
     # 初始化Pygame和OpenGL
     screen, ctx, base_size, screen_size, game_viewport = initialize_pygame_and_context()
     
-    # 初始化资产管理器
-    asset_manager = AssetManager(asset_root="assets")
+    # 初始化统一纹理资产管理器
+    texture_asset_manager = init_texture_asset_manager(asset_root="assets")
     
     # 加载激光纹理配置
     laser_tex_data = get_laser_texture_data()
     laser_tex_data.load_config("assets/images/laser/laser_config.json")
     
-    # 初始化精灵管理器
+    # 初始化精灵管理器（兼容层，内部使用texture_asset_manager）
     sprite_manager = SpriteManager()
     
-    # 加载资源
-    textures, sprite_uv_map = load_resources(ctx, sprite_manager)
+    # 加载资源（使用新的统一资产管理系统）
+    textures, sprite_uv_map = load_resources(ctx, texture_asset_manager)
+    
+    # 同步到精灵管理器兼容层
+    sprite_manager._sync_from_asset_manager()
     
     # 初始化渲染器
     renderer = Renderer(ctx, base_size, sprite_manager, textures, sprite_uv_map)
@@ -315,7 +264,7 @@ def main():
     renderer.cleanup()
     item_renderer.cleanup()
     ui_renderer.cleanup()
-    asset_manager.clear_all()
+    texture_asset_manager.clear_all()
     pygame.quit()
     sys.exit()
 

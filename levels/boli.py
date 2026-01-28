@@ -110,8 +110,7 @@ def spawn_enemies_coroutine(stage_manager, bullet_pool):
         # 等待一段时间再生成下一个敌人
         yield from stage_manager.wait(60)  # 等待1秒
 
-# 多种华丽弹幕模式集合：螺旋、扇形波、花朵环
-
+ 
 def explosion_handler(bp, event):
     """爆炸处理函数"""
     # 爆炸效果：生成多个子弹
@@ -209,7 +208,7 @@ def rain_bullets_coroutine(bullet_pool, stage_manager, duration_seconds=30, spaw
         yield from stage_manager.wait(1)
 
 def level_1(stage_manager, bullet_pool, player):   
-    """第一关：测试延迟爆炸弹幕"""
+    """第一面：测试延迟爆炸弹幕"""
     # 首先生成敌人
     stage_manager.add_coroutine(lambda: spawn_enemies_coroutine(stage_manager, bullet_pool))
     
