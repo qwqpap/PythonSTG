@@ -1,79 +1,62 @@
+"""
+玩家系统模块
+提供可配置的玩家类、射击系统、动画状态机等
+"""
+
+# 导入子模块
+from .player_bullet import PlayerBulletPool
+from .player_shot import (
+    PlayerShotSystem, 
+    ShotPattern, 
+    ShotType, 
+    OptionConfig,
+    create_shot_type_from_config,
+    create_options_from_config
+)
+from .player_animation import (
+    PlayerAnimationStateMachine,
+    AnimationState,
+    Animation,
+    AnimationConfig
+)
+from .player_base import PlayerBase
+from .player_config import (
+    PlayerConfigLoader,
+    load_player,
+    generate_config_template
+)
+
+# 兼容旧代码：Player 别名指向 PlayerBase
+Player = PlayerBase
+
+__all__ = [
+    # 主要类
+    'Player',
+    'PlayerBase',
+    'PlayerBulletPool',
+    'PlayerShotSystem',
+    'PlayerAnimationStateMachine',
+    'PlayerConfigLoader',
+    
+    # 数据类
+    'ShotPattern',
+    'ShotType',
+    'OptionConfig',
+    'AnimationState',
+    'Animation',
+    'AnimationConfig',
+    
+    # 工具函数
+    'load_player',
+    'create_shot_type_from_config',
+    'create_options_from_config',
+    'generate_config_template',
+]
+
+
+# ============ 保留旧的碰撞检测函数（向后兼容）============
 import numpy as np
 from numba import njit
-from ..entity import Entity
-import pygame
-
-class Player(Entity):
-    def __init__(self):
-        """
-        初始化玩家对象
-        """
-        super().__init__([0.0, -0.8], 'player')  # 初始位置在屏幕下方
-        self.hit_radius = 0.01  # 极其微小的判定点（灵梦啊嗯）
-        self.speed_high = 0.02   # 普通速度
-        self.speed_low = 0.008   # Shift 低速模式
-        
-        # 资源属性
-        self.power = 1.00
-        self.score = 0
-        self.lives = 3
-        
-        # 状态机
-        self.is_focused = False  # 是否按住 Shift
-        self.invincible_timer = 0 # 无敌时间
-        self.state = "IDLE"      # 用于后期切换动画逻辑
-    
-    def update(self, dt, keys):
-        """
-        更新玩家状态
-        :param dt: 时间步长
-        :param keys: 键盘状态
-        """
-        # 处理无敌时间
-        if self.invincible_timer > 0:
-            self.invincible_timer -= dt
-            if self.invincible_timer < 0:
-                self.invincible_timer = 0
-        
-        # 处理Shift键，切换focus状态
-        self.is_focused = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
-        
-        # 计算移动速度
-        current_speed = self.speed_low if self.is_focused else self.speed_high
-        
-        # 处理移动输入
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
-            self.pos[1] += current_speed * dt * 60  # 乘以60使速度单位与帧率无关
-        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            self.pos[1] -= current_speed * dt * 60
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.pos[0] -= current_speed * dt * 60
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.pos[0] += current_speed * dt * 60
-        
-        # 限制玩家在屏幕范围内
-        # 考虑渲染时的宽高比校正（384/448），调整Y轴边界
-        aspect_ratio = 384.0 / 448.0
-        self.pos[0] = np.clip(self.pos[0], -1.0, 1.0)
-        self.pos[1] = np.clip(self.pos[1], -1.0 / aspect_ratio, 1.0 / aspect_ratio)
-    
-    def get_speed(self):
-        """
-        获取当前移动速度
-        :return: 当前速度值
-        """
-        return self.speed_low if self.is_focused else self.speed_high
-    
-    def take_damage(self):
-        """
-        玩家受到伤害
-        :return: 是否真的受到伤害（考虑无敌时间）
-        """
-        if self.invincible_timer <= 0:
-            self.lives -= 1
-            self.invincible_timer = 3.0  # 3秒无敌时间
-            return True
-        return False
 
 @njit
 def check_collisions(player_x, player_y, player_radius, bullet_data):
