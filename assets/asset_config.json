@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "description": "Python STG 资产配置文件",
+  "asset_groups": {
+    "laser": {
+      "textures": [
+        "images/laser/laser1.png",
+        "images/laser/laser2.png",
+        "images/laser/laser3.png",
+        "images/laser/laser4.png",
+        "images/laser/laser5.png",
+        "images/laser/laser_bent.png"
+      ]
+    },
+    "bullet": {
+      "textures": [
+        "images/bullet/bullet1.png",
+        "images/bullet/bullet2.png",
+        "images/bullet/bullet3.png",
+        "images/bullet/bullet4.png",
+        "images/bullet/bullet5.png",
+        "images/bullet/bullet6.png"
+      ],
+      "configs": [
+        "images/bullet1.json",
+        "images/bullet2.json",
+        "images/bullet3.json"
+      ]
+    },
+    "enemy": {
+      "textures": []
+    },
+    "player": {
+      "textures": []
+    },
+    "ui": {
+      "textures": []
+    },
+    "audio": {
+      "music": [],
+      "se": []
+    }
+  },
+  "preload": [
+    "laser",
+    "bullet"
+  ]
+}

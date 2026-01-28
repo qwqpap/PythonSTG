@@ -1,0 +1,15 @@
+{
+  "texture": "assets/images/item/item.png",
+  "sprites": {
+    "item_power": {"rect": [0, 0, 32, 32], "center": [16, 16]},
+    "item_point": {"rect": [32, 0, 32, 32], "center": [16, 16]},
+    "item_life_chip": {"rect": [0, 32, 32, 32], "center": [16, 16]},
+    "item_power_full": {"rect": [32, 32, 32, 32], "center": [16, 16]},
+    "item_faith": {"rect": [0, 64, 32, 32], "center": [16, 16]},
+    "item_power_large": {"rect": [32, 64, 32, 32], "center": [16, 16]},
+    "item_extend": {"rect": [0, 96, 32, 32], "center": [16, 16]},
+    "item_faith_minor": {"rect": [32, 96, 32, 32], "center": [16, 16]},
+    "item_bomb_chip": {"rect": [0, 128, 32, 32], "center": [16, 16]},
+    "item_bomb": {"rect": [32, 128, 32, 32], "center": [16, 16]}
+  }
+}

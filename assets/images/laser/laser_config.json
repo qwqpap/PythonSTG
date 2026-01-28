@@ -1,0 +1,48 @@
+{
+  "__comment": "激光纹理配置 - 参考LuaSTG的LoadLaserTexture参数",
+  "__format": "每个激光纹理分3部分: head(头)/body(身)/tail(尾), 16种颜色垂直排列",
+  "laser_textures": {
+    "laser1": {
+      "file": "laser1.png",
+      "head_width": 64,
+      "body_width": 128,
+      "tail_width": 64,
+      "row_height": 16,
+      "margin": 1,
+      "colors": 16
+    },
+    "laser2": {
+      "file": "laser2.png",
+      "head_width": 5,
+      "body_width": 236,
+      "tail_width": 15,
+      "row_height": 16,
+      "margin": 1,
+      "colors": 16
+    },
+    "laser3": {
+      "file": "laser3.png",
+      "head_width": 127,
+      "body_width": 1,
+      "tail_width": 128,
+      "row_height": 16,
+      "margin": 1,
+      "colors": 16
+    },
+    "laser4": {
+      "file": "laser4.png",
+      "head_width": 1,
+      "body_width": 254,
+      "tail_width": 1,
+      "row_height": 16,
+      "margin": 1,
+      "colors": 16
+    }
+  },
+  "bent_laser": {
+    "file": "laser_bent.png",
+    "segment_width": 16,
+    "row_height": 16,
+    "colors": 16
+  }
+}

@@ -1,0 +1,1525 @@
+{
+  "__image_filename": "bullet2.png",
+  "sprites": {
+    "star_small1": {
+      "rect": [
+        96,
+        0,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small2": {
+      "rect": [
+        96,
+        16,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small3": {
+      "rect": [
+        96,
+        32,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small4": {
+      "rect": [
+        96,
+        48,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small5": {
+      "rect": [
+        96,
+        64,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small6": {
+      "rect": [
+        96,
+        80,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small7": {
+      "rect": [
+        96,
+        96,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small8": {
+      "rect": [
+        96,
+        112,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small9": {
+      "rect": [
+        96,
+        128,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small10": {
+      "rect": [
+        96,
+        144,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small11": {
+      "rect": [
+        96,
+        160,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small12": {
+      "rect": [
+        96,
+        176,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small13": {
+      "rect": [
+        96,
+        192,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small14": {
+      "rect": [
+        96,
+        208,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small15": {
+      "rect": [
+        96,
+        224,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_small16": {
+      "rect": [
+        96,
+        240,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        3.0,
+        3.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big1": {
+      "rect": [
+        224,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big2": {
+      "rect": [
+        224,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big3": {
+      "rect": [
+        224,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big4": {
+      "rect": [
+        224,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big5": {
+      "rect": [
+        224,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big6": {
+      "rect": [
+        224,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big7": {
+      "rect": [
+        224,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "star_big8": {
+      "rect": [
+        224,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        15.5,
+        16.0
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        5.5,
+        5.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big1": {
+      "rect": [
+        192,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big2": {
+      "rect": [
+        192,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big3": {
+      "rect": [
+        192,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big4": {
+      "rect": [
+        192,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big5": {
+      "rect": [
+        192,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big6": {
+      "rect": [
+        192,
+        160,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big7": {
+      "rect": [
+        192,
+        192,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_big8": {
+      "rect": [
+        192,
+        224,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.5
+      ],
+      "radius": 16,
+      "rotate": true,
+      "scale": [
+        8.0,
+        8.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small1": {
+      "rect": [
+        176,
+        0,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small2": {
+      "rect": [
+        176,
+        16,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small3": {
+      "rect": [
+        176,
+        32,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small4": {
+      "rect": [
+        176,
+        48,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small5": {
+      "rect": [
+        176,
+        64,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small6": {
+      "rect": [
+        176,
+        80,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small7": {
+      "rect": [
+        176,
+        96,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small8": {
+      "rect": [
+        176,
+        112,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small9": {
+      "rect": [
+        176,
+        128,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small10": {
+      "rect": [
+        176,
+        144,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small11": {
+      "rect": [
+        176,
+        160,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small12": {
+      "rect": [
+        176,
+        176,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small13": {
+      "rect": [
+        176,
+        192,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small14": {
+      "rect": [
+        176,
+        208,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small15": {
+      "rect": [
+        176,
+        224,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "ball_small16": {
+      "rect": [
+        176,
+        240,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.0,
+        2.0
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a1": {
+      "rect": [
+        160,
+        0,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a2": {
+      "rect": [
+        160,
+        16,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a3": {
+      "rect": [
+        160,
+        32,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a4": {
+      "rect": [
+        160,
+        48,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a5": {
+      "rect": [
+        160,
+        64,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a6": {
+      "rect": [
+        160,
+        80,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a7": {
+      "rect": [
+        160,
+        96,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a8": {
+      "rect": [
+        160,
+        112,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a9": {
+      "rect": [
+        160,
+        128,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a10": {
+      "rect": [
+        160,
+        144,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a11": {
+      "rect": [
+        160,
+        160,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a12": {
+      "rect": [
+        160,
+        176,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a13": {
+      "rect": [
+        160,
+        192,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a14": {
+      "rect": [
+        160,
+        208,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a15": {
+      "rect": [
+        160,
+        224,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_a16": {
+      "rect": [
+        160,
+        240,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b1": {
+      "rect": [
+        128,
+        0,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b2": {
+      "rect": [
+        128,
+        16,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b3": {
+      "rect": [
+        128,
+        32,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b4": {
+      "rect": [
+        128,
+        48,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b5": {
+      "rect": [
+        128,
+        64,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b6": {
+      "rect": [
+        128,
+        80,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b7": {
+      "rect": [
+        128,
+        96,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b8": {
+      "rect": [
+        128,
+        112,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b9": {
+      "rect": [
+        128,
+        128,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b10": {
+      "rect": [
+        128,
+        144,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b11": {
+      "rect": [
+        128,
+        160,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b12": {
+      "rect": [
+        128,
+        176,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b13": {
+      "rect": [
+        128,
+        192,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b14": {
+      "rect": [
+        128,
+        208,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b15": {
+      "rect": [
+        128,
+        224,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    },
+    "grain_b16": {
+      "rect": [
+        128,
+        240,
+        16,
+        16
+      ],
+      "center": [
+        8,
+        8
+      ],
+      "radius": 8,
+      "rotate": true,
+      "scale": [
+        2.5,
+        2.5
+      ],
+      "image_path": "THlib//bullet//bullet2.png"
+    }
+  }
+}

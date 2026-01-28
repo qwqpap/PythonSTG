@@ -1,0 +1,38 @@
+{
+  "panel": {
+    "size": [320, 896],
+    "bg_color": [16, 16, 32],
+    "bg_alpha": 0.6,
+    "margin_right": 32,
+    "gap_to_game": 16
+  },
+  "layout": {
+    "hiscore_label": [10, 10],
+    "hiscore_value": [140, 10],
+    "score_label": [10, 40],
+    "score_value": [140, 40],
+
+    "player_label": [10, 80],
+    "player_icons": [100, 80],
+    "bomb_label": [180, 80],
+    "bomb_icons": [240, 80],
+
+    "power_label": [10, 110],
+    "power_value": [100, 110],
+    "power_bar": [10, 135],
+    "power_bar_width": 200,
+    "power_bar_height": 12,
+
+    "graze_label": [10, 165],
+    "graze_value": [80, 165],
+    "point_label": [150, 165],
+    "point_value": [220, 165],
+
+    "boss_hp_bar": [20, 5],
+    "boss_hp_bar_width": 344,
+    "boss_hp_bar_height": 8,
+    "spell_name": [192, 25],
+    "spell_time": [350, 25],
+    "spell_bonus": [192, 45]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "version": "2.0",
+  "description": "新版纹理资产配置格式示例",
+  "texture": "bullet1.png",
+  
+  "sprites": {
+    "bullet_red_small": {
+      "rect": [0, 0, 16, 16],
+      "center": [8, 8],
+      "radius": 4.0,
+      "rotate": true,
+      "metadata": {
+        "damage": 10,
+        "type": "small"
+      }
+    },
+    "bullet_blue_medium": {
+      "rect": [16, 0, 32, 32],
+      "center": [16, 16],
+      "radius": 8.0,
+      "rotate": true
+    },
+    "bullet_green_large": {
+      "rect": [48, 0, 48, 48],
+      "center": [24, 24],
+      "radius": 12.0,
+      "rotate": false
+    }
+  },
+  
+  "animations": {
+    "bullet_spin_red": {
+      "comment": "方式1: 显式帧列表 - 适合不规则排列的帧",
+      "frames": [
+        {"rect": [0, 64, 32, 32]},
+        {"rect": [32, 64, 32, 32]},
+        {"rect": [64, 64, 32, 32]},
+        {"rect": [96, 64, 32, 32]}
+      ],
+      "center": [16, 16],
+      "radius": 8.0,
+      "frame_duration": 0.05,
+      "loop": true,
+      "rotate": false
+    },
+    
+    "bullet_pulse_blue": {
+      "comment": "方式2: 连续帧带 - 适合规则排列的动画",
+      "strip": {
+        "x": 0,
+        "y": 128,
+        "width": 32,
+        "height": 32,
+        "count": 8,
+        "direction": "horizontal",
+        "spacing": 0
+      },
+      "center": [16, 16],
+      "radius": 8.0,
+      "frame_duration": 0.1,
+      "loop": true
+    },
+    
+    "bullet_grow": {
+      "comment": "非循环动画示例 - 子弹生成效果",
+      "strip": {
+        "x": 0,
+        "y": 192,
+        "width": 32,
+        "height": 32,
+        "count": 4,
+        "direction": "horizontal"
+      },
+      "center": [16, 16],
+      "radius": 8.0,
+      "frame_duration": 0.08,
+      "loop": false
+    }
+  }
+}
