@@ -61,6 +61,15 @@ DEFAULT_SIZE_CATEGORIES = {
 }
 
 
+# 尝试导入配置模块（向后兼容）
+try:
+    from ..core.config import get_config
+    HAS_CORE_CONFIG = True
+except ImportError:
+    HAS_CORE_CONFIG = False
+    get_config = None
+
+
 class Renderer:
     """OpenGL渲染器，负责子弹、玩家、敌人、Boss的渲染"""
     
@@ -78,6 +87,13 @@ class Renderer:
         self.ctx = ctx
         self.base_size = base_size
         self.sprite_manager = sprite_manager
+        
+        # 从配置获取参数（如果可用）
+        if HAS_CORE_CONFIG and get_config:
+            config = get_config()
+            self._y_scale_factor = config.y_scale_factor
+        else:
+            self._y_scale_factor = base_size[0] / base_size[1]
         self.textures = textures
         self.sprite_uv_map = sprite_uv_map
         

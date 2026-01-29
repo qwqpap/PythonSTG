@@ -6,6 +6,9 @@ import math
 # 动态方法可以在弹幕描述脚本里面实现
 # 或者新的modifier_bullet.py文件里面实现
 
+# 导入优化版本（新代码应使用这个）
+from .optimized_pool import OptimizedBulletPool
+
 class SpawnRequest:
     """生成请求"""
     def __init__(self, x, y, angle, speed, color=None, sprite_id='', init=None, delay=0, acc=None, on_death=None, max_lifetime=0.0, modifiers=None):

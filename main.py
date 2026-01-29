@@ -19,6 +19,10 @@ from src.game.enemy import EnemyManager
 from src.game.laser import LaserPool, get_laser_texture_data
 from src.game.item import ItemPool, ItemConfig
 from src.resource.sprite import SpriteManager
+from src.core import (
+    GameConfig, get_config, init_config,
+    CollisionManager, get_collision_manager
+)
 from src.resource.texture_asset import (
     TextureAssetManager, 
     get_texture_asset_manager, 
@@ -38,17 +42,13 @@ def initialize_pygame_and_context():
     """初始化Pygame和ModernGL上下文"""
     pygame.init()
     
-    # 游戏逻辑尺寸（坐标系使用）
-    base_size = (384, 448)
-    game_scale = 2  # 游戏区域放大倍数
-    game_view_size = (base_size[0] * game_scale, base_size[1] * game_scale)
+    # 初始化全局配置
+    config = init_config()
     
-    # 窗口尺寸（包含右侧信息栏）
-    screen_size = (1280, 960)
-    # 游戏视口放在左侧，留出右侧信息面板空间
-    margin_x = 32
-    margin_y = (screen_size[1] - game_view_size[1]) // 2
-    game_viewport = (margin_x, margin_y, game_view_size[0], game_view_size[1])
+    # 从配置获取尺寸参数
+    base_size = (config.base_width, config.base_height)
+    screen_size = (config.window_width, config.window_height)
+    game_viewport = config.game_viewport
     
     screen = pygame.display.set_mode(screen_size, pygame.OPENGL | pygame.DOUBLEBUF)
     pygame.display.set_caption("弹幕游戏")
@@ -232,30 +232,27 @@ def main():
         player.power = item_pool.stats.get_power_float()
         player.lives = item_pool.stats.lives
         
-        # 碰撞检测 - 子弹
+        # 获取碰撞管理器
+        collision_mgr = get_collision_manager()
+        
+        # 碰撞检测 - 子弹（使用统一碰撞管理器）
         if player.invincible_timer <= 0:
-            collided_bullet = check_collisions(player.pos[0], player.pos[1], player.hit_radius, bullet_pool.data)
-            if collided_bullet != -1:
+            bullet_result = collision_mgr.check_player_vs_bullets(
+                player.pos[0], player.pos[1], player.hit_radius, bullet_pool
+            )
+            if bullet_result.occurred:
                 if player.take_damage():
                     print(f"Player hit by bullet! Lives left: {player.lives}")
-                    bullet_pool.data['alive'][collided_bullet] = 0
+                    bullet_pool.data['alive'][bullet_result.index] = 0
         
-        # 碰撞检测 - 激光
+        # 碰撞检测 - 激光（使用统一碰撞管理器）
         if player.invincible_timer <= 0:
-            # 检查直线激光
-            lasers, bent_lasers = laser_pool.get_all_lasers()
-            for laser in lasers:
-                if laser.check_collision(player.pos[0], player.pos[1], player.hit_radius):
-                    if player.take_damage():
-                        print(f"Player hit by laser! Lives left: {player.lives}")
-                        break
-            
-            # 检查曲线激光
-            for bent_laser in bent_lasers:
-                if bent_laser.check_collision(player.pos[0], player.pos[1], player.hit_radius):
-                    if player.take_damage():
-                        print(f"Player hit by bent laser! Lives left: {player.lives}")
-                        break
+            laser_result = collision_mgr.check_player_vs_lasers(
+                player.pos[0], player.pos[1], player.hit_radius, laser_pool
+            )
+            if laser_result.occurred:
+                if player.take_damage():
+                    print(f"Player hit by laser! Lives left: {player.lives}")
         
         # 更新 HUD 状态
         hud.update_from_player(player)
