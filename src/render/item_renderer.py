@@ -6,7 +6,8 @@ import moderngl
 import numpy as np
 import pygame
 import os
-from typing import List, Dict, Optional, TYPE_CHECKING
+import json
+from typing import List, Dict, Optional, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..resource.texture_asset import TextureAssetManager
@@ -14,6 +15,20 @@ if TYPE_CHECKING:
 
 class ItemRenderer:
     """物品渲染器"""
+    
+    # ItemType mapping to sprite names in config
+    ITEM_TYPE_NAMES = {
+        1: "item_power",       # POWER
+        2: "item_point",       # POINT
+        3: "item_life_chip",   # LIFE_CHIP
+        4: "item_power_full",  # POWER_FULL
+        5: "item_faith",       # FAITH
+        6: "item_power_large", # POWER_LARGE
+        7: "item_extend",      # EXTEND
+        8: "item_faith_minor", # FAITH_MINOR
+        9: "item_bomb_chip",   # BOMB_CHIP
+        10: "item_bomb"        # BOMB
+    }
     
     def __init__(self, ctx: moderngl.Context, base_size=(384, 448)):
         """
@@ -112,17 +127,44 @@ class ItemRenderer:
         )
     
     def load_texture(self, texture_path: str = "assets/images/item/item.png", 
-                     asset_manager: Optional['TextureAssetManager'] = None):
+                     asset_manager: Optional['TextureAssetManager'] = None,
+                     config_path: Optional[str] = None):
         """
         加载物品纹理
         
         Args:
             texture_path: 纹理文件路径
             asset_manager: 可选的纹理资产管理器（如果提供，将使用其缓存）
+            config_path: 自定义配置文件路径 (Optional)
         """
+        # 尝试自动查找配置文件
+        config_data = None
+        
+        # 1. 尝试使用传入的 config_path
+        if config_path and os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                print(f"已加载物品配置: {config_path}")
+            except Exception as e:
+                print(f"无法读取配置 {config_path}: {e}")
+
+        # 2. 如果没有传入，尝试在纹理目录找 item.json
+        if config_data is None:
+            dir_path = os.path.dirname(texture_path)
+            auto_config_path = os.path.join(dir_path, "item.json")
+            if os.path.exists(auto_config_path):
+                try:
+                    with open(auto_config_path, 'r', encoding='utf-8') as f:
+                        config_data = json.load(f)
+                    print(f"自动加载物品配置: {auto_config_path}")
+                except Exception as e:
+                    print(f"无法读取自动配置 {auto_config_path}: {e}")
+
         # 尝试从资产管理器获取
         if asset_manager:
             surface = asset_manager.get_texture(texture_path)
+
             if surface is None:
                 # 尝试加载
                 from ..resource.texture_asset import get_texture_asset_manager
@@ -146,8 +188,11 @@ class ItemRenderer:
             )
             self.texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
             
-            # 预计算所有物品类型的 UV
-            self._precompute_uvs()
+            # 计算UV
+            if config_data and "sprites" in config_data:
+                self._compute_uvs_from_config(config_data["sprites"])
+            else:
+                self._precompute_uvs()
             
             print(f"已加载物品纹理: {texture_path}")
             return True
@@ -155,6 +200,36 @@ class ItemRenderer:
             print(f"加载物品纹理失败: {e}")
             return False
     
+    def _compute_uvs_from_config(self, sprites_config: Dict[str, Any]):
+        """从配置计算 UV"""
+        tex_w, tex_h = self.texture_size
+        
+        # 反向映射: 名字 -> ID
+        name_to_id = {v: k for k, v in self.ITEM_TYPE_NAMES.items()}
+        
+        for name, data in sprites_config.items():
+            if name in name_to_id:
+                item_id = name_to_id[name]
+                rect = data.get("rect", [0, 0, 32, 32])
+                x, y, w, h = rect
+                
+                # tobytes(flip=True) 已翻转纹理，ModernGL 中 (0,0) 左下
+                # 如果 texture 加载时用了 vertical flip, 则 v_top 对应 y=0 的行
+                # 但是 Pygame tobytes(flip=True) 意味着 y=0 变成了底部
+                # 通常 UV: (0,0) is bottom-left
+                # Rect (x, y, w, h) 通常 y 是从顶部开始 (top-left system)
+                # 所以 y_in_gl = height - y - h
+                
+                u_left = x / tex_w
+                u_right = (x + w) / tex_w
+                
+
+                
+                v_top = y / tex_h 
+                v_bottom = (y + h) / tex_h
+
+                self.sprite_uvs[item_id] = (u_left, v_bottom, u_right, v_top)
+                
     def _precompute_uvs(self):
         """预计算所有物品类型的 UV 坐标"""
         tex_w, tex_h = self.texture_size

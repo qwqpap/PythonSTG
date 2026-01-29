@@ -1,15 +1,287 @@
 {
   "texture": "assets/images/item/item.png",
+  "__image_filename": "",
   "sprites": {
-    "item_power": {"rect": [0, 0, 32, 32], "center": [16, 16]},
-    "item_point": {"rect": [32, 0, 32, 32], "center": [16, 16]},
-    "item_life_chip": {"rect": [0, 32, 32, 32], "center": [16, 16]},
-    "item_power_full": {"rect": [32, 32, 32, 32], "center": [16, 16]},
-    "item_faith": {"rect": [0, 64, 32, 32], "center": [16, 16]},
-    "item_power_large": {"rect": [32, 64, 32, 32], "center": [16, 16]},
-    "item_extend": {"rect": [0, 96, 32, 32], "center": [16, 16]},
-    "item_faith_minor": {"rect": [32, 96, 32, 32], "center": [16, 16]},
-    "item_bomb_chip": {"rect": [0, 128, 32, 32], "center": [16, 16]},
-    "item_bomb": {"rect": [32, 128, 32, 32], "center": [16, 16]}
-  }
+    "item_power": {
+      "rect": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_point": {
+      "rect": [
+        32,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_life_chip": {
+      "rect": [
+        0,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_power_full": {
+      "rect": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_faith": {
+      "rect": [
+        0,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_power_large": {
+      "rect": [
+        32,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_extend": {
+      "rect": [
+        0,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_faith_minor": {
+      "rect": [
+        32,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_bomb_chip": {
+      "rect": [
+        0,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "item_bomb": {
+      "rect": [
+        32,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16,
+        16
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_0": {
+      "rect": [
+        64,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_1": {
+      "rect": [
+        96,
+        0,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_2": {
+      "rect": [
+        64,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_3": {
+      "rect": [
+        96,
+        32,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_4": {
+      "rect": [
+        64,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_5": {
+      "rect": [
+        96,
+        64,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_6": {
+      "rect": [
+        64,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_7": {
+      "rect": [
+        96,
+        96,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_8": {
+      "rect": [
+        64,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    },
+    "tile_9": {
+      "rect": [
+        96,
+        128,
+        32,
+        32
+      ],
+      "center": [
+        16.0,
+        16.0
+      ],
+      "radius": 0.0,
+      "rotate": false
+    }
+  },
+  "animations": {}
 }

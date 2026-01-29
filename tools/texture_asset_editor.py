@@ -12,6 +12,8 @@
     python tools/texture_asset_editor.py
 """
 
+raise SystemExit("已弃用：请使用 tools/asset_manager_qt.py")
+
 import json
 import os
 import sys
