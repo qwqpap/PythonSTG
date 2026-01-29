@@ -247,12 +247,17 @@ def main():
         if active_boss:
             hud.update_from_boss(active_boss)
         
-        # 渲染游戏场景（限定到左侧游戏视口）
-        renderer.render_frame(bullet_pool, player, stage_manager, laser_pool, viewport_rect=game_viewport)
+        # 渲染游戏场景（按正确的图层顺序，包含道具渲染）
+        renderer.render_frame(
+            bullet_pool, player, stage_manager, laser_pool, 
+            viewport_rect=game_viewport,
+            item_renderer=item_renderer,
+            items=item_pool.get_active_items()
+        )
         
-        # 渲染物品（在游戏视口内）
-        ctx.viewport = game_viewport
-        item_renderer.render_items(item_pool.get_active_items())
+        # 注意：道具现在在renderer.render_frame中渲染，不需要单独调用
+        # ctx.viewport = game_viewport
+        # item_renderer.render_items(item_pool.get_active_items())
         
         # 将视口恢复为全窗口，渲染HUD
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])

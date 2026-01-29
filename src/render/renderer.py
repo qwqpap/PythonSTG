@@ -1,10 +1,64 @@
 """
 渲染器类 - 负责所有OpenGL渲染逻辑
+
+渲染层级顺序（从底到顶，符合东方Project标准）：
+0. 背景 (Background)
+1. 敌人/Boss
+2. 特效/光环 (Aura)
+3. 道具 (Items) - 在敌弹下层，避免遮挡弹幕
+4. 自机子弹 (Player Shots) - 在敌弹下层
+5. 自机Options
+6. 自机本体 (Player Sprite)
+7. 敌机弹幕 (Enemy Bullets) - 内部按大小排序：大弹在下，小弹在上
+8. 激光 (Lasers) - 在弹幕层
+9. 特效：消弹 (VFX)
+10. 自机判定点 (Hitbox)
+11. UI / 对话框
 """
 import moderngl
 import numpy as np
 import math
 from .laser_renderer import LaserRenderer
+
+
+# 子弹大小分类常量（用于高效分桶排序）
+class BulletSizeCategory:
+    """子弹大小分类，用于渲染排序"""
+    LASER = 0        # 激光（最底层）
+    HUGE = 1         # 巨型光玉、大碟子
+    LARGE = 2        # 大型子弹、札弹
+    MEDIUM = 3       # 中型子弹
+    SMALL = 4        # 小玉、鳞弹
+    TINY = 5         # 米粒弹、针弹（最顶层）
+
+
+# 预定义的精灵大小分类映射（可通过配置扩展）
+# 键为精灵ID前缀或完整ID，值为大小分类
+DEFAULT_SIZE_CATEGORIES = {
+    # 巨型
+    'ball_huge': BulletSizeCategory.HUGE,
+    'bubble': BulletSizeCategory.HUGE,
+    'orb_huge': BulletSizeCategory.HUGE,
+    # 大型
+    'ball_big': BulletSizeCategory.LARGE,
+    'star_big': BulletSizeCategory.LARGE,
+    'ofuda': BulletSizeCategory.LARGE,
+    'knife_big': BulletSizeCategory.LARGE,
+    # 中型
+    'ball_mid': BulletSizeCategory.MEDIUM,
+    'star_mid': BulletSizeCategory.MEDIUM,
+    'ellipse': BulletSizeCategory.MEDIUM,
+    # 小型
+    'ball_small': BulletSizeCategory.SMALL,
+    'star_small': BulletSizeCategory.SMALL,
+    'scale': BulletSizeCategory.SMALL,
+    'kunai': BulletSizeCategory.SMALL,
+    # 极小型
+    'rice': BulletSizeCategory.TINY,
+    'needle': BulletSizeCategory.TINY,
+    'dot': BulletSizeCategory.TINY,
+    'grain': BulletSizeCategory.TINY,
+}
 
 
 class Renderer:
@@ -30,6 +84,10 @@ class Renderer:
         # 获取默认精灵
         self.default_sprite_id = 'star_small1' if 'star_small1' in sprite_manager.get_all_sprite_ids() else next(iter(sprite_manager.get_all_sprite_ids()), None)
         
+        # 子弹大小分类缓存（避免每帧重新计算）
+        self._sprite_size_cache = {}
+        self._build_sprite_size_cache()
+        
         # 初始化着色器和渲染资源
         self._init_bullet_shader()
         self._init_player_shader()
@@ -37,6 +95,58 @@ class Renderer:
         
         # 初始化激光渲染器
         self.laser_renderer = LaserRenderer(ctx, base_size)
+    
+    def _build_sprite_size_cache(self):
+        """构建精灵大小分类缓存"""
+        for sprite_id in self.sprite_manager.get_all_sprite_ids():
+            self._sprite_size_cache[sprite_id] = self._classify_sprite_size(sprite_id)
+    
+    def _classify_sprite_size(self, sprite_id: str) -> int:
+        """
+        根据精灵ID分类其大小等级
+        
+        Args:
+            sprite_id: 精灵ID
+            
+        Returns:
+            BulletSizeCategory 常量
+        """
+        # 首先检查完整ID匹配
+        if sprite_id in DEFAULT_SIZE_CATEGORIES:
+            return DEFAULT_SIZE_CATEGORIES[sprite_id]
+        
+        # 检查前缀匹配
+        sprite_id_lower = sprite_id.lower()
+        for prefix, category in DEFAULT_SIZE_CATEGORIES.items():
+            if sprite_id_lower.startswith(prefix):
+                return category
+        
+        # 根据精灵实际尺寸推断
+        sprite_data = self.sprite_manager.get_sprite(sprite_id)
+        if sprite_data and 'rect' in sprite_data:
+            width = sprite_data['rect'][2]
+            height = sprite_data['rect'][3]
+            max_dim = max(width, height)
+            
+            if max_dim >= 64:
+                return BulletSizeCategory.HUGE
+            elif max_dim >= 32:
+                return BulletSizeCategory.LARGE
+            elif max_dim >= 16:
+                return BulletSizeCategory.MEDIUM
+            elif max_dim >= 8:
+                return BulletSizeCategory.SMALL
+            else:
+                return BulletSizeCategory.TINY
+        
+        # 默认为中型
+        return BulletSizeCategory.MEDIUM
+    
+    def get_sprite_size_category(self, sprite_id: str) -> int:
+        """获取精灵的大小分类（带缓存）"""
+        if sprite_id not in self._sprite_size_cache:
+            self._sprite_size_cache[sprite_id] = self._classify_sprite_size(sprite_id)
+        return self._sprite_size_cache[sprite_id]
     
     def _init_bullet_shader(self):
         """初始化子弹渲染着色器和VAO"""
@@ -225,9 +335,20 @@ class Renderer:
         self.circle_vbo = self.ctx.buffer(reserve=(self.circle_segments + 1) * 2 * 4)
         self.circle_vao = self.ctx.vertex_array(self.circle_program, [(self.circle_vbo, '2f', 'in_vert')])
     
-    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None):
+    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None, item_renderer=None, items=None):
         """
-        渲染一帧
+        渲染一帧（按正确的图层顺序）
+        
+        渲染顺序（从底到顶）：
+        1. 背景（由外部处理）
+        2. 敌人/Boss
+        3. 道具（在敌弹下层）
+        4. 自机子弹（TODO: 分离玩家子弹）
+        5. 自机Options
+        6. 自机本体
+        7. 敌机弹幕（按大小排序：大弹在下，小弹在上）
+        8. 激光
+        9. 自机判定点
         
         Args:
             bullet_pool: 子弹池对象
@@ -235,37 +356,128 @@ class Renderer:
             stage_manager: 关卡管理器对象
             laser_pool: 激光池对象（可选）
             viewport_rect: (x, y, width, height)，游戏区域在窗口中的视口
+            item_renderer: 道具渲染器（可选，用于统一渲染顺序）
+            items: 道具列表（可选）
         """
         # 保存并切换视口到游戏区域
         prev_viewport = self.ctx.viewport
         if viewport_rect:
             self.ctx.viewport = viewport_rect
+        
         # 清屏
         self.ctx.clear(0.1, 0.1, 0.1)
         
-        # 渲染激光（在子弹之前渲染，作为背景层）
+        # ===== 层级 1: 敌人/Boss =====
+        self._render_boss(stage_manager)
+        self._render_enemies(stage_manager)
+        
+        # ===== 层级 2: 道具 =====
+        # 道具在敌弹下层，避免遮挡弹幕导致玩家看不清
+        if item_renderer and items:
+            item_renderer.render_items(items)
+        
+        # ===== 层级 3-5: 自机子弹、Options、自机本体 =====
+        # TODO: 分离玩家子弹和敌人子弹，玩家子弹在此渲染
+        # 目前先渲染玩家
+        self._render_player(player)
+        
+        # ===== 层级 6: 敌机弹幕（按大小排序） =====
+        self._render_bullets_sorted(bullet_pool)
+        
+        # ===== 层级 7: 激光 =====
         if laser_pool:
             lasers, bent_lasers = laser_pool.get_all_lasers()
             self.laser_renderer.render_lasers(lasers)
             self.laser_renderer.render_bent_lasers(bent_lasers)
         
-        # 渲染子弹
-        self._render_bullets(bullet_pool)
-        
-        # 渲染玩家
-        self._render_player(player)
-        
-        # 渲染Boss
-        self._render_boss(stage_manager)
-        
-        # 渲染敌人
-        self._render_enemies(stage_manager)
-        
-        # 渲染判定点
+        # ===== 层级 8: 自机判定点（最高优先级） =====
         if player.is_focused:
             self._render_hitbox(player)
+        
         # 还原视口
         self.ctx.viewport = prev_viewport
+    
+    def _render_bullets_sorted(self, bullet_pool):
+        """
+        按大小分类渲染子弹（大弹在下，小弹在上）
+        
+        使用分桶策略实现高效排序：
+        - 不进行每帧的完整排序
+        - 按大小分类分桶，然后按桶顺序渲染
+        - 同一桶内按纹理分组批量渲染
+        """
+        positions, colors, angles, sprite_ids = bullet_pool.get_active_bullets()
+        active_count = len(positions)
+        
+        if active_count == 0:
+            return
+        
+        # 按大小分类分桶
+        # buckets[category] = {texture_path: [indices]}
+        buckets = {cat: {} for cat in range(6)}  # 6个大小分类
+        
+        for i in range(active_count):
+            sprite_id = sprite_ids[i]
+            size_category = self.get_sprite_size_category(sprite_id)
+            texture_path = self.sprite_manager.get_sprite_texture_path(sprite_id)
+            
+            if not texture_path:
+                texture_path = next(iter(self.textures.keys())) if self.textures else None
+            
+            if texture_path:
+                if texture_path not in buckets[size_category]:
+                    buckets[size_category][texture_path] = []
+                buckets[size_category][texture_path].append(i)
+        
+        # 按大小顺序渲染（从大到小：LASER -> HUGE -> LARGE -> MEDIUM -> SMALL -> TINY）
+        for category in range(6):
+            for texture_path, bullet_indices in buckets[category].items():
+                if texture_path in self.textures and bullet_indices:
+                    self._render_bullet_batch(
+                        positions, angles, sprite_ids, 
+                        bullet_indices, texture_path
+                    )
+    
+    def _render_bullet_batch(self, positions, angles, sprite_ids, indices, texture_path):
+        """渲染一批子弹（同一纹理）"""
+        self.textures[texture_path].use(0)
+        
+        group_size = len(indices)
+        indices_array = np.array(indices)
+        group_positions = positions[indices_array]
+        group_angles = angles[indices_array]
+        group_sprite_ids = sprite_ids[indices_array]
+        
+        self.instance_vbo.write(group_positions.tobytes())
+        self.angle_vbo.write(group_angles.tobytes())
+        
+        # 准备UV数据和尺寸数据
+        uv_data = np.zeros((group_size, 4), dtype='f4')
+        scale_data = np.zeros((group_size, 2), dtype='f4')
+        default_size = 16.0
+        
+        for j, sprite_id in enumerate(group_sprite_ids):
+            # UV数据
+            if sprite_id in self.sprite_uv_map:
+                uv_data[j] = self.sprite_uv_map[sprite_id]
+            elif self.default_sprite_id and self.default_sprite_id in self.sprite_uv_map:
+                uv_data[j] = self.sprite_uv_map[self.default_sprite_id]
+            else:
+                uv_data[j] = [0.0, 0.0, 1.0, 1.0]
+            
+            # 尺寸数据
+            sprite_data = self.sprite_manager.get_sprite(sprite_id)
+            if sprite_data and 'rect' in sprite_data:
+                width = sprite_data['rect'][2] * self.bullet_scale_factor
+                height = sprite_data['rect'][3] * self.bullet_scale_factor
+                scale_data[j] = [width, height]
+            else:
+                scale_data[j] = [default_size * self.bullet_scale_factor,
+                                default_size * self.bullet_scale_factor]
+        
+        self.uv_vbo.write(uv_data.tobytes())
+        self.scale_vbo.write(scale_data.tobytes())
+        self.bullet_vao.render(moderngl.TRIANGLES, instances=group_size)
     
     def _render_bullets(self, bullet_pool):
         """渲染所有子弹"""
