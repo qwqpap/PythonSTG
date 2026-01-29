@@ -1,0 +1,102 @@
+{
+  "name": "temple",
+  "description": "神殿背景 - 3D透视走廊效果",
+  "textures": {
+    "ground": {
+      "path": "temple/ground.png",
+      "description": "地板纹理"
+    },
+    "pillar": {
+      "path": "temple/pillar.png",
+      "description": "柱子纹理"
+    },
+    "road": {
+      "path": "temple/road.png",
+      "description": "道路纹理"
+    }
+  },
+  "camera": {
+    "eye": [
+      0.0,
+      -2.0,
+      1.5
+    ],
+    "at": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "fovy": 0.5,
+    "z_near": 0.5,
+    "z_far": 5.0
+  },
+  "fog": {
+    "enabled": true,
+    "color": [
+      51,
+      25,
+      76,
+      255
+    ],
+    "start": 1.0,
+    "end": 4.0
+  },
+  "scroll": {
+    "base_speed": 0.002,
+    "direction": [
+      0,
+      1
+    ]
+  },
+  "layers": [
+    {
+      "name": "floor",
+      "texture": "ground",
+      "z_order": 0,
+      "z_depth": 0.0,
+      "blend_mode": "normal",
+      "alpha": 1.0,
+      "scroll_multiplier": 1.0,
+      "tile": {
+        "x_range": [
+          -1,
+          1
+        ],
+        "y_range": [
+          -4,
+          5
+        ],
+        "size": 1.0
+      },
+      "variants": [],
+      "enabled": true
+    },
+    {
+      "name": "pillars",
+      "texture": "pillar",
+      "z_order": 1,
+      "z_depth": 0.5,
+      "blend_mode": "normal",
+      "alpha": 0.8,
+      "scroll_multiplier": 1.0,
+      "tile": {
+        "x_range": [
+          -1,
+          1
+        ],
+        "y_range": [
+          -4,
+          5
+        ],
+        "size": 1.0
+      },
+      "variants": [],
+      "enabled": true
+    }
+  ]
+}

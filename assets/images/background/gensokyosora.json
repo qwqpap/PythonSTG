@@ -1,0 +1,89 @@
+{
+  "name": "gensokyosora",
+  "description": "幻想乡天空 - 简单的天空滚动",
+  
+  "textures": {
+    "sky": {
+      "path": "gensokyosora/aosora.png",
+      "description": "天空纹理"
+    },
+    "clouds1": {
+      "path": "gensokyosora/sora_1.png",
+      "description": "云层1"
+    },
+    "clouds2": {
+      "path": "gensokyosora/sora_2.png",
+      "description": "云层2"
+    },
+    "clouds3": {
+      "path": "gensokyosora/sora_3.png",
+      "description": "云层3"
+    }
+  },
+  
+  "camera": {
+    "eye": [0.0, 0.0, 1.0],
+    "at": [0.0, 0.0, 0.0],
+    "up": [0.0, 1.0, 0.0],
+    "fovy": 1.0,
+    "z_near": 0.1,
+    "z_far": 10.0
+  },
+  
+  "fog": {
+    "enabled": false,
+    "color": [0, 0, 0, 0],
+    "start": 0.0,
+    "end": 0.0
+  },
+  
+  "scroll": {
+    "base_speed": 0.003,
+    "direction": [0, 1]
+  },
+  
+  "layers": [
+    {
+      "name": "sky_base",
+      "texture": "sky",
+      "z_order": 0,
+      "z_depth": 0.0,
+      "blend_mode": "normal",
+      "alpha": 1.0,
+      "scroll_multiplier": 0.5,
+      "tile": {
+        "x_range": [-2, 3],
+        "y_range": [-2, 3],
+        "size": 1.0
+      }
+    },
+    {
+      "name": "clouds_far",
+      "texture": "clouds1",
+      "z_order": 1,
+      "z_depth": 0.0,
+      "blend_mode": "normal",
+      "alpha": 0.8,
+      "scroll_multiplier": 0.7,
+      "tile": {
+        "x_range": [-2, 3],
+        "y_range": [-2, 3],
+        "size": 1.0
+      }
+    },
+    {
+      "name": "clouds_mid",
+      "texture": "clouds2",
+      "z_order": 2,
+      "z_depth": 0.0,
+      "blend_mode": "add",
+      "alpha": 0.5,
+      "scroll_multiplier": 1.0,
+      "tile": {
+        "x_range": [-2, 3],
+        "y_range": [-2, 3],
+        "size": 1.0
+      }
+    }
+  ]
+}

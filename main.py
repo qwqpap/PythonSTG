@@ -182,6 +182,25 @@ def main():
     item_renderer = ItemRenderer(ctx, base_size)
     item_renderer.load_texture("assets/images/item/item.png")
     
+    # 初始化背景渲染器（可选）
+    background_renderer = None
+    try:
+        from src.game.background_render import BackgroundRenderer
+        
+        background_renderer = BackgroundRenderer(ctx, base_size)
+        
+        # 使用数据驱动背景（推荐，可通过编辑器调整参数）
+        # 可选: 'lake', 'temple', 'bamboo', 'gensokyosora'
+        # 配置文件在 assets/images/background/*.json
+        background_renderer.load_background('lake')
+        
+        renderer.set_background_renderer(background_renderer)
+        print("背景系统初始化成功")
+    except Exception as e:
+        print(f"背景系统初始化失败（可选功能）: {e}")
+        import traceback
+        traceback.print_exc()
+    
     # 初始化游戏对象
     player, bullet_pool, laser_pool, item_pool, stage_manager = initialize_game_objects()
     
@@ -247,12 +266,13 @@ def main():
         if active_boss:
             hud.update_from_boss(active_boss)
         
-        # 渲染游戏场景（按正确的图层顺序，包含道具渲染）
+        # 渲染游戏场景（按正确的图层顺序，包含道具渲染和背景）
         renderer.render_frame(
             bullet_pool, player, stage_manager, laser_pool, 
             viewport_rect=game_viewport,
             item_renderer=item_renderer,
-            items=item_pool.get_active_items()
+            items=item_pool.get_active_items(),
+            dt=dt  # 传递时间步长用于背景动画
         )
         
         # 注意：道具现在在renderer.render_frame中渲染，不需要单独调用
@@ -273,6 +293,8 @@ def main():
     renderer.cleanup()
     item_renderer.cleanup()
     ui_renderer.cleanup()
+    if background_renderer:
+        background_renderer.cleanup()
     texture_asset_manager.clear_all()
     pygame.quit()
     sys.exit()

@@ -95,6 +95,9 @@ class Renderer:
         
         # 初始化激光渲染器
         self.laser_renderer = LaserRenderer(ctx, base_size)
+        
+        # 背景渲染器（可选，延迟初始化）
+        self.background_renderer = None
     
     def _build_sprite_size_cache(self):
         """构建精灵大小分类缓存"""
@@ -335,20 +338,29 @@ class Renderer:
         self.circle_vbo = self.ctx.buffer(reserve=(self.circle_segments + 1) * 2 * 4)
         self.circle_vao = self.ctx.vertex_array(self.circle_program, [(self.circle_vbo, '2f', 'in_vert')])
     
-    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None, item_renderer=None, items=None):
+    def set_background_renderer(self, background_renderer):
+        """
+        设置背景渲染器
+        
+        Args:
+            background_renderer: BackgroundRenderer实例
+        """
+        self.background_renderer = background_renderer
+    
+    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None, item_renderer=None, items=None, dt=0.0):
         """
         渲染一帧（按正确的图层顺序）
         
         渲染顺序（从底到顶）：
-        1. 背景（由外部处理）
-        2. 敌人/Boss
-        3. 道具（在敌弹下层）
-        4. 自机子弹（TODO: 分离玩家子弹）
-        5. 自机Options
-        6. 自机本体
-        7. 敌机弹幕（按大小排序：大弹在下，小弹在上）
-        8. 激光
-        9. 自机判定点
+        0. 背景（2D卷轴/3D场景）
+        1. 敌人/Boss
+        2. 道具（在敌弹下层）
+        3. 自机子弹（TODO: 分离玩家子弹）
+        4. 自机Options
+        5. 自机本体
+        6. 敌机弹幕（按大小排序：大弹在下，小弹在上）
+        7. 激光
+        8. 自机判定点
         
         Args:
             bullet_pool: 子弹池对象
@@ -358,6 +370,7 @@ class Renderer:
             viewport_rect: (x, y, width, height)，游戏区域在窗口中的视口
             item_renderer: 道具渲染器（可选，用于统一渲染顺序）
             items: 道具列表（可选）
+            dt: 时间步长（用于背景动画更新）
         """
         # 保存并切换视口到游戏区域
         prev_viewport = self.ctx.viewport
@@ -366,6 +379,11 @@ class Renderer:
         
         # 清屏
         self.ctx.clear(0.1, 0.1, 0.1)
+        
+        # ===== 层级 0: 背景 =====
+        if self.background_renderer:
+            self.background_renderer.update(dt)
+            self.background_renderer.render()
         
         # ===== 层级 1: 敌人/Boss =====
         self._render_boss(stage_manager)
