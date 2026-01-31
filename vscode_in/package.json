@@ -1,0 +1,104 @@
+{
+  "name": "stg-asset-preview",
+  "displayName": "STG Asset Preview",
+  "description": "Preview bullet, sprite, and laser images when coding STG games",
+  "version": "0.0.1",
+  "publisher": "stg-engine",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.108.1"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "STG",
+    "bullet hell",
+    "game development",
+    "sprite preview",
+    "texture atlas"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/assets/images/**/*.json",
+    "workspaceContains:**/assets/players/**/*.json"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "stg-asset-preview.refresh",
+        "title": "STG: 刷新资产缓存",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "stg-asset-preview.showAll",
+        "title": "STG: 查看所有资产",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "stg-asset-preview.search",
+        "title": "STG: 搜索资产",
+        "icon": "$(search)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "stg-asset-preview.showAll",
+        "key": "ctrl+shift+g",
+        "mac": "cmd+shift+g"
+      },
+      {
+        "command": "stg-asset-preview.search",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "stg-asset-preview.showAll",
+          "group": "stg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "STG Asset Preview",
+      "properties": {
+        "stg-asset-preview.enableHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用悬停预览"
+        },
+        "stg-asset-preview.enableCompletion": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用自动补全"
+        },
+        "stg-asset-preview.maxPreviewSize": {
+          "type": "number",
+          "default": 128,
+          "description": "预览图片最大尺寸"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.108.1",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.52.0",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
