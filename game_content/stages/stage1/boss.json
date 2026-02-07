@@ -28,14 +28,6 @@
       "comment": "第一张符卡"
     },
     {
-      "type": "nonspell",
-      "hp": 1000,
-      "time": 30,
-      "script": "nonspell_2",
-      "practice_unlock": false,
-      "comment": "第二段非符"
-    },
-    {
       "type": "spellcard",
       "name": "夜符「Night Bird」",
       "hp": 1500,
@@ -44,16 +36,6 @@
       "bonus": 1500000,
       "practice_unlock": true,
       "comment": "第二张符卡 - 比较难"
-    },
-    {
-      "type": "spellcard",
-      "name": "闇符「Demarcation」",
-      "hp": 2000,
-      "time": 75,
-      "script": "spell_3",
-      "bonus": 2000000,
-      "practice_unlock": true,
-      "comment": "最终符卡"
     }
   ]
 }

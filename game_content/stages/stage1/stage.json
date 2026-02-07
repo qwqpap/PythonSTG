@@ -3,14 +3,16 @@
   "name": "Stage 1",
   "title": "赤より紅い夢",
   "subtitle": "A Dream More Scarlet than Red",
+
   "bgm": "stage1.ogg",
   "boss_bgm": "boss1.ogg",
   "background": "stage1_bg",
+
   "sections": [
     {
       "type": "wave",
-      "script": "wave_1",
-      "comment": "开场小怪波次"
+      "script": "waves/opening_wave",
+      "comment": "开场小怪波次 - 几列米弹从上方落下"
     },
     {
       "type": "wait",
@@ -19,28 +21,33 @@
     },
     {
       "type": "wave",
-      "script": "wave_2",
-      "comment": "第二波敌人"
+      "script": "waves/fairy_wave",
+      "comment": "妖精编队 - 散布弹"
+    },
+    {
+      "type": "wait",
+      "duration": 60,
+      "comment": "等待1秒"
     },
     {
       "type": "midboss",
-      "boss": "midboss",
-      "comment": "道中Boss"
+      "boss": "bosses/midboss",
+      "comment": "道中Boss - 露米娅（1段非符）"
     },
     {
       "type": "wave",
-      "script": "wave_3",
-      "comment": "中Boss后的敌人"
+      "script": "waves/post_midboss_wave",
+      "comment": "道中Boss后的收尾波次"
     },
     {
       "type": "dialogue",
-      "script": "dialogue_1",
+      "script": "dialogue/pre_boss",
       "comment": "Boss前对话"
     },
     {
       "type": "boss",
-      "boss": "boss",
-      "comment": "关底Boss"
+      "boss": "bosses/boss",
+      "comment": "关底Boss - 露米娅（1非符 + 2符卡）"
     }
   ]
 }

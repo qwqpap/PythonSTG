@@ -1,0 +1,17 @@
+{
+  "id": "rumia_midboss",
+  "name": "ルーミア",
+  "texture": "enemy_rumia",
+  "animations": {},
+
+  "phases": [
+    {
+      "type": "nonspell",
+      "hp": 600,
+      "time": 20,
+      "script": "nonspell_1",
+      "bonus": 50000,
+      "comment": "道中非符：简单圆弹"
+    }
+  ]
+}

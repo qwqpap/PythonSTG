@@ -1,0 +1,32 @@
+{
+  "id": "stage3",
+  "name": "Stage 3",
+  "title": "",
+  "subtitle": "",
+
+  "bgm": "",
+  "boss_bgm": "",
+  "background": "",
+
+  "sections": [
+    {
+      "type": "wave",
+      "script": "waves/opening_wave",
+      "comment": "TODO: 开场波次"
+    },
+    {
+      "type": "wait",
+      "duration": 120
+    },
+    {
+      "type": "midboss",
+      "boss": "bosses/midboss",
+      "comment": "TODO: 道中Boss"
+    },
+    {
+      "type": "boss",
+      "boss": "bosses/boss",
+      "comment": "TODO: 关底Boss"
+    }
+  ]
+}

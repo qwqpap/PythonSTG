@@ -1,0 +1,161 @@
+"""
+关卡上下文 - 引擎层提供给内容层的统一接口
+
+这是引擎和内容之间的桥梁。
+所有内容脚本（符卡、波次、敌人）通过此上下文与引擎交互。
+内容脚本不需要知道 BulletPool、EnemyManager 等引擎内部实现。
+
+使用方式（在 main.py 或 levels/ 中）：
+    ctx = StageContext(bullet_pool=bullet_pool, player=player)
+    stage = StageBase.from_config("stage.json", ctx)
+"""
+
+import math
+from typing import Optional, Any, List
+
+from .spellcard import SpellCardContext
+
+
+class PlayerProxy:
+    """
+    玩家代理 - 为内容脚本提供只读的玩家信息
+    
+    内容脚本只需要知道玩家的位置，不需要访问 Player 的内部实现。
+    """
+    
+    def __init__(self, player):
+        self._player = player
+    
+    @property
+    def x(self) -> float:
+        return self._player.pos[0]
+    
+    @property
+    def y(self) -> float:
+        return self._player.pos[1]
+
+
+class StageContext(SpellCardContext):
+    """
+    关卡上下文 - 引擎提供的统一能力接口
+    
+    职责：
+    - 将内容脚本的高层 API（bullet_type="ball_m", color="red"）
+      映射到引擎底层（sprite_id="ball_mid1"）
+    - 管理子弹的创建和销毁
+    - 提供玩家信息的只读代理
+    - 提供敌人管理接口
+    
+    内容脚本通过 SpellCard.ctx / Wave.ctx / EnemyScript.ctx 访问此对象。
+    """
+    
+    # 弹幕类型 → 精灵名称映射
+    BULLET_TYPE_MAP = {
+        "ball_s": "ball_small",
+        "ball_m": "ball_mid",
+        "ball_l": "ball_huge",
+        "rice": "rice",
+        "scale": "scale",
+        "arrowhead": "arrowhead",
+        "knife": "knife",
+        "star_s": "star_small",
+        "star_m": "star_mid",
+        "bullet": "bullet",
+        "oval": "oval",
+        "needle": "needle",
+    }
+    
+    # 颜色 → 精灵后缀映射
+    COLOR_MAP = {
+        "red": "1",
+        "blue": "2",
+        "green": "3",
+        "yellow": "4",
+        "purple": "5",
+        "white": "6",
+        "darkblue": "7",
+        "orange": "8",
+        "cyan": "9",
+        "pink": "10",
+    }
+    
+    def __init__(self, bullet_pool, player, enemy_manager=None,
+                 laser_pool=None, item_pool=None):
+        """
+        Args:
+            bullet_pool: 引擎的子弹池
+            player: 引擎的玩家对象
+            enemy_manager: 引擎的敌人管理器（可选）
+            laser_pool: 引擎的激光池（可选）
+            item_pool: 引擎的道具池（可选）
+        """
+        self.bullet_pool = bullet_pool
+        self._player = player
+        self._player_proxy = PlayerProxy(player)
+        self._enemy_manager = enemy_manager
+        self._laser_pool = laser_pool
+        self._item_pool = item_pool
+        self._bullet_indices: List[int] = []
+    
+    def create_bullet(self, x: float, y: float, angle: float, speed: float,
+                      bullet_type: str = "ball_m", color: str = "red",
+                      accel: float = 0, angle_accel: float = 0,
+                      owner=None, **kwargs) -> int:
+        """
+        创建子弹
+        
+        Args:
+            x, y: 位置（归一化坐标）
+            angle: 角度（度，0=右，90=上，-90=下）
+            speed: 速度（每秒）
+            bullet_type: 弹幕类型（ball_s, ball_m, rice, scale 等）
+            color: 颜色（red, blue, green 等）
+            accel: 加速度
+            angle_accel: 角度加速度
+            
+        Returns:
+            子弹索引（用于后续操作）
+        """
+        sprite_id = self._resolve_sprite_id(bullet_type, color)
+        idx = self.bullet_pool.spawn_bullet(
+            x=x, y=y,
+            angle=math.radians(angle),
+            speed=speed / 60.0,
+            sprite_id=sprite_id
+        )
+        if idx >= 0:
+            self._bullet_indices.append(idx)
+        return idx
+    
+    def remove_bullet(self, bullet_idx: int):
+        """移除子弹"""
+        if 0 <= bullet_idx < len(self.bullet_pool.data['alive']):
+            self.bullet_pool.data['alive'][bullet_idx] = 0
+            if bullet_idx in self._bullet_indices:
+                self._bullet_indices.remove(bullet_idx)
+    
+    def bullet_to_item(self, bullet_idx: int):
+        """子弹转化为道具"""
+        self.remove_bullet(bullet_idx)
+        # TODO: 如果有 item_pool，在子弹位置生成道具
+    
+    def get_player(self) -> PlayerProxy:
+        """获取玩家信息（只读代理）"""
+        return self._player_proxy
+    
+    def get_enemies(self) -> list:
+        """获取当前活跃的敌人列表"""
+        if self._enemy_manager:
+            return self._enemy_manager.get_active_enemies()
+        return []
+    
+    def clear_all_bullets(self):
+        """清除所有子弹"""
+        self.bullet_pool.clear_all()
+        self._bullet_indices.clear()
+    
+    def _resolve_sprite_id(self, bullet_type: str, color: str) -> str:
+        """将弹幕类型+颜色映射到精灵 ID"""
+        base = self.BULLET_TYPE_MAP.get(bullet_type, "ball_mid")
+        suffix = self.COLOR_MAP.get(color, "1")
+        return f"{base}{suffix}"

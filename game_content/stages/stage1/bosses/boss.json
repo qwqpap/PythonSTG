@@ -1,0 +1,37 @@
+{
+  "id": "rumia_boss",
+  "name": "ルーミア",
+  "texture": "enemy_rumia",
+  "animations": {},
+
+  "phases": [
+    {
+      "type": "nonspell",
+      "hp": 800,
+      "time": 30,
+      "script": "nonspell_1",
+      "bonus": 100000,
+      "comment": "第1段非符：圆弹 + 自机狙"
+    },
+    {
+      "type": "spellcard",
+      "hp": 1200,
+      "time": 60,
+      "script": "spell_1",
+      "name": "月符「Moonlight Ray」",
+      "bonus": 1000000,
+      "practice_unlock": true,
+      "comment": "第1张符卡：月光射线"
+    },
+    {
+      "type": "spellcard",
+      "hp": 1500,
+      "time": 60,
+      "script": "spell_2",
+      "name": "夜符「Night Bird」",
+      "bonus": 1500000,
+      "practice_unlock": true,
+      "comment": "第2张符卡：夜鸟飞舞"
+    }
+  ]
+}

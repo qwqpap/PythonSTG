@@ -36,6 +36,7 @@ from levels.boli import level_1
 from levels.laser_test import laser_test_level
 from levels.item_test import simple_item_demo
 from levels.spellcard_test import spellcard_test_level
+from levels.stage1_level import stage1_level
 
 
 def initialize_pygame_and_context():
@@ -119,7 +120,7 @@ def initialize_game_objects():
     # stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
     # stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
     # stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
-    stage_manager.add_coroutine(lambda: spellcard_test_level(stage_manager, bullet_pool, player))
+    stage_manager.add_coroutine(lambda: stage1_level(stage_manager, bullet_pool, player))
     
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 

@@ -151,14 +151,32 @@ class StageBase:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         
-        # 执行 run 函数或类
+        # 支持三种波次编写方式：
+        
+        # 1. 函数风格：def run(ctx): ... yield
         if hasattr(module, 'run'):
             wave_gen = module.run(self.ctx)
             if wave_gen:
                 yield from wave_gen
-        elif hasattr(module, 'Wave'):
-            wave = module.Wave(self.ctx)
-            yield from wave.run()
+        
+        # 2. 注册风格：wave = MyWaveClass（推荐）
+        elif hasattr(module, 'wave'):
+            wave_cls = module.wave
+            wave_instance = wave_cls()
+            wave_instance.bind(self.ctx)
+            yield from wave_instance.execute()
+        
+        # 3. 自动查找 Wave 子类
+        else:
+            from .wave_base import Wave as WaveBase
+            for name in dir(module):
+                obj = getattr(module, name)
+                if (isinstance(obj, type) and issubclass(obj, WaveBase) 
+                        and obj is not WaveBase):
+                    wave_instance = obj()
+                    wave_instance.bind(self.ctx)
+                    yield from wave_instance.execute()
+                    break
     
     def _run_boss(self, section: StageSection, is_midboss: bool) -> Generator:
         """执行 Boss 战"""

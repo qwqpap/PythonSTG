@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional, List, Callable, Any, Generator
 from dataclasses import dataclass, field
 import math
+import types
 
 if TYPE_CHECKING:
     from .boss_base import BossBase
@@ -268,15 +269,18 @@ class SpellCard(ABC):
     
     # ==================== 等待 API ====================
     
+    @types.coroutine
     def wait(self, frames: int) -> Generator:
         """等待指定帧数"""
         for _ in range(frames):
             yield
     
+    @types.coroutine
     def wait_seconds(self, seconds: float) -> Generator:
         """等待指定秒数"""
         yield from self.wait(int(seconds * 60))
     
+    @types.coroutine
     def wait_until(self, condition: Callable[[], bool]) -> Generator:
         """等待直到条件满足"""
         while not condition():

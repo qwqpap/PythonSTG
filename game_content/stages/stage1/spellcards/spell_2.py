@@ -1,12 +1,19 @@
 """
-夜符「Night Bird」
+夜符「Night Bird」- 露米娅的第二张符卡
 
-露米娅的第二张符卡
-特点：鸟群式弹幕 + 随机移动
+特点：V字鸟群弹幕 + Boss 随机移动 + 大波攻击
+
+设计思路：
+  - Boss 在场上随机移动，边移动边发射 V 字形弹幕
+  - 移动结束后释放一次大波圆形扩散
+  - 通过随机移动增加不确定性
+  
+高级技巧演示：
+  - 在 run() 中同时驱动移动和火力
+  - 抽取辅助方法 _fire_bird_pattern / _fire_wave_attack
 """
 
 from src.game.stage.spellcard import SpellCard
-import math
 import random
 
 

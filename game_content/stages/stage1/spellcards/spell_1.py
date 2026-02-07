@@ -1,14 +1,15 @@
 """
-月符「Moonlight Ray」
+月符「Moonlight Ray」- 露米娅的第一张符卡
 
-露米娅的第一张符卡
-特点：月光射线 + 圆形弹幕
+特点：圆形扩散 + 自机狙射线 + 后期螺旋弹
 
-注意：使用 yield from self.wait() 风格，不是 await
+设计思路：
+  - 前 15 秒：圆形弹幕 + 自机狙，节奏稳定
+  - 15 秒后加入螺旋弹，难度提升
+  - 旋转角度每帧递增，产生"月光旋转"效果
 """
 
 from src.game.stage.spellcard import SpellCard
-import math
 
 
 class MoonlightRay(SpellCard):
@@ -19,17 +20,16 @@ class MoonlightRay(SpellCard):
     time_limit = 60
     bonus = 1000000
     
-    def setup(self):
+    async def setup(self):
         """Boss 移动到中央上方"""
-        yield from self.boss.move_to(0, 0.5, duration=60)
+        await self.boss.move_to(0, 0.5, duration=60)
     
-    def run(self):
+    async def run(self):
         """主弹幕逻辑"""
         angle_offset = 0
         
         while True:
-            # === 第一阶段：圆形扩散 ===
-            # 发射36发蓝色圆弹
+            # === 第一层：圆形扩散 ===
             self.fire_circle(
                 count=20,
                 speed=2.5,
@@ -37,25 +37,24 @@ class MoonlightRay(SpellCard):
                 bullet_type="ball_m",
                 color="blue"
             )
-            angle_offset += 10  # 每次旋转
+            angle_offset += 10
             
-            yield from self.wait(8)
+            await self.wait(8)
             
-            # === 第二阶段：自机狙射线 ===
-            # 每隔一段时间发射指向玩家的射线
-            if self.time % 60 < 30:  # 前半段
+            # === 第二层：自机狙射线 ===
+            if self.time % 60 < 30:
                 for i in range(5):
                     self.fire_at_player(
                         speed=3.0 + i * 0.2,
                         bullet_type="ball_l",
                         color="white"
                     )
-                    yield from self.wait(3)
+                    await self.wait(3)
             
-            yield from self.wait(20)
+            await self.wait(20)
             
-            # === 第三阶段：螺旋弹幕 ===
-            if self.time_seconds > 15:  # 15秒后增加难度
+            # === 第三层：螺旋弹幕（15秒后增加难度）===
+            if self.time_seconds > 15:
                 for arm in range(3):
                     base_angle = angle_offset + arm * 120
                     for i in range(6):
@@ -65,10 +64,9 @@ class MoonlightRay(SpellCard):
                             bullet_type="scale",
                             color="purple"
                         )
-                    yield from self.wait(2)
+                    await self.wait(2)
             
-            yield from self.wait(30)
+            await self.wait(30)
 
 
-# 注册符卡（用于动态加载）
 spellcard = MoonlightRay

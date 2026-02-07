@@ -472,4 +472,4 @@ class PlayerBase(Entity):
         self.is_dead = False
         self.is_respawning = False
         self.invincible_timer = 0.0
-        self.bullet_pool.clear()
+        self.bullet_pool.clear_all()

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import os
+import types
 
 if TYPE_CHECKING:
     from .spellcard import SpellCard, SpellCardContext
@@ -193,7 +194,8 @@ class BossBase:
     
     # ==================== 移动 API ====================
     
-    async def move_to(self, x: float, y: float, duration: int = 60):
+    @types.coroutine
+    def move_to(self, x: float, y: float, duration: int = 60):
         """移动到指定位置"""
         start_x, start_y = self.x, self.y
         for i in range(duration):
