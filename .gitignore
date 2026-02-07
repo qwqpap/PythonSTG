@@ -1,3 +1,8 @@
 /luastg_game/
 /trash/
-/__pycache__/
+
+# Python bytecode/cache
+**/__pycache__/
+*.py[cod]
+*.nbc
+*.nbi
