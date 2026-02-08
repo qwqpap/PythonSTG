@@ -229,9 +229,16 @@ class StageBase:
             except StopIteration:
                 self._active = False
     
-    def _play_bgm(self, bgm_path: str):
-        """播放 BGM（可覆盖）"""
-        print(f"[Stage] 播放 BGM: {bgm_path}")
+    def _play_bgm(self, bgm_name: str):
+        """播放 BGM - 通过 ctx.audio 系统"""
+        if self.ctx and hasattr(self.ctx, 'play_bgm'):
+            # 去掉扩展名作为 BGM 名称查找
+            name = bgm_name
+            if '.' in name:
+                name = name.rsplit('.', 1)[0]
+            if self.ctx.play_bgm(name):
+                return
+        print(f"[Stage] 播放 BGM: {bgm_name}")
     
     def _on_stage_complete(self):
         """关卡完成（可覆盖）"""

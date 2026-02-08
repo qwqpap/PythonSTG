@@ -14,6 +14,7 @@ import math
 from typing import Optional, Any, List
 
 from .spellcard import SpellCardContext
+from ..audio import AudioManager
 
 
 class PlayerProxy:
@@ -80,7 +81,8 @@ class StageContext(SpellCardContext):
     }
     
     def __init__(self, bullet_pool, player, enemy_manager=None,
-                 laser_pool=None, item_pool=None):
+                 laser_pool=None, item_pool=None,
+                 audio_manager: Optional[AudioManager] = None):
         """
         Args:
             bullet_pool: 引擎的子弹池
@@ -88,6 +90,7 @@ class StageContext(SpellCardContext):
             enemy_manager: 引擎的敌人管理器（可选）
             laser_pool: 引擎的激光池（可选）
             item_pool: 引擎的道具池（可选）
+            audio_manager: 音频管理器（可选）
         """
         self.bullet_pool = bullet_pool
         self._player = player
@@ -95,6 +98,7 @@ class StageContext(SpellCardContext):
         self._enemy_manager = enemy_manager
         self._laser_pool = laser_pool
         self._item_pool = item_pool
+        self._audio_manager = audio_manager
         self._bullet_indices: List[int] = []
     
     def create_bullet(self, x: float, y: float, angle: float, speed: float,
@@ -153,6 +157,40 @@ class StageContext(SpellCardContext):
         """清除所有子弹"""
         self.bullet_pool.clear_all()
         self._bullet_indices.clear()
+    
+    # ==================== 音频 API ====================
+    
+    @property
+    def audio(self) -> Optional[AudioManager]:
+        """音频管理器（内容脚本通过此接口播放音效和 BGM）"""
+        return self._audio_manager
+    
+    def play_se(self, name: str, volume: Optional[float] = None) -> bool:
+        """播放音效（便捷方法）"""
+        if self._audio_manager:
+            return self._audio_manager.play_se(name, volume)
+        return False
+    
+    def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0) -> bool:
+        """播放 BGM（便捷方法）"""
+        if self._audio_manager:
+            return self._audio_manager.play_bgm(name, loops, fade_ms)
+        return False
+    
+    def stop_bgm(self, fade_ms: int = 0):
+        """停止 BGM"""
+        if self._audio_manager:
+            self._audio_manager.stop_bgm(fade_ms)
+    
+    def pause_bgm(self):
+        """暂停 BGM"""
+        if self._audio_manager:
+            self._audio_manager.pause_bgm()
+    
+    def unpause_bgm(self):
+        """恢复 BGM"""
+        if self._audio_manager:
+            self._audio_manager.unpause_bgm()
     
     def _resolve_sprite_id(self, bullet_type: str, color: str) -> str:
         """将弹幕类型+颜色映射到精灵 ID"""

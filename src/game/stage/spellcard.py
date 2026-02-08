@@ -267,6 +267,20 @@ class SpellCard(ABC):
                 self.ctx.remove_bullet(bullet)
         self._bullets.clear()
     
+    # ==================== 音频 API ====================
+    
+    def play_se(self, name: str, volume: float = None) -> bool:
+        """
+        播放音效
+        
+        Args:
+            name: 音效名称（如 "kira", "lazer", "explode"）
+            volume: 音量覆盖 (0.0~1.0)
+        """
+        if self.ctx and hasattr(self.ctx, 'play_se'):
+            return self.ctx.play_se(name, volume)
+        return False
+    
     # ==================== 等待 API ====================
     
     @types.coroutine

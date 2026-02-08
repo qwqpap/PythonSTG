@@ -20,6 +20,7 @@
 12. [完整示例：Stage 1 逐文件解析](#12-完整示例stage-1-逐文件解析)
 13. [常见问题](#13-常见问题)
 14. [从零创建一个新关卡](#14-从零创建一个新关卡)
+15. [音频系统](#15-音频系统)
 
 ---
 
@@ -94,8 +95,12 @@ game_content/stages/
 │   ├── enemies/                 ← 可复用的敌人脚本
 │   │   └── fairy.py             ← 红/蓝妖精
 │   │
-│   └── dialogue/                ← 对话脚本
-│       └── pre_boss.py          ← Boss前对话
+│   ├── dialogue/                ← 对话脚本
+│   │   └── pre_boss.py          ← Boss前对话
+│   │
+│   └── audio/                   ← 关卡私有音频（可选）
+│       ├── se/                  ← 关卡专属音效
+│       └── music/               ← 关卡专属 BGM
 │
 ├── stage2/                      ← 关卡 2（同样结构）
 │   ├── stage.json
@@ -110,7 +115,7 @@ game_content/stages/
 ```
 
 **关键规则：`game_content/` 下的文件不能出现引擎逻辑！**  
-只允许出现：弹幕定义、敌人行为、Boss配置、时间线、对话、资源引用。
+只允许出现：弹幕定义、敌人行为、Boss配置、时间线、对话、音频资源、资源引用。
 
 ---
 
@@ -336,6 +341,13 @@ spellcard = MySpellCard
 | `await self.boss.move_to(x, y, duration)` | 平滑移动 Boss | `await self.boss.move_to(0.3, 0.5, 60)` |
 | `self.boss.move_to_instant(x, y)` | 瞬移 Boss | `self.boss.move_to_instant(0, 0.5)` |
 
+#### 音效
+
+| 方法 | 说明 |
+|------|------|
+| `self.play_se(name)` | 播放音效（Stage私有优先，fallback全局） |
+| `self.play_se(name, volume=0.5)` | 指定音量播放音效 |
+
 #### 辅助
 
 | 方法 | 说明 |
@@ -472,6 +484,7 @@ wave = MyWave
 | `self.fire_arc(x, y, count, ...)` | 扇形弹幕 |
 | `self.fire_at_player(x, y, speed, ...)` | 自机狙 |
 | `await self.wait(frames)` | 等待 |
+| `self.play_se(name)` | 播放音效 |
 | `self.time` / `self.time_seconds` | 当前时间 |
 
 ### 6.3 兼容旧版函数风格
@@ -1013,6 +1026,186 @@ def stage2_level(stage_manager, bullet_pool, player) -> Generator:
 
 ---
 
+## 15. 音频系统
+
+pystg 采用**两级音频管理**：
+
+```
+┌────────────────────────────────────────────┐
+│            AudioManager（统一调度）            │
+│                                              │
+│  查找顺序： Stage私有 → Game全局 → 警告缺失  │
+└─────────────┬────────────────┬─────────────┘
+              │                │
+    ┌────────┴───────┐  ┌─────┴─────────┐
+    │ GameAudioBank    │  │ StageAudioBank  │
+    │ （全局，始终存在） │  │ （关卡私有，可选）│
+    │                  │  │                 │
+    │ shoot, graze,    │  │ 可覆盖全局同名 SE│
+    │ pldead, bomb...  │  │ 关卡专属 BGM    │
+    └──────────────────┘  └─────────────────┘
+```
+
+### 15.1 内容作者需要知道的
+
+**你不需要直接操作音频系统。** 基类已经提供了便捷方法：
+
+```python
+# 在 SpellCard / Wave / EnemyScript 中
+self.play_se("shoot")            # 播放音效
+self.play_se("explode", volume=0.7)  # 指定音量
+
+# 通过 ctx 播放 BGM
+self.ctx.play_bgm("boss1")       # 播放 BGM
+self.ctx.stop_bgm(fade_ms=1000)  # 淡出停止
+```
+
+### 15.2 全局音效（GameAudioBank）
+
+全局音效由引擎在启动时加载，文件在 `assets/audio/se/` 目录下。
+所有内容脚本均可直接使用以下名称：
+
+| 名称 | 说明 | 对应文件 |
+|------|------|----------|
+| `"shoot"` | 自机射击 | se_plst00.wav |
+| `"graze"` | 擦弹 | se_graze.wav |
+| `"pldead"` | 自机死亡 | se_pldead00.wav |
+| `"extend"` | 续命 | se_extend.wav |
+| `"powerup"` | 满P | se_powerup.wav |
+| `"bomb"` | Bomb | se_nep00.wav |
+| `"pause"` | 暂停 | se_pause.wav |
+| `"select"` | 菜单选择 | se_select00.wav |
+| `"cancel"` | 菜单取消 | se_cancel00.wav |
+| `"ok"` | 菜单确认 | se_ok00.wav |
+| `"cardget"` | 符卡取得 | se_cardget.wav |
+| `"timeout"` | 超时 | se_timeout.wav |
+| `"item"` | 道具回收 | se_item00.wav |
+| `"damage"` | 敌人受伤 | se_damage00.wav |
+| `"explode"` | 敌人爆炸 | se_explode.wav |
+| `"kira"` | 星星音效 | se_kira00.wav |
+| `"lazer"` | 激光 | se_lazer00.wav |
+| `"bonus"` | 奖励 | se_bonus.wav |
+| `"warning"` | 警告 | se_hyz_warning.wav |
+| `"charge"` | 蓄力 | se_hyz_charge00.wav |
+
+### 15.3 关卡私有音频（StageAudioBank）
+
+每个关卡可以有自己的专属音频，放在关卡目录的 `audio/` 子目录下：
+
+```
+game_content/stages/stage1/
+  audio/
+    se/                    ← 关卡专属音效
+    │  se_custom_shot.wav  ← 文件名去掉 se_ 前缀和 .wav 后缀 → 名称为 "custom_shot"
+    │  se_boss_roar.wav    → 名称为 "boss_roar"
+    │
+    music/                 ← 关卡专属 BGM
+       stage1_road.ogg     → 名称为 "stage1_road"
+       boss1.ogg           → 名称为 "boss1"
+```
+
+**命名规则：**
+- SE 文件名 `se_xxx.wav` 自动去掉 `se_` 前缀 → 音效名为 `"xxx"`
+- BGM 文件名去掉扩展名即为 BGM 名称
+- 支持格式：`.wav`（SE）、`.ogg` / `.mp3` / `.wav`（BGM）
+
+**覆盖机制：** 如果关卡私有 SE 和全局 SE 同名，则关卡私有优先。例如关卡 `audio/se/se_shoot.wav` 会覆盖全局的 `"shoot"` 音效。
+
+### 15.4 在脚本中使用音频
+
+#### SpellCard / NonSpell 中
+
+```python
+class MySpell(SpellCard):
+    async def setup(self):
+        self.play_se("warning")       # 符卡开始时播放警告音
+        await self.boss.move_to(0, 0.5, duration=60)
+    
+    async def run(self):
+        while True:
+            self.fire_circle(count=20, speed=2.5, color="red")
+            self.play_se("shoot")     # 每次发弹播放射击音
+            await self.wait(15)
+    
+    async def on_defeated(self):
+        self.clear_bullets(to_items=True)
+        self.play_se("explode")       # Boss 被击败时爆炸音
+```
+
+#### Wave 中
+
+```python
+class MyWave(Wave):
+    async def run(self):
+        self.play_se("warning")       # 波次开始提示
+        await self.wait(60)
+        
+        for _ in range(5):
+            self.fire_circle(x=0, y=0.9, count=12, speed=2.0)
+            self.play_se("shoot")
+            await self.wait(20)
+```
+
+#### EnemyScript 中
+
+```python
+class BigFairy(EnemyScript):
+    hp = 100
+    
+    async def run(self):
+        await self.move_to(self.x, 0.3, duration=60)
+        self.play_se("charge")        # 蓄力音
+        await self.wait(60)
+        self.fire_circle(count=24, speed=3.0, color="purple")
+        self.play_se("lazer")         # 发射音
+```
+
+#### 通过 ctx 控制 BGM
+
+```python
+# 在 Wave 或 SpellCard 中直接通过 ctx
+self.ctx.play_bgm("boss1")               # 播放 BGM
+self.ctx.play_bgm("boss1", fade_ms=2000) # 2秒淡入
+self.ctx.stop_bgm(fade_ms=1000)          # 1秒淡出停止
+self.ctx.pause_bgm()                     # 暂停
+self.ctx.unpause_bgm()                   # 恢复
+```
+
+> **注意：** 通常不需要手动控制 BGM。`stage.json` 中配置的 `bgm` 和 `boss_bgm` 会由引擎自动在合适的时机播放。只有在需要特殊音频控制（如符卡中间切换 BGM、对话期间降低音量等）时才需要手动调用。
+
+### 15.5 为新关卡添加音频
+
+1. 在关卡目录下创建 `audio/se/` 和 `audio/music/` 目录
+2. 将 SE 文件（`.wav`）放入 `audio/se/`，文件名以 `se_` 开头
+3. 将 BGM 文件（`.ogg`/`.mp3`）放入 `audio/music/`
+4. 在加载脚本（`levels/stageN_level.py`）中初始化 StageAudioBank：
+
+```python
+from src.game.audio import StageAudioBank
+
+def stageN_level(stage_manager, bullet_pool, player, audio_manager=None):
+    # 加载关卡私有音频
+    stage_bank = StageAudioBank.from_directory("stageN", "game_content/stages/stageN")
+    if audio_manager:
+        audio_manager.set_stage_bank(stage_bank)
+    
+    ctx = StageContext(
+        bullet_pool=bullet_pool,
+        player=player,
+        enemy_manager=stage_manager.enemy_manager,
+        audio_manager=audio_manager
+    )
+    # ... 其余逻辑
+    
+    # 关卡结束时清理
+    if audio_manager:
+        audio_manager.set_stage_bank(None)
+```
+
+5. 完成！脚本中就可以通过 `self.play_se("xxx")` 使用新音效了。
+
+---
+
 ## 附录：文件分层一览
 
 ```
@@ -1023,7 +1216,10 @@ def stage2_level(stage_manager, bullet_pool, player) -> Generator:
     ├── spellcards/*.py     ← 符卡脚本
     ├── bosses/*.json       ← Boss 符卡序列
     ├── enemies/*.py        ← 敌人脚本
-    └── dialogue/*.py       ← 对话
+    ├── dialogue/*.py       ← 对话
+    └── audio/              ← 关卡私有音频（可选）
+        ├── se/*.wav        ← 关卡音效
+        └── music/*.ogg     ← 关卡 BGM
 
 你不需要关心的（引擎层）：
   src/game/stage/
@@ -1035,7 +1231,8 @@ def stage2_level(stage_manager, bullet_pool, player) -> Generator:
     ├── context.py          ← StageContext（引擎桥梁）
     └── practice.py         ← 练习模式
   
-  src/game/bullet/          ← 子弹池（引擎内部）
-  src/game/player/          ← 玩家系统（引擎内部）
-  src/render/               ← 渲染系统（引擎内部）
+  src/game/audio.py           ← 音频系统（AudioBank / AudioManager）
+  src/game/bullet/            ← 子弹池（引擎内部）
+  src/game/player/            ← 玩家系统（引擎内部）
+  src/render/                 ← 渲染系统（引擎内部）
 ```

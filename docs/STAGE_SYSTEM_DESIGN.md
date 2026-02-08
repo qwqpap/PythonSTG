@@ -1,5 +1,17 @@
 # 关卡与弹幕脚本系统设计
 
+> **⚠️ 已弃用 (Deprecated)**
+> 
+> 本文档是早期的系统设计草案，其中的 API、目录结构和代码示例已与当前实现不一致。
+> 
+> **请使用新版指南：[关卡脚本编写指南](STAGE_SCRIPTING_GUIDE.md)**
+> 
+> 主要差异：
+> - 本文引用 `from src.game.danmaku import SpellCard` 等已不存在的模块
+> - `PracticeManager`、`SpellCardPractice` 等类尚未实现
+> - 目录结构已重新设计（增加了 waves/、enemies/、dialogue/、audio/ 等子目录）
+> - 音频系统已完整实现（本文未覆盖）
+
 ## 核心设计原则
 
 1. **符卡是最小可复用单元** - 每张符卡独立，可单独练习

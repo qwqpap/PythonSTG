@@ -262,7 +262,13 @@ class EnemyScript(ABC):
         """等待指定秒数"""
         yield from self.wait(int(seconds * 60))
     
-    # ==================== 生命周期回调 ====================
+    # ==================== 音频 API ====================
+    
+    def play_se(self, name: str, volume: float = None) -> bool:
+        """播放音效"""
+        if self.ctx and hasattr(self.ctx, 'play_se'):
+            return self.ctx.play_se(name, volume)
+        return False
     
     async def on_spawn(self):
         """出生回调（可覆盖）"""

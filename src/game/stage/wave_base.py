@@ -155,6 +155,14 @@ class Wave(ABC):
         """等待指定秒数"""
         yield from self.wait(int(seconds * 60))
     
+    # ==================== 音频 API ====================
+    
+    def play_se(self, name: str, volume: float = None) -> bool:
+        """播放音效"""
+        if self.ctx and hasattr(self.ctx, 'play_se'):
+            return self.ctx.play_se(name, volume)
+        return False
+    
     # ==================== 子类实现 ====================
     
     @abstractmethod

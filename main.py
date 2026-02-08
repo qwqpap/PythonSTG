@@ -18,6 +18,7 @@ from src.game.boss import BossManager
 from src.game.enemy import EnemyManager
 from src.game.laser import LaserPool, get_laser_texture_data
 from src.game.item import ItemPool, ItemConfig
+from src.game.audio import GameAudioBank, AudioManager
 from src.resource.sprite import SpriteManager
 from src.core import (
     GameConfig, get_config, init_config,
@@ -100,7 +101,7 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
     return textures, sprite_uv_map
 
 
-def initialize_game_objects():
+def initialize_game_objects(audio_manager=None):
     """初始化游戏对象（玩家、子弹池、关卡管理器等）"""
     # 使用 Sakuya 角色（通过配置和脚本加载）
     player = load_sakuya()
@@ -120,7 +121,7 @@ def initialize_game_objects():
     # stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
     # stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
     # stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
-    stage_manager.add_coroutine(lambda: stage1_level(stage_manager, bullet_pool, player))
+    stage_manager.add_coroutine(lambda: stage1_level(stage_manager, bullet_pool, player, audio_manager=audio_manager))
     
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
@@ -202,8 +203,15 @@ def main():
         import traceback
         traceback.print_exc()
     
+    # 初始化音频系统
+    game_audio = GameAudioBank()
+    game_audio.load_defaults()
+    audio_manager = AudioManager(game_audio)
+    
     # 初始化游戏对象
-    player, bullet_pool, laser_pool, item_pool, stage_manager = initialize_game_objects()
+    player, bullet_pool, laser_pool, item_pool, stage_manager = initialize_game_objects(
+        audio_manager=audio_manager
+    )
     
     # 游戏主循环
     clock = pygame.time.Clock()
@@ -288,6 +296,7 @@ def main():
         pygame.display.flip()
     
     # 清理资源
+    audio_manager.cleanup()
     renderer.cleanup()
     item_renderer.cleanup()
     ui_renderer.cleanup()
