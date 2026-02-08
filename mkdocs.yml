@@ -1,0 +1,22 @@
+site_name: pystg Docs
+site_url: https://qwqpap.github.io/PythonSTG/
+repo_url: https://github.com/qwqpap/PythonSTG
+docs_dir: docs
+theme:
+  name: material
+  language: zh
+nav:
+  - 首页: index.md
+  - 关卡脚本: STAGE_SCRIPTING_GUIDE.md
+  - 关卡系统设计: STAGE_SYSTEM_DESIGN.md
+  - 资产与激光系统: ASSET_AND_LASER_SYSTEM.md
+  - 纹理资产系统: TEXTURE_ASSET_SYSTEM.md
+markdown_extensions:
+  - toc:
+      permalink: true
+  - admonition
+  - codehilite
+  - footnotes
+  - tables
+extra:
+  logo: logo.png
