@@ -47,7 +47,7 @@ class BlueFairy(EnemyScript):
         for _ in range(5):
             self.fire_at_player(
                 speed=2.5,
-                bullet_type="rice", color="blue"
+                bullet_type="ball_s", color="blue"
             )
             await self.wait(10)
         

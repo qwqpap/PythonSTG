@@ -25,7 +25,7 @@ class OpeningWave(Wave):
                 self.fire(
                     x=x, y=0.9,
                     angle=-90, speed=1.8,
-                    bullet_type="rice", color="blue"
+                    bullet_type="bullet_m", color="red"
                 )
             await self.wait(30)  # 每波间隔 0.5 秒
         

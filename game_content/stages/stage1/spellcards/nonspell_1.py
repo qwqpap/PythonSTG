@@ -49,7 +49,7 @@ class NonSpell1(NonSpell):
             if self.time % 120 < 60:
                 self.fire_at_player(
                     speed=2.5,
-                    bullet_type="rice",
+                    bullet_type="ball_s",
                     color="white"
                 )
             

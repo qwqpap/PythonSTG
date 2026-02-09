@@ -75,6 +75,9 @@ class BossBase:
         # 加载阶段
         base_dir = os.path.dirname(config_path)
         spellcard_dir = os.path.join(base_dir, 'spellcards')
+        # 兼容旧结构：若 bosses/spellcards 不存在，则回退到 stage 根目录下的 spellcards
+        if not os.path.isdir(spellcard_dir):
+            spellcard_dir = os.path.normpath(os.path.join(base_dir, '..', 'spellcards'))
         
         for phase_cfg in config.get('phases', []):
             phase = BossPhase(

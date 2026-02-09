@@ -10,8 +10,10 @@
     stage = StageBase.from_config("stage.json", ctx)
 """
 
+import json
 import math
-from typing import Optional, Any, List
+import os
+from typing import Optional, Any, Dict, List
 
 from .spellcard import SpellCardContext
 from ..audio import AudioManager
@@ -50,7 +52,13 @@ class StageContext(SpellCardContext):
     内容脚本通过 SpellCard.ctx / Wave.ctx / EnemyScript.ctx 访问此对象。
     """
     
-    # 弹幕类型 → 精灵名称映射
+    # ===== 弹幕别名表（从 JSON 加载，每个类型独立的颜色映射） =====
+    # 格式: {bullet_type: {color: sprite_name}}
+    # 由 assets/bullet_aliases.json 定义，bullet_alias_manager 工具编辑
+    BULLET_ALIAS_TABLE: Dict[str, Dict[str, str]] = {}
+    _aliases_loaded: bool = False
+
+    # ===== 旧版映射（保留为 fallback） =====
     BULLET_TYPE_MAP = {
         "ball_s": "ball_small",
         "ball_m": "ball_mid",
@@ -66,7 +74,6 @@ class StageContext(SpellCardContext):
         "needle": "needle",
     }
     
-    # 颜色 → 精灵后缀映射
     COLOR_MAP = {
         "red": "1",
         "blue": "2",
@@ -79,6 +86,25 @@ class StageContext(SpellCardContext):
         "cyan": "9",
         "pink": "10",
     }
+
+    @classmethod
+    def load_bullet_aliases(cls, path: str = "assets/bullet_aliases.json"):
+        """
+        从 JSON 加载弹幕别名表。
+        
+        文件格式:
+            {"version": "1.0", "mapping": {"ball_m": {"red": "ball_mid1", ...}, ...}}
+        """
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                cls.BULLET_ALIAS_TABLE = data.get("mapping", {})
+                count = sum(len(v) for v in cls.BULLET_ALIAS_TABLE.values())
+                print(f"[StageContext] 加载 {len(cls.BULLET_ALIAS_TABLE)} 个弹幕类型, {count} 个别名")
+            except Exception as e:
+                print(f"[StageContext] 加载弹幕别名失败: {e}")
+        cls._aliases_loaded = True
     
     def __init__(self, bullet_pool, player, enemy_manager=None,
                  laser_pool=None, item_pool=None,
@@ -100,6 +126,10 @@ class StageContext(SpellCardContext):
         self._item_pool = item_pool
         self._audio_manager = audio_manager
         self._bullet_indices: List[int] = []
+        
+        # 首次使用时加载别名表
+        if not StageContext._aliases_loaded:
+            StageContext.load_bullet_aliases()
     
     def create_bullet(self, x: float, y: float, angle: float, speed: float,
                       bullet_type: str = "ball_m", color: str = "red",
@@ -194,6 +224,13 @@ class StageContext(SpellCardContext):
     
     def _resolve_sprite_id(self, bullet_type: str, color: str) -> str:
         """将弹幕类型+颜色映射到精灵 ID"""
+        # 优先使用别名表（每个类型独立的颜色映射）
+        type_entry = self.BULLET_ALIAS_TABLE.get(bullet_type)
+        if type_entry:
+            sprite_id = type_entry.get(color)
+            if sprite_id:
+                return sprite_id
+        # Fallback: 旧版全局映射
         base = self.BULLET_TYPE_MAP.get(bullet_type, "ball_mid")
         suffix = self.COLOR_MAP.get(color, "1")
         return f"{base}{suffix}"
