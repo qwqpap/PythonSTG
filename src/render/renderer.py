@@ -598,6 +598,7 @@ class Renderer:
                 self.player_texture = self.ctx.texture(img.size, 4, img.tobytes())
                 self.player_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
                 self.player_texture_size = img.size
+                self.player_texture_scale = 1.0
                 print(f"已加载玩家纹理: {texture_path} ({img.size[0]}x{img.size[1]})")
         
         if self.player_texture is None:
@@ -613,14 +614,56 @@ class Renderer:
         # 计算UV坐标（v=0在顶部，v=1在底部）
         tex_w, tex_h = self.player_texture_size
         rect = sprite_info.get('rect', [0, 0, 32, 48])
-        u0 = rect[0] / tex_w
-        v0 = rect[1] / tex_h                    # 顶部
-        u1 = (rect[0] + rect[2]) / tex_w
-        v1 = (rect[1] + rect[3]) / tex_h        # 底部
+
+        downsample = getattr(player, 'render_downsample', False)
+        render_size_px = getattr(player, 'render_size_px', None)
+        scale = 1.0
+        if downsample and render_size_px:
+            try:
+                scale = min(1.0, float(render_size_px) / max(1.0, float(rect[2])))
+            except Exception:
+                scale = 1.0
+
+        if downsample and scale < 1.0:
+            # 仅在需要时创建缩放纹理，并同步 UV 计算
+            if getattr(self, 'player_texture_scale', 1.0) != scale:
+                texture_path = player.texture_path
+                if os.path.exists(texture_path):
+                    img = Image.open(texture_path).convert('RGBA')
+                    new_size = (max(1, int(img.size[0] * scale)), max(1, int(img.size[1] * scale)))
+                    img = img.resize(new_size, resample=Image.NEAREST)
+                    if self.player_texture:
+                        self.player_texture.release()
+                    self.player_texture = self.ctx.texture(img.size, 4, img.tobytes())
+                    self.player_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+                    self.player_texture_size = img.size
+                    self.player_texture_scale = scale
+        elif not downsample and getattr(self, 'player_texture_scale', 1.0) != 1.0:
+            texture_path = player.texture_path
+            if os.path.exists(texture_path):
+                img = Image.open(texture_path).convert('RGBA')
+                if self.player_texture:
+                    self.player_texture.release()
+                self.player_texture = self.ctx.texture(img.size, 4, img.tobytes())
+                self.player_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+                self.player_texture_size = img.size
+                self.player_texture_scale = 1.0
+
+        scaled_rect = [rect[0] * scale, rect[1] * scale, rect[2] * scale, rect[3] * scale]
+        u0 = scaled_rect[0] / tex_w
+        v0 = scaled_rect[1] / tex_h                    # 顶部
+        u1 = (scaled_rect[0] + scaled_rect[2]) / tex_w
+        v1 = (scaled_rect[1] + scaled_rect[3]) / tex_h        # 底部
         
         # 计算屏幕位置（转换精灵像素大小到归一化坐标）
-        sprite_w = rect[2] / 192.0  # 192 是半屏宽度的像素数
-        sprite_h = rect[3] / 192.0
+        if hasattr(player, 'render_size_px') and player.render_size_px:
+            base_w = max(1.0, float(rect[2]))
+            scale = float(player.render_size_px) / base_w
+            sprite_w = rect[2] * scale / 192.0  # 192 是半屏宽度的像素数
+            sprite_h = rect[3] * scale / 192.0
+        else:
+            sprite_w = rect[2] / 192.0  # 192 是半屏宽度的像素数
+            sprite_h = rect[3] / 192.0
         
         px, py = player.pos[0], player.pos[1]
         
@@ -736,12 +779,13 @@ class Renderer:
     
     def _render_hitbox(self, player):
         """渲染玩家判定点"""
+        hx, hy = player.get_hit_position()
         circle_radius = player.hit_radius
         circle_vertices = []
         for i in range(self.circle_segments + 1):
             a = 2 * math.pi * i / self.circle_segments
-            x = player.pos[0] + math.cos(a) * circle_radius
-            y = player.pos[1] + math.sin(a) * circle_radius
+            x = hx + math.cos(a) * circle_radius
+            y = hy + math.sin(a) * circle_radius
             circle_vertices.extend([x, y])
         circle_vertices = np.array(circle_vertices, dtype='f4')
         self.circle_vbo.write(circle_vertices.tobytes())

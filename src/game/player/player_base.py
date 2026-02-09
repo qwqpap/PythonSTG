@@ -38,6 +38,14 @@ class PlayerBase(Entity):
         self.lives = 3
         self.bombs = 3
         self.graze = 0
+
+        # 渲染尺寸（像素，缩放到游戏坐标）
+        self.render_size_px: Optional[float] = None
+        self.render_downsample: bool = False
+
+        # 判定点偏移（归一化坐标）
+        self.hitbox_offset_x: float = 0.0
+        self.hitbox_offset_y: float = 0.0
         
         # 状态
         self.is_focused = False      # 低速模式
@@ -111,6 +119,16 @@ class PlayerBase(Entity):
         # 纹理路径
         if 'texture' in config and self._config_base_path:
             self.texture_path = os.path.join(self._config_base_path, config['texture'])
+
+        # 渲染尺寸（像素）
+        if 'render_size_px' in config:
+            try:
+                value = float(config['render_size_px'])
+                self.render_size_px = value if value > 0 else None
+            except Exception:
+                self.render_size_px = None
+        if 'render_downsample' in config:
+            self.render_downsample = bool(config.get('render_downsample', False))
         
         # 精灵定义
         if 'sprites' in config:
@@ -131,6 +149,27 @@ class PlayerBase(Entity):
         
         if 'graze_radius' in stats:
             self.graze_radius = stats['graze_radius'] * pixel_to_norm
+
+        # 判定点偏移：编辑器以纹理像素为单位，需按 render_size/sprite_width 缩放
+        # 且编辑器 Y 轴向下、游戏 Y 轴向上，Y 取反
+        _sprite_w = 32.0
+        if self.sprites:
+            for _spr in self.sprites.values():
+                _sprite_w = max(1.0, float(_spr.get('rect', [0,0,32,32])[2]))
+                break
+        _render_px = self.render_size_px if self.render_size_px else _sprite_w
+        _offset_scale = float(_render_px) / _sprite_w * pixel_to_norm
+
+        if 'hitbox_offset_x' in stats:
+            try:
+                self.hitbox_offset_x = float(stats['hitbox_offset_x']) * _offset_scale
+            except Exception:
+                self.hitbox_offset_x = 0.0
+        if 'hitbox_offset_y' in stats:
+            try:
+                self.hitbox_offset_y = -float(stats['hitbox_offset_y']) * _offset_scale
+            except Exception:
+                self.hitbox_offset_y = 0.0
         
         # 初始资源
         initial = config.get('initial', {})
@@ -447,7 +486,7 @@ class PlayerBase(Entity):
     
     def get_hit_position(self) -> tuple:
         """获取判定点位置"""
-        return (self.pos[0], self.pos[1])
+        return (self.pos[0] + self.hitbox_offset_x, self.pos[1] + self.hitbox_offset_y)
     
     def get_option_positions(self) -> list:
         """获取Option位置列表"""

@@ -16,7 +16,7 @@ class PostMidbossWave(Wave):
         for burst in range(6):
             self.fire_circle(
                 x=0.0, y=0.8,
-                count=12, speed=2.0,
+                count=12, speed=5.0,
                 start_angle=burst * 15,
                 bullet_type="ball_m", color="yellow"
             )

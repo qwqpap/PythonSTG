@@ -1,0 +1,85 @@
+{
+  "version": "2.0",
+  "name": "tenshi",
+  "description": "",
+  "author": "",
+  "texture": "tenshi_test_1.png",
+  "render_size_px": 64,
+  "render_downsample": true,
+  "stats": {
+    "speed_high": 0.018,
+    "speed_low": 0.008,
+    "hitbox_radius": 3.0,
+    "graze_radius": 8.0,
+    "hitbox_offset_x": -5.5,
+    "hitbox_offset_y": -1.5
+  },
+  "initial": {
+    "lives": 1,
+    "bombs": 0,
+    "power": 1.0
+  },
+  "sprites": {
+    "normal": {
+      "rect": [
+        0,
+        0,
+        145,
+        145
+      ]
+    },
+    "right": {
+      "rect": [
+        0,
+        145,
+        145,
+        145
+      ]
+    },
+    "left": {
+      "rect": [
+        0,
+        290,
+        145,
+        145
+      ]
+    }
+  },
+  "animations": {
+    "transition_speed": 8.0,
+    "animations": {
+      "idle": {
+        "frames": [
+          "normal"
+        ],
+        "fps": 1,
+        "loop": true
+      },
+      "move_left": {
+        "frames": [
+          "right"
+        ],
+        "fps": 1,
+        "loop": true
+      },
+      "move_right": {
+        "frames": [
+          "left"
+        ],
+        "fps": 1,
+        "loop": true
+      }
+    }
+  },
+  "shot_types": {
+    "unfocused": {
+      "damage": 10,
+      "speed": 0.05,
+      "interval": 4,
+      "spread": 5,
+      "count": 2,
+      "sprite": "player_bullet"
+    }
+  },
+  "options": []
+}

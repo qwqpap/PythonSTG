@@ -1120,9 +1120,14 @@ class EngineIntegratedAssetManager(QMainWindow):
             f"images/item/{sheet_name}.json",
             f"images/enemy/{sheet_name}.json",
             f"images/background/{sheet_name}.json",
-            f"players/reimu/{sheet_name}.json",
-            f"players/sakuya/{sheet_name}.json",
         ]
+
+        # 自动遍历所有玩家目录
+        players_root = ASSETS_ROOT / "players"
+        if players_root.exists():
+            for player_dir in players_root.iterdir():
+                if player_dir.is_dir():
+                    possible_paths.append(f"players/{player_dir.name}/{sheet_name}.json")
         
         for path in possible_paths:
             full_path = ASSETS_ROOT / path

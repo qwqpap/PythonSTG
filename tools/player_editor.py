@@ -15,6 +15,7 @@
 import sys
 import os
 import json
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, field
@@ -26,7 +27,8 @@ from PyQt5.QtWidgets import (
     QComboBox, QGroupBox, QFormLayout, QScrollArea, QFrame, QTabWidget,
     QFileDialog, QMessageBox, QToolBar, QAction, QStatusBar, QSlider,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem,
-    QGraphicsEllipseItem, QTableWidget, QTableWidgetItem, QHeaderView
+    QGraphicsEllipseItem, QTableWidget, QTableWidgetItem, QHeaderView,
+    QAbstractItemView
 )
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import (
@@ -91,12 +93,18 @@ class PlayerConfigData:
     description: str = ""
     author: str = ""
     texture: str = ""
+
+    # 渲染
+    render_size_px: int = 32
+    render_downsample: bool = False
     
     # 属性
     speed_high: float = 0.02
     speed_low: float = 0.008
     hitbox_radius: float = 3.0
     graze_radius: float = 24.0
+    hitbox_offset_x: float = 0.0
+    hitbox_offset_y: float = 0.0
     
     # 初始值
     lives: int = 3
@@ -123,6 +131,7 @@ class SpritePreviewView(QGraphicsView):
     """精灵预览视图"""
     
     sprite_rect_changed = pyqtSignal(int, int, int, int)
+    hitbox_offset_changed = pyqtSignal(float, float)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -136,6 +145,11 @@ class SpritePreviewView(QGraphicsView):
         self.texture_item: Optional[QGraphicsPixmapItem] = None
         self.rect_items: Dict[str, QGraphicsRectItem] = {}
         self.selected_rect: Optional[QGraphicsRectItem] = None
+
+        self.hitbox_item: Optional[QGraphicsEllipseItem] = None
+        self._hitbox_rect: Optional[Tuple[int, int, int, int]] = None
+        self._hitbox_radius: float = 0.0
+        self._drag_hitbox = False
         
         self._zoom = 2.0
         self.setTransform(QTransform().scale(self._zoom, self._zoom))
@@ -147,11 +161,44 @@ class SpritePreviewView(QGraphicsView):
         
         self.scene.clear()
         self.rect_items.clear()
+        self.hitbox_item = None
+        self._hitbox_rect = None
+        self._hitbox_radius = 0.0
         
         pixmap = QPixmap(path)
         self.texture_item = QGraphicsPixmapItem(pixmap)
         self.scene.addItem(self.texture_item)
         self.scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
+
+    def set_hitbox(self, rect: Optional[Tuple[int, int, int, int]],
+                   radius: float, offset_x: float, offset_y: float,
+                   visible: bool = True):
+        """设置判定点显示（基于当前精灵 rect）"""
+        self._hitbox_rect = rect
+        self._hitbox_radius = radius
+
+        if not rect or radius <= 0 or not visible:
+            if self.hitbox_item:
+                self.hitbox_item.setVisible(False)
+            return
+
+        if self.hitbox_item is None:
+            pen = QPen(QColor(255, 80, 80), 2)
+            brush = QBrush(QColor(255, 80, 80, 40))
+            self.hitbox_item = self.scene.addEllipse(0, 0, 1, 1, pen, brush)
+            self.hitbox_item.setZValue(20)
+
+        self.hitbox_item.setVisible(True)
+        self._update_hitbox_position(offset_x, offset_y)
+
+    def _update_hitbox_position(self, offset_x: float, offset_y: float):
+        if not self._hitbox_rect or not self.hitbox_item:
+            return
+        x, y, w, h = self._hitbox_rect
+        cx = x + w / 2 + offset_x
+        cy = y + h / 2 + offset_y
+        r = self._hitbox_radius
+        self.hitbox_item.setRect(cx - r, cy - r, r * 2, r * 2)
     
     def add_sprite_rect(self, name: str, rect: Tuple[int, int, int, int], selected: bool = False):
         """添加精灵矩形"""
@@ -189,6 +236,36 @@ class SpritePreviewView(QGraphicsView):
             self.zoom_in()
         else:
             self.zoom_out()
+
+    def mousePressEvent(self, event):
+        if self.hitbox_item and self.hitbox_item.isVisible():
+            scene_pos = self.mapToScene(event.pos())
+            if self.hitbox_item.contains(self.hitbox_item.mapFromScene(scene_pos)):
+                self._drag_hitbox = True
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_hitbox and self._hitbox_rect and self.hitbox_item:
+            scene_pos = self.mapToScene(event.pos())
+            x, y, w, h = self._hitbox_rect
+            cx = x + w / 2
+            cy = y + h / 2
+            offset_x = scene_pos.x() - cx
+            offset_y = scene_pos.y() - cy
+            self._update_hitbox_position(offset_x, offset_y)
+            self.hitbox_offset_changed.emit(offset_x, offset_y)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_hitbox:
+            self._drag_hitbox = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 # ==================== 动画预览视图 ====================
@@ -261,6 +338,16 @@ class AnimationPreviewView(QWidget):
         # 设置定时器间隔
         if anim.fps > 0:
             self.timer.setInterval(int(1000 / anim.fps))
+
+    def set_frame_index(self, index: int):
+        """手动设置当前帧"""
+        if not self.current_animation:
+            return
+        frames = self.current_animation.frames
+        if not frames:
+            return
+        self.current_frame = max(0, min(index, len(frames) - 1))
+        self._update_display()
     
     def _update_display(self):
         """更新显示"""
@@ -578,6 +665,9 @@ class PlayerEditor(QMainWindow):
         self.player_data = PlayerConfigData()
         self.texture_path: Optional[str] = None
         self.texture_pixmap: Optional[QPixmap] = None
+        self._suppress_sprite_change = False
+        self._current_sprite_key: Optional[str] = None
+        self._suppress_hitbox_change = False
         
         self._setup_ui()
         self._setup_menu()
@@ -628,13 +718,16 @@ class PlayerEditor(QMainWindow):
         player_layout = QVBoxLayout(player_group)
         
         self.player_list = QListWidget()
-        self.player_list.currentTextChanged.connect(self._on_player_selected)
+        self.player_list.currentItemChanged.connect(self._on_player_selected)
         player_layout.addWidget(self.player_list)
         
         btn_layout = QHBoxLayout()
         btn_new = QPushButton("新建")
         btn_new.clicked.connect(self._new_player)
         btn_layout.addWidget(btn_new)
+        btn_refresh = QPushButton("刷新")
+        btn_refresh.clicked.connect(self._scan_players)
+        btn_layout.addWidget(btn_refresh)
         player_layout.addLayout(btn_layout)
         
         layout.addWidget(player_group)
@@ -700,8 +793,34 @@ class PlayerEditor(QMainWindow):
         self.graze_spin.setRange(5, 100)
         self.graze_spin.valueChanged.connect(self._on_stats_changed)
         stats_layout.addRow("擦弹半径:", self.graze_spin)
+
+        self.hitbox_offset_x_spin = QDoubleSpinBox()
+        self.hitbox_offset_x_spin.setRange(-50, 50)
+        self.hitbox_offset_x_spin.setDecimals(2)
+        self.hitbox_offset_x_spin.valueChanged.connect(self._on_stats_changed)
+        stats_layout.addRow("判定偏移X:", self.hitbox_offset_x_spin)
+
+        self.hitbox_offset_y_spin = QDoubleSpinBox()
+        self.hitbox_offset_y_spin.setRange(-50, 50)
+        self.hitbox_offset_y_spin.setDecimals(2)
+        self.hitbox_offset_y_spin.valueChanged.connect(self._on_stats_changed)
+        stats_layout.addRow("判定偏移Y:", self.hitbox_offset_y_spin)
         
         layout.addWidget(stats_group)
+
+        render_group = QGroupBox("渲染")
+        render_layout = QFormLayout(render_group)
+
+        self.render_size_spin = QSpinBox()
+        self.render_size_spin.setRange(8, 256)
+        self.render_size_spin.valueChanged.connect(self._on_stats_changed)
+        render_layout.addRow("显示尺寸(px):", self.render_size_spin)
+
+        self.render_downsample_cb = QCheckBox("降采样贴图")
+        self.render_downsample_cb.toggled.connect(self._on_stats_changed)
+        render_layout.addRow("", self.render_downsample_cb)
+
+        layout.addWidget(render_group)
         
         # 初始值
         init_group = QGroupBox("初始值")
@@ -750,6 +869,7 @@ class PlayerEditor(QMainWindow):
         sprite_layout.addLayout(toolbar)
         
         self.sprite_view = SpritePreviewView()
+        self.sprite_view.hitbox_offset_changed.connect(self._on_hitbox_dragged)
         sprite_layout.addWidget(self.sprite_view)
         
         layout.addWidget(sprite_group, stretch=2)
@@ -821,6 +941,7 @@ class PlayerEditor(QMainWindow):
         
         self.sprite_list = QListWidget()
         self.sprite_list.currentTextChanged.connect(self._on_sprite_selected)
+        self.sprite_list.itemDoubleClicked.connect(self._add_frame_from_sprite)
         layout.addWidget(self.sprite_list)
         
         # 精灵属性
@@ -907,6 +1028,10 @@ class PlayerEditor(QMainWindow):
         
         self.frame_list = QListWidget()
         self.frame_list.setMaximumHeight(100)
+        self.frame_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.frame_list.setDefaultDropAction(Qt.MoveAction)
+        self.frame_list.model().rowsMoved.connect(self._on_frame_list_reordered)
+        self.frame_list.currentRowChanged.connect(self._on_frame_selected)
         layout.addWidget(self.frame_list)
         
         frame_btn = QHBoxLayout()
@@ -1061,22 +1186,109 @@ class PlayerEditor(QMainWindow):
     def _scan_players(self):
         """扫描可用玩家"""
         self.player_list.clear()
-        
+
         if PLAYERS_ROOT.exists():
-            for folder in PLAYERS_ROOT.iterdir():
-                if folder.is_dir():
-                    config_file = folder / "config.json"
-                    if config_file.exists():
-                        self.player_list.addItem(folder.name)
-    
-    def _on_player_selected(self, player_id: str):
+            for folder in sorted(PLAYERS_ROOT.iterdir(), key=lambda p: p.name.lower()):
+                if not folder.is_dir():
+                    continue
+                config_file = folder / "config.json"
+                has_config = config_file.exists()
+                label = folder.name if has_config else f"{folder.name} (未配置)"
+                item = QListWidgetItem(label)
+                item.setData(Qt.UserRole, folder.name)
+                item.setData(Qt.UserRole + 1, has_config)
+                self.player_list.addItem(item)
+
+    def _on_player_selected(self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]):
         """玩家选中"""
+        if not current:
+            return
+
+        self._commit_sprite_edits()
+
+        player_id = current.data(Qt.UserRole)
         if not player_id:
             return
-        
+
         config_path = PLAYERS_ROOT / player_id / "config.json"
+        if not config_path.exists():
+            self._create_default_config_for_folder(PLAYERS_ROOT / player_id)
+
         if config_path.exists():
             self._load_config(str(config_path))
+
+    def _find_texture_candidates(self, folder: Path) -> List[Path]:
+        """查找角色目录内的纹理文件"""
+        if not folder.exists():
+            return []
+        patterns = ["*.png", "*.jpg", "*.jpeg"]
+        results: List[Path] = []
+        for pat in patterns:
+            results.extend(sorted(folder.glob(pat)))
+        return results
+
+    def _create_default_config_for_folder(self, folder: Path):
+        """为未配置的角色目录创建默认 config.json"""
+        folder.mkdir(parents=True, exist_ok=True)
+        config_path = folder / "config.json"
+        if config_path.exists():
+            return
+        texture_name = ""
+        candidates = self._find_texture_candidates(folder)
+        if len(candidates) == 1:
+            texture_name = candidates[0].name
+        elif len(candidates) > 1:
+            names = [p.name for p in candidates]
+            from PyQt5.QtWidgets import QInputDialog
+            choice, ok = QInputDialog.getItem(
+                self, "选择纹理", "检测到多个纹理文件，选择一个：", names, 0, False
+            )
+            if ok:
+                texture_name = choice
+
+        config = {
+            "version": "2.0",
+            "name": folder.name,
+            "description": "",
+            "author": "",
+            "texture": texture_name,
+            "render_size_px": 32,
+            "render_downsample": False,
+            "stats": {
+                "speed_high": 0.02,
+                "speed_low": 0.008,
+                "hitbox_radius": 3,
+                "graze_radius": 24,
+                "hitbox_offset_x": 0.0,
+                "hitbox_offset_y": 0.0
+            },
+            "initial": {"lives": 3, "bombs": 3, "power": 1.0},
+            "sprites": {},
+            "animations": {"transition_speed": 8.0, "animations": {}},
+            "shot_types": {},
+            "options": []
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+        if texture_name:
+            self._ensure_player_sheet_config(folder, texture_name)
+        self._scan_players()
+
+    def _ensure_player_sheet_config(self, folder: Path, texture_name: str):
+        """为纹理生成最小的精灵表 JSON，供纹理管理器识别"""
+        if not texture_name:
+            return
+        sheet_name = Path(texture_name).stem
+        sheet_path = folder / f"{sheet_name}.json"
+        if sheet_path.exists():
+            return
+        data = {
+            "__image_filename": texture_name,
+            "sprites": {}
+        }
+        with open(sheet_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
     
     def _load_config(self, path: str):
         """加载配置"""
@@ -1089,6 +1301,8 @@ class PlayerEditor(QMainWindow):
             self.player_data.description = data.get('description', '')
             self.player_data.author = data.get('author', '')
             self.player_data.texture = data.get('texture', '')
+            self.player_data.render_size_px = int(data.get('render_size_px', 32))
+            self.player_data.render_downsample = bool(data.get('render_downsample', False))
             
             # 属性
             stats = data.get('stats', {})
@@ -1096,6 +1310,8 @@ class PlayerEditor(QMainWindow):
             self.player_data.speed_low = stats.get('speed_low', 0.008)
             self.player_data.hitbox_radius = stats.get('hitbox_radius', 3)
             self.player_data.graze_radius = stats.get('graze_radius', 24)
+            self.player_data.hitbox_offset_x = stats.get('hitbox_offset_x', 0.0)
+            self.player_data.hitbox_offset_y = stats.get('hitbox_offset_y', 0.0)
             
             # 初始值
             initial = data.get('initial', {})
@@ -1133,6 +1349,25 @@ class PlayerEditor(QMainWindow):
                     self.sprite_view.load_texture(str(tex_path))
                     self.anim_preview.set_texture(self.texture_pixmap)
                     self.anim_preview.set_sprites(self.player_data.sprites)
+            else:
+                # 没有指定纹理时，自动选择目录内第一个图片
+                candidates = self._find_texture_candidates(config_dir)
+                if candidates:
+                    tex_path = candidates[0]
+                    self.player_data.texture = tex_path.name
+                    self.texture_label.setText(self.player_data.texture)
+                    self.texture_path = str(tex_path)
+                    self.texture_pixmap = QPixmap(str(tex_path))
+                    self.sprite_view.load_texture(str(tex_path))
+                    self.anim_preview.set_texture(self.texture_pixmap)
+                    self.anim_preview.set_sprites(self.player_data.sprites)
+                else:
+                    self.texture_path = None
+                    self.texture_pixmap = None
+            
+            # load_texture 会 scene.clear() 导致精灵矩形和判定点标记丢失，需重建
+            self._refresh_sprite_rects()
+            self._refresh_hitbox_marker()
             
             self.statusBar().showMessage(f"已加载: {path}")
             
@@ -1147,21 +1382,34 @@ class PlayerEditor(QMainWindow):
         self.author_edit.setText(self.player_data.author)
         self.texture_label.setText(self.player_data.texture)
         
-        # 属性
-        self.speed_high_spin.setValue(self.player_data.speed_high)
-        self.speed_low_spin.setValue(self.player_data.speed_low)
-        self.hitbox_spin.setValue(self.player_data.hitbox_radius)
-        self.graze_spin.setValue(self.player_data.graze_radius)
-        
-        # 初始值
-        self.lives_spin.setValue(self.player_data.lives)
-        self.bombs_spin.setValue(self.player_data.bombs)
-        self.power_spin.setValue(self.player_data.power)
+        # 在设置 spinbox 值时，抑制 _on_stats_changed 回调
+        # 否则前面的 setValue 会读取后面 spinbox 尚未更新的旧值，覆盖 player_data
+        self._suppress_hitbox_change = True
+        try:
+            # 属性
+            self.speed_high_spin.setValue(self.player_data.speed_high)
+            self.speed_low_spin.setValue(self.player_data.speed_low)
+            self.hitbox_spin.setValue(self.player_data.hitbox_radius)
+            self.graze_spin.setValue(self.player_data.graze_radius)
+            self.hitbox_offset_x_spin.setValue(self.player_data.hitbox_offset_x)
+            self.hitbox_offset_y_spin.setValue(self.player_data.hitbox_offset_y)
+
+            self.render_size_spin.setValue(self.player_data.render_size_px)
+            self.render_downsample_cb.setChecked(self.player_data.render_downsample)
+            
+            # 初始值
+            self.lives_spin.setValue(self.player_data.lives)
+            self.bombs_spin.setValue(self.player_data.bombs)
+            self.power_spin.setValue(self.player_data.power)
+        finally:
+            self._suppress_hitbox_change = False
         
         # 精灵列表
         self.sprite_list.clear()
         for name in self.player_data.sprites:
             self.sprite_list.addItem(name)
+
+        self._current_sprite_key = None
         
         # 动画列表
         self.animation_list.clear()
@@ -1173,6 +1421,7 @@ class PlayerEditor(QMainWindow):
         
         # 更新精灵显示
         self._refresh_sprite_rects()
+        self._refresh_hitbox_marker()
     
     def _refresh_sprite_rects(self):
         """刷新精灵矩形显示"""
@@ -1183,6 +1432,8 @@ class PlayerEditor(QMainWindow):
         
         for name, sprite in self.player_data.sprites.items():
             self.sprite_view.add_sprite_rect(name, sprite.rect, name == selected_name)
+
+        self.anim_preview.set_sprites(self.player_data.sprites)
     
     def _on_info_changed(self):
         """信息变化"""
@@ -1192,13 +1443,20 @@ class PlayerEditor(QMainWindow):
     
     def _on_stats_changed(self):
         """属性变化"""
+        if self._suppress_hitbox_change:
+            return
         self.player_data.speed_high = self.speed_high_spin.value()
         self.player_data.speed_low = self.speed_low_spin.value()
         self.player_data.hitbox_radius = self.hitbox_spin.value()
         self.player_data.graze_radius = self.graze_spin.value()
+        self.player_data.hitbox_offset_x = self.hitbox_offset_x_spin.value()
+        self.player_data.hitbox_offset_y = self.hitbox_offset_y_spin.value()
         self.player_data.lives = self.lives_spin.value()
         self.player_data.bombs = self.bombs_spin.value()
         self.player_data.power = self.power_spin.value()
+        self.player_data.render_size_px = self.render_size_spin.value()
+        self.player_data.render_downsample = self.render_downsample_cb.isChecked()
+        self._refresh_hitbox_marker()
     
     def _choose_texture(self):
         """选择纹理"""
@@ -1215,6 +1473,7 @@ class PlayerEditor(QMainWindow):
             self.texture_pixmap = QPixmap(path)
             self.sprite_view.load_texture(path)
             self.anim_preview.set_texture(self.texture_pixmap)
+            self.anim_preview.set_sprites(self.player_data.sprites)
     
     # 精灵操作
     def _add_sprite(self):
@@ -1233,16 +1492,28 @@ class PlayerEditor(QMainWindow):
             self._refresh_sprite_rects()
     
     def _on_sprite_selected(self, name: str):
+        self._commit_sprite_edits()
         if name and name in self.player_data.sprites:
             sprite = self.player_data.sprites[name]
-            self.sprite_name_edit.setText(sprite.name)
-            self.sprite_x.setValue(sprite.rect[0])
-            self.sprite_y.setValue(sprite.rect[1])
-            self.sprite_w.setValue(sprite.rect[2])
-            self.sprite_h.setValue(sprite.rect[3])
+            self._suppress_sprite_change = True
+            try:
+                self.sprite_name_edit.setText(sprite.name)
+                self.sprite_x.setValue(sprite.rect[0])
+                self.sprite_y.setValue(sprite.rect[1])
+                self.sprite_w.setValue(sprite.rect[2])
+                self.sprite_h.setValue(sprite.rect[3])
+            finally:
+                self._suppress_sprite_change = False
+            self._current_sprite_key = name
             self._refresh_sprite_rects()
+            self._refresh_hitbox_marker()
+        else:
+            self._current_sprite_key = None
+            self._refresh_hitbox_marker()
     
     def _on_sprite_changed(self):
+        if self._suppress_sprite_change:
+            return
         item = self.sprite_list.currentItem()
         if item:
             old_name = item.text()
@@ -1262,8 +1533,65 @@ class PlayerEditor(QMainWindow):
                     del self.player_data.sprites[old_name]
                     self.player_data.sprites[new_name] = sprite
                     item.setText(new_name)
+
+                    # 同步动画帧中引用的精灵名称
+                    for anim in self.player_data.animations.values():
+                        anim.frames = [new_name if f == old_name else f for f in anim.frames]
                 
                 self._refresh_sprite_rects()
+
+    def _commit_sprite_edits(self):
+        """在切换选择或保存前，提交当前精灵编辑"""
+        if not self._current_sprite_key:
+            return
+        if self._current_sprite_key not in self.player_data.sprites:
+            return
+        old_name = self._current_sprite_key
+        new_name = self.sprite_name_edit.text()
+
+        sprite = self.player_data.sprites[old_name]
+        sprite.name = new_name
+        sprite.rect = (
+            self.sprite_x.value(),
+            self.sprite_y.value(),
+            self.sprite_w.value(),
+            self.sprite_h.value()
+        )
+
+        if old_name != new_name:
+            del self.player_data.sprites[old_name]
+            self.player_data.sprites[new_name] = sprite
+            for anim in self.player_data.animations.values():
+                anim.frames = [new_name if f == old_name else f for f in anim.frames]
+            self._current_sprite_key = new_name
+
+    def _refresh_hitbox_marker(self):
+        item = self.sprite_list.currentItem()
+        if not item:
+            self.sprite_view.set_hitbox(None, 0, 0, 0, visible=False)
+            return
+        name = item.text()
+        sprite = self.player_data.sprites.get(name)
+        if not sprite:
+            self.sprite_view.set_hitbox(None, 0, 0, 0, visible=False)
+            return
+        self.sprite_view.set_hitbox(
+            sprite.rect,
+            self.player_data.hitbox_radius,
+            self.player_data.hitbox_offset_x,
+            self.player_data.hitbox_offset_y,
+            visible=True,
+        )
+
+    def _on_hitbox_dragged(self, offset_x: float, offset_y: float):
+        self._suppress_hitbox_change = True
+        try:
+            self.hitbox_offset_x_spin.setValue(offset_x)
+            self.hitbox_offset_y_spin.setValue(offset_y)
+            self.player_data.hitbox_offset_x = offset_x
+            self.player_data.hitbox_offset_y = offset_y
+        finally:
+            self._suppress_hitbox_change = False
     
     # 动画操作
     def _add_animation(self):
@@ -1320,15 +1648,30 @@ class PlayerEditor(QMainWindow):
             if name in self.player_data.animations:
                 # 从精灵列表选择
                 sprites = list(self.player_data.sprites.keys())
-                if sprites:
-                    from PyQt5.QtWidgets import QInputDialog
-                    frame, ok = QInputDialog.getItem(
-                        self, "添加帧", "选择精灵:", sprites, 0, False
-                    )
-                    if ok:
-                        self.player_data.animations[name].frames.append(frame)
-                        self.frame_list.addItem(frame)
-                        self.anim_preview.set_animation(self.player_data.animations[name])
+                if not sprites:
+                    QMessageBox.information(self, "提示", "当前没有可用精灵，请先添加精灵。")
+                    return
+                from PyQt5.QtWidgets import QInputDialog
+                frame, ok = QInputDialog.getItem(
+                    self, "添加帧", "选择精灵:", sprites, 0, False
+                )
+                if ok:
+                    self.player_data.animations[name].frames.append(frame)
+                    self.frame_list.addItem(frame)
+                    self.anim_preview.set_animation(self.player_data.animations[name])
+
+    def _add_frame_from_sprite(self, item: QListWidgetItem):
+        anim_item = self.animation_list.currentItem()
+        if not anim_item:
+            QMessageBox.information(self, "提示", "请先选择一个动画。")
+            return
+        name = anim_item.text()
+        if name not in self.player_data.animations:
+            return
+        frame_name = item.text()
+        self.player_data.animations[name].frames.append(frame_name)
+        self.frame_list.addItem(frame_name)
+        self.anim_preview.set_animation(self.player_data.animations[name])
     
     def _delete_frame(self):
         item = self.animation_list.currentItem()
@@ -1340,6 +1683,28 @@ class PlayerEditor(QMainWindow):
                 self.player_data.animations[name].frames.pop(row)
                 self.frame_list.takeItem(row)
                 self.anim_preview.set_animation(self.player_data.animations[name])
+
+    def _on_frame_selected(self, row: int):
+        anim_item = self.animation_list.currentItem()
+        if not anim_item:
+            return
+        name = anim_item.text()
+        if name not in self.player_data.animations:
+            return
+        self.anim_preview.set_frame_index(row)
+
+    def _on_frame_list_reordered(self, *args):
+        anim_item = self.animation_list.currentItem()
+        if not anim_item:
+            return
+        name = anim_item.text()
+        if name not in self.player_data.animations:
+            return
+        frames = []
+        for i in range(self.frame_list.count()):
+            frames.append(self.frame_list.item(i).text())
+        self.player_data.animations[name].frames = frames
+        self.anim_preview.set_animation(self.player_data.animations[name])
     
     # 射击操作
     def _add_shot_type(self):
@@ -1384,9 +1749,49 @@ class PlayerEditor(QMainWindow):
     
     # 文件操作
     def _new_player(self):
+        from PyQt5.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "新建角色", "角色文件夹名称:")
+        if not ok or not name:
+            return
+
+        folder = PLAYERS_ROOT / name
+        folder.mkdir(parents=True, exist_ok=True)
+
+        tex_path, _ = QFileDialog.getOpenFileName(
+            self, "选择角色纹理",
+            str(folder),
+            "图片 (*.png *.jpg)"
+        )
+
+        texture_name = ""
+        if tex_path:
+            tex_path = Path(tex_path)
+            if tex_path.parent != folder:
+                target = folder / tex_path.name
+                shutil.copy2(str(tex_path), str(target))
+                tex_path = target
+            texture_name = tex_path.name
+
         self.player_data = PlayerConfigData()
+        self.player_data.name = name
+        self.player_data.texture = texture_name
+
+        self.texture_path = str(folder / texture_name) if texture_name else None
+        self.texture_label.setText(texture_name)
         self._update_ui()
-        self.sprite_view.scene.clear()
+
+        if self.texture_path and Path(self.texture_path).exists():
+            self.texture_pixmap = QPixmap(self.texture_path)
+            self.sprite_view.load_texture(self.texture_path)
+            self.anim_preview.set_texture(self.texture_pixmap)
+
+        self._create_default_config_for_folder(folder)
+        self._scan_players()
+        for i in range(self.player_list.count()):
+            item = self.player_list.item(i)
+            if item.data(Qt.UserRole) == name:
+                self.player_list.setCurrentItem(item)
+                break
     
     def _open_config(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1398,10 +1803,12 @@ class PlayerEditor(QMainWindow):
             self._load_config(path)
     
     def _save_config(self):
+        self._commit_sprite_edits()
         # 确定保存路径
-        player_id = self.player_list.currentItem()
-        if player_id:
-            save_dir = PLAYERS_ROOT / player_id.text()
+        player_item = self.player_list.currentItem()
+        if player_item:
+            player_id = player_item.data(Qt.UserRole) or player_item.text()
+            save_dir = PLAYERS_ROOT / player_id
         else:
             save_dir = PLAYERS_ROOT / "new_player"
             save_dir.mkdir(exist_ok=True)
@@ -1413,17 +1820,28 @@ class PlayerEditor(QMainWindow):
         )
         
         if path:
+            # 确保纹理在角色目录内
+            if self.texture_path:
+                tex_path = Path(self.texture_path)
+                if tex_path.exists() and tex_path.parent != Path(path).parent:
+                    target = Path(path).parent / tex_path.name
+                    shutil.copy2(str(tex_path), str(target))
+                    self.player_data.texture = target.name
             config = {
                 "version": "2.0",
                 "name": self.player_data.name,
                 "description": self.player_data.description,
                 "author": self.player_data.author,
                 "texture": self.player_data.texture,
+                "render_size_px": self.player_data.render_size_px,
+                "render_downsample": self.player_data.render_downsample,
                 "stats": {
                     "speed_high": self.player_data.speed_high,
                     "speed_low": self.player_data.speed_low,
                     "hitbox_radius": self.player_data.hitbox_radius,
-                    "graze_radius": self.player_data.graze_radius
+                    "graze_radius": self.player_data.graze_radius,
+                    "hitbox_offset_x": self.player_data.hitbox_offset_x,
+                    "hitbox_offset_y": self.player_data.hitbox_offset_y
                 },
                 "initial": {
                     "lives": self.player_data.lives,
@@ -1468,6 +1886,9 @@ class PlayerEditor(QMainWindow):
             
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
+
+            # 生成供纹理管理器使用的精灵表 JSON
+            self._ensure_player_sheet_config(Path(path).parent, self.player_data.texture)
             
             self.statusBar().showMessage(f"已保存: {path}")
             self._scan_players()

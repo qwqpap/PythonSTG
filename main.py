@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.render import Renderer
 from src.game.bullet import BulletPool
-from src.game.player import Player, check_collisions, load_sakuya
+from src.game.player import Player, check_collisions, load_player
 from src.game.stage import StageManager
 from src.game.boss import BossManager
 from src.game.enemy import EnemyManager
@@ -103,8 +103,8 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
 
 def initialize_game_objects(audio_manager=None):
     """初始化游戏对象（玩家、子弹池、关卡管理器等）"""
-    # 使用 Sakuya 角色（通过配置和脚本加载）
-    player = load_sakuya()
+    # 使用 Tenshi 角色（通过配置和脚本加载）
+    player = load_player("tenshi")
     print(f"已加载玩家: {player.name}")
     bullet_pool = BulletPool(max_bullets=50000)
     laser_pool = LaserPool(max_lasers=100)
@@ -245,9 +245,10 @@ def main():
         collision_mgr = get_collision_manager()
         
         # 碰撞检测 - 子弹（使用统一碰撞管理器）
+        hit_x, hit_y = player.get_hit_position()
         if player.invincible_timer <= 0:
             bullet_result = collision_mgr.check_player_vs_bullets(
-                player.pos[0], player.pos[1], player.hit_radius, bullet_pool
+                hit_x, hit_y, player.hit_radius, bullet_pool
             )
             if bullet_result.occurred:
                 if player.take_damage():
@@ -257,7 +258,7 @@ def main():
         # 碰撞检测 - 激光（使用统一碰撞管理器）
         if player.invincible_timer <= 0:
             laser_result = collision_mgr.check_player_vs_lasers(
-                player.pos[0], player.pos[1], player.hit_radius, laser_pool
+                hit_x, hit_y, player.hit_radius, laser_pool
             )
             if laser_result.occurred:
                 if player.take_damage():

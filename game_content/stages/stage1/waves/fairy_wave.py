@@ -20,7 +20,7 @@ class FairyWave(Wave):
             # 每组发射一个小圆
             self.fire_circle(
                 x=x, y=0.9,
-                count=8, speed=2.2,
+                count=8, speed=5.2,
                 start_angle=random.uniform(0, 45),
                 bullet_type="ball_s", color="green"
             )
