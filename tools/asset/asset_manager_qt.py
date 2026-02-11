@@ -42,7 +42,7 @@ from PyQt5.QtGui import (
 )
 
 # 添加项目根目录到路径，以便导入引擎模块
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # 尝试导入引擎的统一纹理系统

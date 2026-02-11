@@ -25,7 +25,9 @@ from PyQt5.QtCore import Qt, QRect
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ASSET_ROOT = PROJECT_ROOT / "assets"
 BULLET_IMAGE_DIR = ASSET_ROOT / "images" / "bullet"
+ENEMY_IMAGE_DIR = ASSET_ROOT / "images" / "enemy"
 BULLET_ALIASES_PATH = ASSET_ROOT / "bullet_aliases.json"
+ENEMY_ALIASES_PATH = ASSET_ROOT / "enemy_aliases.json"
 CONTEXT_PY_PATH = PROJECT_ROOT / "src" / "game" / "stage" / "context.py"
 PLAYERS_ROOT = ASSET_ROOT / "players"
 
@@ -377,3 +379,125 @@ def get_sprite_entry_map(atlases: Dict[str, List[SpriteEntry]]
         for e in entries:
             result[e.name] = e
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# 敌人精灵加载
+# ═══════════════════════════════════════════════════════════════
+
+def load_all_enemy_sprites(enemy_dir: Path = ENEMY_IMAGE_DIR
+                           ) -> Dict[str, List[SpriteEntry]]:
+    """
+    加载所有敌人 JSON 配置中的精灵。
+    
+    如果没有 JSON 配置，为每张独立 PNG 创建整图精灵条目。
+    
+    Returns:
+        {atlas_name: [SpriteEntry, ...]}
+    """
+    atlases: Dict[str, List[SpriteEntry]] = {}
+
+    if not enemy_dir.is_dir():
+        return atlases
+
+    # 先加载 JSON 配置
+    for json_path in sorted(enemy_dir.glob("*.json")):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+
+        atlas_name = json_path.stem
+        image_filename = (data.get("__image_filename")
+                          or data.get("texture") or "")
+        if not image_filename:
+            image_filename = atlas_name + ".png"
+        texture_path = str(enemy_dir / image_filename)
+
+        entries: List[SpriteEntry] = []
+        for spr_name, spr_info in data.get("sprites", {}).items():
+            entries.append(SpriteEntry(
+                name=spr_name,
+                atlas=atlas_name,
+                texture_path=texture_path,
+                rect=tuple(spr_info.get("rect", [0, 0, 32, 32])),
+                center=tuple(spr_info.get("center", [0, 0])),
+                radius=spr_info.get("radius", 0),
+                rotate=spr_info.get("rotate", False),
+            ))
+        atlases[atlas_name] = entries
+
+    # 为没有 JSON 的独立 PNG 自动创建单精灵条目
+    json_stems = {p.stem for p in enemy_dir.glob("*.json")}
+    # 收集 JSON 引用的纹理文件名
+    json_textures = set()
+    for entries in atlases.values():
+        for e in entries:
+            json_textures.add(Path(e.texture_path).name)
+
+    for png_path in sorted(enemy_dir.glob("*.png")):
+        if png_path.stem in json_stems:
+            continue
+        if png_path.name in json_textures:
+            continue
+        # 整图作为单个精灵
+        try:
+            from PIL import Image as _PILImage
+            img = _PILImage.open(str(png_path))
+            w, h = img.size
+        except Exception:
+            w, h = 64, 64
+        atlas_name = png_path.stem
+        sprite_name = png_path.stem
+        atlases[atlas_name] = [SpriteEntry(
+            name=sprite_name,
+            atlas=atlas_name,
+            texture_path=str(png_path),
+            rect=(0, 0, w, h),
+        )]
+
+    return atlases
+
+
+# ═══════════════════════════════════════════════════════════════
+# 敌人别名 JSON 读写
+# ═══════════════════════════════════════════════════════════════
+
+def load_enemy_aliases(path: Path = ENEMY_ALIASES_PATH
+                       ) -> Dict[str, str]:
+    """
+    读取敌人别名配置。
+    
+    Returns:
+        {alias_name: sprite_name}
+    """
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("mapping", {})
+    except Exception:
+        return {}
+
+
+def save_enemy_aliases(mapping: Dict[str, str],
+                       path: Path = ENEMY_ALIASES_PATH):
+    """
+    保存敌人别名配置到 JSON。
+    
+    格式:
+        {
+          "version": "1.0",
+          "mapping": {
+            "enemy_fairy_red": "fairy_red_idle",
+            "enemy_fairy_blue": "fairy_blue_idle",
+            ...
+          }
+        }
+    """
+    data = {"version": "1.0", "mapping": mapping}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)

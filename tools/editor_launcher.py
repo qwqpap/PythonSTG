@@ -91,7 +91,7 @@ class EditorLauncher(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("pystg 编辑器工具箱")
-        self.setFixedSize(640, 380)
+        self.setFixedSize(900, 420)
         self._processes: list = []
 
         central = QWidget()
@@ -114,29 +114,36 @@ class EditorLauncher(QMainWindow):
         layout.addSpacing(12)
 
         # 卡片网格
-        cards_layout = QHBoxLayout()
+        cards_layout = QGridLayout()
         cards_layout.setSpacing(16)
 
         # 弹幕别名管理器
         card1 = ToolCard(
             "弹幕别名", "管理弹幕类型和颜色到精灵的映射关系",
             "🎯", "#f38ba8")
-        card1.mousePressEvent = lambda e: self._launch("bullet_alias_manager.py")
-        cards_layout.addWidget(card1)
+        card1.mousePressEvent = lambda e: self._launch("bullet/bullet_alias_manager.py")
+        cards_layout.addWidget(card1, 0, 0)
 
         # 纹理资产编辑器
         card2 = ToolCard(
             "纹理编辑", "编辑精灵图集裁切区域、动画帧、激光配置",
             "🖼️", "#89b4fa")
-        card2.mousePressEvent = lambda e: self._launch("asset_manager_qt.py")
-        cards_layout.addWidget(card2)
+        card2.mousePressEvent = lambda e: self._launch("asset/asset_manager_qt.py")
+        cards_layout.addWidget(card2, 0, 1)
 
         # 自机编辑器
         card3 = ToolCard(
             "自机编辑", "编辑自机动画、射击类型、子机配置",
             "✈️", "#a6e3a1")
-        card3.mousePressEvent = lambda e: self._launch("player_editor.py")
-        cards_layout.addWidget(card3)
+        card3.mousePressEvent = lambda e: self._launch("player/player_editor.py")
+        cards_layout.addWidget(card3, 0, 2)
+
+        # 敌人别名管理器
+        card4 = ToolCard(
+            "敌人别名", "管理敌人贴图和别名映射关系",
+            "👾", "#fab387")
+        card4.mousePressEvent = lambda e: self._launch("enemy/enemy_alias_manager.py")
+        cards_layout.addWidget(card4, 1, 0)
 
         layout.addLayout(cards_layout)
         layout.addStretch()

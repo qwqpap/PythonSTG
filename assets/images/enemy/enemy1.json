@@ -1,0 +1,37 @@
+{
+  "__image_filename": "enemy1.png",
+  "sprites": {
+    "enemy_type_0_0": {
+      "rect": [
+        0,
+        0,
+        190,
+        96
+      ],
+      "center": [
+        95,
+        48
+      ]
+    }
+  },
+  "animations": {
+    "enemy_type_0": {
+      "frames": [
+        "enemy_type_0_0"
+      ],
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "zones": [
+    {
+      "name": "enemy_type_0",
+      "x": 0,
+      "y": 0,
+      "w": 190,
+      "h": 96,
+      "frame_w": 190,
+      "frame_h": 96
+    }
+  ]
+}
