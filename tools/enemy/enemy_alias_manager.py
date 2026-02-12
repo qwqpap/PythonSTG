@@ -42,6 +42,13 @@ from tools.editor_common import (
     get_all_sprite_names, get_sprite_entry_map,
 )
 
+try:
+    import cv2
+    import numpy as np
+    _HAS_CV2 = True
+except ImportError:
+    _HAS_CV2 = False
+
 
 # ═══════════════════════════════════════════════════════════════
 # SpriteThumb — 精灵缩略图（用于精灵面板中的每个精灵）
@@ -957,12 +964,345 @@ class _TextureCanvas(QWidget):
         self.update()
 
 
+# ═══════════════════════════════════════════════════════════════
+# Alpha-Channel Auto-Detection — 基于 Alpha 通道的自动精灵检测
+# ═══════════════════════════════════════════════════════════════
+
+_HSV_COLOR_TABLE = [
+    ((0, 10),   "red"),
+    ((10, 25),  "orange"),
+    ((25, 35),  "yellow"),
+    ((35, 80),  "green"),
+    ((80, 130), "blue"),
+    ((130, 160), "purple"),
+    ((160, 180), "red"),
+]
+
+
+def _detect_color_name(img_bgra, x: int, y: int, w: int, h: int) -> str:
+    """基于 HSV 色相识别区域的主色调名称。"""
+    roi = img_bgra[y:y+h, x:x+w]
+    if roi.size == 0:
+        return ""
+    alpha = roi[:, :, 3]
+    mask = alpha > 20
+    if not mask.any():
+        return ""
+    hsv = cv2.cvtColor(roi[:, :, :3], cv2.COLOR_BGR2HSV)
+    h_vals = hsv[:, :, 0][mask]
+    s_vals = hsv[:, :, 1][mask]
+    v_vals = hsv[:, :, 2][mask]
+    avg_s = float(s_vals.mean())
+    avg_v = float(v_vals.mean())
+    if avg_s < 40:
+        return "white" if avg_v > 180 else ("gray" if avg_v > 80 else "black")
+    avg_h = float(h_vals.mean())
+    for (lo, hi), name in _HSV_COLOR_TABLE:
+        if lo <= avg_h < hi:
+            return name
+    return "red"
+
+
+def _column_projection_frames(
+    full_alpha: np.ndarray,
+    row_y: int, row_h: int,
+    scan_x: int, scan_end_x: int,
+    min_frame_px: int = 6,
+) -> Tuple[int, int, int]:
+    """
+    列投影法检测帧数和帧宽。
+
+    对行条带的 Alpha 做列求和，找出内容段（不透明列的连续区间），
+    根据段间距判定帧宽、帧数。比轮廓法更适合密集多帧场景。
+
+    Returns:
+        (frame_w, n_frames, content_start_x)
+    """
+    strip = full_alpha[row_y:row_y + row_h, scan_x:scan_end_x]
+    if strip.size == 0:
+        return (scan_end_x - scan_x, 1, scan_x)
+
+    col_sum = strip.sum(axis=0).astype(np.float64)
+    thresh = max(row_h * 2.0, 10.0)
+    is_content = col_sum > thresh
+
+    # ── 找连续内容段 ──
+    segments: List[Tuple[int, int]] = []  # (start_col, end_col)
+    in_seg = False
+    seg_start = 0
+    for i in range(len(is_content)):
+        if is_content[i] and not in_seg:
+            seg_start = i
+            in_seg = True
+        elif not is_content[i] and in_seg:
+            if i - seg_start >= min_frame_px:
+                segments.append((seg_start, i))
+            in_seg = False
+    if in_seg:
+        seg_end = len(is_content)
+        if seg_end - seg_start >= min_frame_px:
+            segments.append((seg_start, seg_end))
+
+    if not segments:
+        return (scan_end_x - scan_x, 1, scan_x)
+
+    n = len(segments)
+    if n == 1:
+        seg_w = segments[0][1] - segments[0][0]
+        return (seg_w, 1, scan_x + segments[0][0])
+
+    # 段间步长
+    strides = [segments[j + 1][0] - segments[j][0] for j in range(n - 1)]
+    strides_sorted = sorted(strides)
+    median_stride = strides_sorted[len(strides_sorted) // 2]
+
+    max_seg_w = max(s[1] - s[0] for s in segments)
+    frame_w = max(median_stride, max_seg_w)
+
+    return (frame_w, n, scan_x + segments[0][0])
+
+
+def _align_zones(zones: List[_ZoneInfo]) -> List[_ZoneInfo]:
+    """
+    对齐一组 zone：统一 frame_w / frame_h / x / w。
+
+    同一次框选产生的多行应保持一致的帧尺寸、起始位置和总宽度。
+    """
+    if len(zones) <= 1:
+        return zones
+
+    from statistics import median as _median
+
+    # 帧宽：中位数，四舍五入到偶数
+    raw_fw = _median([z.frame_w for z in zones])
+    med_fw = max(4, int(round(raw_fw / 2.0)) * 2)
+
+    # 帧高：取最大值（防裁剪）
+    max_fh = max(z.frame_h for z in zones)
+
+    # 公共 X 起点（最小值）
+    min_x = min(z.x for z in zones)
+
+    # 帧数：各行帧数取最大
+    max_cols = max(max(1, round(z.w / med_fw)) for z in zones)
+    zone_w = med_fw * max_cols
+
+    zones.sort(key=lambda z: z.y)
+
+    for z in zones:
+        z.frame_w = med_fw
+        z.frame_h = max_fh
+        z.x = min_x
+        z.w = zone_w
+        z.h = max_fh
+
+    return zones
+
+
+def _group_align_zones(zones: List[_ZoneInfo]) -> List[_ZoneInfo]:
+    """
+    按相似帧尺寸分组，组内对齐。
+
+    整图检测时不同敌人类型有不同帧大小，不能全局对齐。
+    先把 frame_w 和 frame_h 相近的行归为一组，再组内调用 _align_zones。
+    """
+    if len(zones) <= 1:
+        return zones
+
+    # 按 (frame_w, frame_h) 相似度归组
+    # 允许 ±30% 的偏差视为同组
+    groups: List[List[_ZoneInfo]] = []
+    used = [False] * len(zones)
+
+    for i in range(len(zones)):
+        if used[i]:
+            continue
+        group = [zones[i]]
+        used[i] = True
+        fw_ref = zones[i].frame_w
+        fh_ref = zones[i].frame_h
+        for j in range(i + 1, len(zones)):
+            if used[j]:
+                continue
+            fw_ratio = zones[j].frame_w / fw_ref if fw_ref else 0
+            fh_ratio = zones[j].frame_h / fh_ref if fh_ref else 0
+            if 0.7 <= fw_ratio <= 1.4 and 0.7 <= fh_ratio <= 1.4:
+                group.append(zones[j])
+                used[j] = True
+        groups.append(group)
+
+    # 组内对齐
+    result: List[_ZoneInfo] = []
+    for group in groups:
+        if len(group) > 1:
+            group = _align_zones(group)
+        result.extend(group)
+
+    # 按 y 排序 + 重新编号
+    result.sort(key=lambda z: z.y)
+    for idx, z in enumerate(result):
+        parts = z.name.rsplit("_", 1)
+        color_sfx = parts[1] if len(parts) == 2 and parts[1] in (
+            "red", "orange", "yellow", "green",
+            "blue", "purple", "white", "gray", "black") else ""
+        z.name = f"anim_{idx}_{color_sfx}" if color_sfx else f"anim_{idx}"
+
+    return result
+
+
+def _auto_detect_zones_in_region(
+    png_path: str,
+    region: Optional[Tuple[int, int, int, int]] = None,
+    alpha_thresh: int = 10,
+    min_sprite_px: int = 6,
+    align: bool = True,
+) -> List[_ZoneInfo]:
+    """
+    基于 Alpha 通道连通域 + 列投影法，自动识别精灵行。
+
+    算法:
+      1. Alpha 掩码 → cv2.findContours → 包围盒
+      2. 按 Y 邻近度分组为行
+      3. 列投影法细化每行的帧宽/帧数（解决密集多帧问题）
+      4. 对齐：统一 frame_w / frame_h / x（解决行间不齐问题）
+      5. HSV 色相命名
+
+    Returns:
+        按从上到下排列的 _ZoneInfo 列表
+    """
+    if not _HAS_CV2:
+        return []
+
+    img = cv2.imread(png_path, cv2.IMREAD_UNCHANGED)
+    if img is None or len(img.shape) < 3 or img.shape[2] < 4:
+        return []
+
+    full_img = img
+    full_alpha = img[:, :, 3]
+    ox, oy = 0, 0
+    if region:
+        rx, ry, rw, rh = region
+        ox, oy = rx, ry
+        img = img[ry:ry + rh, rx:rx + rw]
+
+    alpha = img[:, :, 3]
+    _, mask = cv2.threshold(alpha, alpha_thresh, 255, cv2.THRESH_BINARY)
+
+    # 连通域包围盒
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                    cv2.CHAIN_APPROX_SIMPLE)
+    bboxes = []
+    for cnt in contours:
+        bx, by, bw, bh = cv2.boundingRect(cnt)
+        if bw >= min_sprite_px and bh >= min_sprite_px:
+            bboxes.append((bx + ox, by + oy, bw, bh))
+
+    if not bboxes:
+        return []
+
+    bboxes.sort(key=lambda b: (b[1], b[0]))
+
+    # ── 分行（Y 邻近度） ──
+    rows: List[List[Tuple[int, int, int, int]]] = []
+    cur_row = [bboxes[0]]
+    for bb in bboxes[1:]:
+        ref_y = sum(b[1] for b in cur_row) / len(cur_row)
+        ref_h = sum(b[3] for b in cur_row) / len(cur_row)
+        if abs(bb[1] - ref_y) < ref_h * 0.5:
+            cur_row.append(bb)
+        else:
+            rows.append(cur_row)
+            cur_row = [bb]
+    rows.append(cur_row)
+
+    # ── 每行 → zone ──
+    zones: List[_ZoneInfo] = []
+    for i, row_bbs in enumerate(rows):
+        row_bbs.sort(key=lambda b: b[0])
+        min_x = min(b[0] for b in row_bbs)
+        min_y = min(b[1] for b in row_bbs)
+        max_r = max(b[0] + b[2] for b in row_bbs)
+        max_b = max(b[1] + b[3] for b in row_bbs)
+        row_h = max_b - min_y
+
+        # 列投影法精确检测帧宽/帧数
+        proj_fw, proj_n, proj_x = _column_projection_frames(
+            full_alpha, min_y, row_h, min_x, max_r, min_sprite_px)
+
+        # contour 法作为参考
+        n_contour = len(row_bbs)
+
+        # 当列投影和轮廓法都给出结果时，优先信任帧数更多的一方
+        # （轮廓可能合并 → 帧数少；投影可能误切 → 但很少）
+        if proj_n >= n_contour:
+            frame_w = proj_fw
+            n_frames = proj_n
+            start_x = proj_x
+        else:
+            # 轮廓法检测到更多帧 → 用轮廓法步长
+            max_bw = max(b[2] for b in row_bbs)
+            if n_contour >= 2:
+                strides = [row_bbs[j + 1][0] - row_bbs[j][0]
+                           for j in range(n_contour - 1)]
+                strides_sorted = sorted(strides)
+                stride = strides_sorted[len(strides_sorted) // 2]
+                frame_w = max(stride, max_bw)
+            else:
+                frame_w = max_bw
+            n_frames = n_contour
+            start_x = min_x
+
+        zone_w = frame_w * n_frames
+        frame_h = row_h
+
+        # 颜色
+        color = ""
+        try:
+            color = _detect_color_name(full_img, min_x, min_y,
+                                       max_r - min_x, max_b - min_y)
+        except Exception:
+            pass
+
+        name = f"anim_{i}_{color}" if color else f"anim_{i}"
+
+        zones.append(_ZoneInfo(
+            name=name, x=start_x, y=min_y,
+            w=zone_w, h=frame_h,
+            frame_w=frame_w, frame_h=frame_h,
+        ))
+
+    # ── 过滤噪声行 ──
+    # 高度远小于中位数的行通常是误检（比如边缘伪影）
+    if len(zones) >= 2:
+        from statistics import median as _med
+        med_h = _med([z.frame_h for z in zones])
+        zones = [z for z in zones if z.frame_h >= med_h * 0.3]
+
+    # ── 对齐 ──
+    if align and len(zones) > 1:
+        zones = _align_zones(zones)
+        # 重新赋名（对齐后 index 不变，仅更新名称里的编号）
+        for idx, z in enumerate(zones):
+            # 保留颜色后缀
+            parts = z.name.rsplit("_", 1)
+            color_sfx = parts[1] if len(parts) == 2 and parts[1] in (
+                "red", "orange", "yellow", "green",
+                "blue", "purple", "white", "gray", "black") else ""
+            z.name = f"anim_{idx}_{color_sfx}" if color_sfx else f"anim_{idx}"
+
+    return zones
+
+
 class _AtlasZoneDialog(QDialog):
     """
     区域式精灵图集切割对话框。
 
     在纹理上拖拽绘制矩形区域来定义敌人类型。每个区域包含该敌人
     的水平动画帧行，用户可调整帧大小 (frame_w × frame_h)。
+
+    支持基于 Alpha 通道的自动检测：
+      - 框选区域 → 自动识别行 → 自动分割帧 + 颜色标注
+      - 一键检测整图
 
     输出::
         sprites   {sprite_name: {rect, center}}
@@ -997,6 +1337,18 @@ class _AtlasZoneDialog(QDialog):
         self._zoom_cb.setCurrentText("100%")
         self._zoom_cb.currentTextChanged.connect(self._on_zoom)
         bar.addWidget(self._zoom_cb)
+
+        bar.addWidget(QLabel("  "))
+        auto_full_btn = QPushButton("🔮 自动检测整图")
+        auto_full_btn.setToolTip(
+            "基于 Alpha 通道自动检测整张纹理中所有精灵行")
+        auto_full_btn.clicked.connect(self._auto_detect_full)
+        bar.addWidget(auto_full_btn)
+
+        clear_all_btn = QPushButton("🗑 清空全部")
+        clear_all_btn.clicked.connect(self._clear_all_zones)
+        bar.addWidget(clear_all_btn)
+
         root.addLayout(bar)
 
         # ── main split ────────────────────────────────────
@@ -1077,9 +1429,13 @@ class _AtlasZoneDialog(QDialog):
         root.addWidget(split)
 
         # hint
-        hint = QLabel(
-            "💡 在纹理上拖拽绘制矩形区域，每个区域 = 一种敌人动画帧行。"
-            " 调整「帧大小」来指定每帧宽高，帧从左到右排列。")
+        hint_text = (
+            "💡 操作方式:\n"
+            "  ① 点击「自动检测整图」一键识别所有精灵行\n"
+            "  ② 或在纹理上拖拽框选区域 → 自动检测该区域内的精灵行\n"
+            "  ③ 检测基于 Alpha 通道，每行 = 一个动画序列，自动标注颜色"
+        )
+        hint = QLabel(hint_text)
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #89b4fa; font-size: 11px;")
         root.addWidget(hint)
@@ -1126,14 +1482,92 @@ class _AtlasZoneDialog(QDialog):
         val = int(text.replace("%", "")) / 100.0
         self._canvas.set_scale(val)
 
-    # ── zone 绘制 ─────────────────────────────────────────
+    # ── zone 绘制 (含自动检测) ────────────────────────────
     def _on_zone_drawn(self, x, y, w, h):
+        """框选区域时自动检测其中的精灵行。"""
+        if _HAS_CV2:
+            detected = _auto_detect_zones_in_region(
+                self._png_path, region=(x, y, w, h))
+            if detected:
+                start = len(self._zones)
+                # 重编号名称前缀
+                base_idx = start
+                for dz in detected:
+                    dz.name = f"anim_{base_idx}_{dz.name.split('_', 2)[-1]}" \
+                        if '_' in dz.name else f"anim_{base_idx}"
+                    # 保留颜色后缀，简化前缀
+                    parts = dz.name.rsplit('_', 1)
+                    if len(parts) == 2 and parts[1] in (
+                        'red', 'orange', 'yellow', 'green',
+                        'blue', 'purple', 'white', 'gray', 'black',
+                    ):
+                        dz.name = f"anim_{base_idx}_{parts[1]}"
+                    else:
+                        dz.name = f"anim_{base_idx}"
+                    base_idx += 1
+                self._zones.extend(detected)
+                self._refresh_list()
+                self._select_zone(start)
+                return
+
+        # Fallback: 手动创建单区域
         idx = len(self._zones)
         name = f"enemy_type_{idx}"
         zone = _ZoneInfo(name, x, y, w, h, frame_w=w, frame_h=h)
         self._zones.append(zone)
         self._refresh_list()
         self._select_zone(idx)
+
+    def _auto_detect_full(self):
+        """自动检测整张纹理中所有精灵行。"""
+        if not _HAS_CV2:
+            QMessageBox.warning(
+                self, "缺少依赖",
+                "自动检测需要 OpenCV。\n"
+                "请安装: pip install opencv-python")
+            return
+
+        # 整图检测不做全局对齐（不同敌人类型帧大小本就不同）
+        # 改为按相似帧尺寸分组后，组内对齐
+        detected = _auto_detect_zones_in_region(
+            self._png_path, align=False)
+        if not detected:
+            QMessageBox.information(
+                self, "未检测到",
+                "未在纹理中检测到精灵（Alpha 通道无不透明区域）。")
+            return
+
+        # 按相似 frame_w/frame_h 分组，组内对齐
+        detected = _group_align_zones(detected)
+
+        if self._zones:
+            reply = QMessageBox.question(
+                self, "替换确认",
+                f"已有 {len(self._zones)} 个区域，"
+                f"检测到 {len(detected)} 个新区域。\n替换全部？",
+                QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+
+        self._zones = detected
+        self._refresh_list()
+        if self._zones:
+            self._select_zone(0)
+
+    def _clear_all_zones(self):
+        """清空所有区域。"""
+        if not self._zones:
+            return
+        reply = QMessageBox.question(
+            self, "确认清空",
+            f"确认删除全部 {len(self._zones)} 个区域？",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self._zones.clear()
+            self._sel = -1
+            self._refresh_list()
+            self._canvas.set_selected(-1)
+            self._set_editor_enabled(False)
 
     # ── 选择 ──────────────────────────────────────────────
     def _select_zone(self, idx: int):

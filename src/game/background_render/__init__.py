@@ -68,6 +68,8 @@ from .data_driven_background import (
     list_available_backgrounds,
 )
 
+from .scene import BackgroundScene
+
 __all__ = [
     # 渲染器
     'BackgroundRenderer',
@@ -104,4 +106,6 @@ __all__ = [
     'ScrollConfig',
     'DataLayerConfig',
     'list_available_backgrounds',
+    # 场景系统 (推荐用于关卡脚本)
+    'BackgroundScene',
 ]

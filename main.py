@@ -101,7 +101,7 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
     return textures, sprite_uv_map
 
 
-def initialize_game_objects(audio_manager=None):
+def initialize_game_objects(audio_manager=None, background_renderer=None):
     """初始化游戏对象（玩家、子弹池、关卡管理器等）"""
     # 使用 Tenshi 角色（通过配置和脚本加载）
     player = load_player("tenshi")
@@ -121,7 +121,13 @@ def initialize_game_objects(audio_manager=None):
     # stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
     # stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
     # stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
-    stage_manager.add_coroutine(lambda: stage1_level(stage_manager, bullet_pool, player, audio_manager=audio_manager))
+    stage_manager.add_coroutine(lambda: stage1_level(
+        stage_manager,
+        bullet_pool,
+        player,
+        audio_manager=audio_manager,
+        background_renderer=background_renderer
+    ))
     
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
@@ -210,7 +216,8 @@ def main():
     
     # 初始化游戏对象
     player, bullet_pool, laser_pool, item_pool, stage_manager = initialize_game_objects(
-        audio_manager=audio_manager
+        audio_manager=audio_manager,
+        background_renderer=background_renderer
     )
     
     # 游戏主循环

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-弹幕背景可视化编辑器
+弹幕背景可视化编辑器 v2
 
 功能:
-- 编辑多图层背景配置
-- 3D摄像机参数调整
-- 雾效配置
-- 滚动和视差效果预览
-- 实时预览背景效果
-- 导出背景配置JSON
+- 自动扫描 assets/images/background 文件树
+- 实时3D透视预览（与游戏引擎一致的投影）
+- 参数修改自动刷新
+- 兼容 data_driven_background JSON 格式
+- 导出可复用的场景代码
 """
 
 import sys
@@ -17,814 +16,1369 @@ import json
 import math
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
-from dataclasses import dataclass, field, asdict
+
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QTreeWidget, QTreeWidgetItem, QListWidget, QListWidgetItem,
+    QSplitter, QTreeWidget, QTreeWidgetItem, QListWidget,
     QLabel, QPushButton, QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox,
-    QComboBox, QGroupBox, QFormLayout, QScrollArea, QFrame, QTabWidget,
-    QFileDialog, QMessageBox, QToolBar, QAction, QStatusBar, QSlider,
-    QColorDialog, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-    QGraphicsRectItem
+    QComboBox, QGroupBox, QFormLayout, QScrollArea, QTabWidget,
+    QFileDialog, QMessageBox, QSlider, QSizePolicy,
+    QColorDialog, QAction, QHeaderView
 )
-from PyQt5.QtCore import Qt, QTimer, QRectF, QPointF, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QPointF, pyqtSignal, QFileSystemWatcher
 from PyQt5.QtGui import (
-    QPixmap, QImage, QPainter, QColor, QPen, QBrush, QFont, 
-    QIcon, QKeySequence, QTransform, QLinearGradient
+    QPixmap, QImage, QPainter, QColor, QPen, QBrush,
+    QPolygonF, QTransform
 )
 
-# 项目路径
+# ==================== 路径常量 ====================
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 ASSETS_ROOT = PROJECT_ROOT / "assets"
-IMAGES_ROOT = ASSETS_ROOT / "images" / "background"
+BG_ROOT = ASSETS_ROOT / "images" / "background"
 
 
-# ==================== 数据模型 ====================
+# ==================== 3D 数学工具 ====================
 
-@dataclass
-class TextureConfig:
-    """纹理配置"""
-    name: str
-    path: str
-    rect: Optional[Tuple[int, int, int, int]] = None
-    blend_mode: str = "normal"
-    alpha: float = 1.0
+def _look_at(eye, at, up):
+    """构建 look-at 视图矩阵 (4x4)"""
+    eye = np.array(eye, dtype=np.float64)
+    at = np.array(at, dtype=np.float64)
+    up = np.array(up, dtype=np.float64)
 
+    f = at - eye
+    f_len = np.linalg.norm(f)
+    if f_len < 1e-8:
+        return np.eye(4)
+    f /= f_len
 
-@dataclass
-class Camera3DConfig:
-    """3D摄像机配置"""
-    eye_x: float = 0.0
-    eye_y: float = 0.0
-    eye_z: float = -1.0
-    at_x: float = 0.0
-    at_y: float = 0.0
-    at_z: float = 0.0
-    up_x: float = 0.0
-    up_y: float = 1.0
-    up_z: float = 0.0
-    fovy: float = 0.6
-    z_near: float = 0.01
-    z_far: float = 10.0
+    s = np.cross(f, up)
+    s_len = np.linalg.norm(s)
+    if s_len < 1e-8:
+        alt = np.array([0.0, 1.0, 0.0]) if abs(f[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+        s = np.cross(f, alt)
+        s /= np.linalg.norm(s)
+    else:
+        s /= s_len
 
+    u = np.cross(s, f)
 
-@dataclass
-class FogConfig:
-    """雾效配置"""
-    enabled: bool = True
-    start: float = 3.0
-    end: float = 6.0
-    color_r: int = 0
-    color_g: int = 0
-    color_b: int = 0
-    color_a: int = 255
+    M = np.eye(4)
+    M[0, :3] = s
+    M[1, :3] = u
+    M[2, :3] = -f
+    M[0, 3] = -np.dot(s, eye)
+    M[1, 3] = -np.dot(u, eye)
+    M[2, 3] = np.dot(f, eye)
+    return M
 
 
-@dataclass
-class LayerConfig:
-    """图层配置"""
-    name: str = "layer"
-    texture: str = ""
-    z_order: int = 0
-    scroll_x: float = 0.0
-    scroll_y: float = 0.0
-    parallax: float = 1.0
-    alpha: float = 1.0
-    blend_mode: str = "normal"
-    tile_x: int = 1
-    tile_y: int = 1
-    use_3d: bool = False
+def _perspective(fovy, aspect, z_near, z_far):
+    """构建透视投影矩阵 (4x4)"""
+    f = 1.0 / max(np.tan(fovy / 2.0), 1e-6)
+    M = np.zeros((4, 4))
+    M[0, 0] = f / max(aspect, 1e-6)
+    M[1, 1] = f
+    denom = z_near - z_far
+    if abs(denom) < 1e-8:
+        denom = -1.0
+    M[2, 2] = (z_far + z_near) / denom
+    M[2, 3] = (2.0 * z_far * z_near) / denom
+    M[3, 2] = -1.0
+    return M
 
 
-@dataclass
-class BackgroundData:
-    """背景数据"""
-    name: str = "新背景"
-    description: str = ""
-    textures: List[TextureConfig] = field(default_factory=list)
-    camera: Camera3DConfig = field(default_factory=Camera3DConfig)
-    fog: FogConfig = field(default_factory=FogConfig)
-    layers: List[LayerConfig] = field(default_factory=list)
-    scroll_speed: float = 0.01
+def _project(mvp, x, y, z, sw, sh):
+    """将 3D 世界坐标投影到屏幕坐标, 返回 (sx, sy) 或 None"""
+    p = mvp @ np.array([x, y, z, 1.0])
+    if p[3] <= 0.001:
+        return None
+    p /= p[3]
+    sx = (p[0] + 1.0) / 2.0 * sw
+    sy = (1.0 - p[1]) / 2.0 * sh
+    return (sx, sy)
 
 
-# ==================== 预览视图 ====================
+# ==================== 背景预览控件 ====================
 
-class BackgroundPreviewView(QGraphicsView):
-    """背景预览视图"""
-    
+class BackgroundPreview(QWidget):
+    """带 3D 透视效果的背景预览控件"""
+
+    PREVIEW_W = 384
+    PREVIEW_H = 448
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.scene = QGraphicsScene()
-        self.setScene(self.scene)
-        
-        self.setRenderHint(QPainter.Antialiasing)
-        self.setRenderHint(QPainter.SmoothPixmapTransform)
-        self.setMinimumSize(400, 500)
-        
-        # 预览区域尺寸
-        self.preview_width = 384
-        self.preview_height = 448
-        
-        # 当前数据
-        self.bg_data: Optional[BackgroundData] = None
-        self.loaded_textures: Dict[str, QPixmap] = {}
-        self.layer_items: List[QGraphicsPixmapItem] = []
-        
-        # 动画状态
-        self.scroll_offset = 0.0
-        self.animation_running = False
-        
+        self.setMinimumSize(400, 470)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.config: Optional[dict] = None
+        self.textures: Dict[str, QPixmap] = {}
+        self.scroll_offset: float = 0.0
+        self.animating: bool = False
+        self._mvp = None
+        self._dirty_mvp = True
+
         self.timer = QTimer()
-        self.timer.timeout.connect(self._update_animation)
-        
-        # 绘制边界
-        self._draw_boundary()
-    
-    def _draw_boundary(self):
-        """绘制预览边界"""
-        # 背景
-        self.scene.setBackgroundBrush(QBrush(QColor(20, 20, 30)))
-        
-        # 游戏区域边框
-        pen = QPen(QColor(100, 100, 150), 2)
-        self.scene.addRect(0, 0, self.preview_width, self.preview_height, pen)
-    
-    def set_background_data(self, data: BackgroundData):
-        """设置背景数据"""
-        self.bg_data = data
+        self.timer.timeout.connect(self._tick)
+
+        self.buffer = QImage(self.PREVIEW_W, self.PREVIEW_H, QImage.Format_ARGB32)
+        self.buffer.fill(QColor(20, 20, 30))
+
+    # ---------- 公共接口 ----------
+
+    def set_config(self, config: dict):
+        self.config = config
+        self._dirty_mvp = True
         self._load_textures()
-        self._refresh_preview()
-    
-    def _load_textures(self):
-        """加载纹理"""
-        if not self.bg_data:
-            return
-        
-        self.loaded_textures.clear()
-        
-        for tex in self.bg_data.textures:
-            path = IMAGES_ROOT / tex.path
-            if path.exists():
-                pixmap = QPixmap(str(path))
-                self.loaded_textures[tex.name] = pixmap
-    
-    def _refresh_preview(self):
-        """刷新预览"""
-        # 清除旧图层
-        for item in self.layer_items:
-            self.scene.removeItem(item)
-        self.layer_items.clear()
-        
-        if not self.bg_data:
-            return
-        
-        # 绘制雾效背景
-        if self.bg_data.fog.enabled:
-            fog_color = QColor(
-                self.bg_data.fog.color_r,
-                self.bg_data.fog.color_g,
-                self.bg_data.fog.color_b,
-                self.bg_data.fog.color_a
-            )
-            fog_rect = self.scene.addRect(
-                0, 0, self.preview_width, self.preview_height,
-                QPen(Qt.NoPen), QBrush(fog_color)
-            )
-            fog_rect.setZValue(-100)
-        
-        # 按z_order排序绘制图层
-        sorted_layers = sorted(self.bg_data.layers, key=lambda l: l.z_order)
-        
-        for layer in sorted_layers:
-            if layer.texture not in self.loaded_textures:
-                continue
-            
-            pixmap = self.loaded_textures[layer.texture]
-            
-            # 计算滚动偏移
-            offset_x = (self.scroll_offset * layer.scroll_x * layer.parallax) % pixmap.width()
-            offset_y = (self.scroll_offset * layer.scroll_y * layer.parallax) % pixmap.height()
-            
-            # 平铺
-            for tx in range(layer.tile_x):
-                for ty in range(layer.tile_y):
-                    item = QGraphicsPixmapItem(pixmap)
-                    item.setPos(
-                        tx * pixmap.width() - offset_x,
-                        ty * pixmap.height() - offset_y
-                    )
-                    item.setOpacity(layer.alpha)
-                    item.setZValue(layer.z_order)
-                    
-                    self.scene.addItem(item)
-                    self.layer_items.append(item)
-    
+        self.render_frame()
+
+    def invalidate_mvp(self):
+        self._dirty_mvp = True
+
     def start_animation(self):
-        """开始动画"""
-        self.animation_running = True
+        self.animating = True
         self.timer.start(16)
-    
+
     def stop_animation(self):
-        """停止动画"""
-        self.animation_running = False
+        self.animating = False
         self.timer.stop()
-    
-    def _update_animation(self):
-        """更新动画"""
-        if self.bg_data:
-            self.scroll_offset += self.bg_data.scroll_speed * 60
-            self._refresh_preview()
+
+    def reset_scroll(self):
+        self.scroll_offset = 0.0
+        self.render_frame()
+
+    # ---------- 内部方法 ----------
+
+    def _load_textures(self):
+        self.textures.clear()
+        if not self.config:
+            return
+        for name, tex_info in self.config.get("textures", {}).items():
+            path = BG_ROOT / tex_info.get("path", "")
+            if path.exists():
+                pix = QPixmap(str(path))
+                if not pix.isNull():
+                    self.textures[name] = pix
+
+    def _build_mvp(self):
+        if not self.config or not HAS_NUMPY:
+            self._mvp = np.eye(4) if HAS_NUMPY else None
+            return
+        cam = self.config.get("camera", {})
+        V = _look_at(cam.get("eye", [0, 0, 1]),
+                      cam.get("at", [0, 0, 0]),
+                      cam.get("up", [0, 1, 0]))
+        P = _perspective(cam.get("fovy", 0.8),
+                          self.PREVIEW_W / self.PREVIEW_H,
+                          cam.get("z_near", 0.1),
+                          cam.get("z_far", 10.0))
+        self._mvp = P @ V
+        self._dirty_mvp = False
+
+    def render_frame(self):
+        if self._dirty_mvp:
+            self._build_mvp()
+
+        self.buffer.fill(QColor(0, 0, 0, 255))
+        if not self.config:
+            self.update()
+            return
+
+        # 雾底色
+        fog = self.config.get("fog", {})
+        fog_enabled = fog.get("enabled", False)
+        fog_color_vals = fog.get("color", [0, 0, 0, 255])
+        if fog_enabled:
+            self.buffer.fill(QColor(fog_color_vals[0], fog_color_vals[1],
+                                     fog_color_vals[2], 255))
+
+        painter = QPainter(self.buffer)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        layers = sorted(self.config.get("layers", []),
+                         key=lambda l: l.get("z_order", 0))
+
+        # 雾效参数
+        fog_start = fog.get("start", 0)
+        fog_end = fog.get("end", 10)
+        cam_cfg = self.config.get("camera", {})
+        cam_eye = np.array(cam_cfg.get("eye", [0, 0, 1])) if HAS_NUMPY else None
+        cam_at = np.array(cam_cfg.get("at", [0, 0, 0])) if HAS_NUMPY else None
+        cam_fwd = None
+        if HAS_NUMPY and cam_eye is not None and cam_at is not None:
+            fwd = cam_at - cam_eye
+            fl = np.linalg.norm(fwd)
+            cam_fwd = fwd / fl if fl > 1e-6 else np.array([0, 0, -1])
+
+        for layer_cfg in layers:
+            if not layer_cfg.get("enabled", True):
+                continue
+            tex_name = layer_cfg.get("texture", "")
+            if tex_name not in self.textures:
+                continue
+            pix = self.textures[tex_name]
+            alpha = layer_cfg.get("alpha", 1.0)
+            blend = layer_cfg.get("blend_mode", "normal")
+            z_depth = layer_cfg.get("z_depth", 0.0)
+            scroll_mul = layer_cfg.get("scroll_multiplier", 1.0)
+
+            tile_cfg = layer_cfg.get("tile", {})
+            x_range = tile_cfg.get("x_range", [-1, 1])
+            y_range = tile_cfg.get("y_range", [-4, 7])
+            tile_size = tile_cfg.get("size", 1.0)
+
+            # 雾效衰减
+            fog_factor = 0.0
+            if fog_enabled and fog_end > fog_start and HAS_NUMPY and cam_fwd is not None:
+                tc = np.array([0, 0, z_depth])
+                depth = abs(np.dot(tc - cam_eye, cam_fwd))
+                fog_factor = float(np.clip(
+                    (depth - fog_start) / (fog_end - fog_start), 0, 1))
+            effective_alpha = alpha * (1.0 - fog_factor * 0.8)
+
+            # 混合模式
+            if blend == "add":
+                painter.setCompositionMode(QPainter.CompositionMode_Plus)
+            elif blend == "multiply":
+                painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+            else:
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+            scroll_y = self.scroll_offset * scroll_mul
+            self._render_tiles(painter, pix, z_depth, tile_size,
+                               x_range, y_range, scroll_y, (0, 0),
+                               effective_alpha)
+
+            for variant in layer_cfg.get("variants", []):
+                vs = self.scroll_offset * variant.get("scroll_multiplier", 1.0)
+                vo = variant.get("offset", [0, 0])
+                self._render_tiles(painter, pix, z_depth, tile_size,
+                                   x_range, y_range, vs, vo, effective_alpha)
+
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+        # 边框
+        painter.setPen(QPen(QColor(100, 100, 150, 180), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(0, 0, self.PREVIEW_W - 1, self.PREVIEW_H - 1)
+        painter.end()
+        self.update()
+
+    def _render_tiles(self, painter, pix, z_depth, tile_size,
+                      x_range, y_range, scroll_y, offset, alpha):
+        if tile_size <= 0:
+            return
+        tw, th = pix.width(), pix.height()
+        if tw <= 0 or th <= 0:
+            return
+        y_scroll = (scroll_y % tile_size) if tile_size > 0 else 0.0
+
+        if HAS_NUMPY and self._mvp is not None:
+            self._render_tiles_3d(painter, pix, tw, th, z_depth, tile_size,
+                                  x_range, y_range, y_scroll, offset, alpha)
+        else:
+            self._render_tiles_2d(painter, pix, tw, th, tile_size,
+                                  x_range, y_range, y_scroll, offset, alpha)
+
+    def _render_tiles_3d(self, painter, pix, tw, th, z_depth, tile_size,
+                         x_range, y_range, y_scroll, offset, alpha):
+        """3D 透视渲染"""
+        mvp = self._mvp
+        pw, ph = self.PREVIEW_W, self.PREVIEW_H
+        src_quad = QPolygonF([QPointF(0, 0), QPointF(tw, 0),
+                              QPointF(tw, th), QPointF(0, th)])
+
+        for i in range(x_range[0], x_range[1]):
+            for j in range(y_range[0], y_range[1]):
+                x0 = i * tile_size + offset[0]
+                x1 = (i + 1) * tile_size + offset[0]
+                y0 = (j - y_scroll) * tile_size + offset[1]
+                y1 = (j + 1 - y_scroll) * tile_size + offset[1]
+                z = z_depth
+
+                corners = [
+                    _project(mvp, x0, y0, z, pw, ph),
+                    _project(mvp, x1, y0, z, pw, ph),
+                    _project(mvp, x1, y1, z, pw, ph),
+                    _project(mvp, x0, y1, z, pw, ph),
+                ]
+                if any(c is None for c in corners):
+                    continue
+
+                # 面积检查 (跳过退化四边形)
+                d1 = (corners[2][0] - corners[0][0],
+                      corners[2][1] - corners[0][1])
+                d2 = (corners[3][0] - corners[1][0],
+                      corners[3][1] - corners[1][1])
+                area = abs(d1[0] * d2[1] - d1[1] * d2[0]) / 2
+                if area < 2:
+                    continue
+
+                # 视口裁剪
+                xs = [c[0] for c in corners]
+                ys = [c[1] for c in corners]
+                if max(xs) < -100 or min(xs) > pw + 100:
+                    continue
+                if max(ys) < -100 or min(ys) > ph + 100:
+                    continue
+
+                dst_quad = QPolygonF([QPointF(c[0], c[1]) for c in corners])
+                transform = QTransform()
+                if QTransform.quadToQuad(src_quad, dst_quad, transform):
+                    painter.save()
+                    painter.setTransform(transform)
+                    painter.setOpacity(alpha)
+                    painter.drawPixmap(0, 0, pix)
+                    painter.restore()
+
+    def _render_tiles_2d(self, painter, pix, tw, th, tile_size,
+                         x_range, y_range, y_scroll, offset, alpha):
+        """2D 后备渲染 (无 numpy 时)"""
+        scale = min(self.PREVIEW_W, self.PREVIEW_H) / max(
+            (x_range[1] - x_range[0]) * tile_size,
+            (y_range[1] - y_range[0]) * tile_size, 1)
+        painter.setOpacity(alpha)
+        cx = self.PREVIEW_W / 2
+        x_mid = (x_range[0] + x_range[1]) / 2.0
+        for i in range(x_range[0], x_range[1]):
+            for j in range(y_range[0], y_range[1]):
+                x = (i - x_mid + offset[0]) * scale + cx
+                y = (j - y_scroll + offset[1]) * scale
+                w = tile_size * scale
+                h = tile_size * scale
+                painter.drawPixmap(int(x), int(y), int(w), int(h), pix)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        scale = min(w / self.PREVIEW_W, h / self.PREVIEW_H)
+        pw = int(self.PREVIEW_W * scale)
+        ph = int(self.PREVIEW_H * scale)
+        x = (w - pw) // 2
+        y = (h - ph) // 2
+        p.fillRect(self.rect(), QColor(20, 20, 30))
+        p.drawImage(x, y, self.buffer.scaled(
+            pw, ph, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def _tick(self):
+        if self.config:
+            speed = self.config.get("scroll", {}).get("base_speed", 0.003)
+            self.scroll_offset += speed * 0.016
+            self.render_frame()
+
+
+# ==================== 文件树面板 ====================
+
+class FileTreePanel(QWidget):
+    """自动扫描 assets/images/background 的文件树"""
+
+    config_selected = pyqtSignal(str)
+    image_selected = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+        self._setup_watcher()
+        self.refresh_tree()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        header = QHBoxLayout()
+        title = QLabel("背景资源")
+        title.setStyleSheet("font-size: 11pt; font-weight: bold; color: #ddd;")
+        header.addWidget(title)
+        btn_refresh = QPushButton("🔄")
+        btn_refresh.setFixedWidth(30)
+        btn_refresh.setToolTip("刷新文件树")
+        btn_refresh.clicked.connect(self.refresh_tree)
+        header.addWidget(btn_refresh)
+        layout.addLayout(header)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["名称", "信息"])
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.tree.setAnimated(True)
+        self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        layout.addWidget(self.tree)
+
+        # 缩略图预览
+        thumb_group = QGroupBox("图片预览")
+        thumb_layout = QVBoxLayout(thumb_group)
+        self.thumbnail = QLabel()
+        self.thumbnail.setFixedSize(200, 160)
+        self.thumbnail.setAlignment(Qt.AlignCenter)
+        self.thumbnail.setStyleSheet(
+            "background-color: #1a1a1a; border: 1px solid #333;")
+        self.thumbnail.setText("选择图片查看")
+        thumb_layout.addWidget(self.thumbnail)
+        self.thumb_info = QLabel("")
+        self.thumb_info.setStyleSheet("color: #888; font-size: 9pt;")
+        thumb_layout.addWidget(self.thumb_info)
+        layout.addWidget(thumb_group)
+
+    def _setup_watcher(self):
+        self.watcher = QFileSystemWatcher()
+        if BG_ROOT.exists():
+            self.watcher.addPath(str(BG_ROOT))
+            for sub in BG_ROOT.iterdir():
+                if sub.is_dir():
+                    self.watcher.addPath(str(sub))
+        self.watcher.directoryChanged.connect(lambda _: self.refresh_tree())
+
+    def refresh_tree(self):
+        self.tree.clear()
+        if not BG_ROOT.exists():
+            QTreeWidgetItem(self.tree, ["(目录不存在)", ""])
+            return
+
+        # 场景配置 (.json)
+        jsons = sorted(BG_ROOT.glob("*.json"))
+        if jsons:
+            root = QTreeWidgetItem(self.tree,
+                                   ["📁 场景配置", f"{len(jsons)} 个"])
+            root.setExpanded(True)
+            for jf in jsons:
+                item = QTreeWidgetItem(root, [f"🎬 {jf.stem}", "JSON"])
+                item.setData(0, Qt.UserRole, str(jf))
+                item.setData(0, Qt.UserRole + 1, "json")
+                item.setForeground(0, QBrush(QColor(100, 200, 255)))
+
+        # 图片素材文件夹
+        dirs = sorted([d for d in BG_ROOT.iterdir() if d.is_dir()])
+        if dirs:
+            root = QTreeWidgetItem(self.tree,
+                                   ["📁 图片素材", f"{len(dirs)} 组"])
+            root.setExpanded(True)
+            for d in dirs:
+                imgs = sorted(list(d.glob("*.png")) + list(d.glob("*.jpg")))
+                dir_item = QTreeWidgetItem(
+                    root, [f"📂 {d.name}", f"{len(imgs)} 张"])
+                for img in imgs:
+                    sz_kb = img.stat().st_size // 1024
+                    img_item = QTreeWidgetItem(
+                        dir_item, [f"🖼 {img.name}", f"{sz_kb}KB"])
+                    img_item.setData(0, Qt.UserRole, str(img))
+                    img_item.setData(0, Qt.UserRole + 1, "image")
+
+    def _on_item_clicked(self, item, col):
+        itype = item.data(0, Qt.UserRole + 1)
+        path = item.data(0, Qt.UserRole)
+        if itype == "image" and path:
+            self._show_thumbnail(path)
+            self.image_selected.emit(path)
+        elif itype == "json" and path:
+            self.config_selected.emit(path)
+
+    def _on_item_double_clicked(self, item, col):
+        itype = item.data(0, Qt.UserRole + 1)
+        path = item.data(0, Qt.UserRole)
+        if itype == "json" and path:
+            self.config_selected.emit(path)
+
+    def _show_thumbnail(self, path):
+        pix = QPixmap(path)
+        if not pix.isNull():
+            self.thumbnail.setPixmap(
+                pix.scaled(200, 160, Qt.KeepAspectRatio,
+                           Qt.SmoothTransformation))
+            self.thumb_info.setText(f"{pix.width()} x {pix.height()}")
+        else:
+            self.thumbnail.setText("无法加载")
+            self.thumb_info.setText("")
 
 
 # ==================== 图层编辑面板 ====================
 
 class LayerEditorPanel(QWidget):
-    """图层编辑面板"""
-    
-    layer_changed = pyqtSignal()
-    
+    changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._current_layer: Optional[LayerConfig] = None
+        self._config: Optional[dict] = None
+        self._cur_idx = -1
+        self._block = False
         self._setup_ui()
-    
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        
-        # 基本属性
-        basic_group = QGroupBox("基本属性")
-        basic_layout = QFormLayout(basic_group)
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # 图层列表
+        list_grp = QGroupBox("图层列表")
+        ll = QVBoxLayout(list_grp)
+
+        btns = QHBoxLayout()
+        for text, slot in [("+ 添加", self._add_layer),
+                           ("- 删除", self._del_layer),
+                           ("▲", self._move_up),
+                           ("▼", self._move_down)]:
+            b = QPushButton(text)
+            if text in ("▲", "▼"):
+                b.setFixedWidth(30)
+            b.clicked.connect(slot)
+            btns.addWidget(b)
+        ll.addLayout(btns)
+
+        self.layer_list = QListWidget()
+        self.layer_list.setMaximumHeight(120)
+        self.layer_list.currentRowChanged.connect(self._on_layer_selected)
+        ll.addWidget(self.layer_list)
+        layout.addWidget(list_grp)
+
+        # 属性滚动区
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        pw = QWidget()
+        pl = QVBoxLayout(pw)
+
+        # — 基本属性 —
+        basic = QGroupBox("基本属性")
+        bl = QFormLayout(basic)
         self.name_edit = QLineEdit()
-        self.name_edit.textChanged.connect(self._on_change)
-        basic_layout.addRow("名称:", self.name_edit)
-        
+        self.name_edit.textChanged.connect(self._on_prop)
+        bl.addRow("名称:", self.name_edit)
         self.texture_combo = QComboBox()
-        self.texture_combo.currentTextChanged.connect(self._on_change)
-        basic_layout.addRow("纹理:", self.texture_combo)
-        
+        self.texture_combo.currentTextChanged.connect(self._on_prop)
+        bl.addRow("纹理:", self.texture_combo)
         self.z_order_spin = QSpinBox()
         self.z_order_spin.setRange(-100, 100)
-        self.z_order_spin.valueChanged.connect(self._on_change)
-        basic_layout.addRow("Z顺序:", self.z_order_spin)
-        
-        layout.addWidget(basic_group)
-        
-        # 滚动属性
-        scroll_group = QGroupBox("滚动")
-        scroll_layout = QFormLayout(scroll_group)
-        
-        self.scroll_x_spin = QDoubleSpinBox()
-        self.scroll_x_spin.setRange(-10, 10)
-        self.scroll_x_spin.setSingleStep(0.01)
-        self.scroll_x_spin.valueChanged.connect(self._on_change)
-        scroll_layout.addRow("X速度:", self.scroll_x_spin)
-        
-        self.scroll_y_spin = QDoubleSpinBox()
-        self.scroll_y_spin.setRange(-10, 10)
-        self.scroll_y_spin.setSingleStep(0.01)
-        self.scroll_y_spin.valueChanged.connect(self._on_change)
-        scroll_layout.addRow("Y速度:", self.scroll_y_spin)
-        
-        self.parallax_spin = QDoubleSpinBox()
-        self.parallax_spin.setRange(0, 5)
-        self.parallax_spin.setValue(1.0)
-        self.parallax_spin.setSingleStep(0.1)
-        self.parallax_spin.valueChanged.connect(self._on_change)
-        scroll_layout.addRow("视差系数:", self.parallax_spin)
-        
-        layout.addWidget(scroll_group)
-        
-        # 显示属性
-        display_group = QGroupBox("显示")
-        display_layout = QFormLayout(display_group)
-        
-        self.alpha_slider = QSlider(Qt.Horizontal)
-        self.alpha_slider.setRange(0, 100)
-        self.alpha_slider.setValue(100)
-        self.alpha_slider.valueChanged.connect(self._on_change)
-        display_layout.addRow("透明度:", self.alpha_slider)
-        
+        self.z_order_spin.valueChanged.connect(self._on_prop)
+        bl.addRow("Z顺序:", self.z_order_spin)
+        self.z_depth_spin = QDoubleSpinBox()
+        self.z_depth_spin.setRange(-10, 10)
+        self.z_depth_spin.setSingleStep(0.1)
+        self.z_depth_spin.setDecimals(2)
+        self.z_depth_spin.valueChanged.connect(self._on_prop)
+        bl.addRow("Z深度:", self.z_depth_spin)
+        self.enabled_cb = QCheckBox("启用")
+        self.enabled_cb.setChecked(True)
+        self.enabled_cb.toggled.connect(self._on_prop)
+        bl.addRow("", self.enabled_cb)
+        pl.addWidget(basic)
+
+        # — 显示属性 —
+        disp = QGroupBox("显示")
+        dl = QFormLayout(disp)
+        self.alpha_spin = QDoubleSpinBox()
+        self.alpha_spin.setRange(0, 1)
+        self.alpha_spin.setSingleStep(0.05)
+        self.alpha_spin.setDecimals(3)
+        self.alpha_spin.valueChanged.connect(self._on_prop)
+        dl.addRow("透明度:", self.alpha_spin)
         self.blend_combo = QComboBox()
-        self.blend_combo.addItems(["normal", "additive", "multiply"])
-        self.blend_combo.currentTextChanged.connect(self._on_change)
-        display_layout.addRow("混合模式:", self.blend_combo)
-        
-        layout.addWidget(display_group)
-        
-        # 平铺
-        tile_group = QGroupBox("平铺")
-        tile_layout = QFormLayout(tile_group)
-        
-        self.tile_x_spin = QSpinBox()
-        self.tile_x_spin.setRange(1, 10)
-        self.tile_x_spin.valueChanged.connect(self._on_change)
-        tile_layout.addRow("X次数:", self.tile_x_spin)
-        
-        self.tile_y_spin = QSpinBox()
-        self.tile_y_spin.setRange(1, 10)
-        self.tile_y_spin.valueChanged.connect(self._on_change)
-        tile_layout.addRow("Y次数:", self.tile_y_spin)
-        
-        layout.addWidget(tile_group)
-        
-        # 3D选项
-        self.use_3d_cb = QCheckBox("使用3D渲染")
-        self.use_3d_cb.toggled.connect(self._on_change)
-        layout.addWidget(self.use_3d_cb)
-        
-        layout.addStretch()
-    
-    def set_layer(self, layer: LayerConfig, textures: List[str]):
-        """设置当前图层"""
-        self._current_layer = layer
-        
-        self.blockSignals(True)
-        
-        # 更新纹理列表
+        self.blend_combo.addItems(["normal", "add", "multiply"])
+        self.blend_combo.currentTextChanged.connect(self._on_prop)
+        dl.addRow("混合模式:", self.blend_combo)
+        self.scroll_mul = QDoubleSpinBox()
+        self.scroll_mul.setRange(-10, 10)
+        self.scroll_mul.setSingleStep(0.05)
+        self.scroll_mul.setDecimals(3)
+        self.scroll_mul.valueChanged.connect(self._on_prop)
+        dl.addRow("滚动系数:", self.scroll_mul)
+        pl.addWidget(disp)
+
+        # — 平铺 —
+        tile_grp = QGroupBox("平铺配置")
+        tl = QFormLayout(tile_grp)
+        xr = QHBoxLayout()
+        self.tile_x0 = QSpinBox()
+        self.tile_x0.setRange(-10, 10)
+        self.tile_x0.valueChanged.connect(self._on_prop)
+        self.tile_x1 = QSpinBox()
+        self.tile_x1.setRange(-10, 10)
+        self.tile_x1.valueChanged.connect(self._on_prop)
+        xr.addWidget(self.tile_x0)
+        xr.addWidget(QLabel("~"))
+        xr.addWidget(self.tile_x1)
+        tl.addRow("X范围:", xr)
+        yr = QHBoxLayout()
+        self.tile_y0 = QSpinBox()
+        self.tile_y0.setRange(-20, 20)
+        self.tile_y0.valueChanged.connect(self._on_prop)
+        self.tile_y1 = QSpinBox()
+        self.tile_y1.setRange(-20, 20)
+        self.tile_y1.valueChanged.connect(self._on_prop)
+        yr.addWidget(self.tile_y0)
+        yr.addWidget(QLabel("~"))
+        yr.addWidget(self.tile_y1)
+        tl.addRow("Y范围:", yr)
+        self.tile_size = QDoubleSpinBox()
+        self.tile_size.setRange(0.1, 10)
+        self.tile_size.setSingleStep(0.1)
+        self.tile_size.setValue(1.0)
+        self.tile_size.valueChanged.connect(self._on_prop)
+        tl.addRow("尺寸:", self.tile_size)
+        pl.addWidget(tile_grp)
+
+        pl.addStretch()
+        scroll.setWidget(pw)
+        layout.addWidget(scroll)
+
+    # --- 公共接口 ---
+
+    def set_config(self, config: dict):
+        self._config = config
+        self._cur_idx = -1
+        self._refresh_list()
+        self._refresh_texture_combo()
+
+    def _refresh_texture_combo(self):
+        self.texture_combo.blockSignals(True)
         self.texture_combo.clear()
-        self.texture_combo.addItems(textures)
-        
-        self.name_edit.setText(layer.name)
-        self.texture_combo.setCurrentText(layer.texture)
-        self.z_order_spin.setValue(layer.z_order)
-        self.scroll_x_spin.setValue(layer.scroll_x)
-        self.scroll_y_spin.setValue(layer.scroll_y)
-        self.parallax_spin.setValue(layer.parallax)
-        self.alpha_slider.setValue(int(layer.alpha * 100))
-        self.blend_combo.setCurrentText(layer.blend_mode)
-        self.tile_x_spin.setValue(layer.tile_x)
-        self.tile_y_spin.setValue(layer.tile_y)
-        self.use_3d_cb.setChecked(layer.use_3d)
-        
-        self.blockSignals(False)
-    
-    def _on_change(self):
-        """属性变化"""
-        if not self._current_layer:
+        if self._config:
+            self.texture_combo.addItems(
+                list(self._config.get("textures", {}).keys()))
+        self.texture_combo.blockSignals(False)
+
+    # --- 内部 ---
+
+    def _refresh_list(self):
+        self.layer_list.clear()
+        if not self._config:
             return
-        
-        self._current_layer.name = self.name_edit.text()
-        self._current_layer.texture = self.texture_combo.currentText()
-        self._current_layer.z_order = self.z_order_spin.value()
-        self._current_layer.scroll_x = self.scroll_x_spin.value()
-        self._current_layer.scroll_y = self.scroll_y_spin.value()
-        self._current_layer.parallax = self.parallax_spin.value()
-        self._current_layer.alpha = self.alpha_slider.value() / 100.0
-        self._current_layer.blend_mode = self.blend_combo.currentText()
-        self._current_layer.tile_x = self.tile_x_spin.value()
-        self._current_layer.tile_y = self.tile_y_spin.value()
-        self._current_layer.use_3d = self.use_3d_cb.isChecked()
-        
-        self.layer_changed.emit()
+        for layer in self._config.get("layers", []):
+            en = "✓" if layer.get("enabled", True) else "✗"
+            z = layer.get("z_order", 0)
+            self.layer_list.addItem(
+                f"{en} [{z}] {layer.get('name', '?')}")
+
+    def _on_layer_selected(self, row):
+        self._cur_idx = row
+        if not self._config or row < 0:
+            return
+        layers = self._config.get("layers", [])
+        if row >= len(layers):
+            return
+        L = layers[row]
+        self._block = True
+        self.name_edit.setText(L.get("name", ""))
+        self.texture_combo.setCurrentText(L.get("texture", ""))
+        self.z_order_spin.setValue(L.get("z_order", 0))
+        self.z_depth_spin.setValue(L.get("z_depth", 0))
+        self.enabled_cb.setChecked(L.get("enabled", True))
+        self.alpha_spin.setValue(L.get("alpha", 1.0))
+        self.blend_combo.setCurrentText(L.get("blend_mode", "normal"))
+        self.scroll_mul.setValue(L.get("scroll_multiplier", 1.0))
+        tile = L.get("tile", {})
+        xr = tile.get("x_range", [-1, 1])
+        yr = tile.get("y_range", [-4, 7])
+        self.tile_x0.setValue(xr[0])
+        self.tile_x1.setValue(xr[1])
+        self.tile_y0.setValue(yr[0])
+        self.tile_y1.setValue(yr[1])
+        self.tile_size.setValue(tile.get("size", 1.0))
+        self._block = False
+
+    def _on_prop(self):
+        if self._block or not self._config:
+            return
+        idx = self._cur_idx
+        layers = self._config.get("layers", [])
+        if idx < 0 or idx >= len(layers):
+            return
+        L = layers[idx]
+        L["name"] = self.name_edit.text()
+        L["texture"] = self.texture_combo.currentText()
+        L["z_order"] = self.z_order_spin.value()
+        L["z_depth"] = self.z_depth_spin.value()
+        L["enabled"] = self.enabled_cb.isChecked()
+        L["alpha"] = self.alpha_spin.value()
+        L["blend_mode"] = self.blend_combo.currentText()
+        L["scroll_multiplier"] = self.scroll_mul.value()
+        L.setdefault("tile", {})
+        L["tile"]["x_range"] = [self.tile_x0.value(), self.tile_x1.value()]
+        L["tile"]["y_range"] = [self.tile_y0.value(), self.tile_y1.value()]
+        L["tile"]["size"] = self.tile_size.value()
+        self._refresh_list()
+        if idx >= 0:
+            self.layer_list.setCurrentRow(idx)
+        self.changed.emit()
+
+    def _add_layer(self):
+        if not self._config:
+            return
+        layers = self._config.setdefault("layers", [])
+        tex_names = list(self._config.get("textures", {}).keys())
+        layers.append({
+            "name": f"layer_{len(layers)}",
+            "texture": tex_names[0] if tex_names else "",
+            "z_order": len(layers), "z_depth": 0.0,
+            "blend_mode": "normal", "alpha": 1.0,
+            "scroll_multiplier": 1.0,
+            "tile": {"x_range": [-1, 1], "y_range": [-4, 7], "size": 1.0},
+            "variants": [], "enabled": True
+        })
+        self._refresh_list()
+        self.layer_list.setCurrentRow(len(layers) - 1)
+        self.changed.emit()
+
+    def _del_layer(self):
+        if not self._config:
+            return
+        layers = self._config.get("layers", [])
+        idx = self._cur_idx
+        if 0 <= idx < len(layers):
+            del layers[idx]
+            self._cur_idx = -1
+            self._refresh_list()
+            self.changed.emit()
+
+    def _move_up(self):
+        if not self._config:
+            return
+        layers = self._config.get("layers", [])
+        idx = self._cur_idx
+        if idx > 0:
+            layers[idx], layers[idx - 1] = layers[idx - 1], layers[idx]
+            self._refresh_list()
+            self.layer_list.setCurrentRow(idx - 1)
+            self.changed.emit()
+
+    def _move_down(self):
+        if not self._config:
+            return
+        layers = self._config.get("layers", [])
+        idx = self._cur_idx
+        if 0 <= idx < len(layers) - 1:
+            layers[idx], layers[idx + 1] = layers[idx + 1], layers[idx]
+            self._refresh_list()
+            self.layer_list.setCurrentRow(idx + 1)
+            self.changed.emit()
 
 
 # ==================== 摄像机编辑面板 ====================
 
 class CameraEditorPanel(QWidget):
-    """摄像机编辑面板"""
-    
-    camera_changed = pyqtSignal()
-    
+    changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._camera: Optional[Camera3DConfig] = None
+        self._config: Optional[dict] = None
+        self._block = False
         self._setup_ui()
-    
+
+    def _dspin(self, lo, hi, step, decimals=2):
+        s = QDoubleSpinBox()
+        s.setRange(lo, hi)
+        s.setSingleStep(step)
+        s.setDecimals(decimals)
+        s.valueChanged.connect(self._on_change)
+        return s
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        
-        # Eye位置
-        eye_group = QGroupBox("摄像机位置 (Eye)")
-        eye_layout = QFormLayout(eye_group)
-        
-        self.eye_x = QDoubleSpinBox()
-        self.eye_x.setRange(-10, 10)
-        self.eye_x.setSingleStep(0.1)
-        self.eye_x.valueChanged.connect(self._on_change)
-        eye_layout.addRow("X:", self.eye_x)
-        
-        self.eye_y = QDoubleSpinBox()
-        self.eye_y.setRange(-10, 10)
-        self.eye_y.setSingleStep(0.1)
-        self.eye_y.valueChanged.connect(self._on_change)
-        eye_layout.addRow("Y:", self.eye_y)
-        
-        self.eye_z = QDoubleSpinBox()
-        self.eye_z.setRange(-10, 10)
-        self.eye_z.setSingleStep(0.1)
-        self.eye_z.valueChanged.connect(self._on_change)
-        eye_layout.addRow("Z:", self.eye_z)
-        
-        layout.addWidget(eye_group)
-        
-        # 目标位置
-        at_group = QGroupBox("目标位置 (At)")
-        at_layout = QFormLayout(at_group)
-        
-        self.at_x = QDoubleSpinBox()
-        self.at_x.setRange(-10, 10)
-        self.at_x.setSingleStep(0.1)
-        self.at_x.valueChanged.connect(self._on_change)
-        at_layout.addRow("X:", self.at_x)
-        
-        self.at_y = QDoubleSpinBox()
-        self.at_y.setRange(-10, 10)
-        self.at_y.setSingleStep(0.1)
-        self.at_y.valueChanged.connect(self._on_change)
-        at_layout.addRow("Y:", self.at_y)
-        
-        self.at_z = QDoubleSpinBox()
-        self.at_z.setRange(-10, 10)
-        self.at_z.setSingleStep(0.1)
-        self.at_z.valueChanged.connect(self._on_change)
-        at_layout.addRow("Z:", self.at_z)
-        
-        layout.addWidget(at_group)
-        
-        # 投影参数
-        proj_group = QGroupBox("投影参数")
-        proj_layout = QFormLayout(proj_group)
-        
-        self.fovy_spin = QDoubleSpinBox()
-        self.fovy_spin.setRange(0.1, 3.14)
-        self.fovy_spin.setSingleStep(0.1)
-        self.fovy_spin.valueChanged.connect(self._on_change)
-        proj_layout.addRow("FOV Y:", self.fovy_spin)
-        
-        self.z_near_spin = QDoubleSpinBox()
-        self.z_near_spin.setRange(0.001, 1)
-        self.z_near_spin.setDecimals(3)
-        self.z_near_spin.setSingleStep(0.01)
-        self.z_near_spin.valueChanged.connect(self._on_change)
-        proj_layout.addRow("近裁面:", self.z_near_spin)
-        
-        self.z_far_spin = QDoubleSpinBox()
-        self.z_far_spin.setRange(1, 100)
-        self.z_far_spin.setSingleStep(1)
-        self.z_far_spin.valueChanged.connect(self._on_change)
-        proj_layout.addRow("远裁面:", self.z_far_spin)
-        
-        layout.addWidget(proj_group)
-        
+
+        eye_g = QGroupBox("摄像机位置 (Eye)")
+        el = QFormLayout(eye_g)
+        self.eye_x = self._dspin(-20, 20, 0.05)
+        self.eye_y = self._dspin(-20, 20, 0.05)
+        self.eye_z = self._dspin(-20, 20, 0.05)
+        el.addRow("X:", self.eye_x)
+        el.addRow("Y:", self.eye_y)
+        el.addRow("Z:", self.eye_z)
+        layout.addWidget(eye_g)
+
+        at_g = QGroupBox("目标位置 (At)")
+        al = QFormLayout(at_g)
+        self.at_x = self._dspin(-20, 20, 0.05)
+        self.at_y = self._dspin(-20, 20, 0.05)
+        self.at_z = self._dspin(-20, 20, 0.05)
+        al.addRow("X:", self.at_x)
+        al.addRow("Y:", self.at_y)
+        al.addRow("Z:", self.at_z)
+        layout.addWidget(at_g)
+
+        up_g = QGroupBox("上方向 (Up)")
+        ul = QFormLayout(up_g)
+        self.up_x = self._dspin(-1, 1, 0.1)
+        self.up_y = self._dspin(-1, 1, 0.1)
+        self.up_z = self._dspin(-1, 1, 0.1)
+        ul.addRow("X:", self.up_x)
+        ul.addRow("Y:", self.up_y)
+        ul.addRow("Z:", self.up_z)
+        layout.addWidget(up_g)
+
+        proj_g = QGroupBox("投影参数")
+        pl = QFormLayout(proj_g)
+        self.fovy = self._dspin(0.1, 3.14, 0.05)
+        self.z_near = self._dspin(0.001, 10, 0.01, 3)
+        self.z_far = self._dspin(0.1, 100, 0.5)
+        pl.addRow("FOV Y:", self.fovy)
+        pl.addRow("近裁面:", self.z_near)
+        pl.addRow("远裁面:", self.z_far)
+        layout.addWidget(proj_g)
         layout.addStretch()
-    
-    def set_camera(self, camera: Camera3DConfig):
-        """设置摄像机"""
-        self._camera = camera
-        
-        self.blockSignals(True)
-        
-        self.eye_x.setValue(camera.eye_x)
-        self.eye_y.setValue(camera.eye_y)
-        self.eye_z.setValue(camera.eye_z)
-        self.at_x.setValue(camera.at_x)
-        self.at_y.setValue(camera.at_y)
-        self.at_z.setValue(camera.at_z)
-        self.fovy_spin.setValue(camera.fovy)
-        self.z_near_spin.setValue(camera.z_near)
-        self.z_far_spin.setValue(camera.z_far)
-        
-        self.blockSignals(False)
-    
+
+    def set_config(self, config: dict):
+        self._config = config
+        cam = config.get("camera", {})
+        e = cam.get("eye", [0, 0, 1])
+        a = cam.get("at", [0, 0, 0])
+        u = cam.get("up", [0, 1, 0])
+        self._block = True
+        self.eye_x.setValue(e[0])
+        self.eye_y.setValue(e[1])
+        self.eye_z.setValue(e[2])
+        self.at_x.setValue(a[0])
+        self.at_y.setValue(a[1])
+        self.at_z.setValue(a[2])
+        self.up_x.setValue(u[0])
+        self.up_y.setValue(u[1])
+        self.up_z.setValue(u[2])
+        self.fovy.setValue(cam.get("fovy", 0.8))
+        self.z_near.setValue(cam.get("z_near", 0.1))
+        self.z_far.setValue(cam.get("z_far", 10.0))
+        self._block = False
+
     def _on_change(self):
-        """参数变化"""
-        if not self._camera:
+        if self._block or not self._config:
             return
-        
-        self._camera.eye_x = self.eye_x.value()
-        self._camera.eye_y = self.eye_y.value()
-        self._camera.eye_z = self.eye_z.value()
-        self._camera.at_x = self.at_x.value()
-        self._camera.at_y = self.at_y.value()
-        self._camera.at_z = self.at_z.value()
-        self._camera.fovy = self.fovy_spin.value()
-        self._camera.z_near = self.z_near_spin.value()
-        self._camera.z_far = self.z_far_spin.value()
-        
-        self.camera_changed.emit()
+        cam = self._config.setdefault("camera", {})
+        cam["eye"] = [self.eye_x.value(), self.eye_y.value(),
+                      self.eye_z.value()]
+        cam["at"] = [self.at_x.value(), self.at_y.value(),
+                     self.at_z.value()]
+        cam["up"] = [self.up_x.value(), self.up_y.value(),
+                     self.up_z.value()]
+        cam["fovy"] = self.fovy.value()
+        cam["z_near"] = self.z_near.value()
+        cam["z_far"] = self.z_far.value()
+        self.changed.emit()
 
 
 # ==================== 雾效编辑面板 ====================
 
 class FogEditorPanel(QWidget):
-    """雾效编辑面板"""
-    
-    fog_changed = pyqtSignal()
-    
+    changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._fog: Optional[FogConfig] = None
+        self._config: Optional[dict] = None
+        self._block = False
+        self._fog_color = QColor(0, 0, 0)
         self._setup_ui()
-    
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        
-        # 启用
         self.enabled_cb = QCheckBox("启用雾效")
         self.enabled_cb.toggled.connect(self._on_change)
         layout.addWidget(self.enabled_cb)
-        
-        # 距离
-        dist_group = QGroupBox("雾效距离")
-        dist_layout = QFormLayout(dist_group)
-        
+
+        dg = QGroupBox("雾效距离")
+        dl = QFormLayout(dg)
         self.start_spin = QDoubleSpinBox()
         self.start_spin.setRange(0, 20)
-        self.start_spin.setSingleStep(0.5)
+        self.start_spin.setSingleStep(0.1)
         self.start_spin.valueChanged.connect(self._on_change)
-        dist_layout.addRow("起始距离:", self.start_spin)
-        
+        dl.addRow("起始:", self.start_spin)
         self.end_spin = QDoubleSpinBox()
-        self.end_spin.setRange(0.1, 20)
-        self.end_spin.setSingleStep(0.5)
+        self.end_spin.setRange(0, 20)
+        self.end_spin.setSingleStep(0.1)
         self.end_spin.valueChanged.connect(self._on_change)
-        dist_layout.addRow("结束距离:", self.end_spin)
-        
-        layout.addWidget(dist_group)
-        
-        # 颜色
-        color_group = QGroupBox("雾效颜色")
-        color_layout = QVBoxLayout(color_group)
-        
-        self.color_preview = QLabel()
-        self.color_preview.setFixedSize(100, 30)
-        self.color_preview.setStyleSheet("background-color: black; border: 1px solid #555;")
-        color_layout.addWidget(self.color_preview)
-        
-        btn_color = QPushButton("选择颜色")
-        btn_color.clicked.connect(self._choose_color)
-        color_layout.addWidget(btn_color)
-        
-        layout.addWidget(color_group)
-        
+        dl.addRow("结束:", self.end_spin)
+        layout.addWidget(dg)
+
+        cg = QGroupBox("雾效颜色")
+        cl = QVBoxLayout(cg)
+        self.color_lbl = QLabel()
+        self.color_lbl.setFixedSize(120, 30)
+        self.color_lbl.setStyleSheet(
+            "background-color: black; border: 1px solid #555;")
+        cl.addWidget(self.color_lbl)
+        btn = QPushButton("选择颜色")
+        btn.clicked.connect(self._pick_color)
+        cl.addWidget(btn)
+        layout.addWidget(cg)
         layout.addStretch()
-    
-    def set_fog(self, fog: FogConfig):
-        """设置雾效"""
-        self._fog = fog
-        
-        self.blockSignals(True)
-        
-        self.enabled_cb.setChecked(fog.enabled)
-        self.start_spin.setValue(fog.start)
-        self.end_spin.setValue(fog.end)
-        
-        self._update_color_preview()
-        
-        self.blockSignals(False)
-    
-    def _update_color_preview(self):
-        """更新颜色预览"""
-        if self._fog:
-            self.color_preview.setStyleSheet(
-                f"background-color: rgba({self._fog.color_r},{self._fog.color_g},"
-                f"{self._fog.color_b},{self._fog.color_a}); border: 1px solid #555;"
-            )
-    
-    def _choose_color(self):
-        """选择颜色"""
-        if not self._fog:
-            return
-        
-        color = QColorDialog.getColor(
-            QColor(self._fog.color_r, self._fog.color_g, self._fog.color_b),
-            self, "选择雾效颜色"
-        )
-        
-        if color.isValid():
-            self._fog.color_r = color.red()
-            self._fog.color_g = color.green()
-            self._fog.color_b = color.blue()
-            self._update_color_preview()
-            self.fog_changed.emit()
-    
+
+    def set_config(self, config: dict):
+        self._config = config
+        fog = config.get("fog", {})
+        self._block = True
+        self.enabled_cb.setChecked(fog.get("enabled", False))
+        self.start_spin.setValue(fog.get("start", 0))
+        self.end_spin.setValue(fog.get("end", 10))
+        c = fog.get("color", [0, 0, 0, 255])
+        self._fog_color = QColor(c[0], c[1], c[2])
+        self._update_color()
+        self._block = False
+
+    def _update_color(self):
+        self.color_lbl.setStyleSheet(
+            f"background-color: {self._fog_color.name()}; "
+            f"border: 1px solid #555;")
+
+    def _pick_color(self):
+        c = QColorDialog.getColor(self._fog_color, self, "选择雾效颜色")
+        if c.isValid():
+            self._fog_color = c
+            self._update_color()
+            self._on_change()
+
     def _on_change(self):
-        """参数变化"""
-        if not self._fog:
+        if self._block or not self._config:
             return
-        
-        self._fog.enabled = self.enabled_cb.isChecked()
-        self._fog.start = self.start_spin.value()
-        self._fog.end = self.end_spin.value()
-        
-        self.fog_changed.emit()
+        fog = self._config.setdefault("fog", {})
+        fog["enabled"] = self.enabled_cb.isChecked()
+        fog["start"] = self.start_spin.value()
+        fog["end"] = self.end_spin.value()
+        fog["color"] = [self._fog_color.red(), self._fog_color.green(),
+                        self._fog_color.blue(), 255]
+        self.changed.emit()
+
+
+# ==================== 滚动编辑面板 ====================
+
+class ScrollEditorPanel(QWidget):
+    changed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._config: Optional[dict] = None
+        self._block = False
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        g = QGroupBox("滚动参数")
+        fl = QFormLayout(g)
+        self.speed = QDoubleSpinBox()
+        self.speed.setRange(0, 5)
+        self.speed.setSingleStep(0.001)
+        self.speed.setDecimals(4)
+        self.speed.valueChanged.connect(self._on_change)
+        fl.addRow("基础速度:", self.speed)
+        dr = QHBoxLayout()
+        self.dir_x = QDoubleSpinBox()
+        self.dir_x.setRange(-5, 5)
+        self.dir_x.setSingleStep(0.1)
+        self.dir_x.valueChanged.connect(self._on_change)
+        self.dir_y = QDoubleSpinBox()
+        self.dir_y.setRange(-5, 5)
+        self.dir_y.setSingleStep(0.1)
+        self.dir_y.valueChanged.connect(self._on_change)
+        dr.addWidget(self.dir_x)
+        dr.addWidget(self.dir_y)
+        fl.addRow("方向:", dr)
+        layout.addWidget(g)
+        layout.addStretch()
+
+    def set_config(self, config: dict):
+        self._config = config
+        s = config.get("scroll", {})
+        self._block = True
+        self.speed.setValue(s.get("base_speed", 0.003))
+        d = s.get("direction", [0, 1])
+        self.dir_x.setValue(d[0])
+        self.dir_y.setValue(d[1])
+        self._block = False
+
+    def _on_change(self):
+        if self._block or not self._config:
+            return
+        sc = self._config.setdefault("scroll", {})
+        sc["base_speed"] = self.speed.value()
+        sc["direction"] = [self.dir_x.value(), self.dir_y.value()]
+        self.changed.emit()
+
+
+# ==================== 纹理管理面板 ====================
+
+class TexturePanel(QWidget):
+    changed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._config: Optional[dict] = None
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        g = QGroupBox("纹理列表")
+        gl = QVBoxLayout(g)
+        btns = QHBoxLayout()
+        add_b = QPushButton("+ 添加纹理")
+        add_b.clicked.connect(self._add)
+        del_b = QPushButton("- 移除")
+        del_b.clicked.connect(self._remove)
+        btns.addWidget(add_b)
+        btns.addWidget(del_b)
+        gl.addLayout(btns)
+        self.tex_list = QListWidget()
+        self.tex_list.setMaximumHeight(160)
+        gl.addWidget(self.tex_list)
+        layout.addWidget(g)
+        layout.addStretch()
+
+    def set_config(self, config: dict):
+        self._config = config
+        self._refresh()
+
+    def _refresh(self):
+        self.tex_list.clear()
+        if not self._config:
+            return
+        for name, info in self._config.get("textures", {}).items():
+            p = info.get("path", "")
+            d = info.get("description", "")
+            label = f"{name}: {p}"
+            if d:
+                label += f"  ({d})"
+            self.tex_list.addItem(label)
+
+    def _add(self):
+        if not self._config:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择纹理", str(BG_ROOT), "图片 (*.png *.jpg)")
+        if not path:
+            return
+        self._add_from_path(path)
+
+    def _add_from_path(self, path):
+        if not self._config:
+            return
+        p = Path(path)
+        try:
+            rel = p.relative_to(BG_ROOT)
+        except ValueError:
+            rel = Path(p.name)
+        name = p.stem
+        textures = self._config.setdefault("textures", {})
+        base = name
+        i = 1
+        while name in textures:
+            name = f"{base}_{i}"
+            i += 1
+        textures[name] = {
+            "path": str(rel).replace("\\", "/"),
+            "description": ""
+        }
+        self._refresh()
+        self.changed.emit()
+
+    def _remove(self):
+        if not self._config:
+            return
+        row = self.tex_list.currentRow()
+        if row < 0:
+            return
+        keys = list(self._config.get("textures", {}).keys())
+        if row < len(keys):
+            del self._config["textures"][keys[row]]
+            self._refresh()
+            self.changed.emit()
+
+    def add_from_image_path(self, path: str):
+        """外部调用: 从文件树选中的图片添加纹理"""
+        if self._config:
+            self._add_from_path(path)
 
 
 # ==================== 主窗口 ====================
 
 class BackgroundEditor(QMainWindow):
-    """背景编辑器主窗口"""
-    
     def __init__(self):
         super().__init__()
-        
-        self.bg_data = BackgroundData()
-        self.current_layer_index = -1
-        
+        self.config: dict = self._new_config()
+        self.current_file: Optional[str] = None
+
         self._setup_ui()
         self._setup_menu()
         self._apply_theme()
-        
-        self.setWindowTitle("弹幕背景编辑器 - PySTG")
+        self._connect_signals()
+
+        self.setWindowTitle("弹幕背景编辑器 v2 — PySTG")
         self.setMinimumSize(1300, 850)
         self.resize(1500, 950)
-        
-        # 扫描可用纹理
-        self._scan_textures()
-    
+
+        # 防抖刷新
+        self._refresh_timer = QTimer()
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self._do_refresh)
+
+        # 文件变更监视
+        self._file_watcher = QFileSystemWatcher()
+        self._file_watcher.fileChanged.connect(self._on_file_changed)
+
+    @staticmethod
+    def _new_config() -> dict:
+        return {
+            "name": "新背景", "description": "",
+            "textures": {},
+            "camera": {
+                "eye": [0, 0, 1], "at": [0, 0, 0], "up": [0, 1, 0],
+                "fovy": 0.8, "z_near": 0.1, "z_far": 10.0
+            },
+            "fog": {
+                "enabled": False, "color": [0, 0, 0, 255],
+                "start": 0, "end": 10
+            },
+            "scroll": {"base_speed": 0.003, "direction": [0, 1]},
+            "layers": []
+        }
+
+    # ---------- UI 构建 ----------
+
     def _setup_ui(self):
-        """设置UI"""
         central = QWidget()
         self.setCentralWidget(central)
-        
-        main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        
+        ml = QHBoxLayout(central)
+        ml.setContentsMargins(0, 0, 0, 0)
+
         splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
-        
-        # 左侧 - 图层列表
-        left_panel = self._create_left_panel()
-        splitter.addWidget(left_panel)
-        
-        # 中间 - 预览
-        center_panel = self._create_center_panel()
-        splitter.addWidget(center_panel)
-        
-        # 右侧 - 属性编辑
-        right_panel = self._create_right_panel()
-        splitter.addWidget(right_panel)
-        
-        splitter.setSizes([280, 450, 350])
-        
-        self.statusBar().showMessage("就绪")
-    
-    def _create_left_panel(self) -> QWidget:
-        """创建左侧面板"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
-        
-        # 背景信息
-        info_group = QGroupBox("背景信息")
-        info_layout = QFormLayout(info_group)
-        
-        self.name_edit = QLineEdit(self.bg_data.name)
+        ml.addWidget(splitter)
+
+        self.file_tree = FileTreePanel()
+        splitter.addWidget(self.file_tree)
+        splitter.addWidget(self._build_center())
+        splitter.addWidget(self._build_right())
+        splitter.setSizes([270, 450, 380])
+
+        self.statusBar().showMessage(
+            "就绪 — 点击左侧场景配置加载背景")
+
+    def _build_center(self) -> QWidget:
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(5, 5, 5, 5)
+        title = QLabel("背景预览")
+        title.setStyleSheet(
+            "font-size: 12pt; font-weight: bold; color: #ddd;")
+        l.addWidget(title)
+        self.preview = BackgroundPreview()
+        l.addWidget(self.preview)
+        ctrl = QHBoxLayout()
+        self.play_btn = QPushButton("▶ 播放")
+        self.play_btn.clicked.connect(self._toggle_play)
+        ctrl.addWidget(self.play_btn)
+        rst = QPushButton("⏹ 重置")
+        rst.clicked.connect(self.preview.reset_scroll)
+        ctrl.addWidget(rst)
+        l.addLayout(ctrl)
+        return w
+
+    def _build_right(self) -> QWidget:
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(5, 5, 5, 5)
+
+        info_g = QGroupBox("背景信息")
+        il = QFormLayout(info_g)
+        self.name_edit = QLineEdit()
         self.name_edit.textChanged.connect(self._on_info_changed)
-        info_layout.addRow("名称:", self.name_edit)
-        
+        il.addRow("名称:", self.name_edit)
         self.desc_edit = QLineEdit()
         self.desc_edit.textChanged.connect(self._on_info_changed)
-        info_layout.addRow("描述:", self.desc_edit)
-        
-        self.scroll_spin = QDoubleSpinBox()
-        self.scroll_spin.setRange(0, 1)
-        self.scroll_spin.setSingleStep(0.001)
-        self.scroll_spin.setDecimals(3)
-        self.scroll_spin.setValue(0.01)
-        self.scroll_spin.valueChanged.connect(self._on_info_changed)
-        info_layout.addRow("滚动速度:", self.scroll_spin)
-        
-        layout.addWidget(info_group)
-        
-        # 纹理列表
-        tex_group = QGroupBox("纹理")
-        tex_layout = QVBoxLayout(tex_group)
-        
-        btn_layout = QHBoxLayout()
-        btn_add_tex = QPushButton("+ 添加")
-        btn_add_tex.clicked.connect(self._add_texture)
-        btn_layout.addWidget(btn_add_tex)
-        tex_layout.addLayout(btn_layout)
-        
-        self.texture_list = QListWidget()
-        self.texture_list.setMaximumHeight(120)
-        tex_layout.addWidget(self.texture_list)
-        
-        layout.addWidget(tex_group)
-        
-        # 图层列表
-        layer_group = QGroupBox("图层")
-        layer_layout = QVBoxLayout(layer_group)
-        
-        layer_btn_layout = QHBoxLayout()
-        btn_add = QPushButton("+ 添加")
-        btn_add.clicked.connect(self._add_layer)
-        btn_del = QPushButton("删除")
-        btn_del.clicked.connect(self._delete_layer)
-        btn_up = QPushButton("↑")
-        btn_up.setFixedWidth(30)
-        btn_up.clicked.connect(self._move_layer_up)
-        btn_down = QPushButton("↓")
-        btn_down.setFixedWidth(30)
-        btn_down.clicked.connect(self._move_layer_down)
-        
-        layer_btn_layout.addWidget(btn_add)
-        layer_btn_layout.addWidget(btn_del)
-        layer_btn_layout.addWidget(btn_up)
-        layer_btn_layout.addWidget(btn_down)
-        layer_layout.addLayout(layer_btn_layout)
-        
-        self.layer_list = QListWidget()
-        self.layer_list.currentRowChanged.connect(self._on_layer_selected)
-        layer_layout.addWidget(self.layer_list)
-        
-        layout.addWidget(layer_group)
-        
-        return panel
-    
-    def _create_center_panel(self) -> QWidget:
-        """创建中间面板"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
-        
-        title = QLabel("背景预览")
-        title.setStyleSheet("font-size: 12pt; font-weight: bold;")
-        layout.addWidget(title)
-        
-        self.preview_view = BackgroundPreviewView()
-        layout.addWidget(self.preview_view)
-        
-        # 控制
-        ctrl_layout = QHBoxLayout()
-        
-        self.play_btn = QPushButton("▶ 播放")
-        self.play_btn.clicked.connect(self._toggle_animation)
-        ctrl_layout.addWidget(self.play_btn)
-        
-        btn_refresh = QPushButton("刷新")
-        btn_refresh.clicked.connect(self._refresh_preview)
-        ctrl_layout.addWidget(btn_refresh)
-        
-        layout.addLayout(ctrl_layout)
-        
-        return panel
-    
-    def _create_right_panel(self) -> QWidget:
-        """创建右侧面板"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
-        
+        il.addRow("描述:", self.desc_edit)
+        l.addWidget(info_g)
+
         tabs = QTabWidget()
-        
-        # 图层标签
         self.layer_editor = LayerEditorPanel()
-        self.layer_editor.layer_changed.connect(self._on_layer_changed)
         tabs.addTab(self.layer_editor, "图层")
-        
-        # 摄像机标签
         self.camera_editor = CameraEditorPanel()
-        self.camera_editor.camera_changed.connect(self._on_camera_changed)
         tabs.addTab(self.camera_editor, "摄像机")
-        
-        # 雾效标签
         self.fog_editor = FogEditorPanel()
-        self.fog_editor.fog_changed.connect(self._on_fog_changed)
         tabs.addTab(self.fog_editor, "雾效")
-        
-        layout.addWidget(tabs)
-        
-        # 保存按钮
-        btn_save = QPushButton("💾 保存配置")
-        btn_save.setStyleSheet("font-size: 11pt; padding: 10px; background-color: #4CAF50;")
-        btn_save.clicked.connect(self._save_config)
-        layout.addWidget(btn_save)
-        
-        return panel
-    
+        self.scroll_editor = ScrollEditorPanel()
+        tabs.addTab(self.scroll_editor, "滚动")
+        self.texture_panel = TexturePanel()
+        tabs.addTab(self.texture_panel, "纹理")
+        l.addWidget(tabs)
+
+        bl = QHBoxLayout()
+        save_btn = QPushButton("💾 保存")
+        save_btn.setStyleSheet("padding: 8px; background-color: #4CAF50;")
+        save_btn.clicked.connect(self._save)
+        bl.addWidget(save_btn)
+        sa_btn = QPushButton("另存为...")
+        sa_btn.clicked.connect(self._save_as)
+        bl.addWidget(sa_btn)
+        exp_btn = QPushButton("📋 导出场景代码")
+        exp_btn.clicked.connect(self._export_scene_code)
+        bl.addWidget(exp_btn)
+        l.addLayout(bl)
+        return w
+
     def _setup_menu(self):
-        """设置菜单"""
-        menubar = self.menuBar()
-        
-        file_menu = menubar.addMenu("文件(&F)")
-        
-        new_action = QAction("新建", self)
-        new_action.triggered.connect(self._new_background)
-        file_menu.addAction(new_action)
-        
-        open_action = QAction("打开...", self)
-        open_action.triggered.connect(self._open_config)
-        file_menu.addAction(open_action)
-        
-        save_action = QAction("保存", self)
-        save_action.triggered.connect(self._save_config)
-        file_menu.addAction(save_action)
-        
-        file_menu.addSeparator()
-        
-        exit_action = QAction("退出", self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-    
+        mb = self.menuBar()
+        fm = mb.addMenu("文件(&F)")
+        for label, shortcut, slot in [
+            ("新建", "Ctrl+N", self._do_new),
+            ("打开...", "Ctrl+O", self._do_open),
+            ("保存", "Ctrl+S", self._save),
+        ]:
+            a = QAction(label, self)
+            a.setShortcut(shortcut)
+            a.triggered.connect(slot)
+            fm.addAction(a)
+        fm.addSeparator()
+        ea = QAction("退出", self)
+        ea.triggered.connect(self.close)
+        fm.addAction(ea)
+
+    def _connect_signals(self):
+        self.file_tree.config_selected.connect(self._load_config)
+        self.file_tree.image_selected.connect(
+            self.texture_panel.add_from_image_path)
+        self.layer_editor.changed.connect(self._schedule_refresh)
+        self.camera_editor.changed.connect(self._on_camera_changed)
+        self.fog_editor.changed.connect(self._schedule_refresh)
+        self.scroll_editor.changed.connect(self._schedule_refresh)
+        self.texture_panel.changed.connect(self._on_textures_changed)
+
+    # ---------- 刷新逻辑 ----------
+
+    def _schedule_refresh(self):
+        self._refresh_timer.start(50)
+
+    def _do_refresh(self):
+        self.preview.set_config(self.config)
+
+    def _on_camera_changed(self):
+        self.preview.invalidate_mvp()
+        self._schedule_refresh()
+
+    def _on_textures_changed(self):
+        self.layer_editor._refresh_texture_combo()
+        self._schedule_refresh()
+
+    def _on_info_changed(self):
+        self.config["name"] = self.name_edit.text()
+        self.config["description"] = self.desc_edit.text()
+
+    # ---------- 文件操作 ----------
+
+    def _load_config(self, path: str):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                self.config = json.load(f)
+            self.current_file = path
+
+            watched = self._file_watcher.files()
+            if watched:
+                self._file_watcher.removePaths(watched)
+            self._file_watcher.addPath(path)
+
+            self._populate_ui()
+            self.preview.set_config(self.config)
+
+            name = Path(path).stem
+            self.statusBar().showMessage(f"已加载: {name}  ({path})")
+            self.setWindowTitle(f"弹幕背景编辑器 v2 — {name}")
+        except Exception as e:
+            QMessageBox.critical(self, "加载失败", str(e))
+
+    def _populate_ui(self):
+        self.name_edit.blockSignals(True)
+        self.desc_edit.blockSignals(True)
+        self.name_edit.setText(self.config.get("name", ""))
+        self.desc_edit.setText(self.config.get("description", ""))
+        self.name_edit.blockSignals(False)
+        self.desc_edit.blockSignals(False)
+        self.layer_editor.set_config(self.config)
+        self.camera_editor.set_config(self.config)
+        self.fog_editor.set_config(self.config)
+        self.scroll_editor.set_config(self.config)
+        self.texture_panel.set_config(self.config)
+
+    def _on_file_changed(self, path):
+        if path == self.current_file and os.path.exists(path):
+            QTimer.singleShot(300, lambda: self._load_config(path))
+
+    def _do_new(self):
+        self.config = self._new_config()
+        self.current_file = None
+        self._populate_ui()
+        self.preview.set_config(self.config)
+        self.setWindowTitle("弹幕背景编辑器 v2 — 新建")
+        self.statusBar().showMessage("已新建空白配置")
+
+    def _do_open(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "打开背景配置", str(BG_ROOT), "JSON (*.json)")
+        if path:
+            self._load_config(path)
+
+    def _save(self):
+        if self.current_file:
+            self._write(self.current_file)
+        else:
+            self._save_as()
+
+    def _save_as(self):
+        default = self.config.get("name", "background") + ".json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存背景配置", str(BG_ROOT / default), "JSON (*.json)")
+        if path:
+            self._write(path)
+            self.current_file = path
+            watched = self._file_watcher.files()
+            if watched:
+                self._file_watcher.removePaths(watched)
+            self._file_watcher.addPath(path)
+            self.file_tree.refresh_tree()
+
+    def _write(self, path: str):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            watched = self._file_watcher.files()
+            if path in (watched or []):
+                self._file_watcher.removePath(path)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, indent=2, ensure_ascii=False)
+            self._file_watcher.addPath(path)
+            self.statusBar().showMessage(f"已保存: {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "保存失败", str(e))
+
+    # ---------- 动画 ----------
+
+    def _toggle_play(self):
+        if self.preview.animating:
+            self.preview.stop_animation()
+            self.play_btn.setText("▶ 播放")
+        else:
+            self.preview.set_config(self.config)
+            self.preview.start_animation()
+            self.play_btn.setText("⏸ 暂停")
+
+    # ---------- 场景代码导出 ----------
+
+    def _export_scene_code(self):
+        name = self.config.get("name", "background")
+        available = sorted(
+            [f.stem for f in BG_ROOT.glob("*.json")]
+        ) if BG_ROOT.exists() else []
+        code = (
+            f'# 在关卡脚本中使用此背景场景:\n'
+            f'from src.game.background_render.scene import BackgroundScene\n\n'
+            f'# 加载并应用背景\n'
+            f'scene = BackgroundScene.load("{name}")\n'
+            f'bg = scene.apply(background_renderer)\n\n'
+            f'# 所有可用场景: {available}\n'
+            f'# scenes = BackgroundScene.list_all()\n'
+        )
+        QMessageBox.information(self, "场景调用代码", code)
+
+    # ---------- 主题 ----------
+
     def _apply_theme(self):
-        """应用暗色主题"""
         self.setStyleSheet("""
             QMainWindow, QWidget {
                 background-color: #2b2b2b;
@@ -848,10 +1402,9 @@ class BackgroundEditor(QMainWindow):
                 border: 1px solid #555;
                 border-radius: 3px;
                 padding: 5px 12px;
+                color: #ddd;
             }
-            QPushButton:hover {
-                background-color: #505050;
-            }
+            QPushButton:hover { background-color: #505050; }
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
                 background-color: #1e1e1e;
                 border: 1px solid #444;
@@ -859,20 +1412,19 @@ class BackgroundEditor(QMainWindow):
                 padding: 3px;
                 color: #fff;
             }
-            QListWidget {
+            QListWidget, QTreeWidget {
                 background-color: #1e1e1e;
                 border: 1px solid #3d3d3d;
+                color: #ddd;
             }
-            QListWidget::item:selected {
+            QListWidget::item:selected, QTreeWidget::item:selected {
                 background-color: #007acc;
             }
-            QTabWidget::pane {
-                border: 1px solid #3d3d3d;
-            }
+            QTabWidget::pane { border: 1px solid #3d3d3d; }
             QTabBar::tab {
                 background-color: #1e1e1e;
                 color: #aaa;
-                padding: 6px 14px;
+                padding: 6px 12px;
                 border: 1px solid #3d3d3d;
                 border-bottom: none;
             }
@@ -880,245 +1432,24 @@ class BackgroundEditor(QMainWindow):
                 background-color: #2b2b2b;
                 color: #fff;
             }
-            QSlider::groove:horizontal {
-                background: #1e1e1e;
-                height: 6px;
-            }
-            QSlider::handle:horizontal {
-                background: #007acc;
-                width: 14px;
-                margin: -4px 0;
+            QScrollArea { border: none; }
+            QCheckBox { color: #ddd; }
+            QHeaderView::section {
+                background-color: #2b2b2b;
+                color: #aaa;
+                border: 1px solid #3d3d3d;
+                padding: 3px;
             }
         """)
-    
-    def _scan_textures(self):
-        """扫描可用纹理"""
-        if IMAGES_ROOT.exists():
-            for f in IMAGES_ROOT.glob("*.png"):
-                self.texture_list.addItem(f.name)
-            for f in IMAGES_ROOT.glob("*.jpg"):
-                self.texture_list.addItem(f.name)
-    
-    def _refresh_layer_list(self):
-        """刷新图层列表"""
-        self.layer_list.clear()
-        for layer in self.bg_data.layers:
-            self.layer_list.addItem(f"[{layer.z_order}] {layer.name}")
-    
-    def _add_texture(self):
-        """添加纹理"""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择纹理",
-            str(IMAGES_ROOT),
-            "图片 (*.png *.jpg)"
-        )
-        if path:
-            name = Path(path).stem
-            tex = TextureConfig(name=name, path=Path(path).name)
-            self.bg_data.textures.append(tex)
-            self.texture_list.addItem(tex.path)
-    
-    def _add_layer(self):
-        """添加图层"""
-        idx = len(self.bg_data.layers)
-        layer = LayerConfig(name=f"layer_{idx}", z_order=idx)
-        self.bg_data.layers.append(layer)
-        self._refresh_layer_list()
-        self.layer_list.setCurrentRow(len(self.bg_data.layers) - 1)
-    
-    def _delete_layer(self):
-        """删除图层"""
-        row = self.layer_list.currentRow()
-        if 0 <= row < len(self.bg_data.layers):
-            del self.bg_data.layers[row]
-            self._refresh_layer_list()
-            self._refresh_preview()
-    
-    def _move_layer_up(self):
-        """上移图层"""
-        row = self.layer_list.currentRow()
-        if row > 0:
-            self.bg_data.layers[row], self.bg_data.layers[row-1] = \
-                self.bg_data.layers[row-1], self.bg_data.layers[row]
-            self._refresh_layer_list()
-            self.layer_list.setCurrentRow(row - 1)
-    
-    def _move_layer_down(self):
-        """下移图层"""
-        row = self.layer_list.currentRow()
-        if 0 <= row < len(self.bg_data.layers) - 1:
-            self.bg_data.layers[row], self.bg_data.layers[row+1] = \
-                self.bg_data.layers[row+1], self.bg_data.layers[row]
-            self._refresh_layer_list()
-            self.layer_list.setCurrentRow(row + 1)
-    
-    def _on_layer_selected(self, row: int):
-        """图层选中"""
-        if 0 <= row < len(self.bg_data.layers):
-            self.current_layer_index = row
-            layer = self.bg_data.layers[row]
-            textures = [tex.name for tex in self.bg_data.textures]
-            self.layer_editor.set_layer(layer, textures)
-    
-    def _on_info_changed(self):
-        """信息变化"""
-        self.bg_data.name = self.name_edit.text()
-        self.bg_data.description = self.desc_edit.text()
-        self.bg_data.scroll_speed = self.scroll_spin.value()
-    
-    def _on_layer_changed(self):
-        """图层变化"""
-        self._refresh_layer_list()
-        if self.current_layer_index >= 0:
-            self.layer_list.setCurrentRow(self.current_layer_index)
-        self._refresh_preview()
-    
-    def _on_camera_changed(self):
-        """摄像机变化"""
-        self._refresh_preview()
-    
-    def _on_fog_changed(self):
-        """雾效变化"""
-        self._refresh_preview()
-    
-    def _refresh_preview(self):
-        """刷新预览"""
-        self.preview_view.set_background_data(self.bg_data)
-    
-    def _toggle_animation(self):
-        """切换动画"""
-        if self.preview_view.animation_running:
-            self.preview_view.stop_animation()
-            self.play_btn.setText("▶ 播放")
-        else:
-            self.preview_view.start_animation()
-            self.play_btn.setText("⏸ 停止")
-    
-    def _new_background(self):
-        """新建背景"""
-        self.bg_data = BackgroundData()
-        self.name_edit.setText(self.bg_data.name)
-        self.desc_edit.setText("")
-        self.scroll_spin.setValue(0.01)
-        self._refresh_layer_list()
-        self._refresh_preview()
-        
-        # 重置编辑器
-        self.camera_editor.set_camera(self.bg_data.camera)
-        self.fog_editor.set_fog(self.bg_data.fog)
-    
-    def _open_config(self):
-        """打开配置"""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "打开背景配置",
-            str(GAME_CONTENT_ROOT),
-            "JSON文件 (*.json)"
-        )
-        if path:
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                # 解析配置
-                self.bg_data = BackgroundData(
-                    name=data.get('name', ''),
-                    description=data.get('description', ''),
-                    scroll_speed=data.get('scroll_speed', 0.01)
-                )
-                
-                # 纹理
-                for tex in data.get('textures', []):
-                    self.bg_data.textures.append(TextureConfig(
-                        name=tex['name'],
-                        path=tex['path']
-                    ))
-                
-                # 图层
-                for layer in data.get('layers', []):
-                    self.bg_data.layers.append(LayerConfig(
-                        name=layer.get('name', 'layer'),
-                        texture=layer.get('texture', ''),
-                        z_order=layer.get('z_order', 0),
-                        scroll_x=layer.get('scroll_speed', [0, 0])[0] if isinstance(layer.get('scroll_speed'), list) else 0,
-                        scroll_y=layer.get('scroll_speed', [0, 0])[1] if isinstance(layer.get('scroll_speed'), list) else 0,
-                        parallax=layer.get('parallax_factor', 1.0),
-                        alpha=layer.get('alpha', 1.0)
-                    ))
-                
-                # 更新UI
-                self.name_edit.setText(self.bg_data.name)
-                self.desc_edit.setText(self.bg_data.description)
-                self.scroll_spin.setValue(self.bg_data.scroll_speed)
-                self._refresh_layer_list()
-                self._refresh_preview()
-                
-                self.statusBar().showMessage(f"已加载: {path}")
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"加载失败:\n{e}")
-    
-    def _save_config(self):
-        """保存配置"""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "保存背景配置",
-            str(GAME_CONTENT_ROOT / "stages" / "stage1" / "background.json"),
-            "JSON文件 (*.json)"
-        )
-        if path:
-            config = {
-                "name": self.bg_data.name,
-                "description": self.bg_data.description,
-                "scroll_speed": self.bg_data.scroll_speed,
-                "textures": [
-                    {"name": tex.name, "path": tex.path}
-                    for tex in self.bg_data.textures
-                ],
-                "camera": {
-                    "eye": [self.bg_data.camera.eye_x, self.bg_data.camera.eye_y, self.bg_data.camera.eye_z],
-                    "at": [self.bg_data.camera.at_x, self.bg_data.camera.at_y, self.bg_data.camera.at_z],
-                    "fovy": self.bg_data.camera.fovy,
-                    "z_near": self.bg_data.camera.z_near,
-                    "z_far": self.bg_data.camera.z_far
-                },
-                "fog": {
-                    "enabled": self.bg_data.fog.enabled,
-                    "start": self.bg_data.fog.start,
-                    "end": self.bg_data.fog.end,
-                    "color": [
-                        self.bg_data.fog.color_r,
-                        self.bg_data.fog.color_g,
-                        self.bg_data.fog.color_b,
-                        self.bg_data.fog.color_a
-                    ]
-                },
-                "layers": [
-                    {
-                        "name": layer.name,
-                        "texture": layer.texture,
-                        "z_order": layer.z_order,
-                        "scroll_speed": [layer.scroll_x, layer.scroll_y],
-                        "parallax_factor": layer.parallax,
-                        "alpha": layer.alpha,
-                        "blend_mode": layer.blend_mode,
-                        "tile_repeat": [layer.tile_x, layer.tile_y],
-                        "use_3d": layer.use_3d
-                    }
-                    for layer in self.bg_data.layers
-                ]
-            }
-            
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
-            
-            self.statusBar().showMessage(f"已保存: {path}")
 
+
+# ==================== 入口 ====================
 
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
-    
     window = BackgroundEditor()
     window.show()
-    
     sys.exit(app.exec_())
 
 
