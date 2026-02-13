@@ -231,9 +231,13 @@ class StageBase:
         """每帧更新"""
         if not self._active:
             return
-        
+
         self._time += 1
-        
+
+        # 更新所有敌人脚本
+        if self.ctx and hasattr(self.ctx, 'update_enemy_scripts'):
+            self.ctx.update_enemy_scripts()
+
         # 推进主协程
         if self._coroutine:
             try:
@@ -350,6 +354,10 @@ class StageScript:
             return
 
         self._time += 1
+
+        # 更新所有敌人脚本
+        if self.ctx and hasattr(self.ctx, 'update_enemy_scripts'):
+            self.ctx.update_enemy_scripts()
 
         if self._coroutine:
             try:

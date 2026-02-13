@@ -126,7 +126,8 @@ class StageContext(SpellCardContext):
         self._item_pool = item_pool
         self._audio_manager = audio_manager
         self._bullet_indices: List[int] = []
-        
+        self._enemy_scripts: List[Any] = []  # 存储活跃的敌人脚本实例
+
         # 首次使用时加载别名表
         if not StageContext._aliases_loaded:
             StageContext.load_bullet_aliases()
@@ -187,7 +188,27 @@ class StageContext(SpellCardContext):
         """清除所有子弹"""
         self.bullet_pool.clear_all()
         self._bullet_indices.clear()
-    
+
+    # ==================== 敌人脚本管理 API ====================
+
+    def add_enemy_script(self, enemy_script):
+        """添加敌人脚本实例到管理列表"""
+        self._enemy_scripts.append(enemy_script)
+
+    def update_enemy_scripts(self):
+        """更新所有敌人脚本（每帧调用）"""
+        for enemy in self._enemy_scripts[:]:  # 使用切片避免修改列表时出错
+            if not enemy.update():  # update() 返回 False 表示敌人已死亡
+                self._enemy_scripts.remove(enemy)
+
+    def get_enemy_scripts(self) -> List[Any]:
+        """获取所有活跃的敌人脚本"""
+        return self._enemy_scripts
+
+    def clear_enemy_scripts(self):
+        """清除所有敌人脚本"""
+        self._enemy_scripts.clear()
+
     # ==================== 音频 API ====================
     
     @property

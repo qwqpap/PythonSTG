@@ -363,10 +363,10 @@ class Renderer:
         """
         self.background_renderer = background_renderer
     
-    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None, item_renderer=None, items=None, dt=0.0):
+    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None, item_renderer=None, items=None, dt=0.0, enemy_scripts=None):
         """
         渲染一帧（按正确的图层顺序）
-        
+
         渲染顺序（从底到顶）：
         0. 背景（2D卷轴/3D场景）
         1. 敌人/Boss
@@ -377,7 +377,7 @@ class Renderer:
         6. 敌机弹幕（按大小排序：大弹在下，小弹在上）
         7. 激光
         8. 自机判定点
-        
+
         Args:
             bullet_pool: 子弹池对象
             player: 玩家对象
@@ -387,47 +387,48 @@ class Renderer:
             item_renderer: 道具渲染器（可选，用于统一渲染顺序）
             items: 道具列表（可选）
             dt: 时间步长（用于背景动画更新）
+            enemy_scripts: 敌人脚本列表（可选，新的敌人系统）
         """
         # 保存并切换视口到游戏区域
         prev_viewport = self.ctx.viewport
         if viewport_rect:
             self.ctx.viewport = viewport_rect
-        
+
         # 清屏
         self.ctx.clear(0.1, 0.1, 0.1)
-        
+
         # ===== 层级 0: 背景 =====
         if self.background_renderer:
             self.background_renderer.update(dt)
             self.background_renderer.render()
-        
+
         # ===== 层级 1: 敌人/Boss =====
         self._render_boss(stage_manager)
-        self._render_enemies(stage_manager)
-        
+        self._render_enemies(stage_manager, enemy_scripts)
+
         # ===== 层级 2: 道具 =====
         # 道具在敌弹下层，避免遮挡弹幕导致玩家看不清
         if item_renderer and items:
             item_renderer.render_items(items)
-        
+
         # ===== 层级 3-5: 自机子弹、Options、自机本体 =====
         # TODO: 分离玩家子弹和敌人子弹，玩家子弹在此渲染
         # 目前先渲染玩家
         self._render_player(player)
-        
+
         # ===== 层级 6: 敌机弹幕（按大小排序） =====
         self._render_bullets_sorted(bullet_pool)
-        
+
         # ===== 层级 7: 激光 =====
         if laser_pool:
             lasers, bent_lasers = laser_pool.get_all_lasers()
             self.laser_renderer.render_lasers(lasers)
             self.laser_renderer.render_bent_lasers(bent_lasers)
-        
+
         # ===== 层级 8: 自机判定点（最高优先级） =====
         if player.is_focused:
             self._render_hitbox(player)
-        
+
         # 还原视口
         self.ctx.viewport = prev_viewport
     
@@ -760,8 +761,15 @@ class Renderer:
             self.player_vbo.write(boss_vertices.tobytes())
             self.player_vao.render(moderngl.TRIANGLES)
     
-    def _render_enemies(self, stage_manager):
+    def _render_enemies(self, stage_manager, enemy_scripts=None):
         """渲染敌人"""
+        # 新的敌人系统（EnemyScript实例）
+        if enemy_scripts:
+            for enemy in enemy_scripts:
+                if hasattr(enemy, '_active') and enemy._active:
+                    self._render_enemy_sprite(enemy)
+
+        # 旧的敌人系统（Enemy对象）- fallback
         active_enemies = stage_manager.get_active_enemies()
         for enemy in active_enemies:
             if enemy.alive:
@@ -776,6 +784,85 @@ class Renderer:
                 ], dtype='f4')
                 self.player_vbo.write(enemy_vertices.tobytes())
                 self.player_vao.render(moderngl.TRIANGLES)
+
+    def _render_enemy_sprite(self, enemy):
+        """使用纹理渲染单个敌人（支持动画）"""
+        # 获取精灵ID
+        sprite_id = getattr(enemy, 'sprite', None)
+        if not sprite_id:
+            self._render_enemy_fallback(enemy)
+            return
+
+        # 尝试作为精灵ID查找
+        sprite_data = self.sprite_manager.get_sprite(sprite_id)
+        texture_path = None
+
+        if not sprite_data:
+            # 可能是动画名称，尝试获取动画
+            animation = self.sprite_manager.asset_manager.get_animation(sprite_id)
+            if animation and hasattr(animation, 'frames') and len(animation.frames) > 0:
+                # 根据敌人存活时间获取当前帧（支持动画循环）
+                enemy_time = getattr(enemy, '_time', 0) / 60.0
+                current_frame = animation.get_frame_at_time(enemy_time)
+                sprite_data = {
+                    'rect': list(current_frame.rect),
+                    'center': list(current_frame.center)
+                }
+                texture_path = animation.texture_path
+
+        if not sprite_data:
+            self._render_enemy_fallback(enemy)
+            return
+
+        # 获取纹理路径（如果还没有从动画获取）
+        if not texture_path:
+            texture_path = self.sprite_manager.get_sprite_texture_path(sprite_id)
+
+        if not texture_path or texture_path not in self.textures:
+            self._render_enemy_fallback(enemy)
+            return
+
+        # 计算UV坐标（纹理以flip_y=True加载，需要翻转V坐标）
+        tex_w, tex_h = self.textures[texture_path].size
+        rect = sprite_data.get('rect', [0, 0, 32, 32])
+        u0 = rect[0] / tex_w
+        u1 = (rect[0] + rect[2]) / tex_w
+        v0 = 1.0 - (rect[1] + rect[3]) / tex_h  # flip_y校正：底部
+        v1 = 1.0 - rect[1] / tex_h                # flip_y校正：顶部
+
+        # 计算屏幕尺寸（转换像素大小到归一化坐标）
+        sprite_w = rect[2] / 192.0  # 192是半屏宽度的像素数
+        sprite_h = rect[3] / 192.0
+
+        px, py = enemy.x, enemy.y
+
+        # 6个顶点（2个三角形），v0=底部, v1=顶部
+        vertices = np.array([
+            px - sprite_w/2, py - sprite_h/2, u0, v0,  # 左下
+            px + sprite_w/2, py - sprite_h/2, u1, v0,  # 右下
+            px + sprite_w/2, py + sprite_h/2, u1, v1,  # 右上
+            px - sprite_w/2, py - sprite_h/2, u0, v0,  # 左下
+            px + sprite_w/2, py + sprite_h/2, u1, v1,  # 右上
+            px - sprite_w/2, py + sprite_h/2, u0, v1,  # 左上
+        ], dtype='f4')
+
+        self.player_tex_vbo.write(vertices.tobytes())
+        self.textures[texture_path].use(0)
+        self.player_tex_vao.render(moderngl.TRIANGLES)
+
+    def _render_enemy_fallback(self, enemy):
+        """备用：纯色渲染敌人"""
+        enemy_size = 0.03
+        enemy_vertices = np.array([
+            enemy.x - enemy_size, enemy.y + enemy_size,
+            enemy.x - enemy_size, enemy.y - enemy_size,
+            enemy.x + enemy_size, enemy.y + enemy_size,
+            enemy.x + enemy_size, enemy.y + enemy_size,
+            enemy.x - enemy_size, enemy.y - enemy_size,
+            enemy.x + enemy_size, enemy.y - enemy_size,
+        ], dtype='f4')
+        self.player_vbo.write(enemy_vertices.tobytes())
+        self.player_vao.render(moderngl.TRIANGLES)
     
     def _render_hitbox(self, player):
         """渲染玩家判定点"""

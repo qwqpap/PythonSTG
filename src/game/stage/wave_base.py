@@ -156,13 +156,51 @@ class Wave(ABC):
         yield from self.wait(int(seconds * 60))
     
     # ==================== 音频 API ====================
-    
+
     def play_se(self, name: str, volume: float = None) -> bool:
         """播放音效"""
         if self.ctx and hasattr(self.ctx, 'play_se'):
             return self.ctx.play_se(name, volume)
         return False
-    
+
+    # ==================== 敌人生成 API ====================
+
+    def spawn_enemy_class(self, enemy_class: type, x: float = 0.0, y: float = 1.0):
+        """
+        生成敌人实例
+
+        Args:
+            enemy_class: 敌人类（必须是 EnemyScript 的子类）
+            x: 初始X坐标
+            y: 初始Y坐标
+
+        Returns:
+            敌人实例
+
+        Example:
+            from game_content.stages.stage1.enemies.fairy import Enemy1Custom
+
+            enemy = self.spawn_enemy_class(Enemy1Custom, x=0.0, y=1.0)
+        """
+        if not self.ctx:
+            print("[Wave] 警告: 无上下文，无法生成敌人")
+            return None
+
+        # 实例化敌人
+        enemy = enemy_class()
+
+        # 绑定上下文和位置
+        enemy.bind(self.ctx, x, y)
+
+        # 启动敌人
+        enemy.start()
+
+        # 添加到上下文管理（如果支持）
+        if hasattr(self.ctx, 'add_enemy_script'):
+            self.ctx.add_enemy_script(enemy)
+
+        return enemy
+
     # ==================== 子类实现 ====================
     
     @abstractmethod

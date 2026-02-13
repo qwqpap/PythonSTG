@@ -1,0 +1,288 @@
+{
+  "$schema": "enemy_presets_schema",
+  "version": "1.0",
+  "presets": {
+    "enemy1": {
+      "name": "红色妖精 (enemy1)",
+      "sprite": "enemy1",
+      "hp": 30,
+      "score": 100,
+      "hitbox_radius": 0.02,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_s",
+        "bullet_color": "red",
+        "move_speed": 2.0,
+        "fire_rate": 20
+      }
+    },
+    "enemy2": {
+      "name": "蓝色妖精 (enemy2)",
+      "sprite": "enemy2",
+      "hp": 30,
+      "score": 100,
+      "hitbox_radius": 0.02,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_s",
+        "bullet_color": "blue",
+        "move_speed": 2.5,
+        "fire_rate": 15
+      }
+    },
+    "enemy3": {
+      "name": "绿色妖精 (enemy3)",
+      "sprite": "enemy3",
+      "hp": 35,
+      "score": 150,
+      "hitbox_radius": 0.02,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_m",
+        "bullet_color": "green",
+        "move_speed": 1.8,
+        "fire_rate": 25
+      }
+    },
+    "enemy4": {
+      "name": "黄色妖精 (enemy4)",
+      "sprite": "enemy4",
+      "hp": 35,
+      "score": 150,
+      "hitbox_radius": 0.02,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_m",
+        "bullet_color": "yellow",
+        "move_speed": 2.2,
+        "fire_rate": 18
+      }
+    },
+    "enemy5": {
+      "name": "红色大妖精 (enemy5)",
+      "sprite": "enemy5",
+      "hp": 60,
+      "score": 250,
+      "hitbox_radius": 0.025,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "scale_s",
+        "bullet_color": "red",
+        "move_speed": 1.5,
+        "fire_rate": 30
+      }
+    },
+    "enemy6": {
+      "name": "蓝色大妖精 (enemy6)",
+      "sprite": "enemy6",
+      "hp": 60,
+      "score": 250,
+      "hitbox_radius": 0.025,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "scale_s",
+        "bullet_color": "blue",
+        "move_speed": 1.5,
+        "fire_rate": 30
+      }
+    },
+    "enemy7": {
+      "name": "红色中型敌 (enemy7)",
+      "sprite": "enemy7",
+      "hp": 80,
+      "score": 300,
+      "hitbox_radius": 0.03,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_l",
+        "bullet_color": "red",
+        "move_speed": 1.2,
+        "fire_rate": 40
+      }
+    },
+    "enemy8": {
+      "name": "蓝色中型敌 (enemy8)",
+      "sprite": "enemy8",
+      "hp": 80,
+      "score": 300,
+      "hitbox_radius": 0.03,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_l",
+        "bullet_color": "blue",
+        "move_speed": 1.2,
+        "fire_rate": 40
+      }
+    },
+    "enemy9": {
+      "name": "大型敌 (enemy9)",
+      "sprite": "enemy9",
+      "hp": 150,
+      "score": 500,
+      "hitbox_radius": 0.04,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_l",
+        "bullet_color": "purple",
+        "move_speed": 1.0,
+        "fire_rate": 50
+      }
+    },
+    "enemy10": {
+      "name": "粉色妖精 (enemy10)",
+      "sprite": "enemy10",
+      "hp": 30,
+      "score": 100,
+      "hitbox_radius": 0.02,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_s",
+        "bullet_color": "pink",
+        "move_speed": 2.1,
+        "fire_rate": 18
+      }
+    },
+    "enemy11": {
+      "name": "紫色妖精 (enemy11)",
+      "sprite": "enemy11",
+      "hp": 30,
+      "score": 100,
+      "hitbox_radius": 0.02,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_s",
+        "bullet_color": "purple",
+        "move_speed": 2.3,
+        "fire_rate": 17
+      }
+    },
+    "enemy12": {
+      "name": "青色妖精 (enemy12)",
+      "sprite": "enemy12",
+      "hp": 35,
+      "score": 150,
+      "hitbox_radius": 0.02,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "ball_m",
+        "bullet_color": "cyan",
+        "move_speed": 1.9,
+        "fire_rate": 22
+      }
+    },
+    "kedama": {
+      "name": "毛玉 (kedama)",
+      "sprite": "kedama",
+      "hp": 20,
+      "score": 50,
+      "hitbox_radius": 0.015,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "rice_s",
+        "bullet_color": "pink",
+        "move_speed": 3.0,
+        "fire_rate": 15
+      }
+    },
+    "enemy_orb": {
+      "name": "幽灵球 (enemy_orb)",
+      "sprite": "enemy_orb",
+      "hp": 50,
+      "score": 200,
+      "hitbox_radius": 0.025,
+      "drop": null,
+      "defaults": {
+        "bullet_type": "scale_m",
+        "bullet_color": "purple",
+        "move_speed": 1.5,
+        "fire_rate": 25
+      }
+    }
+  },
+  "behavior_presets": {
+    "rush_in_shoot_leave": {
+      "name": "冲入-射击-离开",
+      "description": "最经典的杂兵模式：从屏幕顶部飞入，停顿射击，然后飞出",
+      "phases": [
+        {"action": "move_to", "params": {"target": "y=0.3", "duration": 60}},
+        {"action": "shoot_burst", "params": {"count": 3, "interval": 20}},
+        {"action": "move_to", "params": {"target": "y=-0.2", "duration": 60}}
+      ]
+    },
+    "side_pass_shoot": {
+      "name": "横向掠过射击",
+      "description": "从侧面横向飞过，边移动边射击",
+      "phases": [
+        {"action": "move_to", "params": {"target": "x=-x", "duration": 120}},
+        {"action": "shoot_continuous", "params": {"interval": 10, "count": 5}}
+      ]
+    },
+    "circle_strafe": {
+      "name": "环绕射击",
+      "description": "以圆形路径移动并持续射击",
+      "phases": [
+        {"action": "move_circle", "params": {"radius": 0.3, "duration": 180, "center": [0, 0.3]}},
+        {"action": "shoot_continuous", "params": {"interval": 15, "count": 10}}
+      ]
+    },
+    "dive_attack": {
+      "name": "俯冲攻击",
+      "description": "快速俯冲到屏幕底部，发射密集弹幕",
+      "phases": [
+        {"action": "wait", "params": {"duration": 30}},
+        {"action": "shoot_burst", "params": {"count": 5, "interval": 5}},
+        {"action": "move_to", "params": {"target": "y=-0.5", "duration": 30, "speed": 8.0}}
+      ]
+    },
+    "ambush_retreat": {
+      "name": "突袭-撤退",
+      "description": "快速飞入，发射大量弹幕后迅速撤退",
+      "phases": [
+        {"action": "move_to", "params": {"target": "y=0.4", "duration": 30}},
+        {"action": "shoot_pattern", "params": {"pattern": "circle", "count": 12}},
+        {"action": "wait", "params": {"duration": 15}},
+        {"action": "shoot_pattern", "params": {"pattern": "circle", "count": 16}},
+        {"action": "move_to", "params": {"target": "y=1.2", "duration": 45}}
+      ]
+    }
+  },
+  "movement_presets": {
+    "linear_down": {
+      "name": "直线向下",
+      "path": "linear",
+      "params": {"direction": -90, "speed": 2.0}
+    },
+    "sine_wave": {
+      "name": "正弦波",
+      "path": "sine",
+      "params": {"amplitude": 0.2, "frequency": 2.0, "base_speed": 1.5}
+    },
+    "spiral": {
+      "name": "螺旋",
+      "path": "spiral",
+      "params": {"radius_start": 0.1, "radius_end": 0.3, "rotation_speed": 5.0}
+    }
+  },
+  "attack_presets": {
+    "burst_8way": {
+      "name": "8方向连发",
+      "type": "circle",
+      "params": {"count": 8, "speed": 2.0, "bursts": 3, "burst_interval": 20}
+    },
+    "aimed_3shot": {
+      "name": "自机狙3连发",
+      "type": "aimed",
+      "params": {"count": 3, "speed": 2.5, "interval": 10, "spread": 15}
+    },
+    "spiral_dense": {
+      "name": "密集螺旋",
+      "type": "spiral",
+      "params": {"arms": 3, "bullets_per_arm": 8, "rotation_speed": 10}
+    },
+    "random_spray": {
+      "name": "随机散射",
+      "type": "random",
+      "params": {"count": 12, "speed_min": 1.5, "speed_max": 3.0, "angle_variance": 30}
+    }
+  }
+}

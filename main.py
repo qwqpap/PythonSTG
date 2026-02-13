@@ -281,12 +281,18 @@ def main():
             hud.update_from_boss(active_boss)
         
         # 渲染游戏场景（按正确的图层顺序，包含道具渲染和背景）
+        # 获取敌人脚本列表（如果有）
+        enemy_scripts = None
+        if hasattr(stage_manager, 'current_context') and stage_manager.current_context:
+            enemy_scripts = stage_manager.current_context.get_enemy_scripts()
+
         renderer.render_frame(
-            bullet_pool, player, stage_manager, laser_pool, 
+            bullet_pool, player, stage_manager, laser_pool,
             viewport_rect=game_viewport,
             item_renderer=item_renderer,
             items=item_pool.get_active_items(),
-            dt=dt  # 传递时间步长用于背景动画
+            dt=dt,  # 传递时间步长用于背景动画
+            enemy_scripts=enemy_scripts  # 传递敌人脚本列表
         )
         
         # 注意：道具现在在renderer.render_frame中渲染，不需要单独调用

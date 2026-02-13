@@ -31,6 +31,9 @@ def stage1_level(stage_manager, bullet_pool, player,
         audio_manager=audio_manager
     )
 
+    # 将ctx保存到stage_manager，供渲染器访问
+    stage_manager.current_context = ctx
+
     # 使用程序化关卡脚本
     stage = Stage1()
     stage.bind(ctx)
@@ -41,6 +44,9 @@ def stage1_level(stage_manager, bullet_pool, player,
         yield
 
     print("=== Stage 1 测试关卡结束 ===")
+
+    # 清理上下文引用
+    stage_manager.current_context = None
 
     # 清理关卡私有音频
     if audio_manager:

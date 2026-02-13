@@ -12,6 +12,7 @@ from src.game.stage.boss_base import nonspell, spellcard
 from game_content.stages.stage1.waves.opening_wave import OpeningWave
 from game_content.stages.stage1.waves.fairy_wave import FairyWave
 from game_content.stages.stage1.waves.post_midboss_wave import PostMidbossWave
+from game_content.stages.stage1.waves.enemy_showcase_wave import EnemyShowcaseWave
 
 # 符卡
 from game_content.stages.stage1.spellcards.nonspell_1 import NonSpell1
@@ -60,6 +61,11 @@ class Stage1(StageScript):
 
         # 等待 2 秒
         await self.wait(120)
+        # 测试波次 - 敌人展示
+        await self.run_wave(EnemyShowcaseWave)
+
+        # 等待 10 秒
+        await self.wait(600)
 
         # 妖精编队 - 散布弹
         await self.run_wave(FairyWave)
