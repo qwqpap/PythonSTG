@@ -24,11 +24,12 @@ class BossPhase:
     phase_type: BossPhaseType
     hp: int
     time_limit: float
-    script_path: str
-    name: Optional[str] = None   # 符卡名称（非符为 None）
+    script_path: str = ""                    # 脚本路径（JSON 模式）
+    script_class: Optional[type] = None      # 脚本类（程序化模式）
+    name: Optional[str] = None               # 符卡名称（非符为 None）
     bonus: int = 0
     practice_unlock: bool = False
-    
+
     # 运行时
     spellcard: Optional['SpellCard'] = None
 
@@ -92,7 +93,24 @@ class BossBase:
             boss.phases.append(phase)
         
         return boss
-    
+
+    @classmethod
+    def create(cls, boss_def, ctx: 'SpellCardContext') -> 'BossBase':
+        """从 BossDef 数据对象创建 Boss（程序化模式）"""
+        from dataclasses import replace
+
+        boss = cls()
+        boss.ctx = ctx
+        boss.id = boss_def.id
+        boss.name = boss_def.name
+        boss.texture = boss_def.texture
+        boss.animations = boss_def.animations.copy()
+
+        # 复制 phases，避免修改定义中的运行时状态
+        boss.phases = [replace(p, spellcard=None) for p in boss_def.phases]
+
+        return boss
+
     def start(self):
         """开始 Boss 战"""
         self._active = True
@@ -110,8 +128,11 @@ class BossBase:
         self.hp = phase.hp
         self.max_hp = phase.hp
         
-        # 加载并启动符卡
-        spellcard = self._load_spellcard(phase.script_path)
+        # 加载并启动符卡：优先使用 script_class，回退到 script_path
+        if phase.script_class:
+            spellcard = phase.script_class()
+        else:
+            spellcard = self._load_spellcard(phase.script_path)
         if spellcard:
             # 用配置覆盖符卡默认值
             if phase.name:
@@ -224,3 +245,31 @@ class BossBase:
         """练习模式：直接开始指定阶段"""
         self._active = True
         self._start_phase(phase_index)
+
+
+# ==================== 阶段定义辅助函数 ====================
+
+def nonspell(script_class: type, hp: int, time: float, bonus: int = 100000) -> BossPhase:
+    """创建非符阶段定义"""
+    return BossPhase(
+        phase_type=BossPhaseType.NONSPELL,
+        hp=hp,
+        time_limit=time,
+        script_class=script_class,
+        bonus=bonus,
+        practice_unlock=False
+    )
+
+
+def spellcard(script_class: type, name: str, hp: int, time: float,
+              bonus: int = 1000000, practice: bool = True) -> BossPhase:
+    """创建符卡阶段定义"""
+    return BossPhase(
+        phase_type=BossPhaseType.SPELLCARD,
+        hp=hp,
+        time_limit=time,
+        script_class=script_class,
+        name=name,
+        bonus=bonus,
+        practice_unlock=practice
+    )

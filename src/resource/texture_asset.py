@@ -401,9 +401,18 @@ class TextureAssetManager:
         if 'frames' in data:
             # 方式1: 显式帧列表
             for frame_data in data['frames']:
-                rect = tuple(frame_data.get('rect', [0, 0, 32, 32]))
-                center = tuple(frame_data.get('center', default_center))
-                frames.append(SpriteFrame(rect=rect, center=center))
+                if isinstance(frame_data, str):
+                    # 精灵名引用 — 从已加载的精灵中查找 rect/center
+                    sprite = self.sprites.get(frame_data)
+                    if sprite:
+                        frames.append(SpriteFrame(rect=sprite.rect, center=sprite.center))
+                    else:
+                        print(f"[AnimParse] 未找到精灵引用: {frame_data}")
+                        frames.append(SpriteFrame(rect=(0, 0, 32, 32), center=default_center))
+                else:
+                    rect = tuple(frame_data.get('rect', [0, 0, 32, 32]))
+                    center = tuple(frame_data.get('center', default_center))
+                    frames.append(SpriteFrame(rect=rect, center=center))
         
         elif 'strip' in data:
             # 方式2: 连续帧带（自动计算）

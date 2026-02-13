@@ -27,7 +27,8 @@ class PracticeEntry:
     phase_index: int           # 阶段索引
     spell_name: str            # 符卡名称（非符为空）
     is_nonspell: bool          # 是否为非符
-    config_path: str           # Boss 配置路径
+    config_path: str           # Boss 配置路径（JSON 模式）
+    boss_def: Optional[Any] = None  # BossDef 对象（程序化模式）
     
     @property
     def display_name(self) -> str:
@@ -92,6 +93,58 @@ class PracticeManager:
         
         self._loaded = True
         print(f"[Practice] 加载了 {len(self._entries)} 个可练习符卡")
+
+    def load_from_stages(self, stage_classes: list):
+        """
+        从 StageScript 子类列表加载练习条目（程序化模式）
+
+        扫描每个 StageScript 子类的类属性，查找 BossDef 实例，
+        从中提取可练习的符卡条目。
+
+        Args:
+            stage_classes: StageScript 子类的列表
+
+        用法：
+            from game_content.stages.stage1.stage_script import Stage1
+            manager.load_from_stages([Stage1])
+        """
+        from .stage_base import BossDef
+        from .boss_base import BossPhaseType
+
+        self._entries.clear()
+
+        for stage_cls in stage_classes:
+            stage_id = getattr(stage_cls, 'id', '')
+            stage_name = getattr(stage_cls, 'name', stage_id)
+
+            # 扫描类属性，查找所有 BossDef 实例
+            for attr_name in dir(stage_cls):
+                if attr_name.startswith('_'):
+                    continue
+                attr = getattr(stage_cls, attr_name, None)
+                if not isinstance(attr, BossDef):
+                    continue
+
+                boss_def = attr
+                for i, phase in enumerate(boss_def.phases):
+                    if not phase.practice_unlock:
+                        continue
+
+                    entry = PracticeEntry(
+                        stage_id=stage_id,
+                        stage_name=stage_name,
+                        boss_id=boss_def.id,
+                        boss_name=boss_def.name,
+                        phase_index=i,
+                        spell_name=phase.name or '',
+                        is_nonspell=(phase.phase_type == BossPhaseType.NONSPELL),
+                        config_path='',
+                        boss_def=boss_def
+                    )
+                    self._entries.append(entry)
+
+        self._loaded = True
+        print(f"[Practice] 从关卡脚本加载了 {len(self._entries)} 个可练习符卡")
     
     def _scan_boss_configs(self, stage_path: str, stage_id: str, stage_name: str):
         """扫描关卡中的 Boss 配置"""
@@ -160,26 +213,32 @@ class PracticeManager:
     def start_practice(self, entry: PracticeEntry, ctx: SpellCardContext) -> BossBase:
         """
         开始符卡练习
-        
+
         Returns:
             Boss 实例（已启动到指定阶段）
         """
-        boss = BossBase.from_config(entry.config_path, ctx)
+        if entry.boss_def is not None:
+            boss = BossBase.create(entry.boss_def, ctx)
+        else:
+            boss = BossBase.from_config(entry.config_path, ctx)
         boss.start_phase_practice(entry.phase_index)
         return boss
-    
+
     def start_boss_practice(self, stage_id: str, boss_id: str, ctx: SpellCardContext) -> BossBase:
         """
         开始 Boss 连续练习（所有符卡）
         """
-        entries = [e for e in self._entries 
+        entries = [e for e in self._entries
                    if e.stage_id == stage_id and e.boss_id == boss_id]
-        
+
         if not entries:
             raise ValueError(f"未找到 Boss: {stage_id}/{boss_id}")
-        
-        # 使用第一个条目的配置加载 Boss
-        boss = BossBase.from_config(entries[0].config_path, ctx)
+
+        first = entries[0]
+        if first.boss_def is not None:
+            boss = BossBase.create(first.boss_def, ctx)
+        else:
+            boss = BossBase.from_config(first.config_path, ctx)
         boss.start()  # 从头开始
         return boss
 

@@ -1,19 +1,19 @@
 """
 Stage 1 测试关卡
 
-使用新的 StageContext 桥接引擎层和内容层。
+使用程序化关卡脚本 StageScript。
 这个文件属于"引擎胶水层"，连接 main.py 的引擎对象和 game_content 的内容。
 """
 from typing import Generator
 
 from src.game.stage.context import StageContext
-from src.game.stage.stage_base import StageBase
+from game_content.stages.stage1.stage_script import Stage1
 from src.game.audio import StageAudioBank
 
 
 def stage1_level(stage_manager, bullet_pool, player,
-                 audio_manager=None) -> Generator:
-    """加载 stage1/stage.json 并运行"""
+                 audio_manager=None, **kwargs) -> Generator:
+    """加载并运行 Stage 1"""
     print("=== Stage 1 测试关卡开始 ===")
 
     # 加载关卡私有音频（如果有）
@@ -31,8 +31,9 @@ def stage1_level(stage_manager, bullet_pool, player,
         audio_manager=audio_manager
     )
 
-    # 加载关卡配置并启动
-    stage = StageBase.from_config("game_content/stages/stage1/stage.json", ctx)
+    # 使用程序化关卡脚本
+    stage = Stage1()
+    stage.bind(ctx)
     stage.start()
 
     while stage._active:
