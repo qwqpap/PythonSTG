@@ -34,7 +34,14 @@
       "textures": []
     },
     "ui": {
-      "textures": []
+      "textures": [
+        "images/ui/dialog_box.png",
+        "images/ui/dialog_balloon.png"
+      ],
+      "configs": [
+        "images/ui/dialog_box.json",
+        "images/ui/dialog_balloon.json"
+      ]
     },
     "audio": {
       "music": [],

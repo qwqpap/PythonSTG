@@ -1,0 +1,17 @@
+{
+  "__character_name": "Reiuji Utsuho（灵乌路 空）",
+  "__description": "第一关Boss立绘配置",
+  "__source_folder": "Reiuji_Utsuho",
+
+  "portraits": {
+    "normal": {
+      "file": "Reiuji_Utsuho/normal.png",
+      "center": [0.5, 0.5],
+      "scale": 1.0,
+      "description": "普通表情"
+    }
+  },
+
+  "default_portrait": "normal",
+  "default_position": "right"
+}

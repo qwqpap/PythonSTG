@@ -1,0 +1,17 @@
+{
+  "__character_name": "Hinanawi Tenshi（比那名居 天子）",
+  "__description": "自机角色立绘配置",
+  "__source_folder": "Hinanawi_Tenshi",
+
+  "portraits": {
+    "normal": {
+      "file": "Hinanawi_Tenshi/normal.png",
+      "center": [0.5, 0.5],
+      "scale": 1.0,
+      "description": "普通表情"
+    }
+  },
+
+  "default_portrait": "normal",
+  "default_position": "left"
+}

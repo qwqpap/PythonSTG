@@ -1,0 +1,45 @@
+{
+  "__image_filename": "dialog_box.png",
+  "__description": "对话框背景条纹理",
+  "__texture_size": [368, 60],
+
+  "sprites": {
+    "dialog_box_bg": {
+      "rect": [0, 0, 368, 60],
+      "center": [184, 30],
+      "description": "对话框底部背景条"
+    }
+  },
+
+  "layout_params": {
+    "default_position": {
+      "x": 230,
+      "y": 230,
+      "description": "默认对话框位置（屏幕坐标）"
+    },
+    "portrait_positions": {
+      "left": {
+        "x": 80,
+        "y": 128,
+        "description": "左侧立绘位置"
+      },
+      "right": {
+        "x": 380,
+        "y": 128,
+        "description": "右侧立绘位置"
+      }
+    },
+    "balloon_offset": {
+      "left": {
+        "x": 130,
+        "y": 230,
+        "description": "左侧气泡位置"
+      },
+      "right": {
+        "x": 330,
+        "y": 230,
+        "description": "右侧气泡位置"
+      }
+    }
+  }
+}
