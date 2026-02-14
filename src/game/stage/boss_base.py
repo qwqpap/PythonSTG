@@ -273,3 +273,4 @@ def spellcard(script_class: type, name: str, hp: int, time: float,
         bonus=bonus,
         practice_unlock=practice
     )
+

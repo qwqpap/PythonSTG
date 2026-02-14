@@ -59,6 +59,13 @@ class Stage1(StageScript):
         # 开场波次 - 米弹下落热身
         await self.run_wave(OpeningWave)
 
+        await self.play_dialogue([
+            ("Hinanawi_Tenshi", "left", "你就是掌握核融合力量的地狱鸦吗？"),
+            ("Reiuji_Utsuho", "right", "没错！我是灵乌路空！"),
+            ("Reiuji_Utsuho", "right", "你这个天界的任性小姐，来地底做什么？"),
+            ("Hinanawi_Tenshi", "left", "当然是来修行的！正好拿你练练手！"),
+            ("Reiuji_Utsuho", "right", "哼哼，那就让你见识一下核融合的威力！"),
+        ])
         # 等待 2 秒
         await self.wait(120)
         # 测试波次 - 敌人展示
@@ -79,8 +86,20 @@ class Stage1(StageScript):
         # 道中 Boss 后收尾波次
         await self.run_wave(PostMidbossWave)
 
-        # Boss 前对话（TODO: 对话系统）
-        # await self.run_dialogue(pre_boss_dialogue)
+        # Boss 战前对话
+        await self.play_dialogue([
+            ("Hinanawi_Tenshi", "left", "你就是露米娅吗？"),
+            ("Reiuji_Utsuho", "right", "没错！我是灵乌路空！"),
+            ("Hinanawi_Tenshi", "left", "我听说你很擅长使用符卡？"),
+            ("Reiuji_Utsuho", "right", "哼哼，那当然！"),
+        ])
 
-        # 关底 Boss - 露米娅（1 非符 + 2 符卡）
+        # 关底 Boss - 露米娅
         await self.run_boss(self.boss)
+
+        # Boss 战后对话
+        await self.play_dialogue([
+            ("Reiuji_Utsuho", "right", "好...好强...！"),
+            ("Hinanawi_Tenshi", "left", "这就是天界的实力！"),
+        ])
+

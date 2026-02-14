@@ -31,6 +31,7 @@ from src.resource.texture_asset import (
 )
 from src.render.item_renderer import ItemRenderer
 from src.ui import HUD, UIRenderer
+from src.ui.dialog_gl_renderer import DialogGLRenderer
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from levels.boli import level_1
@@ -185,7 +186,10 @@ def main():
               bg_color=bg_color, bg_alpha=bg_alpha,
               layout_override=layout_override)
     ui_renderer = UIRenderer(ctx, screen_width=screen_size[0], screen_height=screen_size[1])
-    
+
+    # 初始化对话渲染器（ModernGL）
+    dialog_gl_renderer = DialogGLRenderer(ctx, screen_size[0], screen_size[1], game_viewport)
+
     # 初始化物品渲染器
     item_renderer = ItemRenderer(ctx, base_size)
     item_renderer.load_texture("assets/images/item/item.png")
@@ -302,7 +306,13 @@ def main():
         # 将视口恢复为全窗口，渲染HUD
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])
         ui_renderer.render_hud(hud)
-        
+
+        # 渲染对话（如果有，使用 ModernGL）
+        if stage_manager.current_stage:
+            dialog_state = stage_manager.current_stage.get_dialog_renderer()
+            if dialog_state:
+                dialog_gl_renderer.render(dialog_state)
+
         # 更新FPS用于屏幕显示
         hud.state.fps = int(clock.get_fps())
         
@@ -314,6 +324,7 @@ def main():
     renderer.cleanup()
     item_renderer.cleanup()
     ui_renderer.cleanup()
+    dialog_gl_renderer.cleanup()
     if background_renderer:
         background_renderer.cleanup()
     texture_asset_manager.clear_all()

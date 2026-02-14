@@ -319,6 +319,7 @@ class StageScript:
         self._active: bool = False
         self._coroutine = None
         self._current_boss: Optional['BossBase'] = None
+        self._current_dialog_renderer = None  # 当前对话渲染器
         self._time: int = 0
 
     @property
@@ -424,15 +425,100 @@ class StageScript:
             self._play_bgm(self.bgm)
 
     @types.coroutine
+    def play_dialogue(self, dialogue_list):
+        """
+        播放对话序列
+
+        Args:
+            dialogue_list: 对话列表，支持两种格式：
+                简单格式: [("角色名", "位置", "文本"), ...]
+                详细格式: [{"character": "...", "position": "...", "text": "...", "balloon_style": 1}, ...]
+
+        Example:
+            await self.play_dialogue([
+                ("Hinanawi_Tenshi", "left", "你好！"),
+                ("Reiuji_Utsuho", "right", "哼！"),
+            ])
+        """
+        from .dialog_data import DialogSequence, DialogSentence
+
+        # 转换为 DialogSentence 列表
+        sentences = []
+        for item in dialogue_list:
+            if isinstance(item, tuple):
+                # 简单格式: (character, position, text)
+                character, position, text = item
+                sentences.append(DialogSentence(
+                    text=text,
+                    character=character,
+                    position=position,
+                    balloon_style=1  # 默认样式
+                ))
+            elif isinstance(item, dict):
+                # 详细格式
+                sentences.append(DialogSentence(**item))
+            else:
+                raise ValueError(f"Invalid dialogue format: {type(item)}")
+
+        # 创建对话序列
+        sequence = DialogSequence(sentences=sentences, can_skip=True)
+
+        # 创建对话管理器
+        from .dialog_manager import DialogManager
+        manager = DialogManager(sequence)
+
+        # 创建简化渲染器
+        text_renderer = None
+        try:
+            from .simple_dialog_renderer import SimpleDialogTextRenderer
+            text_renderer = SimpleDialogTextRenderer()
+            # 存储到实例变量以便外部渲染
+            self._current_dialog_renderer = text_renderer
+            print(f"[对话] 渲染器已创建: {text_renderer}")
+        except ImportError as e:
+            print(f"[对话] 警告：无法导入渲染器: {e}")
+        except Exception as e:
+            print(f"[对话] 警告：创建渲染器失败: {e}")
+
+        # 设置回调
+        def on_sentence_start(sentence):
+            print(f"\n[对话] {sentence.character} ({sentence.position}): {sentence.text}")
+            if text_renderer:
+                text_renderer.set_sentence(sentence)
+
+        def on_complete():
+            print("[对话] 对话结束\n")
+            if text_renderer:
+                text_renderer.clear()
+            self._current_dialog_renderer = None
+
+        manager.on_sentence_start = on_sentence_start
+        manager.on_complete = on_complete
+
+        # 启动对话
+        manager.start()
+
+        # 等待对话完成
+        while manager.update():
+            if text_renderer:
+                text_renderer.update()
+            yield
+
+    @types.coroutine
     def run_dialogue(self, dialogue_data):
         """
-        运行对话（TODO: 对话系统实现后补充）
+        运行对话（兼容旧 API）
 
         Args:
             dialogue_data: 对话数据
         """
-        # TODO: 对话系统
-        yield
+        # 兼容：如果是 DialogSequence 对象，使用旧方式
+        from .dialog_data import DialogSequence
+        if isinstance(dialogue_data, DialogSequence):
+            dialogue_list = [(s.character, s.position, s.text) for s in dialogue_data.sentences]
+            yield from self.play_dialogue(dialogue_list)
+        else:
+            yield from self.play_dialogue(dialogue_data)
 
     # ==================== 等待 API ====================
 
@@ -472,3 +558,8 @@ class StageScript:
         """关卡完成"""
         self._active = False
         print(f"[StageScript] 关卡完成: {self.name}")
+
+    def get_dialog_renderer(self):
+        """获取当前对话渲染器（供外部渲染使用）"""
+        return self._current_dialog_renderer
+

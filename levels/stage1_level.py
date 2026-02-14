@@ -39,11 +39,17 @@ def stage1_level(stage_manager, bullet_pool, player,
     stage.bind(ctx)
     stage.start()
 
+    # 保存 stage 对象到 stage_manager，供对话渲染使用
+    stage_manager.current_stage = stage
+
     while stage._active:
         stage.update()
         yield
 
     print("=== Stage 1 测试关卡结束 ===")
+
+    # 清理 stage 引用
+    stage_manager.current_stage = None
 
     # 清理上下文引用
     stage_manager.current_context = None

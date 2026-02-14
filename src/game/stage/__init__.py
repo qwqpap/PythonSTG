@@ -13,6 +13,8 @@ class StageManager:
         self.is_paused = False
         self.boss_manager = None
         self.enemy_manager = None
+        self.current_stage = None  # 当前 StageScript 实例（用于对话系统等）
+        self.current_context = None  # 当前 StageContext 实例
     
     def set_boss_manager(self, boss_manager):
         """
