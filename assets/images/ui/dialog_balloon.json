@@ -2,154 +2,346 @@
   "__image_filename": "dialog_balloon.png",
   "__description": "对话气泡纹理配置 - 8种样式，每种包含头、体、尾三部分",
   "__notes": "样式1-4用于单行文本，样式5-8用于多行文本（2行）",
-  "__texture_size": [288, 1024],
-
+  "__texture_size": [
+    288,
+    1024
+  ],
   "sprites": {
     "balloon_head_1": {
-      "rect": [108, 0, 90, 96],
-      "center": [36, 96],
+      "rect": [
+        108,
+        0,
+        90,
+        96
+      ],
+      "center": [
+        36,
+        96
+      ],
       "description": "气泡头部 - 样式1（单行）"
     },
     "balloon_body_1": {
-      "rect": [0, 0, 108, 96],
-      "center": [54, 48],
+      "rect": [
+        0,
+        0,
+        108,
+        96
+      ],
+      "center": [
+        54,
+        48
+      ],
       "description": "气泡身体 - 样式1（可重复）"
     },
     "balloon_tail_1": {
-      "rect": [198, 0, 90, 96],
-      "center": [54, 48],
+      "rect": [
+        198,
+        0,
+        90,
+        96
+      ],
+      "center": [
+        54,
+        48
+      ],
       "description": "气泡尾部 - 样式1"
     },
-
     "balloon_head_2": {
-      "rect": [108, 96, 90, 112],
-      "center": [36, 112],
+      "rect": [
+        108,
+        96,
+        90,
+        112
+      ],
+      "center": [
+        36,
+        112
+      ],
       "description": "气泡头部 - 样式2（单行）"
     },
     "balloon_body_2": {
-      "rect": [0, 96, 108, 112],
-      "center": [54, 56],
+      "rect": [
+        0,
+        96,
+        108,
+        112
+      ],
+      "center": [
+        54,
+        56
+      ],
       "description": "气泡身体 - 样式2（可重复）"
     },
     "balloon_tail_2": {
-      "rect": [198, 96, 90, 112],
-      "center": [54, 56],
+      "rect": [
+        198,
+        96,
+        90,
+        112
+      ],
+      "center": [
+        54,
+        56
+      ],
       "description": "气泡尾部 - 样式2"
     },
-
     "balloon_head_3": {
-      "rect": [108, 231, 90, 96],
-      "center": [36, 96],
+      "rect": [
+        108,
+        231,
+        90,
+        96
+      ],
+      "center": [
+        36,
+        96
+      ],
       "description": "气泡头部 - 样式3（单行）"
     },
     "balloon_body_3": {
-      "rect": [0, 231, 108, 96],
-      "center": [54, 48],
+      "rect": [
+        0,
+        231,
+        108,
+        96
+      ],
+      "center": [
+        54,
+        48
+      ],
       "description": "气泡身体 - 样式3（可重复）"
     },
     "balloon_tail_3": {
-      "rect": [198, 231, 90, 96],
-      "center": [54, 48],
+      "rect": [
+        198,
+        231,
+        90,
+        96
+      ],
+      "center": [
+        54,
+        48
+      ],
       "description": "气泡尾部 - 样式3"
     },
-
     "balloon_head_4": {
-      "rect": [108, 343, 90, 96],
-      "center": [36, 96],
+      "rect": [
+        108,
+        343,
+        90,
+        96
+      ],
+      "center": [
+        36,
+        96
+      ],
       "description": "气泡头部 - 样式4（单行）"
     },
     "balloon_body_4": {
-      "rect": [0, 343, 108, 96],
-      "center": [54, 48],
+      "rect": [
+        0,
+        343,
+        108,
+        96
+      ],
+      "center": [
+        54,
+        48
+      ],
       "description": "气泡身体 - 样式4（可重复）"
     },
     "balloon_tail_4": {
-      "rect": [198, 343, 90, 96],
-      "center": [54, 48],
+      "rect": [
+        198,
+        343,
+        90,
+        96
+      ],
+      "center": [
+        54,
+        48
+      ],
       "description": "气泡尾部 - 样式4"
     },
-
     "balloon_head_5": {
-      "rect": [108, 448, 90, 128],
-      "center": [36, 128],
+      "rect": [
+        108,
+        448,
+        90,
+        128
+      ],
+      "center": [
+        36,
+        128
+      ],
       "description": "气泡头部 - 样式5（多行）"
     },
     "balloon_body_5": {
-      "rect": [0, 448, 108, 128],
-      "center": [54, 64],
+      "rect": [
+        0,
+        448,
+        108,
+        128
+      ],
+      "center": [
+        54,
+        64
+      ],
       "description": "气泡身体 - 样式5（可重复）"
     },
     "balloon_tail_5": {
-      "rect": [198, 448, 90, 128],
-      "center": [54, 64],
+      "rect": [
+        198,
+        448,
+        90,
+        128
+      ],
+      "center": [
+        54,
+        64
+      ],
       "description": "气泡尾部 - 样式5"
     },
-
     "balloon_head_6": {
-      "rect": [108, 576, 90, 144],
-      "center": [36, 144],
+      "rect": [
+        108,
+        576,
+        90,
+        144
+      ],
+      "center": [
+        36,
+        144
+      ],
       "description": "气泡头部 - 样式6（多行）"
     },
     "balloon_body_6": {
-      "rect": [0, 576, 108, 144],
-      "center": [54, 72],
+      "rect": [
+        0,
+        576,
+        108,
+        144
+      ],
+      "center": [
+        54,
+        72
+      ],
       "description": "气泡身体 - 样式6（可重复）"
     },
     "balloon_tail_6": {
-      "rect": [198, 576, 90, 144],
-      "center": [54, 72],
+      "rect": [
+        198,
+        576,
+        90,
+        144
+      ],
+      "center": [
+        54,
+        72
+      ],
       "description": "气泡尾部 - 样式6"
     },
-
     "balloon_head_7": {
-      "rect": [108, 743, 90, 128],
-      "center": [36, 128],
+      "rect": [
+        108,
+        743,
+        90,
+        128
+      ],
+      "center": [
+        36,
+        128
+      ],
       "description": "气泡头部 - 样式7（多行）"
     },
     "balloon_body_7": {
-      "rect": [0, 743, 108, 128],
-      "center": [54, 64],
+      "rect": [
+        0,
+        743,
+        108,
+        128
+      ],
+      "center": [
+        54,
+        64
+      ],
       "description": "气泡身体 - 样式7（可重复）"
     },
     "balloon_tail_7": {
-      "rect": [198, 743, 90, 128],
-      "center": [54, 64],
+      "rect": [
+        198,
+        743,
+        90,
+        128
+      ],
+      "center": [
+        54,
+        64
+      ],
       "description": "气泡尾部 - 样式7"
     },
-
     "balloon_head_8": {
-      "rect": [108, 887, 90, 128],
-      "center": [36, 128],
+      "rect": [
+        108,
+        887,
+        90,
+        128
+      ],
+      "center": [
+        36,
+        128
+      ],
       "description": "气泡头部 - 样式8（多行）"
     },
     "balloon_body_8": {
-      "rect": [0, 887, 108, 128],
-      "center": [54, 64],
+      "rect": [
+        0,
+        887,
+        108,
+        128
+      ],
+      "center": [
+        54,
+        64
+      ],
       "description": "气泡身体 - 样式8（可重复）"
     },
     "balloon_tail_8": {
-      "rect": [198, 887, 90, 128],
-      "center": [54, 64],
+      "rect": [
+        198,
+        887,
+        90,
+        128
+      ],
+      "center": [
+        54,
+        64
+      ],
       "description": "气泡尾部 - 样式8"
     }
   },
-
   "balloon_styles": {
     "style_1": {
       "type": "single_line",
       "head": "balloon_head_1",
       "body": "balloon_body_1",
       "tail": "balloon_tail_1",
-      "body_repeat_width": 16,
-      "description": "单行气泡 - 样式1"
+      "body_repeat_width": 27,
+      "description": "单行气泡 - 样式1",
+      "head_cap_width": 72,
+      "tail_cap_width": 85,
+      "body_tile_offset": 72
     },
     "style_2": {
       "type": "single_line",
       "head": "balloon_head_2",
       "body": "balloon_body_2",
       "tail": "balloon_tail_2",
-      "body_repeat_width": 16,
-      "description": "单行气泡 - 样式2"
+      "body_repeat_width": 25,
+      "description": "单行气泡 - 样式2",
+      "head_cap_width": 58,
+      "tail_cap_width": 74,
+      "body_tile_offset": 60
     },
     "style_3": {
       "type": "single_line",
@@ -196,11 +388,13 @@
       "head": "balloon_head_8",
       "body": "balloon_body_8",
       "tail": "balloon_tail_8",
-      "body_repeat_width": 16,
-      "description": "多行气泡 - 样式8"
+      "body_repeat_width": 29,
+      "description": "多行气泡 - 样式8",
+      "head_cap_width": 70,
+      "tail_cap_width": 92,
+      "body_tile_offset": 89
     }
   },
-
   "layout_params": {
     "head_width": 26,
     "body_width_per_char": 16,
@@ -209,7 +403,11 @@
     "char_height": 32,
     "scale_animation_frames": 10,
     "fade_animation_frames": 16,
-    "text_color": [0, 0, 0],
+    "text_color": [
+      0,
+      0,
+      0
+    ],
     "description": "布局参数：头26px + 体16px×字符数 + 尾4px"
   }
 }
