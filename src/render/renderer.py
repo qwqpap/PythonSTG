@@ -786,64 +786,68 @@ class Renderer:
                 self.player_vao.render(moderngl.TRIANGLES)
 
     def _render_enemy_sprite(self, enemy):
-        """使用纹理渲染单个敌人（支持动画）"""
-        # 获取精灵ID
-        sprite_id = getattr(enemy, 'sprite', None)
-        if not sprite_id:
-            self._render_enemy_fallback(enemy)
-            return
-
-        # 尝试作为精灵ID查找
-        sprite_data = self.sprite_manager.get_sprite(sprite_id)
+        """使用纹理渲染单个敌人（支持贴图对象自动动画）"""
+        # 优先使用贴图对象（EnemyRenderObject）
+        frame = None
         texture_path = None
 
-        if not sprite_data:
-            # 可能是动画名称，尝试获取动画
-            animation = self.sprite_manager.asset_manager.get_animation(sprite_id)
-            if animation and hasattr(animation, 'frames') and len(animation.frames) > 0:
-                # 根据敌人存活时间获取当前帧（支持动画循环）
-                enemy_time = getattr(enemy, '_time', 0) / 60.0
-                current_frame = animation.get_frame_at_time(enemy_time)
-                sprite_data = {
-                    'rect': list(current_frame.rect),
-                    'center': list(current_frame.center)
-                }
-                texture_path = animation.texture_path
+        if hasattr(enemy, 'get_render_frame'):
+            frame, texture_path = enemy.get_render_frame()
 
-        if not sprite_data:
-            self._render_enemy_fallback(enemy)
-            return
+        if frame is not None and texture_path and texture_path in self.textures:
+            rect = list(frame.rect)
+        else:
+            # 退回到直接查找精灵/动画
+            sprite_id = getattr(enemy, 'sprite', None)
+            if not sprite_id:
+                self._render_enemy_fallback(enemy)
+                return
 
-        # 获取纹理路径（如果还没有从动画获取）
-        if not texture_path:
-            texture_path = self.sprite_manager.get_sprite_texture_path(sprite_id)
+            sprite_data = self.sprite_manager.get_sprite(sprite_id)
+            if not sprite_data:
+                animation = self.sprite_manager.asset_manager.get_animation(sprite_id)
+                if animation and hasattr(animation, 'frames') and len(animation.frames) > 0:
+                    enemy_time = getattr(enemy, '_time', 0) / 60.0
+                    current_frame = animation.get_frame_at_time(enemy_time)
+                    sprite_data = {
+                        'rect': list(current_frame.rect),
+                        'center': list(current_frame.center)
+                    }
+                    texture_path = animation.texture_path
 
-        if not texture_path or texture_path not in self.textures:
-            self._render_enemy_fallback(enemy)
-            return
+            if not sprite_data:
+                self._render_enemy_fallback(enemy)
+                return
+
+            if not texture_path:
+                texture_path = self.sprite_manager.get_sprite_texture_path(sprite_id)
+
+            if not texture_path or texture_path not in self.textures:
+                self._render_enemy_fallback(enemy)
+                return
+
+            rect = sprite_data.get('rect', [0, 0, 32, 32])
 
         # 计算UV坐标（纹理以flip_y=True加载，需要翻转V坐标）
         tex_w, tex_h = self.textures[texture_path].size
-        rect = sprite_data.get('rect', [0, 0, 32, 32])
         u0 = rect[0] / tex_w
         u1 = (rect[0] + rect[2]) / tex_w
-        v0 = 1.0 - (rect[1] + rect[3]) / tex_h  # flip_y校正：底部
-        v1 = 1.0 - rect[1] / tex_h                # flip_y校正：顶部
+        v0 = 1.0 - (rect[1] + rect[3]) / tex_h
+        v1 = 1.0 - rect[1] / tex_h
 
-        # 计算屏幕尺寸（转换像素大小到归一化坐标）
-        sprite_w = rect[2] / 192.0  # 192是半屏宽度的像素数
+        # 计算屏幕尺寸
+        sprite_w = rect[2] / 192.0
         sprite_h = rect[3] / 192.0
 
         px, py = enemy.x, enemy.y
 
-        # 6个顶点（2个三角形），v0=底部, v1=顶部
         vertices = np.array([
-            px - sprite_w/2, py - sprite_h/2, u0, v0,  # 左下
-            px + sprite_w/2, py - sprite_h/2, u1, v0,  # 右下
-            px + sprite_w/2, py + sprite_h/2, u1, v1,  # 右上
-            px - sprite_w/2, py - sprite_h/2, u0, v0,  # 左下
-            px + sprite_w/2, py + sprite_h/2, u1, v1,  # 右上
-            px - sprite_w/2, py + sprite_h/2, u0, v1,  # 左上
+            px - sprite_w/2, py - sprite_h/2, u0, v0,
+            px + sprite_w/2, py - sprite_h/2, u1, v0,
+            px + sprite_w/2, py + sprite_h/2, u1, v1,
+            px - sprite_w/2, py - sprite_h/2, u0, v0,
+            px + sprite_w/2, py + sprite_h/2, u1, v1,
+            px - sprite_w/2, py + sprite_h/2, u0, v1,
         ], dtype='f4')
 
         self.player_tex_vbo.write(vertices.tobytes())

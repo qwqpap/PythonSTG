@@ -40,10 +40,11 @@
 import math
 import types
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, List, Any, TYPE_CHECKING
+from typing import Optional, Callable, List, Any, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .spellcard import SpellCardContext
+    from .enemy_render import EnemyRenderObject
 
 
 class EnemyScript(ABC):
@@ -68,7 +69,9 @@ class EnemyScript(ABC):
         self._coroutine = None
         self._bullets: List[Any] = []
         self._time: int = 0
-        
+        self._prev_x: float = 0.0
+        self._render_obj: Optional['EnemyRenderObject'] = None
+
         # 回调
         self.on_death: Optional[Callable] = None
         self.on_out_of_bounds: Optional[Callable] = None
@@ -97,6 +100,8 @@ class EnemyScript(ABC):
         """启动敌人（由引擎/波次调用）"""
         self._active = True
         self._time = 0
+        self._prev_x = self.x
+        self._init_render_object()
         self._coroutine = self._run_wrapper()
     
     async def _run_wrapper(self):
@@ -115,16 +120,22 @@ class EnemyScript(ABC):
         """每帧更新（由引擎调用）"""
         if not self._active:
             return False
-        
+
         self._time += 1
-        
+
+        # 计算X速度并更新贴图对象动画
+        vx = self.x - self._prev_x
+        self._prev_x = self.x
+        if self._render_obj:
+            self._render_obj.update(vx, 1.0 / 60.0)
+
         if self._coroutine:
             try:
                 self._coroutine.send(None)
             except StopIteration:
                 self._active = False
                 return False
-        
+
         return True
     
     def damage(self, amount: int):
@@ -151,6 +162,33 @@ class EnemyScript(ABC):
         if self.on_death:
             self.on_death(self)
     
+    # ==================== 贴图对象 ====================
+
+    def _init_render_object(self):
+        """初始化贴图对象（从 sprite 名称自动创建）"""
+        if not self.sprite or not self.ctx:
+            return
+        try:
+            from .enemy_render import EnemyRenderObject
+            from src.resource.texture_asset import get_texture_asset_manager
+            asset_manager = get_texture_asset_manager()
+            render_obj = EnemyRenderObject(self.sprite, asset_manager)
+            if render_obj.is_valid:
+                self._render_obj = render_obj
+        except Exception:
+            pass
+
+    def get_render_frame(self) -> Tuple[Optional[Any], Optional[str]]:
+        """
+        获取当前渲染帧（由渲染器调用）
+
+        Returns:
+            (SpriteFrame, texture_path) 或 (None, None)
+        """
+        if self._render_obj:
+            return self._render_obj.get_current_frame()
+        return None, None
+
     # ==================== 弹幕 API ====================
     
     def fire(self, angle: float = -90, speed: float = 2.0,

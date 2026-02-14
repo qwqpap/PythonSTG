@@ -2020,166 +2020,148 @@
   },
   "animations": {
     "enemy1": {
-      "frames": [
-        "enemy1_0",
-        "enemy1_1",
-        "enemy1_2",
-        "enemy1_3",
-        "enemy1_4",
-        "enemy1_5",
-        "enemy1_6",
-        "enemy1_7",
-        "enemy1_8",
-        "enemy1_9",
-        "enemy1_10",
-        "enemy1_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy1_0","enemy1_1","enemy1_2","enemy1_3","enemy1_4","enemy1_5","enemy1_6","enemy1_7","enemy1_8","enemy1_9","enemy1_10","enemy1_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy1_idle": {
+      "frames": ["enemy1_0","enemy1_1","enemy1_2","enemy1_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy1_move_left": {
+      "frames": ["enemy1_4","enemy1_5","enemy1_6","enemy1_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy1_move_right": {
+      "frames": ["enemy1_8","enemy1_9","enemy1_10","enemy1_11"],
+      "fps": 8, "loop": true
     },
     "enemy2": {
-      "frames": [
-        "enemy2_0",
-        "enemy2_1",
-        "enemy2_2",
-        "enemy2_3",
-        "enemy2_4",
-        "enemy2_5",
-        "enemy2_6",
-        "enemy2_7",
-        "enemy2_8",
-        "enemy2_9",
-        "enemy2_10",
-        "enemy2_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy2_0","enemy2_1","enemy2_2","enemy2_3","enemy2_4","enemy2_5","enemy2_6","enemy2_7","enemy2_8","enemy2_9","enemy2_10","enemy2_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy2_idle": {
+      "frames": ["enemy2_0","enemy2_1","enemy2_2","enemy2_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy2_move_left": {
+      "frames": ["enemy2_4","enemy2_5","enemy2_6","enemy2_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy2_move_right": {
+      "frames": ["enemy2_8","enemy2_9","enemy2_10","enemy2_11"],
+      "fps": 8, "loop": true
     },
     "enemy3": {
-      "frames": [
-        "enemy3_0",
-        "enemy3_1",
-        "enemy3_2",
-        "enemy3_3",
-        "enemy3_4",
-        "enemy3_5",
-        "enemy3_6",
-        "enemy3_7",
-        "enemy3_8",
-        "enemy3_9",
-        "enemy3_10",
-        "enemy3_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy3_0","enemy3_1","enemy3_2","enemy3_3","enemy3_4","enemy3_5","enemy3_6","enemy3_7","enemy3_8","enemy3_9","enemy3_10","enemy3_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy3_idle": {
+      "frames": ["enemy3_0","enemy3_1","enemy3_2","enemy3_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy3_move_left": {
+      "frames": ["enemy3_4","enemy3_5","enemy3_6","enemy3_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy3_move_right": {
+      "frames": ["enemy3_8","enemy3_9","enemy3_10","enemy3_11"],
+      "fps": 8, "loop": true
     },
     "enemy4": {
-      "frames": [
-        "enemy4_0",
-        "enemy4_1",
-        "enemy4_2",
-        "enemy4_3",
-        "enemy4_4",
-        "enemy4_5",
-        "enemy4_6",
-        "enemy4_7",
-        "enemy4_8",
-        "enemy4_9",
-        "enemy4_10",
-        "enemy4_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy4_0","enemy4_1","enemy4_2","enemy4_3","enemy4_4","enemy4_5","enemy4_6","enemy4_7","enemy4_8","enemy4_9","enemy4_10","enemy4_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy4_idle": {
+      "frames": ["enemy4_0","enemy4_1","enemy4_2","enemy4_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy4_move_left": {
+      "frames": ["enemy4_4","enemy4_5","enemy4_6","enemy4_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy4_move_right": {
+      "frames": ["enemy4_8","enemy4_9","enemy4_10","enemy4_11"],
+      "fps": 8, "loop": true
     },
     "enemy5": {
-      "frames": [
-        "enemy5_0",
-        "enemy5_1",
-        "enemy5_2",
-        "enemy5_3",
-        "enemy5_4",
-        "enemy5_5",
-        "enemy5_6",
-        "enemy5_7",
-        "enemy5_8",
-        "enemy5_9",
-        "enemy5_10",
-        "enemy5_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy5_0","enemy5_1","enemy5_2","enemy5_3","enemy5_4","enemy5_5","enemy5_6","enemy5_7","enemy5_8","enemy5_9","enemy5_10","enemy5_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy5_idle": {
+      "frames": ["enemy5_0","enemy5_1","enemy5_2","enemy5_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy5_move_left": {
+      "frames": ["enemy5_4","enemy5_5","enemy5_6","enemy5_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy5_move_right": {
+      "frames": ["enemy5_8","enemy5_9","enemy5_10","enemy5_11"],
+      "fps": 8, "loop": true
     },
     "enemy6": {
-      "frames": [
-        "enemy6_0",
-        "enemy6_1",
-        "enemy6_2",
-        "enemy6_3",
-        "enemy6_4",
-        "enemy6_5",
-        "enemy6_6",
-        "enemy6_7",
-        "enemy6_8",
-        "enemy6_9",
-        "enemy6_10",
-        "enemy6_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy6_0","enemy6_1","enemy6_2","enemy6_3","enemy6_4","enemy6_5","enemy6_6","enemy6_7","enemy6_8","enemy6_9","enemy6_10","enemy6_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy6_idle": {
+      "frames": ["enemy6_0","enemy6_1","enemy6_2","enemy6_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy6_move_left": {
+      "frames": ["enemy6_4","enemy6_5","enemy6_6","enemy6_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy6_move_right": {
+      "frames": ["enemy6_8","enemy6_9","enemy6_10","enemy6_11"],
+      "fps": 8, "loop": true
     },
     "enemy7": {
-      "frames": [
-        "enemy7_0",
-        "enemy7_1",
-        "enemy7_2",
-        "enemy7_3",
-        "enemy7_4",
-        "enemy7_5",
-        "enemy7_6",
-        "enemy7_7",
-        "enemy7_8",
-        "enemy7_9",
-        "enemy7_10",
-        "enemy7_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy7_0","enemy7_1","enemy7_2","enemy7_3","enemy7_4","enemy7_5","enemy7_6","enemy7_7","enemy7_8","enemy7_9","enemy7_10","enemy7_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy7_idle": {
+      "frames": ["enemy7_0","enemy7_1","enemy7_2","enemy7_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy7_move_left": {
+      "frames": ["enemy7_4","enemy7_5","enemy7_6","enemy7_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy7_move_right": {
+      "frames": ["enemy7_8","enemy7_9","enemy7_10","enemy7_11"],
+      "fps": 8, "loop": true
     },
     "enemy8": {
-      "frames": [
-        "enemy8_0",
-        "enemy8_1",
-        "enemy8_2",
-        "enemy8_3",
-        "enemy8_4",
-        "enemy8_5",
-        "enemy8_6",
-        "enemy8_7",
-        "enemy8_8",
-        "enemy8_9",
-        "enemy8_10",
-        "enemy8_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy8_0","enemy8_1","enemy8_2","enemy8_3","enemy8_4","enemy8_5","enemy8_6","enemy8_7","enemy8_8","enemy8_9","enemy8_10","enemy8_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy8_idle": {
+      "frames": ["enemy8_0","enemy8_1","enemy8_2","enemy8_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy8_move_left": {
+      "frames": ["enemy8_4","enemy8_5","enemy8_6","enemy8_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy8_move_right": {
+      "frames": ["enemy8_8","enemy8_9","enemy8_10","enemy8_11"],
+      "fps": 8, "loop": true
     },
     "enemy9": {
-      "frames": [
-        "enemy9_0",
-        "enemy9_1",
-        "enemy9_2",
-        "enemy9_3",
-        "enemy9_4",
-        "enemy9_5",
-        "enemy9_6",
-        "enemy9_7",
-        "enemy9_8",
-        "enemy9_9",
-        "enemy9_10",
-        "enemy9_11"
-      ],
-      "fps": 8,
-      "loop": true
+      "frames": ["enemy9_0","enemy9_1","enemy9_2","enemy9_3","enemy9_4","enemy9_5","enemy9_6","enemy9_7","enemy9_8","enemy9_9","enemy9_10","enemy9_11"],
+      "fps": 8, "loop": true
+    },
+    "enemy9_idle": {
+      "frames": ["enemy9_0","enemy9_1","enemy9_2","enemy9_3"],
+      "fps": 8, "loop": true
+    },
+    "enemy9_move_left": {
+      "frames": ["enemy9_4","enemy9_5","enemy9_6","enemy9_7"],
+      "fps": 8, "loop": true
+    },
+    "enemy9_move_right": {
+      "frames": ["enemy9_8","enemy9_9","enemy9_10","enemy9_11"],
+      "fps": 8, "loop": true
     },
     "kedama": {
       "frames": [
