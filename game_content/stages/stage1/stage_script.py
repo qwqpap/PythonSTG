@@ -60,11 +60,11 @@ class Stage1(StageScript):
         await self.run_wave(OpeningWave)
 
         await self.play_dialogue([
-            ("Hinanawi_Tenshi", "left", "你就是掌握核融合力量的地狱鸦吗？"),
-            ("Reiuji_Utsuho", "right", "没错！我是灵乌路空！"),
-            ("Reiuji_Utsuho", "right", "你这个天界的任性小姐，来地底做什么？"),
-            ("Hinanawi_Tenshi", "left", "当然是来修行的！正好拿你练练手！"),
-            ("Reiuji_Utsuho", "right", "哼哼，那就让你见识一下核融合的威力！"),
+            ("Hinanawi_Tenshi", "left", "你素？"),
+            ("Reiuji_Utsuho", "right", "是我，露米娅的人类老公！"),
+            ("Reiuji_Utsuho", "right", "不"),
+            ("Hinanawi_Tenshi", "left", "本吧主来了！"),
+            ("Reiuji_Utsuho", "right", "清真食堂开始了。"),
         ])
         # 等待 2 秒
         await self.wait(120)

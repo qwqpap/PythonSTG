@@ -73,7 +73,7 @@ class DialogGLRenderer:
         self._portrait_configs = {}      # {"CharName": config dict}
         self._load_character_portraits()
         self._portrait_default_left = (gx + 20, gy + gh - 350)   # 左侧立绘位置
-        self._portrait_default_right = (gx + gw - 180, gy + gh - 350)  # 右侧立绘位置
+        self._portrait_default_right = (gx + gw - 120, gy + gh - 350)  # 右侧立绘位置
 
         # GL 资源
         self._init_shader()
