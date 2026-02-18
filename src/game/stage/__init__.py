@@ -15,6 +15,7 @@ class StageManager:
         self.enemy_manager = None
         self.current_stage = None  # 当前 StageScript 实例（用于对话系统等）
         self.current_context = None  # 当前 StageContext 实例
+        self.loading_info = None  # dict or None → 控制加载画面显示
     
     def set_boss_manager(self, boss_manager):
         """

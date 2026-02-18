@@ -111,3 +111,7 @@ class SimpleDialogTextRenderer:
         self.current_sentence = None
         self.visible_chars = 0
         self.frame_counter = 0
+
+    def is_active(self) -> bool:
+        """检查对话是否正在进行"""
+        return self.current_sentence is not None

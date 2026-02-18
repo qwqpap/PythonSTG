@@ -32,6 +32,7 @@ from src.resource.texture_asset import (
 from src.render.item_renderer import ItemRenderer
 from src.ui import HUD, UIRenderer
 from src.ui.dialog_gl_renderer import DialogGLRenderer
+from src.ui.loading_renderer import LoadingScreenRenderer
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from levels.boli import level_1
@@ -190,6 +191,9 @@ def main():
     # 初始化对话渲染器（ModernGL）
     dialog_gl_renderer = DialogGLRenderer(ctx, screen_size[0], screen_size[1], game_viewport)
 
+    # 初始化加载画面渲染器
+    loading_renderer = LoadingScreenRenderer(ctx, screen_size[0], screen_size[1])
+
     # 初始化物品渲染器
     item_renderer = ItemRenderer(ctx, base_size)
     item_renderer.load_texture("assets/images/item/item.png")
@@ -239,41 +243,69 @@ def main():
         
         # 获取键盘状态
         keys = pygame.key.get_pressed()
-        
-        # 更新游戏逻辑
-        player.update(dt, keys)
+
+        # ===== 加载画面模式 =====
+        if stage_manager.loading_info:
+            # 加载期间只推进关卡协程，不更新游戏逻辑
+            stage_manager.update(dt, bullet_pool, player)
+
+            # 协程可能在 update 中清除了 loading_info，需要重新检查
+            if stage_manager.loading_info:
+                ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+                ctx.clear(0.0, 0.0, 0.0)
+                loading_renderer.render(stage_manager.loading_info)
+
+                hud.state.fps = int(clock.get_fps())
+                pygame.display.flip()
+                continue
+
+        # ===== 正常游戏模式 =====
+        # 检查是否有活跃的对话（对话期间暂停游戏逻辑）
+        dialog_active = False
+        if stage_manager.current_stage:
+            dialog_state = stage_manager.current_stage.get_dialog_renderer()
+            if dialog_state and hasattr(dialog_state, 'is_active') and dialog_state.is_active():
+                dialog_active = True
+
+        # 更新游戏逻辑（对话期间跳过）
+        if not dialog_active:
+            player.update(dt, keys)
+            bullet_pool.update(dt)
+            laser_pool.update()  # 更新激光
+            item_pool.update(player.pos[0], player.pos[1], dt)  # 更新物品
+
+        # 关卡协程始终更新（包括对话协程）
         stage_manager.update(dt, bullet_pool, player)
-        bullet_pool.update(dt)
-        laser_pool.update()  # 更新激光
-        item_pool.update(player.pos[0], player.pos[1], dt)  # 更新物品
         
         # 同步物品统计到玩家和HUD
         player.score = item_pool.stats.score
         player.power = item_pool.stats.get_power_float()
         player.lives = item_pool.stats.lives
-        
+
         # 获取碰撞管理器
         collision_mgr = get_collision_manager()
-        
-        # 碰撞检测 - 子弹（使用统一碰撞管理器）
-        hit_x, hit_y = player.get_hit_position()
-        if player.invincible_timer <= 0:
-            bullet_result = collision_mgr.check_player_vs_bullets(
-                hit_x, hit_y, player.hit_radius, bullet_pool
-            )
-            if bullet_result.occurred:
-                if player.take_damage():
-                    print(f"Player hit by bullet! Lives left: {player.lives}")
-                    bullet_pool.data['alive'][bullet_result.index] = 0
-        
-        # 碰撞检测 - 激光（使用统一碰撞管理器）
-        if player.invincible_timer <= 0:
-            laser_result = collision_mgr.check_player_vs_lasers(
-                hit_x, hit_y, player.hit_radius, laser_pool
-            )
-            if laser_result.occurred:
-                if player.take_damage():
-                    print(f"Player hit by laser! Lives left: {player.lives}")
+
+        # 碰撞检测（对话期间跳过）
+        if not dialog_active:
+            # 碰撞检测 - 子弹（使用统一碰撞管理器）
+            hit_x, hit_y = player.get_hit_position()
+            if player.invincible_timer <= 0:
+                bullet_result = collision_mgr.check_player_vs_bullets(
+                    hit_x, hit_y, player.hit_radius, bullet_pool
+                )
+                if bullet_result.occurred:
+                    if player.take_damage():
+                        print(f"Player hit by bullet! Lives left: {player.lives}")
+                        bullet_pool.data['alive'][bullet_result.index] = 0
+
+            # 碰撞检测 - 激光（使用统一碰撞管理器）
+            if player.invincible_timer <= 0:
+                laser_result = collision_mgr.check_player_vs_lasers(
+                    hit_x, hit_y, player.hit_radius, laser_pool
+                )
+                if laser_result.occurred:
+                    if player.take_damage():
+                        print(f"Player hit by laser! Lives left: {player.lives}")
         
         # 更新 HUD 状态
         hud.update_from_player(player)
@@ -325,6 +357,7 @@ def main():
     item_renderer.cleanup()
     ui_renderer.cleanup()
     dialog_gl_renderer.cleanup()
+    loading_renderer.cleanup()
     if background_renderer:
         background_renderer.cleanup()
     texture_asset_manager.clear_all()
