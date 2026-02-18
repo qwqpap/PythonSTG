@@ -5,9 +5,8 @@
 所有内容脚本（符卡、波次、敌人）通过此上下文与引擎交互。
 内容脚本不需要知道 BulletPool、EnemyManager 等引擎内部实现。
 
-使用方式（在 main.py 或 levels/ 中）：
+使用方式（由 StageManager._run_stage 自动创建）：
     ctx = StageContext(bullet_pool=bullet_pool, player=player)
-    stage = StageBase.from_config("stage.json", ctx)
 """
 
 import json

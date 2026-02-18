@@ -35,11 +35,7 @@ from src.ui.dialog_gl_renderer import DialogGLRenderer
 from src.ui.loading_renderer import LoadingScreenRenderer
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
-from levels.boli import level_1
-from levels.laser_test import laser_test_level
-from levels.item_test import simple_item_demo
-from levels.spellcard_test import spellcard_test_level
-from levels.stage1_level import stage1_level
+from game_content.stages.stage1.stage_script import Stage1
 
 
 def initialize_pygame_and_context():
@@ -118,19 +114,17 @@ def initialize_game_objects(audio_manager=None, background_renderer=None):
     # 设置管理器
     stage_manager.set_boss_manager(boss_manager)
     stage_manager.set_enemy_manager(enemy_manager)
-    
-    # 加载关卡（可选择不同关卡）
-    # stage_manager.add_coroutine(lambda: level_1(stage_manager, bullet_pool, player))
-    # stage_manager.add_coroutine(lambda: laser_test_level(stage_manager, bullet_pool, player, laser_pool))
-    # stage_manager.add_coroutine(lambda: simple_item_demo(stage_manager, bullet_pool, player, item_pool))
-    stage_manager.add_coroutine(lambda: stage1_level(
-        stage_manager,
-        bullet_pool,
-        player,
+
+    # 绑定引擎对象（一次性）
+    stage_manager.bind_engine(
+        bullet_pool=bullet_pool,
+        player=player,
         audio_manager=audio_manager,
-        background_renderer=background_renderer
-    ))
-    
+    )
+
+    # 加载关卡
+    stage_manager.load_stage(Stage1)
+
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
 

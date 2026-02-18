@@ -75,7 +75,7 @@ class Wave(ABC):
         执行波次，返回一个生成器（由引擎调用）
         
         这个方法将 async def run() 转换为 yield 风格的生成器，
-        让 StageBase 可以用 yield from 来驱动。
+        让 StageScript 可以用 yield from 来驱动。
         """
         coro = self.run()
         try:
