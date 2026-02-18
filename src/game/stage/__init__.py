@@ -109,6 +109,7 @@ class StageManager:
             player=player,
             enemy_manager=self.enemy_manager,
             audio_manager=self._audio_manager,
+            item_pool=self._engine_refs.get('item_pool'),
         )
 
         # 将 ctx 保存到 stage_manager，供渲染器访问

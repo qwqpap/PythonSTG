@@ -60,6 +60,7 @@ class EnemyScript(ABC):
     sprite: str = "enemy_fairy"         # 精灵图
     score: int = 100                    # 击破得分
     hitbox_radius: float = 0.02         # 碰撞半径
+    drops: dict = {}                    # 击破掉落 {"power": N, "point": N, "faith": N}
     
     def __init__(self):
         self.x: float = 0.0
@@ -158,7 +159,15 @@ class EnemyScript(ABC):
             if self.ctx:
                 self.ctx.remove_bullet(bullet_idx)
         self._bullets.clear()
-        
+
+        # 掉道具
+        if self.ctx and self.drops:
+            self.ctx.spawn_drop(self.x, self.y, **self.drops)
+
+        # 加基础分
+        if self.ctx and self.score > 0:
+            self.ctx.add_score(self.score)
+
         if self.on_death:
             self.on_death(self)
     

@@ -15,7 +15,6 @@ from src.game.bullet import BulletPool
 from src.game.player import Player, check_collisions, load_player
 from src.game.stage import StageManager
 from src.game.boss import BossManager
-from src.game.enemy import EnemyManager
 from src.game.laser import LaserPool, get_laser_texture_data
 from src.game.item import ItemPool, ItemConfig
 from src.game.audio import GameAudioBank, AudioManager
@@ -108,18 +107,17 @@ def initialize_game_objects(audio_manager=None, background_renderer=None):
     laser_pool = LaserPool(max_lasers=100)
     item_pool = ItemPool(max_items=1000)
     boss_manager = BossManager()
-    enemy_manager = EnemyManager()
     stage_manager = StageManager()
     
     # 设置管理器
     stage_manager.set_boss_manager(boss_manager)
-    stage_manager.set_enemy_manager(enemy_manager)
 
     # 绑定引擎对象（一次性）
     stage_manager.bind_engine(
         bullet_pool=bullet_pool,
         player=player,
         audio_manager=audio_manager,
+        item_pool=item_pool,
     )
 
     # 加载关卡

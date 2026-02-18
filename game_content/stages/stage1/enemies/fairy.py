@@ -18,6 +18,8 @@ class SideFlyFairy(PresetEnemy):
         - fly_duration：飞行总帧数，超出后敌人消失
     """
     preset_id = "enemy1"
+    score = 200
+    drops = {"power": 3, "point": 1}
 
     # 可在 wave 的 spawn_enemy_class 调用时通过子类覆盖
     fly_angle: float = -60          # 飞行方向（度），0=右，-90=上，180=左

@@ -170,9 +170,32 @@ class StageContext(SpellCardContext):
     
     def bullet_to_item(self, bullet_idx: int):
         """子弹转化为道具"""
+        if self._item_pool and 0 <= bullet_idx < len(self.bullet_pool.data['alive']):
+            bx = self.bullet_pool.data['x'][bullet_idx]
+            by = self.bullet_pool.data['y'][bullet_idx]
+            from ..item import ItemType
+            self._item_pool.spawn(bx, by, ItemType.POINT)
         self.remove_bullet(bullet_idx)
-        # TODO: 如果有 item_pool，在子弹位置生成道具
-    
+
+    def spawn_drop(self, x: float, y: float, **kwargs):
+        """
+        在指定位置生成掉落物（敌人/Boss 击破时调用）
+
+        Args:
+            x, y: 掉落位置（归一化坐标）
+            **kwargs: 传给 ItemPool.spawn_drop 的参数
+                      power, point, faith 等
+        """
+        if self._item_pool:
+            self._item_pool.spawn_drop(x, y, **kwargs)
+
+    def add_score(self, amount: int):
+        """直接增加分数（击破得分等）"""
+        if self._item_pool:
+            self._item_pool.stats.score += amount
+            if self._item_pool.stats.score > self._item_pool.stats.hiscore:
+                self._item_pool.stats.hiscore = self._item_pool.stats.score
+
     def get_player(self) -> PlayerProxy:
         """获取玩家信息（只读代理）"""
         return self._player_proxy
