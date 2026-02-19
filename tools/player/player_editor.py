@@ -93,6 +93,7 @@ class PlayerConfigData:
     description: str = ""
     author: str = ""
     texture: str = ""
+    bullet_texture: str = ""
 
     # 渲染
     render_size_px: int = 32
@@ -764,6 +765,29 @@ class PlayerEditor(QMainWindow):
         
         info_layout.addRow("纹理:", tex_widget)
         
+        # 子弹纹理
+        btex_widget = QWidget()
+        btex_layout = QHBoxLayout(btex_widget)
+        btex_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.bullet_texture_label = QLineEdit()
+        self.bullet_texture_label.setReadOnly(True)
+        self.bullet_texture_label.setPlaceholderText("(共用自机纹理)")
+        btex_layout.addWidget(self.bullet_texture_label)
+        
+        btn_btex = QPushButton("...")
+        btn_btex.setFixedWidth(30)
+        btn_btex.clicked.connect(self._choose_bullet_texture)
+        btex_layout.addWidget(btn_btex)
+        
+        btn_btex_clear = QPushButton("×")
+        btn_btex_clear.setFixedWidth(24)
+        btn_btex_clear.setToolTip("清除子弹纹理（共用自机纹理）")
+        btn_btex_clear.clicked.connect(lambda: (setattr(self.player_data, 'bullet_texture', ''), self.bullet_texture_label.clear()))
+        btex_layout.addWidget(btn_btex_clear)
+        
+        info_layout.addRow("子弹纹理:", btex_widget)
+        
         layout.addWidget(info_group)
         
         # 属性
@@ -1301,6 +1325,13 @@ class PlayerEditor(QMainWindow):
             self.player_data.description = data.get('description', '')
             self.player_data.author = data.get('author', '')
             self.player_data.texture = data.get('texture', '')
+            # 支持新的 textures:{player, bullet} 格式
+            if 'textures' in data:
+                tex_map = data['textures']
+                self.player_data.texture = tex_map.get('player', self.player_data.texture)
+                self.player_data.bullet_texture = tex_map.get('bullet', '')
+            else:
+                self.player_data.bullet_texture = ''
             self.player_data.render_size_px = int(data.get('render_size_px', 32))
             self.player_data.render_downsample = bool(data.get('render_downsample', False))
             
@@ -1368,6 +1399,9 @@ class PlayerEditor(QMainWindow):
             # load_texture 会 scene.clear() 导致精灵矩形和判定点标记丢失，需重建
             self._refresh_sprite_rects()
             self._refresh_hitbox_marker()
+            
+            # 子弹纹理标签
+            self.bullet_texture_label.setText(self.player_data.bullet_texture)
             
             self.statusBar().showMessage(f"已加载: {path}")
             
@@ -1474,6 +1508,17 @@ class PlayerEditor(QMainWindow):
             self.sprite_view.load_texture(path)
             self.anim_preview.set_texture(self.texture_pixmap)
             self.anim_preview.set_sprites(self.player_data.sprites)
+    
+    def _choose_bullet_texture(self):
+        """选择子弹纹理"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择子弹纹理",
+            str(PLAYERS_ROOT),
+            "图片 (*.png *.jpg)"
+        )
+        if path:
+            self.player_data.bullet_texture = Path(path).name
+            self.bullet_texture_label.setText(self.player_data.bullet_texture)
     
     # 精灵操作
     def _add_sprite(self):
@@ -1832,7 +1877,16 @@ class PlayerEditor(QMainWindow):
                 "name": self.player_data.name,
                 "description": self.player_data.description,
                 "author": self.player_data.author,
-                "texture": self.player_data.texture,
+            }
+            # 纹理字段：如果有子弹纹理则用 textures dict，否则沿用旧的 texture string
+            if self.player_data.bullet_texture:
+                config["textures"] = {
+                    "player": self.player_data.texture,
+                    "bullet": self.player_data.bullet_texture
+                }
+            else:
+                config["texture"] = self.player_data.texture
+            config.update({
                 "render_size_px": self.player_data.render_size_px,
                 "render_downsample": self.player_data.render_downsample,
                 "stats": {
@@ -1882,7 +1936,7 @@ class PlayerEditor(QMainWindow):
                     }
                     for opt in self.player_data.options
                 ]
-            }
+            })
             
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)

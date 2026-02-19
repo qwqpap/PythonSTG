@@ -56,8 +56,10 @@ class PlayerBase(Entity):
         self.is_respawning = False
         
         # 纹理/精灵资源
-        self.texture_path = ""       # 纹理文件路径
-        self.sprites = {}            # 精灵定义 {sprite_id: {rect: [x,y,w,h], ...}}
+        self.texture_path = ""               # 自机纹理文件路径
+        self.bullet_texture_path = ""        # 子弹纹理文件路径（空=共用 texture_path）
+        self.sprites = {}                    # 自机精灵定义 {name: {rect: [...]}}
+        self.bullet_sprites = {}             # 子弹精灵定义 {name: {rect: [...]}}
         
         # 上一帧位置（用于动画判断）
         self.last_pos_x = 0.0
@@ -116,8 +118,14 @@ class PlayerBase(Entity):
         # 基础信息
         self.name = config.get('name', self.name)
         
-        # 纹理路径
-        if 'texture' in config and self._config_base_path:
+        # 纹理路径 —— 支持新格式 textures:{player, bullet} 和旧格式 texture:str
+        if 'textures' in config and self._config_base_path:
+            tex_map = config['textures']
+            if 'player' in tex_map:
+                self.texture_path = os.path.join(self._config_base_path, tex_map['player'])
+            if 'bullet' in tex_map:
+                self.bullet_texture_path = os.path.join(self._config_base_path, tex_map['bullet'])
+        elif 'texture' in config and self._config_base_path:
             self.texture_path = os.path.join(self._config_base_path, config['texture'])
 
         # 渲染尺寸（像素）
@@ -133,6 +141,9 @@ class PlayerBase(Entity):
         # 精灵定义
         if 'sprites' in config:
             self.sprites = config['sprites']
+        # 子弹精灵定义
+        if 'bullet_sprites' in config:
+            self.bullet_sprites = config['bullet_sprites']
         
         # 属性
         stats = config.get('stats', {})

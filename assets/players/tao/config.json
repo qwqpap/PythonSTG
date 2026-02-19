@@ -1,0 +1,29 @@
+{
+  "version": "2.0",
+  "name": "tao",
+  "description": "",
+  "author": "",
+  "texture": "",
+  "render_size_px": 32,
+  "render_downsample": false,
+  "stats": {
+    "speed_high": 0.02,
+    "speed_low": 0.008,
+    "hitbox_radius": 3,
+    "graze_radius": 24,
+    "hitbox_offset_x": 0.0,
+    "hitbox_offset_y": 0.0
+  },
+  "initial": {
+    "lives": 3,
+    "bombs": 3,
+    "power": 1.0
+  },
+  "sprites": {},
+  "animations": {
+    "transition_speed": 8.0,
+    "animations": {}
+  },
+  "shot_types": {},
+  "options": []
+}

@@ -329,6 +329,9 @@ class Renderer:
         # 玩家纹理缓存
         self.player_texture = None
         self.player_texture_size = None
+        # 玩家子弹纹理（可独立）
+        self.player_bullet_texture = None
+        self.player_bullet_texture_size = None
     
     def _init_circle_shader(self):
         """初始化判定圆圈渲染着色器和VAO"""
@@ -411,9 +414,10 @@ class Renderer:
         if item_renderer and items:
             item_renderer.render_items(items)
 
-        # ===== 层级 3-5: 自机子弹、Options、自机本体 =====
-        # TODO: 分离玩家子弹和敌人子弹，玩家子弹在此渲染
-        # 目前先渲染玩家
+        # ===== 层级 3: 自机子弹 =====
+        self._render_player_bullets(player)
+
+        # ===== 层级 4-5: Options、自机本体 =====
         self._render_player(player)
 
         # ===== 层级 6: 敌机弹幕（按大小排序） =====
@@ -730,6 +734,97 @@ class Renderer:
             
             self.player_tex_vbo.write(vertices.tobytes())
             self.player_tex_vao.render(moderngl.TRIANGLES)
+    
+    def _render_player_bullets(self, player):
+        """渲染玩家子弹（使用独立的子弹纹理或共用自机纹理）"""
+        import os
+        from PIL import Image
+
+        if not hasattr(player, 'bullet_pool'):
+            return
+
+        active = player.bullet_pool.get_active_data()
+        count = len(active)
+        if count == 0:
+            return
+
+        # ---------- 确定子弹纹理 ----------
+        bullet_tex_path = getattr(player, 'bullet_texture_path', '') or ''
+        player_tex_path = getattr(player, 'texture_path', '') or ''
+        tex_path = bullet_tex_path if bullet_tex_path else player_tex_path
+
+        if not tex_path:
+            return
+
+        # 延迟加载 / 缓存子弹纹理
+        if bullet_tex_path:
+            # 独立子弹纹理
+            if self.player_bullet_texture is None:
+                if os.path.exists(tex_path):
+                    img = Image.open(tex_path).convert('RGBA')
+                    self.player_bullet_texture = self.ctx.texture(img.size, 4, img.tobytes())
+                    self.player_bullet_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+                    self.player_bullet_texture_size = img.size
+                    print(f"已加载玩家子弹纹理: {tex_path} ({img.size[0]}x{img.size[1]})")
+            tex_obj = self.player_bullet_texture
+            tex_size = self.player_bullet_texture_size
+        else:
+            # 共用自机纹理
+            if self.player_texture is None:
+                return
+            tex_obj = self.player_texture
+            tex_size = self.player_texture_size
+
+        if tex_obj is None or tex_size is None:
+            return
+
+        tex_w, tex_h = tex_size
+
+        # ---------- 确定精灵查找表 ----------
+        bullet_sprites = getattr(player, 'bullet_sprites', {}) or {}
+        player_sprites = getattr(player, 'sprites', {}) or {}
+        sprite_lookup = bullet_sprites if bullet_sprites else player_sprites
+
+        # ---------- 准备渲染数据 ----------
+        positions = active['pos'].copy()
+        angles = active['angle'].copy()
+
+        uv_data = np.zeros((count, 4), dtype='f4')
+        scale_data = np.zeros((count, 2), dtype='f4')
+
+        default_size = 8.0
+        scale_factor = self.bullet_scale_factor
+
+        idx_to_id = player.bullet_pool.sprite_idx_to_id
+
+        for j in range(count):
+            sprite_idx = int(active[j]['sprite_idx'])
+            sprite_id = idx_to_id.get(sprite_idx, '')
+
+            rect = None
+            if sprite_id and sprite_id in sprite_lookup:
+                spr = sprite_lookup[sprite_id]
+                rect = spr.get('rect')
+
+            if rect:
+                u0 = rect[0] / tex_w
+                v0 = rect[1] / tex_h
+                u1 = (rect[0] + rect[2]) / tex_w
+                v1 = (rect[1] + rect[3]) / tex_h
+                uv_data[j] = [u0, v0, u1, v1]
+                scale_data[j] = [rect[2] * scale_factor, rect[3] * scale_factor]
+            else:
+                uv_data[j] = [0.0, 0.0, 1.0, 1.0]
+                scale_data[j] = [default_size * scale_factor, default_size * scale_factor]
+
+        # ---------- 发送到 GPU ----------
+        self.instance_vbo.write(positions.tobytes())
+        self.angle_vbo.write(angles.tobytes())
+        self.uv_vbo.write(uv_data.tobytes())
+        self.scale_vbo.write(scale_data.tobytes())
+
+        tex_obj.use(0)
+        self.bullet_vao.render(moderngl.TRIANGLES, instances=count)
     
     def _render_player_fallback(self, player):
         """备用：纯色渲染玩家"""
