@@ -184,10 +184,6 @@ class DialogGLRenderer:
             surface.blit(text_surface, (15, y))
             y += 35
 
-        if dialog_state.visible_chars >= len(sentence.text):
-            hint = self.name_font.render("[按 Z 继续]", True, (200, 200, 200))
-            surface.blit(hint, (self.box_width - 150, self.box_height - 30))
-
         return surface, (self.box_x, self.box_y, self.box_width, self.box_height)
 
     def _wrap_text(self, text, font, max_width):
@@ -498,13 +494,6 @@ class DialogGLRenderer:
                 text_surface = self.balloon_font.render(line, True, text_color)
                 bubble_surface.blit(text_surface, (text_x, text_y))
             text_y += line_height
-
-        # [Z] 提示
-        if visible_chars >= len(full_text):
-            hint_surface = self.balloon_hint_font.render("[Z]", True, text_color)
-            hx = bubble_width - hint_surface.get_width() - 6
-            hy = bubble_height - hint_surface.get_height() - 4
-            bubble_surface.blit(hint_surface, (hx, hy))
 
         # 缩放动画
         if scale_frames > 0:

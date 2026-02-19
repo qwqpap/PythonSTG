@@ -32,6 +32,7 @@ from src.render.item_renderer import ItemRenderer
 from src.ui import HUD, UIRenderer
 from src.ui.dialog_gl_renderer import DialogGLRenderer
 from src.ui.loading_renderer import LoadingScreenRenderer
+from src.ui.main_menu_renderer import MainMenuRenderer
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from game_content.stages.stage1.stage_script import Stage1
@@ -126,10 +127,51 @@ def initialize_game_objects(audio_manager=None, background_renderer=None):
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
 
+def run_main_menu(ctx, screen_size) -> bool:
+    """
+    显示主菜单，处理用户输入。
+    Returns:
+        True: 用户选择开始游戏
+        False: 用户选择退出
+    """
+    main_menu_renderer = MainMenuRenderer(ctx, screen_size[0], screen_size[1])
+    selected_index = 0
+    clock = pygame.time.Clock()
+
+    while True:
+        dt = clock.tick(60) / 1000.0
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                main_menu_renderer.cleanup()
+                return False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    selected_index = (selected_index - 1) % 2
+                elif event.key == pygame.K_DOWN:
+                    selected_index = (selected_index + 1) % 2
+                elif event.key == pygame.K_z:
+                    main_menu_renderer.cleanup()
+                    return selected_index == 0  # 0=开始游戏, 1=退出
+                elif event.key == pygame.K_ESCAPE:
+                    main_menu_renderer.cleanup()
+                    return False
+
+        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.clear(0.0, 0.0, 0.0)
+        main_menu_renderer.render(selected_index)
+        pygame.display.flip()
+
+
 def main():
     """游戏主函数"""
     # 初始化Pygame和OpenGL
     screen, ctx, base_size, screen_size, game_viewport = initialize_pygame_and_context()
+
+    # 主菜单：选择开始游戏或退出
+    if not run_main_menu(ctx, screen_size):
+        pygame.quit()
+        sys.exit(0)
     
     # 初始化统一纹理资产管理器
     texture_asset_manager = init_texture_asset_manager(asset_root="assets")

@@ -106,10 +106,15 @@ class PlayerAnimationStateMachine:
         for name, data in anim_data.items():
             if not isinstance(data, dict):
                 continue
+            # 支持 fps 或 frame_duration（游戏帧/动画帧，60fps 下）
+            fps_val = data.get('fps', 8.0)
+            if 'frame_duration' in data:
+                fd = data['frame_duration']
+                fps_val = 60.0 / fd if fd > 0 else 8.0
             anim = Animation(
                 name=name,
                 frames=data.get('frames', []),
-                fps=data.get('fps', 8.0),
+                fps=fps_val,
                 loop=data.get('loop', True),
                 next_state=data.get('next_state', None)
             )

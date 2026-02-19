@@ -3,27 +3,559 @@
   "name": "orin",
   "description": "",
   "author": "",
-  "texture": "f7d074e81b0486d6db5d276fe9fb0ab9.png",
+  "textures": {
+    "player": "orin.png",
+    "bullet": "f7d074e81b0486d6db5d276fe9fb0ab9.png"
+  },
   "render_size_px": 32,
   "render_downsample": false,
   "stats": {
     "speed_high": 0.02,
     "speed_low": 0.008,
-    "hitbox_radius": 3,
-    "graze_radius": 24,
+    "hitbox_radius": 3.0,
+    "graze_radius": 24.0,
     "hitbox_offset_x": 0.0,
     "hitbox_offset_y": 0.0
   },
   "initial": {
-    "lives": 3,
+    "lives": 1,
     "bombs": 3,
     "power": 1.0
   },
-  "sprites": {},
+  "sprites": {
+    "orin_0": {
+      "rect": [
+        0,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_1": {
+      "rect": [
+        32,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_2": {
+      "rect": [
+        64,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_3": {
+      "rect": [
+        96,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_4": {
+      "rect": [
+        128,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_5": {
+      "rect": [
+        160,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_6": {
+      "rect": [
+        192,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_7": {
+      "rect": [
+        224,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_8": {
+      "rect": [
+        0,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_9": {
+      "rect": [
+        32,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_10": {
+      "rect": [
+        64,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_11": {
+      "rect": [
+        96,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_12": {
+      "rect": [
+        128,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_13": {
+      "rect": [
+        160,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_14": {
+      "rect": [
+        192,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_15": {
+      "rect": [
+        224,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_16": {
+      "rect": [
+        0,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_17": {
+      "rect": [
+        32,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_18": {
+      "rect": [
+        64,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_19": {
+      "rect": [
+        96,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_20": {
+      "rect": [
+        128,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_21": {
+      "rect": [
+        160,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "orin_22": {
+      "rect": [
+        192,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "sprite_0": {
+      "rect": [
+        0,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_1": {
+      "rect": [
+        16,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_2": {
+      "rect": [
+        32,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_3": {
+      "rect": [
+        48,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_4": {
+      "rect": [
+        64,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_5": {
+      "rect": [
+        80,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_6": {
+      "rect": [
+        96,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_7": {
+      "rect": [
+        112,
+        0,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_8": {
+      "rect": [
+        0,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_9": {
+      "rect": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_10": {
+      "rect": [
+        32,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_11": {
+      "rect": [
+        48,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_12": {
+      "rect": [
+        64,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_13": {
+      "rect": [
+        80,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_14": {
+      "rect": [
+        96,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "sprite_15": {
+      "rect": [
+        112,
+        16,
+        16,
+        16
+      ],
+      "source": "bullet"
+    },
+    "auto_39": {
+      "rect": [
+        0,
+        33,
+        60,
+        30
+      ],
+      "source": "bullet"
+    }
+  },
   "animations": {
     "transition_speed": 8.0,
-    "animations": {}
+    "full_tilt_frames": 8,
+    "animations": {
+      "stand": {
+        "frames": [
+          "orin_0",
+          "orin_7",
+          "orin_6",
+          "orin_5",
+          "orin_4",
+          "orin_3",
+          "orin_2",
+          "orin_1"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "left": {
+        "frames": [
+          "orin_12",
+          "orin_13",
+          "orin_14",
+          "orin_15"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "right_light": {
+        "frames": [
+          "orin_16",
+          "orin_17",
+          "orin_18",
+          "orin_19"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "right": {
+        "frames": [
+          "orin_20",
+          "orin_21",
+          "orin_22",
+          "orin_23"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "move_right": {
+        "frames": [
+          "orin_16",
+          "orin_17",
+          "orin_18",
+          "orin_19"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "focus": {
+        "frames": [
+          "orin_0",
+          "orin_7",
+          "orin_6",
+          "orin_5",
+          "orin_4",
+          "orin_3",
+          "orin_2",
+          "orin_1"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "bullet": {
+        "frames": [
+          "sprite_0",
+          "sprite_1",
+          "sprite_2",
+          "sprite_3",
+          "sprite_4",
+          "sprite_5",
+          "sprite_6",
+          "sprite_7"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "coplane": {
+        "frames": [
+          "sprite_8",
+          "sprite_10",
+          "sprite_9",
+          "sprite_11",
+          "sprite_13",
+          "sprite_12",
+          "sprite_14",
+          "sprite_15"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "B": {
+        "frames": [
+          "auto_39"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "light_left": {
+        "frames": [],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "anim_10": {
+        "frames": [
+          "orin_8",
+          "orin_9",
+          "orin_10",
+          "orin_11"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "idle": {
+        "frames": [
+          "orin_0",
+          "orin_7",
+          "orin_6",
+          "orin_5",
+          "orin_4",
+          "orin_3",
+          "orin_2",
+          "orin_1"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "move_left": {
+        "frames": [],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "move_left_full": {
+        "frames": [
+          "orin_12",
+          "orin_13",
+          "orin_14",
+          "orin_15"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      },
+      "move_right_full": {
+        "frames": [
+          "orin_20",
+          "orin_21",
+          "orin_22",
+          "orin_23"
+        ],
+        "frame_duration": 8,
+        "loop": true
+      }
+    }
   },
-  "shot_types": {},
+  "shot_types": {
+    "unfocused": {
+      "damage": 10,
+      "speed": 0.05,
+      "interval": 4,
+      "spread": 5,
+      "count": 2,
+      "sprite": "player_bullet"
+    }
+  },
   "options": []
 }

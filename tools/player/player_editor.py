@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QMessageBox, QToolBar, QAction, QStatusBar, QSlider,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem,
     QGraphicsEllipseItem, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView
+    QAbstractItemView, QDialog, QDialogButtonBox, QStackedWidget
 )
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import (
@@ -52,6 +52,7 @@ class SpriteData:
     name: str
     rect: Tuple[int, int, int, int]  # x, y, w, h
     center: Tuple[float, float] = (0.5, 0.5)
+    source: str = 'player'  # 'player' 或 'bullet'
 
 
 @dataclass
@@ -118,6 +119,7 @@ class PlayerConfigData:
     # 动画
     animations: Dict[str, AnimationData] = field(default_factory=dict)
     animation_transition_speed: float = 8.0
+    full_tilt_frames: int = 8  # 持续移动多少帧后进入完全倾斜(move_left_full/move_right_full)
     
     # 射击
     shot_types: Dict[str, ShotTypeData] = field(default_factory=dict)
@@ -133,6 +135,8 @@ class SpritePreviewView(QGraphicsView):
     
     sprite_rect_changed = pyqtSignal(int, int, int, int)
     hitbox_offset_changed = pyqtSignal(float, float)
+    region_selected = pyqtSignal(int, int, int, int)  # x, y, w, h
+    sprite_clicked = pyqtSignal(str)  # 点击精灵名
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -151,6 +155,11 @@ class SpritePreviewView(QGraphicsView):
         self._hitbox_rect: Optional[Tuple[int, int, int, int]] = None
         self._hitbox_radius: float = 0.0
         self._drag_hitbox = False
+
+        # 拖选区域
+        self._drag_region = False
+        self._region_start: Optional[QPointF] = None
+        self._region_rect_item: Optional[QGraphicsRectItem] = None
         
         self._zoom = 2.0
         self.setTransform(QTransform().scale(self._zoom, self._zoom))
@@ -165,6 +174,7 @@ class SpritePreviewView(QGraphicsView):
         self.hitbox_item = None
         self._hitbox_rect = None
         self._hitbox_radius = 0.0
+        self._region_rect_item = None
         
         pixmap = QPixmap(path)
         self.texture_item = QGraphicsPixmapItem(pixmap)
@@ -201,12 +211,15 @@ class SpritePreviewView(QGraphicsView):
         r = self._hitbox_radius
         self.hitbox_item.setRect(cx - r, cy - r, r * 2, r * 2)
     
-    def add_sprite_rect(self, name: str, rect: Tuple[int, int, int, int], selected: bool = False):
+    def add_sprite_rect(self, name: str, rect: Tuple[int, int, int, int],
+                         selected: bool = False, for_anim: bool = False):
         """添加精灵矩形"""
         x, y, w, h = rect
         
         if selected:
             pen = QPen(QColor(255, 100, 100), 2)
+        elif for_anim:
+            pen = QPen(QColor(100, 255, 100), 2)
         else:
             pen = QPen(QColor(100, 200, 255), 1)
         
@@ -239,12 +252,35 @@ class SpritePreviewView(QGraphicsView):
             self.zoom_out()
 
     def mousePressEvent(self, event):
-        if self.hitbox_item and self.hitbox_item.isVisible():
+        # 判定点拖拽（左键）
+        if event.button() == Qt.LeftButton:
+            if self.hitbox_item and self.hitbox_item.isVisible():
+                scene_pos = self.mapToScene(event.pos())
+                if self.hitbox_item.contains(self.hitbox_item.mapFromScene(scene_pos)):
+                    self._drag_hitbox = True
+                    event.accept()
+                    return
+            # 左键点击精灵矩形
             scene_pos = self.mapToScene(event.pos())
-            if self.hitbox_item.contains(self.hitbox_item.mapFromScene(scene_pos)):
-                self._drag_hitbox = True
-                event.accept()
-                return
+            for name, rect_item in self.rect_items.items():
+                if rect_item.rect().contains(scene_pos):
+                    self.sprite_clicked.emit(name)
+                    event.accept()
+                    return
+        # 右键拖选区域
+        if event.button() == Qt.RightButton:
+            self._region_start = self.mapToScene(event.pos())
+            self._drag_region = True
+            if self._region_rect_item:
+                self.scene.removeItem(self._region_rect_item)
+                self._region_rect_item = None
+            pen = QPen(QColor(80, 160, 255), 1, Qt.DashLine)
+            brush = QBrush(QColor(80, 160, 255, 40))
+            self._region_rect_item = self.scene.addRect(
+                self._region_start.x(), self._region_start.y(), 0, 0, pen, brush)
+            self._region_rect_item.setZValue(30)
+            event.accept()
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -259,11 +295,31 @@ class SpritePreviewView(QGraphicsView):
             self.hitbox_offset_changed.emit(offset_x, offset_y)
             event.accept()
             return
+        if self._drag_region and self._region_start and self._region_rect_item:
+            cur = self.mapToScene(event.pos())
+            x = min(self._region_start.x(), cur.x())
+            y = min(self._region_start.y(), cur.y())
+            w = abs(cur.x() - self._region_start.x())
+            h = abs(cur.y() - self._region_start.y())
+            self._region_rect_item.setRect(x, y, w, h)
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self._drag_hitbox:
             self._drag_hitbox = False
+            event.accept()
+            return
+        if self._drag_region and self._region_start:
+            self._drag_region = False
+            cur = self.mapToScene(event.pos())
+            x = int(min(self._region_start.x(), cur.x()))
+            y = int(min(self._region_start.y(), cur.y()))
+            w = int(abs(cur.x() - self._region_start.x()))
+            h = int(abs(cur.y() - self._region_start.y()))
+            if w > 4 and h > 4:
+                self.region_selected.emit(x, y, w, h)
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -279,6 +335,7 @@ class AnimationPreviewView(QWidget):
         self._setup_ui()
         
         self.texture: Optional[QPixmap] = None
+        self.bullet_texture: Optional[QPixmap] = None
         self.sprites: Dict[str, SpriteData] = {}
         self.current_animation: Optional[AnimationData] = None
         self.current_frame = 0
@@ -323,8 +380,12 @@ class AnimationPreviewView(QWidget):
         layout.addWidget(self.frame_label)
     
     def set_texture(self, pixmap: QPixmap):
-        """设置纹理"""
+        """设置自机纹理"""
         self.texture = pixmap
+    
+    def set_bullet_texture(self, pixmap: Optional[QPixmap]):
+        """设置子弹纹理（用于子弹精灵的动画预览）"""
+        self.bullet_texture = pixmap
     
     def set_sprites(self, sprites: Dict[str, SpriteData]):
         """设置精灵数据"""
@@ -352,7 +413,7 @@ class AnimationPreviewView(QWidget):
     
     def _update_display(self):
         """更新显示"""
-        if not self.current_animation or not self.texture:
+        if not self.current_animation:
             return
         
         frames = self.current_animation.frames
@@ -363,10 +424,12 @@ class AnimationPreviewView(QWidget):
         sprite = self.sprites.get(frame_name)
         
         if sprite:
-            x, y, w, h = sprite.rect
-            cropped = self.texture.copy(x, y, w, h)
-            scaled = cropped.scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.preview_label.setPixmap(scaled)
+            tex = self.bullet_texture if getattr(sprite, 'source', 'player') == 'bullet' else self.texture
+            if tex and not tex.isNull():
+                x, y, w, h = sprite.rect
+                cropped = tex.copy(x, y, w, h)
+                scaled = cropped.scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.preview_label.setPixmap(scaled)
         
         self.frame_label.setText(f"帧: {self.current_frame + 1}/{len(frames)}")
     
@@ -423,23 +486,25 @@ class AnimationStateMachineView(QGraphicsView):
         self.scene.clear()
         self.state_items.clear()
         
-        # 预定义位置
+        # 预定义位置：idle 中心，左移加速/全速在左，右移加速/全速在右
         positions = {
-            'idle': (150, 100),
-            'move_left': (50, 50),
-            'move_right': (250, 50),
-            'tilt_left': (0, 100),
-            'tilt_right': (300, 100),
+            'idle': (200, 120),
+            'move_left': (80, 60),
+            'move_left_full': (80, 180),
+            'move_right': (320, 60),
+            'move_right_full': (320, 180),
+            'death': (200, 240),
+            'spawn': (200, 0),
         }
         
         idx = 0
         for name in animations:
-            x, y = positions.get(name, (50 + (idx % 4) * 80, 150 + (idx // 4) * 60))
+            x, y = positions.get(name, (50 + (idx % 4) * 80, 250 + (idx // 4) * 50))
             self._add_state_node(name, x, y)
             idx += 1
         
         # 绘制转换线
-        self._draw_transitions()
+        self._draw_transitions(animations)
     
     def _add_state_node(self, name: str, x: float, y: float):
         """添加状态节点"""
@@ -457,16 +522,19 @@ class AnimationStateMachineView(QGraphicsView):
         text.setPos(x + 5, y + 10)
         text.setZValue(11)
     
-    def _draw_transitions(self):
-        """绘制转换线"""
-        # 简化的转换关系
+    def _draw_transitions(self, animations: dict = None):
+        """绘制转换线 - 两阶段动画：idle↔move_left↔move_left_full"""
         transitions = [
             ('idle', 'move_left'),
             ('idle', 'move_right'),
-            ('move_left', 'tilt_left'),
-            ('move_right', 'tilt_right'),
-            ('tilt_left', 'idle'),
-            ('tilt_right', 'idle'),
+            ('move_left', 'move_left_full'),
+            ('move_right', 'move_right_full'),
+            ('move_left_full', 'move_left'),
+            ('move_right_full', 'move_right'),
+            ('move_left', 'idle'),
+            ('move_right', 'idle'),
+            ('move_left_full', 'idle'),
+            ('move_right_full', 'idle'),
         ]
         
         pen = QPen(QColor(80, 80, 100), 1, Qt.DashLine)
@@ -666,6 +734,9 @@ class PlayerEditor(QMainWindow):
         self.player_data = PlayerConfigData()
         self.texture_path: Optional[str] = None
         self.texture_pixmap: Optional[QPixmap] = None
+        self.bullet_texture_path: Optional[str] = None
+        self.bullet_texture_pixmap: Optional[QPixmap] = None
+        self._viewing_bullet_tex = False
         self._suppress_sprite_change = False
         self._current_sprite_key: Optional[str] = None
         self._suppress_hitbox_change = False
@@ -748,45 +819,6 @@ class PlayerEditor(QMainWindow):
         self.author_edit = QLineEdit()
         self.author_edit.textChanged.connect(self._on_info_changed)
         info_layout.addRow("作者:", self.author_edit)
-        
-        # 纹理
-        tex_widget = QWidget()
-        tex_layout = QHBoxLayout(tex_widget)
-        tex_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.texture_label = QLineEdit()
-        self.texture_label.setReadOnly(True)
-        tex_layout.addWidget(self.texture_label)
-        
-        btn_tex = QPushButton("...")
-        btn_tex.setFixedWidth(30)
-        btn_tex.clicked.connect(self._choose_texture)
-        tex_layout.addWidget(btn_tex)
-        
-        info_layout.addRow("纹理:", tex_widget)
-        
-        # 子弹纹理
-        btex_widget = QWidget()
-        btex_layout = QHBoxLayout(btex_widget)
-        btex_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.bullet_texture_label = QLineEdit()
-        self.bullet_texture_label.setReadOnly(True)
-        self.bullet_texture_label.setPlaceholderText("(共用自机纹理)")
-        btex_layout.addWidget(self.bullet_texture_label)
-        
-        btn_btex = QPushButton("...")
-        btn_btex.setFixedWidth(30)
-        btn_btex.clicked.connect(self._choose_bullet_texture)
-        btex_layout.addWidget(btn_btex)
-        
-        btn_btex_clear = QPushButton("×")
-        btn_btex_clear.setFixedWidth(24)
-        btn_btex_clear.setToolTip("清除子弹纹理（共用自机纹理）")
-        btn_btex_clear.clicked.connect(lambda: (setattr(self.player_data, 'bullet_texture', ''), self.bullet_texture_label.clear()))
-        btex_layout.addWidget(btn_btex_clear)
-        
-        info_layout.addRow("子弹纹理:", btex_widget)
         
         layout.addWidget(info_group)
         
@@ -889,11 +921,22 @@ class PlayerEditor(QMainWindow):
         btn_zoom_out.clicked.connect(lambda: self.sprite_view.zoom_out())
         toolbar.addWidget(btn_zoom_in)
         toolbar.addWidget(btn_zoom_out)
+        
+        toolbar.addWidget(QLabel("  显示:"))
+        self._tex_switch_combo = QComboBox()
+        self._tex_switch_combo.addItem("自机纹理", "player")
+        self._tex_switch_combo.addItem("子弹纹理", "bullet")
+        self._tex_switch_combo.setFixedWidth(100)
+        self._tex_switch_combo.currentIndexChanged.connect(self._on_tex_switch)
+        toolbar.addWidget(self._tex_switch_combo)
+        
         toolbar.addStretch()
         sprite_layout.addLayout(toolbar)
         
         self.sprite_view = SpritePreviewView()
         self.sprite_view.hitbox_offset_changed.connect(self._on_hitbox_dragged)
+        self.sprite_view.region_selected.connect(self._region_auto_detect)
+        self.sprite_view.sprite_clicked.connect(self._on_preview_sprite_clicked)
         sprite_layout.addWidget(self.sprite_view)
         
         layout.addWidget(sprite_group, stretch=2)
@@ -915,71 +958,173 @@ class PlayerEditor(QMainWindow):
         return panel
     
     def _create_right_panel(self) -> QWidget:
-        """创建右侧面板"""
+        """创建右侧面板 — 向导式"""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
         
-        tabs = QTabWidget()
+        # 步骤指示器
+        self._step_labels = []
+        step_names = ["① 纹理", "② 切割", "③ 动画", "④ 绑定"]
+        step_bar = QHBoxLayout()
+        for i, name in enumerate(step_names):
+            lbl = QLabel(name)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet("padding:4px; font-weight:bold;")
+            step_bar.addWidget(lbl)
+            self._step_labels.append(lbl)
+        layout.addLayout(step_bar)
         
-        # 精灵标签
-        sprite_tab = self._create_sprite_tab()
-        tabs.addTab(sprite_tab, "精灵")
+        # 步骤页面
+        self._wizard_stack = QStackedWidget()
+        self._wizard_stack.addWidget(self._create_step_texture())
+        self._wizard_stack.addWidget(self._create_step_cut())
+        self._wizard_stack.addWidget(self._create_step_animate())
+        self._wizard_stack.addWidget(self._create_step_bind())
+        layout.addWidget(self._wizard_stack, stretch=1)
         
-        # 动画标签
-        anim_tab = self._create_animation_tab()
-        tabs.addTab(anim_tab, "动画")
-        
-        # 射击标签
-        shot_tab = self._create_shot_tab()
-        tabs.addTab(shot_tab, "射击")
-        
-        # 子机标签
-        option_tab = self._create_option_tab()
-        tabs.addTab(option_tab, "子机")
-        
-        layout.addWidget(tabs)
-        
-        # 保存按钮
-        btn_save = QPushButton("💾 保存配置")
-        btn_save.setStyleSheet("font-size: 11pt; padding: 10px; background-color: #4CAF50;")
+        # 导航按钮
+        nav = QHBoxLayout()
+        self._btn_prev = QPushButton("← 上一步")
+        self._btn_prev.clicked.connect(self._wizard_prev)
+        self._btn_next = QPushButton("下一步 →")
+        self._btn_next.clicked.connect(self._wizard_next)
+        btn_save = QPushButton("💾 保存")
+        btn_save.setStyleSheet("background-color: #4CAF50;")
         btn_save.clicked.connect(self._save_config)
-        layout.addWidget(btn_save)
+        nav.addWidget(self._btn_prev)
+        nav.addWidget(self._btn_next)
+        nav.addWidget(btn_save)
+        layout.addLayout(nav)
         
+        self._update_wizard_step(0)
         return panel
     
-    def _create_sprite_tab(self) -> QWidget:
-        """创建精灵标签页"""
+    def _update_wizard_step(self, idx: int):
+        """更新向导步骤"""
+        self._wizard_stack.setCurrentIndex(idx)
+        for i, lbl in enumerate(self._step_labels):
+            if i == idx:
+                lbl.setStyleSheet("padding:4px; font-weight:bold; background:#4a90d9; color:white; border-radius:3px;")
+            elif i < idx:
+                lbl.setStyleSheet("padding:4px; font-weight:bold; color:#4CAF50;")
+            else:
+                lbl.setStyleSheet("padding:4px; font-weight:bold; color:#888;")
+        self._btn_prev.setEnabled(idx > 0)
+        self._btn_next.setEnabled(idx < 3)
+        # 进入步骤③时刷新精灵缩略图网格
+        if idx == 2:
+            self._refresh_sprite_thumb_grid()
+        # 进入步骤④时刷新行为绑定下拉框
+        if idx == 3:
+            self._refresh_behavior_combos()
+    
+    def _wizard_prev(self):
+        idx = self._wizard_stack.currentIndex()
+        if idx > 0:
+            self._update_wizard_step(idx - 1)
+    
+    def _wizard_next(self):
+        idx = self._wizard_stack.currentIndex()
+        if idx < 3:
+            self._update_wizard_step(idx + 1)
+    
+    # ── 步骤① 纹理 ──
+    def _create_step_texture(self) -> QWidget:
+        """步骤①：选择纹理"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # 精灵列表
+        layout.addWidget(QLabel("选择纹理文件，用于后续精灵切割。"))
+        
+        form = QFormLayout()
+        
+        # 自机纹理
+        tex_w = QWidget()
+        tex_l = QHBoxLayout(tex_w)
+        tex_l.setContentsMargins(0, 0, 0, 0)
+        self.texture_label = QLineEdit()
+        self.texture_label.setReadOnly(True)
+        self.texture_label.setPlaceholderText("(未选择)")
+        tex_l.addWidget(self.texture_label)
+        btn_tex = QPushButton("选择...")
+        btn_tex.clicked.connect(self._choose_texture)
+        tex_l.addWidget(btn_tex)
+        form.addRow("自机纹理:", tex_w)
+        
+        # 子弹纹理
+        btex_w = QWidget()
+        btex_l = QHBoxLayout(btex_w)
+        btex_l.setContentsMargins(0, 0, 0, 0)
+        self.bullet_texture_label = QLineEdit()
+        self.bullet_texture_label.setReadOnly(True)
+        self.bullet_texture_label.setPlaceholderText("(共用自机纹理)")
+        btex_l.addWidget(self.bullet_texture_label)
+        btn_btex = QPushButton("选择...")
+        btn_btex.clicked.connect(self._choose_bullet_texture)
+        btex_l.addWidget(btn_btex)
+        btn_btex_clr = QPushButton("×")
+        btn_btex_clr.setFixedWidth(24)
+        btn_btex_clr.clicked.connect(lambda: (
+            setattr(self.player_data, 'bullet_texture', ''),
+            self.bullet_texture_label.clear()
+        ))
+        btex_l.addWidget(btn_btex_clr)
+        form.addRow("子弹纹理:", btex_w)
+        
+        layout.addLayout(form)
+        
+        # 纹理信息
+        self._tex_info_label = QLabel("")
+        self._tex_info_label.setStyleSheet("color:#aaa;")
+        layout.addWidget(self._tex_info_label)
+        
+        # 纹理预览缩略图
+        self._tex_preview_label = QLabel()
+        self._tex_preview_label.setFixedHeight(200)
+        self._tex_preview_label.setAlignment(Qt.AlignCenter)
+        self._tex_preview_label.setStyleSheet("background:#1a1a1a; border:1px solid #333;")
+        layout.addWidget(self._tex_preview_label)
+        
+        layout.addStretch()
+        return widget
+    
+    # ── 步骤② 切割 ──
+    def _create_step_cut(self) -> QWidget:
+        """步骤②：精灵切割"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        layout.addWidget(QLabel("切割纹理为精灵。右键在预览画布拖选区域可自动检测。"))
+        
+        # 切割工具按钮
         btn_layout = QHBoxLayout()
-        btn_add = QPushButton("+ 添加")
+        btn_add = QPushButton("+ 手动添加")
         btn_add.clicked.connect(self._add_sprite)
         btn_del = QPushButton("删除")
         btn_del.clicked.connect(self._delete_sprite)
+        btn_grid = QPushButton("⊞ 网格切割")
+        btn_grid.setToolTip("按行列均匀切割纹理，批量生成精灵")
+        btn_grid.clicked.connect(self._open_grid_split_dialog)
         btn_layout.addWidget(btn_add)
         btn_layout.addWidget(btn_del)
+        btn_layout.addWidget(btn_grid)
         layout.addLayout(btn_layout)
         
+        # 精灵列表
         self.sprite_list = QListWidget()
         self.sprite_list.currentTextChanged.connect(self._on_sprite_selected)
-        self.sprite_list.itemDoubleClicked.connect(self._add_frame_from_sprite)
         layout.addWidget(self.sprite_list)
         
         # 精灵属性
         form = QFormLayout()
-        
         self.sprite_name_edit = QLineEdit()
         self.sprite_name_edit.textChanged.connect(self._on_sprite_changed)
         form.addRow("名称:", self.sprite_name_edit)
         
-        # Rect
         rect_widget = QWidget()
         rect_layout = QHBoxLayout(rect_widget)
         rect_layout.setContentsMargins(0, 0, 0, 0)
-        
         self.sprite_x = QSpinBox()
         self.sprite_x.setRange(0, 9999)
         self.sprite_x.valueChanged.connect(self._on_sprite_changed)
@@ -992,7 +1137,6 @@ class PlayerEditor(QMainWindow):
         self.sprite_h = QSpinBox()
         self.sprite_h.setRange(1, 9999)
         self.sprite_h.valueChanged.connect(self._on_sprite_changed)
-        
         rect_layout.addWidget(QLabel("X:"))
         rect_layout.addWidget(self.sprite_x)
         rect_layout.addWidget(QLabel("Y:"))
@@ -1001,27 +1145,53 @@ class PlayerEditor(QMainWindow):
         rect_layout.addWidget(self.sprite_w)
         rect_layout.addWidget(QLabel("H:"))
         rect_layout.addWidget(self.sprite_h)
-        
         form.addRow("区域:", rect_widget)
         
         layout.addLayout(form)
-        
         return widget
     
-    def _create_animation_tab(self) -> QWidget:
-        """创建动画标签页"""
+    # ── 步骤③ 动画 ──
+    def _create_step_animate(self) -> QWidget:
+        """步骤③：创建动画"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
+        layout.addWidget(QLabel("选择精灵创建动画。可多选缩略图或在预览区左键点击精灵。"))
+        
+        # 精灵缩略图网格（多选）
+        self._sprite_thumb_area = QScrollArea()
+        self._sprite_thumb_area.setFixedHeight(120)
+        self._sprite_thumb_area.setWidgetResizable(True)
+        self._sprite_thumb_container = QWidget()
+        self._sprite_thumb_flow = QHBoxLayout(self._sprite_thumb_container)
+        self._sprite_thumb_flow.setContentsMargins(2, 2, 2, 2)
+        self._sprite_thumb_flow.setSpacing(4)
+        self._sprite_thumb_flow.addStretch()
+        self._sprite_thumb_area.setWidget(self._sprite_thumb_container)
+        layout.addWidget(self._sprite_thumb_area)
+        
+        self._selected_thumb_names: list = []
+        
+        # 从选中创建动画
+        batch_btn = QHBoxLayout()
+        btn_from_sel = QPushButton("🎬 从选中创建动画")
+        btn_from_sel.clicked.connect(self._create_anim_from_selected)
+        batch_btn.addWidget(btn_from_sel)
+        batch_btn.addStretch()
+        layout.addLayout(batch_btn)
+        
         # 动画列表
-        btn_layout = QHBoxLayout()
-        btn_add = QPushButton("+ 添加")
-        btn_add.clicked.connect(self._add_animation)
-        btn_del = QPushButton("删除")
-        btn_del.clicked.connect(self._delete_animation)
-        btn_layout.addWidget(btn_add)
-        btn_layout.addWidget(btn_del)
-        layout.addLayout(btn_layout)
+        anim_header = QHBoxLayout()
+        anim_header.addWidget(QLabel("动画列表:"))
+        btn_add_anim = QPushButton("+")
+        btn_add_anim.setFixedWidth(30)
+        btn_add_anim.clicked.connect(self._add_animation)
+        btn_del_anim = QPushButton("-")
+        btn_del_anim.setFixedWidth(30)
+        btn_del_anim.clicked.connect(self._delete_animation)
+        anim_header.addWidget(btn_add_anim)
+        anim_header.addWidget(btn_del_anim)
+        layout.addLayout(anim_header)
         
         self.animation_list = QListWidget()
         self.animation_list.currentTextChanged.connect(self._on_animation_selected)
@@ -1029,29 +1199,24 @@ class PlayerEditor(QMainWindow):
         
         # 动画属性
         form = QFormLayout()
-        
         self.anim_name_edit = QLineEdit()
         self.anim_name_edit.textChanged.connect(self._on_animation_changed)
         form.addRow("名称:", self.anim_name_edit)
-        
         self.anim_fps_spin = QSpinBox()
         self.anim_fps_spin.setRange(1, 60)
         self.anim_fps_spin.setValue(8)
         self.anim_fps_spin.valueChanged.connect(self._on_animation_changed)
         form.addRow("FPS:", self.anim_fps_spin)
-        
         self.anim_loop_cb = QCheckBox("循环")
         self.anim_loop_cb.setChecked(True)
         self.anim_loop_cb.toggled.connect(self._on_animation_changed)
         form.addRow("", self.anim_loop_cb)
-        
         layout.addLayout(form)
         
         # 帧列表
         layout.addWidget(QLabel("帧:"))
-        
         self.frame_list = QListWidget()
-        self.frame_list.setMaximumHeight(100)
+        self.frame_list.setMaximumHeight(80)
         self.frame_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.frame_list.setDefaultDropAction(Qt.MoveAction)
         self.frame_list.model().rowsMoved.connect(self._on_frame_list_reordered)
@@ -1067,58 +1232,115 @@ class PlayerEditor(QMainWindow):
         frame_btn.addWidget(btn_del_frame)
         layout.addLayout(frame_btn)
         
+        # 帧预览条
+        self.frame_strip_area = QScrollArea()
+        self.frame_strip_area.setFixedHeight(70)
+        self.frame_strip_area.setWidgetResizable(True)
+        self.frame_strip_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.frame_strip_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.frame_strip_container = QWidget()
+        self.frame_strip_layout = QHBoxLayout(self.frame_strip_container)
+        self.frame_strip_layout.setContentsMargins(2, 2, 2, 2)
+        self.frame_strip_layout.setSpacing(4)
+        self.frame_strip_layout.addStretch()
+        self.frame_strip_area.setWidget(self.frame_strip_container)
+        layout.addWidget(self.frame_strip_area)
+        
         return widget
     
-    def _create_shot_tab(self) -> QWidget:
-        """创建射击标签页"""
+    # ── 步骤④ 绑定 ──
+    def _create_step_bind(self) -> QWidget:
+        """步骤④：行为绑定 + 射击/子机"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
         
-        # 射击类型列表
-        btn_layout = QHBoxLayout()
-        btn_add = QPushButton("+ 添加")
-        btn_add.clicked.connect(self._add_shot_type)
-        btn_del = QPushButton("删除")
-        btn_del.clicked.connect(self._delete_shot_type)
-        btn_layout.addWidget(btn_add)
-        btn_layout.addWidget(btn_del)
-        layout.addLayout(btn_layout)
+        # 行为绑定
+        bind_group = QGroupBox("行为 → 动画绑定")
+        bind_layout = QFormLayout(bind_group)
+        
+        self._behavior_combos: Dict[str, QComboBox] = {}
+        behaviors = [
+            ("idle", "待机"),
+            ("move_left", "左移(加速)"),
+            ("move_left_full", "左移(全速)"),
+            ("move_right", "右移(加速)"),
+            ("move_right_full", "右移(全速)"),
+            ("focus", "低速"),
+            ("death", "死亡"),
+        ]
+        for key, label in behaviors:
+            combo = QComboBox()
+            combo.addItem("(无)", "")
+            combo.currentIndexChanged.connect(lambda idx, k=key: self._on_behavior_bound(k))
+            bind_layout.addRow(f"{label}:", combo)
+            self._behavior_combos[key] = combo
+        
+        # 完全倾斜阈值（两阶段动画：加速→全速）
+        tilt_row = QHBoxLayout()
+        tilt_row.addWidget(QLabel("完全倾斜帧数:"))
+        self._full_tilt_spin = QSpinBox()
+        self._full_tilt_spin.setRange(1, 60)
+        self._full_tilt_spin.setValue(8)
+        self._full_tilt_spin.setToolTip("持续移动多少帧后切换到 move_left_full/move_right_full 动画")
+        self._full_tilt_spin.valueChanged.connect(self._on_full_tilt_changed)
+        tilt_row.addWidget(self._full_tilt_spin)
+        tilt_row.addWidget(QLabel("(静止→加速→全速)"))
+        tilt_row.addStretch()
+        bind_layout.addRow("", tilt_row)
+        
+        layout.addWidget(bind_group)
+        
+        # 射击
+        shot_group = QGroupBox("射击类型")
+        shot_layout = QVBoxLayout(shot_group)
+        shot_btn = QHBoxLayout()
+        btn_add_shot = QPushButton("+ 添加")
+        btn_add_shot.clicked.connect(self._add_shot_type)
+        btn_del_shot = QPushButton("删除")
+        btn_del_shot.clicked.connect(self._delete_shot_type)
+        shot_btn.addWidget(btn_add_shot)
+        shot_btn.addWidget(btn_del_shot)
+        shot_layout.addLayout(shot_btn)
         
         self.shot_list = QListWidget()
         self.shot_list.currentTextChanged.connect(self._on_shot_selected)
-        layout.addWidget(self.shot_list)
+        shot_layout.addWidget(self.shot_list)
         
-        # 射击编辑器
         self.shot_editor = ShotTypeEditor()
         self.shot_editor.shot_changed.connect(self._on_shot_changed)
-        layout.addWidget(self.shot_editor)
+        shot_layout.addWidget(self.shot_editor)
+        layout.addWidget(shot_group)
         
-        return widget
-    
-    def _create_option_tab(self) -> QWidget:
-        """创建子机标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        # 子机列表
-        btn_layout = QHBoxLayout()
-        btn_add = QPushButton("+ 添加")
-        btn_add.clicked.connect(self._add_option)
-        btn_del = QPushButton("删除")
-        btn_del.clicked.connect(self._delete_option)
-        btn_layout.addWidget(btn_add)
-        btn_layout.addWidget(btn_del)
-        layout.addLayout(btn_layout)
+        # 子机
+        opt_group = QGroupBox("子机")
+        opt_layout = QVBoxLayout(opt_group)
+        opt_btn = QHBoxLayout()
+        btn_add_opt = QPushButton("+ 添加")
+        btn_add_opt.clicked.connect(self._add_option)
+        btn_del_opt = QPushButton("删除")
+        btn_del_opt.clicked.connect(self._delete_option)
+        opt_btn.addWidget(btn_add_opt)
+        opt_btn.addWidget(btn_del_opt)
+        opt_layout.addLayout(opt_btn)
         
         self.option_list = QListWidget()
         self.option_list.currentRowChanged.connect(self._on_option_selected)
-        layout.addWidget(self.option_list)
+        opt_layout.addWidget(self.option_list)
         
-        # 子机编辑器
         self.option_editor = OptionEditor()
         self.option_editor.option_changed.connect(self._on_option_changed)
-        layout.addWidget(self.option_editor)
+        opt_layout.addWidget(self.option_editor)
+        layout.addWidget(opt_group)
         
+        layout.addStretch()
+        scroll.setWidget(inner)
+        
+        outer = QVBoxLayout(widget)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
         return widget
     
     def _setup_menu(self):
@@ -1314,11 +1536,49 @@ class PlayerEditor(QMainWindow):
         with open(sheet_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
     
+    def _collect_bullet_sprite_refs(self, data: dict) -> set:
+        """从 shot_types/options/animations 收集子弹精灵引用（用于推断 source）"""
+        refs = set()
+        # 从 shot_types 递归收集 "sprite" 字段
+        for st in (data.get('shot_types') or {}).values():
+            if isinstance(st, dict):
+                self._collect_sprite_refs_rec(st, refs)
+        # 从 options 收集
+        for opt in (data.get('options') or []):
+            if isinstance(opt, dict):
+                self._collect_sprite_refs_rec(opt, refs)
+        # 从 animations 中非核心动画收集（bullet/coplane 等子弹动画的帧）
+        core_anims = {'idle', 'move_left', 'move_right', 'move_left_full', 'move_right_full',
+                      'stand', 'left', 'right', 'right_light', 'focus', 'death', 'spawn', 'option'}
+        anims = (data.get('animations') or {})
+        anim_data = anims.get('animations', anims) if isinstance(anims.get('animations'), dict) else anims
+        for anim_name, anim_def in (anim_data or {}).items():
+            if anim_name in core_anims or not isinstance(anim_def, dict):
+                continue
+            for f in anim_def.get('frames', []):
+                if isinstance(f, str):
+                    refs.add(f)
+        return refs
+
+    def _collect_sprite_refs_rec(self, obj, refs: set):
+        """递归收集 dict 中所有 "sprite" 键的字符串值"""
+        if isinstance(obj, dict):
+            if 'sprite' in obj and isinstance(obj['sprite'], str):
+                refs.add(obj['sprite'])
+            for v in obj.values():
+                self._collect_sprite_refs_rec(v, refs)
+        elif isinstance(obj, list):
+            for v in obj:
+                self._collect_sprite_refs_rec(v, refs)
+
     def _load_config(self, path: str):
         """加载配置"""
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            
+            # 加载后重置纹理视图为自机
+            self._viewing_bullet_tex = False
             
             # 基本信息
             self.player_data.name = data.get('name', '')
@@ -1350,20 +1610,37 @@ class PlayerEditor(QMainWindow):
             self.player_data.bombs = initial.get('bombs', 3)
             self.player_data.power = initial.get('power', 1.0)
             
-            # 精灵
+            # 精灵（根据 source 或 shot_types 推断归属）
             self.player_data.sprites.clear()
+            bullet_sprite_names = self._collect_bullet_sprite_refs(data)
+            has_bullet_tex = bool(data.get('bullet_texture') or
+                                  (data.get('textures') or {}).get('bullet'))
             for name, sprite_data in data.get('sprites', {}).items():
                 rect = tuple(sprite_data.get('rect', [0, 0, 64, 64]))
-                self.player_data.sprites[name] = SpriteData(name=name, rect=rect)
+                src = sprite_data.get('source')
+                if src is None and has_bullet_tex and name in bullet_sprite_names:
+                    src = 'bullet'
+                elif src is None:
+                    src = 'player'
+                self.player_data.sprites[name] = SpriteData(name=name, rect=rect, source=src)
             
             # 动画
             self.player_data.animations.clear()
             anim_config = data.get('animations', {})
-            for name, anim_data in anim_config.get('animations', {}).items():
+            self.player_data.animation_transition_speed = anim_config.get('transition_speed', 8.0)
+            self.player_data.full_tilt_frames = anim_config.get('full_tilt_frames', 8)
+            for name, anim_data in anim_config.get('animations', anim_config).items():
+                if not isinstance(anim_data, dict):
+                    continue
+                # 支持 fps 或 frame_duration（游戏帧/动画帧）
+                fps_val = anim_data.get('fps', 8)
+                if 'frame_duration' in anim_data:
+                    fd = anim_data['frame_duration']
+                    fps_val = max(1, int(60 / fd)) if fd > 0 else 8
                 self.player_data.animations[name] = AnimationData(
                     name=name,
                     frames=anim_data.get('frames', []),
-                    fps=anim_data.get('fps', 8),
+                    fps=fps_val,
                     loop=anim_data.get('loop', True)
                 )
             
@@ -1380,6 +1657,7 @@ class PlayerEditor(QMainWindow):
                     self.sprite_view.load_texture(str(tex_path))
                     self.anim_preview.set_texture(self.texture_pixmap)
                     self.anim_preview.set_sprites(self.player_data.sprites)
+                    self.anim_preview.set_bullet_texture(self.bullet_texture_pixmap)
             else:
                 # 没有指定纹理时，自动选择目录内第一个图片
                 candidates = self._find_texture_candidates(config_dir)
@@ -1392,16 +1670,40 @@ class PlayerEditor(QMainWindow):
                     self.sprite_view.load_texture(str(tex_path))
                     self.anim_preview.set_texture(self.texture_pixmap)
                     self.anim_preview.set_sprites(self.player_data.sprites)
+                    self.anim_preview.set_bullet_texture(self.bullet_texture_pixmap)
                 else:
                     self.texture_path = None
                     self.texture_pixmap = None
             
+            if hasattr(self, '_tex_switch_combo'):
+                self._tex_switch_combo.blockSignals(True)
+                self._tex_switch_combo.setCurrentIndex(0)
+                self._tex_switch_combo.blockSignals(False)
             # load_texture 会 scene.clear() 导致精灵矩形和判定点标记丢失，需重建
             self._refresh_sprite_rects()
             self._refresh_hitbox_marker()
             
-            # 子弹纹理标签
+            # 子弹纹理
             self.bullet_texture_label.setText(self.player_data.bullet_texture)
+            if not self.player_data.bullet_texture:
+                self.bullet_texture_path = None
+                self.bullet_texture_pixmap = None
+                self.anim_preview.set_bullet_texture(None)
+            elif self.player_data.bullet_texture:
+                btex_path = config_dir / self.player_data.bullet_texture
+                if btex_path.exists():
+                    self.bullet_texture_path = str(btex_path)
+                    self.bullet_texture_pixmap = QPixmap(str(btex_path))
+                    self.anim_preview.set_bullet_texture(self.bullet_texture_pixmap)
+            
+            # 更新步骤①预览缩略图
+            if hasattr(self, '_tex_preview_label') and self.texture_pixmap:
+                preview = self.texture_pixmap.scaled(
+                    300, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self._tex_preview_label.setPixmap(preview)
+            if hasattr(self, '_tex_info_label') and self.texture_pixmap:
+                self._tex_info_label.setText(
+                    f"尺寸: {self.texture_pixmap.width()} × {self.texture_pixmap.height()} px")
             
             self.statusBar().showMessage(f"已加载: {path}")
             
@@ -1438,10 +1740,8 @@ class PlayerEditor(QMainWindow):
         finally:
             self._suppress_hitbox_change = False
         
-        # 精灵列表
-        self.sprite_list.clear()
-        for name in self.player_data.sprites:
-            self.sprite_list.addItem(name)
+        # 精灵列表（按当前纹理过滤）
+        self._refresh_sprite_list_for_view()
 
         self._current_sprite_key = None
         
@@ -1453,19 +1753,40 @@ class PlayerEditor(QMainWindow):
         # 状态机
         self.state_machine_view.set_states(self.player_data.animations)
         
+        # 完全倾斜帧数
+        if hasattr(self, '_full_tilt_spin'):
+            self._full_tilt_spin.setValue(self.player_data.full_tilt_frames)
+        
         # 更新精灵显示
         self._refresh_sprite_rects()
         self._refresh_hitbox_marker()
     
+    def _refresh_sprite_list_for_view(self):
+        """按当前纹理选项刷新精灵列表，只显示对应 source 的精灵"""
+        view_source = 'bullet' if self._viewing_bullet_tex else 'player'
+        self.sprite_list.clear()
+        for name, sprite in self.player_data.sprites.items():
+            if getattr(sprite, 'source', 'player') == view_source:
+                self.sprite_list.addItem(name)
+
     def _refresh_sprite_rects(self):
         """刷新精灵矩形显示"""
         self.sprite_view.clear_rects()
+        
+        # 根据当前查看的纹理过滤精灵框
+        view_source = 'bullet' if self._viewing_bullet_tex else 'player'
         
         selected = self.sprite_list.currentItem()
         selected_name = selected.text() if selected else None
         
         for name, sprite in self.player_data.sprites.items():
-            self.sprite_view.add_sprite_rect(name, sprite.rect, name == selected_name)
+            if getattr(sprite, 'source', 'player') != view_source:
+                continue
+            anim_sel = hasattr(self, '_selected_thumb_names') and name in self._selected_thumb_names
+            self.sprite_view.add_sprite_rect(
+                name, sprite.rect,
+                selected=(name == selected_name),
+                for_anim=anim_sel)
 
         self.anim_preview.set_sprites(self.player_data.sprites)
     
@@ -1508,25 +1829,440 @@ class PlayerEditor(QMainWindow):
             self.sprite_view.load_texture(path)
             self.anim_preview.set_texture(self.texture_pixmap)
             self.anim_preview.set_sprites(self.player_data.sprites)
+            
+            # 更新纹理信息和预览
+            if hasattr(self, '_tex_info_label'):
+                self._tex_info_label.setText(
+                    f"尺寸: {self.texture_pixmap.width()} × {self.texture_pixmap.height()} px")
+            if hasattr(self, '_tex_preview_label'):
+                preview = self.texture_pixmap.scaled(
+                    300, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self._tex_preview_label.setPixmap(preview)
     
     def _choose_bullet_texture(self):
         """选择子弹纹理"""
+        start_dir = str(PLAYERS_ROOT)
+        if self.texture_path:
+            start_dir = str(Path(self.texture_path).parent)
         path, _ = QFileDialog.getOpenFileName(
             self, "选择子弹纹理",
-            str(PLAYERS_ROOT),
+            start_dir,
             "图片 (*.png *.jpg)"
         )
         if path:
             self.player_data.bullet_texture = Path(path).name
             self.bullet_texture_label.setText(self.player_data.bullet_texture)
+            self.bullet_texture_path = path
+            self.bullet_texture_pixmap = QPixmap(path)
+            self.anim_preview.set_bullet_texture(self.bullet_texture_pixmap)
+            self.statusBar().showMessage(f"子弹纹理: {Path(path).name}")
+    
+    def _on_tex_switch(self, idx: int):
+        """切换预览区显示的纹理"""
+        kind = self._tex_switch_combo.currentData()
+        if kind == "bullet":
+            if self.bullet_texture_path and self.bullet_texture_pixmap:
+                self.sprite_view.load_texture(self.bullet_texture_path)
+                self._viewing_bullet_tex = True
+                self._refresh_sprite_list_for_view()
+                self._refresh_sprite_rects()
+                self._refresh_hitbox_marker()
+                self.statusBar().showMessage("预览: 子弹纹理")
+            else:
+                self.statusBar().showMessage("请先在步骤①选择子弹纹理")
+        else:
+            if self.texture_path:
+                self.sprite_view.load_texture(self.texture_path)
+                self._viewing_bullet_tex = False
+                self._refresh_sprite_list_for_view()
+                self._refresh_sprite_rects()
+                self._refresh_hitbox_marker()
+                self.statusBar().showMessage("预览: 自机纹理")
     
     # 精灵操作
     def _add_sprite(self):
         idx = len(self.player_data.sprites)
         name = f"sprite_{idx}"
-        self.player_data.sprites[name] = SpriteData(name=name, rect=(0, 0, 64, 64))
+        src = 'bullet' if self._viewing_bullet_tex else 'player'
+        self.player_data.sprites[name] = SpriteData(name=name, rect=(0, 0, 64, 64), source=src)
         self.sprite_list.addItem(name)
         self._refresh_sprite_rects()
+    
+    def _open_grid_split_dialog(self):
+        """打开网格切割对话框，批量生成精灵"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("网格切割 — 批量生成精灵")
+        dlg_layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        
+        rows_spin = QSpinBox()
+        rows_spin.setRange(1, 200)
+        rows_spin.setValue(1)
+        cols_spin = QSpinBox()
+        cols_spin.setRange(1, 200)
+        cols_spin.setValue(1)
+        
+        start_x = QSpinBox()
+        start_x.setRange(0, 99999)
+        start_y = QSpinBox()
+        start_y.setRange(0, 99999)
+        
+        cell_w = QSpinBox()
+        cell_w.setRange(1, 99999)
+        cell_w.setValue(64)
+        cell_h = QSpinBox()
+        cell_h.setRange(1, 99999)
+        cell_h.setValue(64)
+        
+        # 如果已有纹理，用纹理尺寸做默认值参考
+        if self.texture_pixmap and not self.texture_pixmap.isNull():
+            tw, th = self.texture_pixmap.width(), self.texture_pixmap.height()
+            cell_w.setValue(min(tw, 64))
+            cell_h.setValue(min(th, 64))
+        
+        gap_x = QSpinBox()
+        gap_x.setRange(0, 99999)
+        gap_y = QSpinBox()
+        gap_y.setRange(0, 99999)
+        
+        prefix_edit = QLineEdit("sprite")
+        
+        form.addRow("行数:", rows_spin)
+        form.addRow("列数:", cols_spin)
+        form.addRow("起点 X:", start_x)
+        form.addRow("起点 Y:", start_y)
+        form.addRow("单元宽:", cell_w)
+        form.addRow("单元高:", cell_h)
+        form.addRow("间隔 X:", gap_x)
+        form.addRow("间隔 Y:", gap_y)
+        form.addRow("名称前缀:", prefix_edit)
+        
+        dlg_layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dlg_layout.addWidget(buttons)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            self._create_grid_sprites(
+                rows_spin.value(), cols_spin.value(),
+                start_x.value(), start_y.value(),
+                cell_w.value(), cell_h.value(),
+                gap_x.value(), gap_y.value(),
+                prefix_edit.text().strip() or "sprite"
+            )
+    
+    def _create_grid_sprites(self, rows, cols, sx, sy, cw, ch, gx, gy, prefix):
+        """按网格生成精灵"""
+        idx = 0
+        for r in range(rows):
+            for c in range(cols):
+                x = sx + c * (cw + gx)
+                y = sy + r * (ch + gy)
+                name = f"{prefix}_{idx}"
+                while name in self.player_data.sprites:
+                    idx += 1
+                    name = f"{prefix}_{idx}"
+                src = 'bullet' if self._viewing_bullet_tex else 'player'
+                self.player_data.sprites[name] = SpriteData(name=name, rect=(x, y, cw, ch), source=src)
+                self.sprite_list.addItem(name)
+                idx += 1
+        self._refresh_sprite_rects()
+        self.statusBar().showMessage(f"已生成 {rows * cols} 个精灵")
+    
+    def _region_auto_detect(self, rx: int, ry: int, rw: int, rh: int):
+        """对拖选区域进行自动检测精灵"""
+        # 使用当前预览的纹理
+        tex_path = self.bullet_texture_path if self._viewing_bullet_tex else self.texture_path
+        if not tex_path or not os.path.isfile(tex_path):
+            QMessageBox.warning(self, "警告", "请先选择纹理文件")
+            return
+        
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            QMessageBox.warning(
+                self, "缺少依赖",
+                "区域检测需要 OpenCV。\n请安装: pip install opencv-python")
+            return
+        
+        img = cv2.imread(tex_path, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            QMessageBox.warning(self, "错误", "无法读取纹理文件")
+            return
+        
+        ih, iw = img.shape[:2]
+        # 坐标钳位到图像范围
+        rx = max(0, min(rx, iw - 1))
+        ry = max(0, min(ry, ih - 1))
+        rw = min(rw, iw - rx)
+        rh = min(rh, ih - ry)
+        if rw < 2 or rh < 2:
+            self.statusBar().showMessage("选区太小")
+            return
+        
+        region = img[ry:ry + rh, rx:rx + rw]
+        
+        # 生成检测mask：优先Alpha通道，否则用灰度
+        if len(img.shape) >= 3 and img.shape[2] >= 4:
+            alpha = region[:, :, 3]
+            _, mask = cv2.threshold(alpha, 10, 255, cv2.THRESH_BINARY)
+        else:
+            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) if len(region.shape) == 3 else region
+            # 用背景色判断：取四角平均作为背景
+            corners = [gray[0, 0], gray[0, -1], gray[-1, 0], gray[-1, -1]]
+            bg = int(np.mean(corners))
+            diff = cv2.absdiff(gray, np.full_like(gray, bg))
+            _, mask = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
+        
+        # 形态学膨胀，合并紧邻像素
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        bboxes = []
+        for cnt in contours:
+            bx, by, bw, bh = cv2.boundingRect(cnt)
+            if bw >= 4 and bh >= 4:
+                bboxes.append((bx + rx, by + ry, bw, bh))
+        
+        if not bboxes:
+            self.statusBar().showMessage(
+                f"选区({rx},{ry},{rw}×{rh})内未检测到精灵 "
+                f"[contours={len(contours)}]")
+            return
+        
+        bboxes.sort(key=lambda b: (b[1], b[0]))
+        
+        # 按Y邻近度分行
+        rows_of_bb = [[bboxes[0]]]
+        for bb in bboxes[1:]:
+            ref_y = sum(b[1] for b in rows_of_bb[-1]) / len(rows_of_bb[-1])
+            ref_h = sum(b[3] for b in rows_of_bb[-1]) / len(rows_of_bb[-1])
+            if abs(bb[1] - ref_y) < max(ref_h * 0.5, 8):
+                rows_of_bb[-1].append(bb)
+            else:
+                rows_of_bb.append([bb])
+        
+        # 每个contour直接作为一个精灵
+        idx = len(self.player_data.sprites)
+        count = 0
+        for row_bbs in rows_of_bb:
+            row_bbs.sort(key=lambda b: b[0])
+            for bx, by, bw, bh in row_bbs:
+                name = f"auto_{idx}"
+                while name in self.player_data.sprites:
+                    idx += 1
+                    name = f"auto_{idx}"
+                src = 'bullet' if self._viewing_bullet_tex else 'player'
+                self.player_data.sprites[name] = SpriteData(name=name, rect=(bx, by, bw, bh), source=src)
+                self.sprite_list.addItem(name)
+                idx += 1
+                count += 1
+        
+        self._refresh_sprite_rects()
+        self.statusBar().showMessage(f"选区内检测到 {count} 个精灵")
+    
+    def _update_frame_strip(self):
+        """更新动画帧预览条（按精灵 source 使用对应纹理）"""
+        # 清除旧缩略图
+        while self.frame_strip_layout.count() > 0:
+            item = self.frame_strip_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        
+        anim_item = self.animation_list.currentItem()
+        if not anim_item:
+            return
+        name = anim_item.text()
+        anim = self.player_data.animations.get(name)
+        if not anim:
+            return
+        
+        for frame_name in anim.frames:
+            sprite = self.player_data.sprites.get(frame_name)
+            if not sprite:
+                # 占位
+                lbl = QLabel("?")
+                lbl.setFixedSize(60, 60)
+                lbl.setAlignment(Qt.AlignCenter)
+                lbl.setStyleSheet("background:#333; border:1px solid #555; color:#999;")
+                lbl.setToolTip(f"{frame_name} (未找到)")
+                self.frame_strip_layout.addWidget(lbl)
+                continue
+            
+            tex = self._get_tex_for_sprite(sprite)
+            if not tex or tex.isNull():
+                lbl = QLabel("?")
+                lbl.setFixedSize(60, 60)
+                lbl.setAlignment(Qt.AlignCenter)
+                lbl.setStyleSheet("background:#333; border:1px solid #555; color:#999;")
+                lbl.setToolTip(f"{frame_name} (纹理缺失)")
+                self.frame_strip_layout.addWidget(lbl)
+                continue
+            
+            x, y, w, h = sprite.rect
+            cropped = tex.copy(x, y, w, h)
+            scaled = cropped.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl = QLabel()
+            lbl.setPixmap(scaled)
+            lbl.setFixedSize(60, 60)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet("background:#222; border:1px solid #555;")
+            lbl.setToolTip(frame_name)
+            self.frame_strip_layout.addWidget(lbl)
+        
+        self.frame_strip_layout.addStretch()
+    
+    def _get_tex_for_sprite(self, sprite: SpriteData):
+        """根据精灵 source 返回对应纹理"""
+        if getattr(sprite, 'source', 'player') == 'bullet':
+            return self.bullet_texture_pixmap if self.bullet_texture_pixmap and not self.bullet_texture_pixmap.isNull() else self.texture_pixmap
+        return self.texture_pixmap
+    
+    def _refresh_sprite_thumb_grid(self):
+        """刷新步骤③的精灵缩略图网格（按当前纹理选项过滤）"""
+        # 清除旧缩略图
+        while self._sprite_thumb_flow.count() > 0:
+            item = self._sprite_thumb_flow.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        
+        self._selected_thumb_names.clear()
+        
+        view_source = 'bullet' if self._viewing_bullet_tex else 'player'
+        tex = self.bullet_texture_pixmap if self._viewing_bullet_tex else self.texture_pixmap
+        if not tex or tex.isNull():
+            return
+        
+        for name, sprite in self.player_data.sprites.items():
+            if getattr(sprite, 'source', 'player') != view_source:
+                continue
+            x, y, w, h = sprite.rect
+            cropped = tex.copy(x, y, w, h)
+            scaled = cropped.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            btn = QPushButton()
+            btn.setIcon(QIcon(scaled))
+            btn.setIconSize(scaled.size())
+            btn.setFixedSize(60, 60)
+            btn.setCheckable(True)
+            btn.setToolTip(name)
+            btn.setStyleSheet("""
+                QPushButton { background:#222; border:1px solid #555; }
+                QPushButton:checked { border:2px solid #4a90d9; background:#2a3a5a; }
+            """)
+            btn.toggled.connect(lambda checked, n=name: self._on_thumb_toggled(n, checked))
+            self._sprite_thumb_flow.addWidget(btn)
+        
+        self._sprite_thumb_flow.addStretch()
+    
+    def _on_thumb_toggled(self, name: str, checked: bool):
+        """缩略图选中/取消"""
+        if checked:
+            if name not in self._selected_thumb_names:
+                self._selected_thumb_names.append(name)
+        else:
+            if name in self._selected_thumb_names:
+                self._selected_thumb_names.remove(name)
+    
+    def _on_preview_sprite_clicked(self, name: str):
+        """预览区左键点击精灵 → 切换动画选中状态"""
+        if name in self._selected_thumb_names:
+            self._selected_thumb_names.remove(name)
+        else:
+            self._selected_thumb_names.append(name)
+        
+        # 同步缩略图按钮的checked状态（如果在步骤③）
+        for i in range(self._sprite_thumb_flow.count()):
+            item = self._sprite_thumb_flow.itemAt(i)
+            btn = item.widget() if item else None
+            if btn and hasattr(btn, 'toolTip') and btn.toolTip() == name:
+                btn.blockSignals(True)
+                btn.setChecked(name in self._selected_thumb_names)
+                btn.blockSignals(False)
+                break
+        
+        # 高亮选中的精灵矩形
+        self._refresh_sprite_rects()
+        
+        sel = len(self._selected_thumb_names)
+        self.statusBar().showMessage(
+            f"{'选中' if name in self._selected_thumb_names else '取消'} {name}  "
+            f"(已选 {sel} 个精灵)")
+    
+    def _create_anim_from_selected(self):
+        """从选中的精灵缩略图批量创建动画"""
+        if not self._selected_thumb_names:
+            self.statusBar().showMessage("请先在上方点选精灵缩略图")
+            return
+        
+        # 生成动画名
+        idx = len(self.player_data.animations)
+        anim_name = f"anim_{idx}"
+        while anim_name in self.player_data.animations:
+            idx += 1
+            anim_name = f"anim_{idx}"
+        
+        anim = AnimationData(
+            name=anim_name,
+            frames=list(self._selected_thumb_names),
+            fps=8,
+            loop=True
+        )
+        self.player_data.animations[anim_name] = anim
+        self.animation_list.addItem(anim_name)
+        self.animation_list.setCurrentRow(self.animation_list.count() - 1)
+        self.statusBar().showMessage(f"已创建动画 '{anim_name}' ({len(anim.frames)} 帧)")
+        self._update_frame_strip()
+    
+    def _refresh_behavior_combos(self):
+        """刷新步骤④的行为绑定下拉框"""
+        anim_names = list(self.player_data.animations.keys())
+        
+        for key, combo in self._behavior_combos.items():
+            combo.blockSignals(True)
+            current_data = combo.currentData()
+            combo.clear()
+            combo.addItem("(无)", "")
+            for an in anim_names:
+                combo.addItem(an, an)
+            # 恢复之前的选择
+            if current_data:
+                idx = combo.findData(current_data)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            # 检查 player_data.animations 中是否已有此行为名
+            if key in self.player_data.animations:
+                idx = combo.findData(key)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+    
+    def _on_behavior_bound(self, behavior_key: str):
+        """行为绑定变更"""
+        combo = self._behavior_combos.get(behavior_key)
+        if not combo:
+            return
+        anim_name = combo.currentData()
+        if anim_name and anim_name in self.player_data.animations:
+            # 复制动画数据到行为名
+            src = self.player_data.animations[anim_name]
+            self.player_data.animations[behavior_key] = AnimationData(
+                name=behavior_key,
+                frames=list(src.frames),
+                fps=src.fps,
+                loop=src.loop
+            )
+        self.statusBar().showMessage(f"行为 '{behavior_key}' 已绑定")
+    
+    def _on_full_tilt_changed(self, value: int):
+        """完全倾斜帧数变更"""
+        self.player_data.full_tilt_frames = value
     
     def _delete_sprite(self):
         item = self.sprite_list.currentItem()
@@ -1666,6 +2402,7 @@ class PlayerEditor(QMainWindow):
                 self.frame_list.addItem(frame)
             
             self.anim_preview.set_animation(anim)
+            self._update_frame_strip()
     
     def _on_animation_changed(self):
         item = self.animation_list.currentItem()
@@ -1704,6 +2441,7 @@ class PlayerEditor(QMainWindow):
                     self.player_data.animations[name].frames.append(frame)
                     self.frame_list.addItem(frame)
                     self.anim_preview.set_animation(self.player_data.animations[name])
+                    self._update_frame_strip()
 
     def _add_frame_from_sprite(self, item: QListWidgetItem):
         anim_item = self.animation_list.currentItem()
@@ -1717,6 +2455,7 @@ class PlayerEditor(QMainWindow):
         self.player_data.animations[name].frames.append(frame_name)
         self.frame_list.addItem(frame_name)
         self.anim_preview.set_animation(self.player_data.animations[name])
+        self._update_frame_strip()
     
     def _delete_frame(self):
         item = self.animation_list.currentItem()
@@ -1728,6 +2467,7 @@ class PlayerEditor(QMainWindow):
                 self.player_data.animations[name].frames.pop(row)
                 self.frame_list.takeItem(row)
                 self.anim_preview.set_animation(self.player_data.animations[name])
+                self._update_frame_strip()
 
     def _on_frame_selected(self, row: int):
         anim_item = self.animation_list.currentItem()
@@ -1750,6 +2490,7 @@ class PlayerEditor(QMainWindow):
             frames.append(self.frame_list.item(i).text())
         self.player_data.animations[name].frames = frames
         self.anim_preview.set_animation(self.player_data.animations[name])
+        self._update_frame_strip()
     
     # 射击操作
     def _add_shot_type(self):
@@ -1903,15 +2644,16 @@ class PlayerEditor(QMainWindow):
                     "power": self.player_data.power
                 },
                 "sprites": {
-                    name: {"rect": list(sprite.rect)}
+                    name: {"rect": list(sprite.rect), "source": getattr(sprite, 'source', 'player')}
                     for name, sprite in self.player_data.sprites.items()
                 },
                 "animations": {
                     "transition_speed": self.player_data.animation_transition_speed,
+                    "full_tilt_frames": self.player_data.full_tilt_frames,
                     "animations": {
                         name: {
                             "frames": anim.frames,
-                            "fps": anim.fps,
+                            "frame_duration": max(1, round(60 / anim.fps)) if anim.fps > 0 else 5,
                             "loop": anim.loop
                         }
                         for name, anim in self.player_data.animations.items()
