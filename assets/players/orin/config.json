@@ -557,5 +557,32 @@
       "sprite": "player_bullet"
     }
   },
-  "options": []
+  "options": [],
+  "bullet_anims": {
+    "orin_bullet": {
+      "frames": ["sprite_0","sprite_1","sprite_2","sprite_3","sprite_4","sprite_5","sprite_6","sprite_7"],
+      "frame_duration": 4,
+      "loop": true,
+      "hitbox_radius": 0.02
+    },
+    "orin_coplane_shot": {
+      "frames": ["sprite_8","sprite_9","sprite_10","sprite_11"],
+      "frame_duration": 4,
+      "loop": true,
+      "hitbox_radius": 0.015
+    }
+  },
+  "option_anims": {
+    "coplane_idle": {
+      "frames": ["sprite_8","sprite_10","sprite_9","sprite_11","sprite_13","sprite_12","sprite_14","sprite_15"],
+      "frame_duration": 8,
+      "loop": true,
+      "render_size_px": 16
+    }
+  },
+  "skills": [
+    { "slot": "bomb", "name": "怨灵「阴燃的怨灵」", "icon": "auto_39", "cooldown": 300 },
+    { "slot": "passive", "name": "怨灵追踪", "description": "子弹命中后生成追踪怨灵" }
+  ],
+  "script": "script.py"
 }

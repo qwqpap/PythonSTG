@@ -38,6 +38,34 @@ from src.ui.bitmap_font import get_font_manager
 from game_content.stages.stage1.stage_script import Stage1
 
 
+class _CollisionTargetAdapter:
+    """
+    适配器：将 enemy_scripts + boss 转为 CollisionManager 所需的 enemy_manager 接口。
+    供 check_player_bullets_vs_enemies 使用 Numba 加速。
+    """
+    
+    def __init__(self, targets):
+        self._targets = []
+        for t in targets:
+            if getattr(t, '_active', getattr(t, 'alive', True)):
+                self._targets.append(_CollisionTargetWrapper(t))
+    
+    def get_active_enemies(self):
+        return self._targets
+
+
+class _CollisionTargetWrapper:
+    """包装器：提供 .pos 和 .hit_radius 接口，damage() 委托给实际目标"""
+    
+    def __init__(self, target):
+        self._target = target
+        self.pos = (getattr(target, 'x', 0), getattr(target, 'y', 0))
+        self.hit_radius = getattr(target, 'hitbox_radius', getattr(target, 'hit_radius', 0.05))
+    
+    def damage(self, amount):
+        self._target.damage(int(amount))
+
+
 def initialize_pygame_and_context():
     """初始化Pygame和ModernGL上下文"""
     pygame.init()
@@ -101,8 +129,7 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
 
 def initialize_game_objects(audio_manager=None, background_renderer=None):
     """初始化游戏对象（玩家、子弹池、关卡管理器等）"""
-    # 使用 Tenshi 角色（通过配置和脚本加载）
-    player = load_player("tenshi")
+    player = load_player("orin")
     print(f"已加载玩家: {player.name}")
     bullet_pool = BulletPool(max_bullets=50000)
     laser_pool = LaserPool(max_lasers=100)
@@ -341,7 +368,7 @@ def main():
                     if player.take_damage():
                         print(f"Player hit by laser! Lives left: {player.lives}")
             
-            # 碰撞检测 - 玩家子弹 vs 敌人/Boss（P0：补全伤害流程）
+            # 碰撞检测 - 玩家子弹 vs 敌人/Boss（使用 Numba 加速）
             collision_targets = []
             if stage_manager.current_context:
                 collision_targets.extend(stage_manager.current_context.get_enemy_scripts())
@@ -351,12 +378,20 @@ def main():
                     collision_targets.append(boss)
             
             if collision_targets:
-                hits = player.check_bullet_collisions(collision_targets)
-                for b_idx, e_idx, damage in hits:
-                    if 0 <= e_idx < len(collision_targets):
-                        target = collision_targets[e_idx]
-                        if hasattr(target, 'damage'):
-                            target.damage(int(damage))
+                adapter = _CollisionTargetAdapter(collision_targets)
+                hits = collision_mgr.check_player_bullets_vs_enemies(
+                    player.bullet_pool,
+                    adapter,
+                    hit_radius=0.02,  # 子弹判定半径
+                )
+                targets = adapter.get_active_enemies()
+                for hit in hits:
+                    if 0 <= hit.target_idx < len(targets):
+                        target = targets[hit.target_idx]
+                        target.damage(hit.damage)
+                        if player.script and hasattr(player.script, 'on_bullet_hit_enemy'):
+                            player.script.on_bullet_hit_enemy(
+                                hit.bullet_idx, target._target, hit.damage)
         
         # 更新 HUD 状态
         hud.update_from_player(player)

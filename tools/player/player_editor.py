@@ -66,7 +66,7 @@ class AnimationData:
 
 @dataclass
 class ShotTypeData:
-    """射击类型数据"""
+    """射击类型数据（v2 兼容）"""
     name: str = "main"
     damage: float = 10.0
     speed: float = 0.05
@@ -78,13 +78,43 @@ class ShotTypeData:
 
 @dataclass
 class OptionData:
-    """子机数据"""
+    """子机数据（v2 兼容）"""
     name: str = "option"
     offset_x: float = 0.0
     offset_y: float = 0.0
     shot_type: str = "homing"
     damage: float = 5.0
     interval: int = 8
+
+
+@dataclass
+class BulletAnimData:
+    """v3 子弹动画资源"""
+    name: str = ""
+    frames: List[str] = field(default_factory=list)
+    frame_duration: int = 4
+    loop: bool = True
+    hitbox_radius: float = 0.02
+
+
+@dataclass
+class OptionAnimData:
+    """v3 僚机动画资源"""
+    name: str = ""
+    frames: List[str] = field(default_factory=list)
+    frame_duration: int = 8
+    loop: bool = True
+    render_size_px: float = 16.0
+
+
+@dataclass
+class SkillData:
+    """v3 技能槽位声明"""
+    slot: str = "bomb"        # bomb / skill_1 / passive
+    name: str = ""
+    icon: str = ""
+    cooldown: int = 300       # 帧
+    description: str = ""
 
 
 @dataclass
@@ -121,11 +151,20 @@ class PlayerConfigData:
     animation_transition_speed: float = 8.0
     full_tilt_frames: int = 8  # 持续移动多少帧后进入完全倾斜(move_left_full/move_right_full)
     
-    # 射击
+    # 射击（v2 兼容）
     shot_types: Dict[str, ShotTypeData] = field(default_factory=dict)
     
-    # 子机
+    # 子机（v2 兼容）
     options: List[OptionData] = field(default_factory=list)
+
+    # v3 子弹动画资源
+    bullet_anims: Dict[str, BulletAnimData] = field(default_factory=dict)
+    
+    # v3 僚机动画资源
+    option_anims: Dict[str, OptionAnimData] = field(default_factory=dict)
+    
+    # v3 技能
+    skills: List[SkillData] = field(default_factory=list)
 
 
 # ==================== 精灵预览视图 ====================
@@ -554,7 +593,7 @@ class AnimationStateMachineView(QGraphicsView):
 # ==================== 射击类型编辑器 ====================
 
 class ShotTypeEditor(QWidget):
-    """射击类型编辑器"""
+    """射击类型编辑器（v2 兼容，保留但不再是主编辑器）"""
     
     shot_changed = pyqtSignal()
     
@@ -565,50 +604,39 @@ class ShotTypeEditor(QWidget):
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        
         form = QFormLayout()
-        
         self.name_edit = QLineEdit()
         self.name_edit.textChanged.connect(self._on_change)
         form.addRow("名称:", self.name_edit)
-        
         self.damage_spin = QDoubleSpinBox()
         self.damage_spin.setRange(1, 1000)
         self.damage_spin.valueChanged.connect(self._on_change)
         form.addRow("伤害:", self.damage_spin)
-        
         self.speed_spin = QDoubleSpinBox()
         self.speed_spin.setRange(0.001, 0.5)
         self.speed_spin.setDecimals(3)
         self.speed_spin.setSingleStep(0.005)
         self.speed_spin.valueChanged.connect(self._on_change)
         form.addRow("速度:", self.speed_spin)
-        
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 60)
         self.interval_spin.valueChanged.connect(self._on_change)
         form.addRow("间隔(帧):", self.interval_spin)
-        
         self.count_spin = QSpinBox()
         self.count_spin.setRange(1, 20)
         self.count_spin.valueChanged.connect(self._on_change)
         form.addRow("弹数:", self.count_spin)
-        
         self.spread_spin = QDoubleSpinBox()
         self.spread_spin.setRange(0, 90)
         self.spread_spin.valueChanged.connect(self._on_change)
         form.addRow("扩散角度:", self.spread_spin)
-        
         self.sprite_edit = QLineEdit()
         self.sprite_edit.textChanged.connect(self._on_change)
         form.addRow("精灵:", self.sprite_edit)
-        
         layout.addLayout(form)
     
     def set_shot(self, shot: ShotTypeData):
-        """设置射击类型"""
         self._shot = shot
-        
         self.blockSignals(True)
         self.name_edit.setText(shot.name)
         self.damage_spin.setValue(shot.damage)
@@ -622,7 +650,6 @@ class ShotTypeEditor(QWidget):
     def _on_change(self):
         if not self._shot:
             return
-        
         self._shot.name = self.name_edit.text()
         self._shot.damage = self.damage_spin.value()
         self._shot.speed = self.speed_spin.value()
@@ -630,14 +657,212 @@ class ShotTypeEditor(QWidget):
         self._shot.count = self.count_spin.value()
         self._shot.spread = self.spread_spin.value()
         self._shot.sprite = self.sprite_edit.text()
-        
         self.shot_changed.emit()
 
 
-# ==================== 子机编辑器 ====================
+# ==================== v3 子弹动画资源编辑器 ====================
+
+class BulletAnimEditor(QWidget):
+    """v3 子弹动画资源编辑器"""
+    
+    data_changed = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._anim: Optional[BulletAnimData] = None
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        
+        self.name_edit = QLineEdit()
+        self.name_edit.textChanged.connect(self._on_change)
+        form.addRow("名称:", self.name_edit)
+        
+        self.frames_edit = QLineEdit()
+        self.frames_edit.setPlaceholderText("逗号分隔精灵名: sprite_0,sprite_1,...")
+        self.frames_edit.textChanged.connect(self._on_change)
+        form.addRow("帧序列:", self.frames_edit)
+        
+        self.duration_spin = QSpinBox()
+        self.duration_spin.setRange(1, 60)
+        self.duration_spin.setValue(4)
+        self.duration_spin.valueChanged.connect(self._on_change)
+        form.addRow("帧间隔:", self.duration_spin)
+        
+        self.loop_check = QCheckBox("循环")
+        self.loop_check.setChecked(True)
+        self.loop_check.stateChanged.connect(self._on_change)
+        form.addRow("", self.loop_check)
+        
+        self.hitbox_spin = QDoubleSpinBox()
+        self.hitbox_spin.setRange(0.001, 0.2)
+        self.hitbox_spin.setDecimals(3)
+        self.hitbox_spin.setSingleStep(0.005)
+        self.hitbox_spin.setValue(0.02)
+        self.hitbox_spin.valueChanged.connect(self._on_change)
+        form.addRow("判定半径:", self.hitbox_spin)
+        
+        layout.addLayout(form)
+    
+    def set_anim(self, anim: BulletAnimData):
+        self._anim = anim
+        self.blockSignals(True)
+        self.name_edit.setText(anim.name)
+        self.frames_edit.setText(",".join(anim.frames))
+        self.duration_spin.setValue(anim.frame_duration)
+        self.loop_check.setChecked(anim.loop)
+        self.hitbox_spin.setValue(anim.hitbox_radius)
+        self.blockSignals(False)
+    
+    def _on_change(self):
+        if not self._anim:
+            return
+        self._anim.name = self.name_edit.text()
+        raw = self.frames_edit.text().strip()
+        self._anim.frames = [f.strip() for f in raw.split(",") if f.strip()] if raw else []
+        self._anim.frame_duration = self.duration_spin.value()
+        self._anim.loop = self.loop_check.isChecked()
+        self._anim.hitbox_radius = self.hitbox_spin.value()
+        self.data_changed.emit()
+
+
+# ==================== v3 僚机动画资源编辑器 ====================
+
+class OptionAnimEditor(QWidget):
+    """v3 僚机动画资源编辑器"""
+    
+    data_changed = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._anim: Optional[OptionAnimData] = None
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        
+        self.name_edit = QLineEdit()
+        self.name_edit.textChanged.connect(self._on_change)
+        form.addRow("名称:", self.name_edit)
+        
+        self.frames_edit = QLineEdit()
+        self.frames_edit.setPlaceholderText("逗号分隔精灵名")
+        self.frames_edit.textChanged.connect(self._on_change)
+        form.addRow("帧序列:", self.frames_edit)
+        
+        self.duration_spin = QSpinBox()
+        self.duration_spin.setRange(1, 60)
+        self.duration_spin.setValue(8)
+        self.duration_spin.valueChanged.connect(self._on_change)
+        form.addRow("帧间隔:", self.duration_spin)
+        
+        self.loop_check = QCheckBox("循环")
+        self.loop_check.setChecked(True)
+        self.loop_check.stateChanged.connect(self._on_change)
+        form.addRow("", self.loop_check)
+        
+        self.size_spin = QDoubleSpinBox()
+        self.size_spin.setRange(4, 128)
+        self.size_spin.setValue(16)
+        self.size_spin.valueChanged.connect(self._on_change)
+        form.addRow("渲染尺寸(px):", self.size_spin)
+        
+        layout.addLayout(form)
+    
+    def set_anim(self, anim: OptionAnimData):
+        self._anim = anim
+        self.blockSignals(True)
+        self.name_edit.setText(anim.name)
+        self.frames_edit.setText(",".join(anim.frames))
+        self.duration_spin.setValue(anim.frame_duration)
+        self.loop_check.setChecked(anim.loop)
+        self.size_spin.setValue(anim.render_size_px)
+        self.blockSignals(False)
+    
+    def _on_change(self):
+        if not self._anim:
+            return
+        self._anim.name = self.name_edit.text()
+        raw = self.frames_edit.text().strip()
+        self._anim.frames = [f.strip() for f in raw.split(",") if f.strip()] if raw else []
+        self._anim.frame_duration = self.duration_spin.value()
+        self._anim.loop = self.loop_check.isChecked()
+        self._anim.render_size_px = self.size_spin.value()
+        self.data_changed.emit()
+
+
+# ==================== v3 技能编辑器 ====================
+
+class SkillEditor(QWidget):
+    """v3 技能槽位声明编辑器"""
+    
+    data_changed = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._skill: Optional[SkillData] = None
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        
+        self.slot_combo = QComboBox()
+        self.slot_combo.addItems(["bomb", "skill_1", "skill_2", "passive"])
+        self.slot_combo.currentTextChanged.connect(self._on_change)
+        form.addRow("槽位:", self.slot_combo)
+        
+        self.name_edit = QLineEdit()
+        self.name_edit.textChanged.connect(self._on_change)
+        form.addRow("名称:", self.name_edit)
+        
+        self.icon_edit = QLineEdit()
+        self.icon_edit.setPlaceholderText("精灵名（图标）")
+        self.icon_edit.textChanged.connect(self._on_change)
+        form.addRow("图标:", self.icon_edit)
+        
+        self.cooldown_spin = QSpinBox()
+        self.cooldown_spin.setRange(0, 9999)
+        self.cooldown_spin.setValue(300)
+        self.cooldown_spin.valueChanged.connect(self._on_change)
+        form.addRow("冷却(帧):", self.cooldown_spin)
+        
+        self.desc_edit = QLineEdit()
+        self.desc_edit.textChanged.connect(self._on_change)
+        form.addRow("描述:", self.desc_edit)
+        
+        layout.addLayout(form)
+    
+    def set_skill(self, skill: SkillData):
+        self._skill = skill
+        self.blockSignals(True)
+        idx = self.slot_combo.findText(skill.slot)
+        if idx >= 0:
+            self.slot_combo.setCurrentIndex(idx)
+        self.name_edit.setText(skill.name)
+        self.icon_edit.setText(skill.icon)
+        self.cooldown_spin.setValue(skill.cooldown)
+        self.desc_edit.setText(skill.description)
+        self.blockSignals(False)
+    
+    def _on_change(self):
+        if not self._skill:
+            return
+        self._skill.slot = self.slot_combo.currentText()
+        self._skill.name = self.name_edit.text()
+        self._skill.icon = self.icon_edit.text()
+        self._skill.cooldown = self.cooldown_spin.value()
+        self._skill.description = self.desc_edit.text()
+        self.data_changed.emit()
+
+
+# ==================== 子机编辑器（v2 兼容保留） ====================
 
 class OptionEditor(QWidget):
-    """子机编辑器"""
+    """子机编辑器（v2 兼容）"""
     
     option_changed = pyqtSignal()
     
@@ -648,58 +873,44 @@ class OptionEditor(QWidget):
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        
         form = QFormLayout()
-        
         self.name_edit = QLineEdit()
         self.name_edit.textChanged.connect(self._on_change)
         form.addRow("名称:", self.name_edit)
-        
-        # 偏移
         offset_widget = QWidget()
         offset_layout = QHBoxLayout(offset_widget)
         offset_layout.setContentsMargins(0, 0, 0, 0)
-        
         self.offset_x_spin = QDoubleSpinBox()
         self.offset_x_spin.setRange(-1, 1)
         self.offset_x_spin.setSingleStep(0.01)
         self.offset_x_spin.setDecimals(3)
         self.offset_x_spin.valueChanged.connect(self._on_change)
-        
         self.offset_y_spin = QDoubleSpinBox()
         self.offset_y_spin.setRange(-1, 1)
         self.offset_y_spin.setSingleStep(0.01)
         self.offset_y_spin.setDecimals(3)
         self.offset_y_spin.valueChanged.connect(self._on_change)
-        
         offset_layout.addWidget(QLabel("X:"))
         offset_layout.addWidget(self.offset_x_spin)
         offset_layout.addWidget(QLabel("Y:"))
         offset_layout.addWidget(self.offset_y_spin)
-        
         form.addRow("偏移:", offset_widget)
-        
         self.shot_type_combo = QComboBox()
         self.shot_type_combo.addItems(["homing", "straight", "spread"])
         self.shot_type_combo.currentTextChanged.connect(self._on_change)
         form.addRow("射击类型:", self.shot_type_combo)
-        
         self.damage_spin = QDoubleSpinBox()
         self.damage_spin.setRange(1, 100)
         self.damage_spin.valueChanged.connect(self._on_change)
         form.addRow("伤害:", self.damage_spin)
-        
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 60)
         self.interval_spin.valueChanged.connect(self._on_change)
         form.addRow("间隔(帧):", self.interval_spin)
-        
         layout.addLayout(form)
     
     def set_option(self, option: OptionData):
-        """设置子机"""
         self._option = option
-        
         self.blockSignals(True)
         self.name_edit.setText(option.name)
         self.offset_x_spin.setValue(option.offset_x)
@@ -1293,8 +1504,73 @@ class PlayerEditor(QMainWindow):
         
         layout.addWidget(bind_group)
         
-        # 射击
-        shot_group = QGroupBox("射击类型")
+        # ===== v3: 子弹动画资源 =====
+        ba_group = QGroupBox("子弹动画资源 (v3)")
+        ba_layout = QVBoxLayout(ba_group)
+        ba_btn = QHBoxLayout()
+        btn_add_ba = QPushButton("+ 添加")
+        btn_add_ba.clicked.connect(self._add_bullet_anim)
+        btn_del_ba = QPushButton("删除")
+        btn_del_ba.clicked.connect(self._delete_bullet_anim)
+        ba_btn.addWidget(btn_add_ba)
+        ba_btn.addWidget(btn_del_ba)
+        ba_layout.addLayout(ba_btn)
+        
+        self.bullet_anim_list = QListWidget()
+        self.bullet_anim_list.currentTextChanged.connect(self._on_bullet_anim_selected)
+        ba_layout.addWidget(self.bullet_anim_list)
+        
+        self.bullet_anim_editor = BulletAnimEditor()
+        self.bullet_anim_editor.data_changed.connect(self._on_bullet_anim_changed)
+        ba_layout.addWidget(self.bullet_anim_editor)
+        layout.addWidget(ba_group)
+        
+        # ===== v3: 僚机动画资源 =====
+        oa_group = QGroupBox("僚机动画资源 (v3)")
+        oa_layout = QVBoxLayout(oa_group)
+        oa_btn = QHBoxLayout()
+        btn_add_oa = QPushButton("+ 添加")
+        btn_add_oa.clicked.connect(self._add_option_anim)
+        btn_del_oa = QPushButton("删除")
+        btn_del_oa.clicked.connect(self._delete_option_anim)
+        oa_btn.addWidget(btn_add_oa)
+        oa_btn.addWidget(btn_del_oa)
+        oa_layout.addLayout(oa_btn)
+        
+        self.option_anim_list = QListWidget()
+        self.option_anim_list.currentTextChanged.connect(self._on_option_anim_selected)
+        oa_layout.addWidget(self.option_anim_list)
+        
+        self.option_anim_editor = OptionAnimEditor()
+        self.option_anim_editor.data_changed.connect(self._on_option_anim_changed)
+        oa_layout.addWidget(self.option_anim_editor)
+        layout.addWidget(oa_group)
+        
+        # ===== v3: 技能声明 =====
+        sk_group = QGroupBox("技能声明 (v3)")
+        sk_layout = QVBoxLayout(sk_group)
+        sk_btn = QHBoxLayout()
+        btn_add_sk = QPushButton("+ 添加")
+        btn_add_sk.clicked.connect(self._add_skill)
+        btn_del_sk = QPushButton("删除")
+        btn_del_sk.clicked.connect(self._delete_skill)
+        sk_btn.addWidget(btn_add_sk)
+        sk_btn.addWidget(btn_del_sk)
+        sk_layout.addLayout(sk_btn)
+        
+        self.skill_list = QListWidget()
+        self.skill_list.currentRowChanged.connect(self._on_skill_selected)
+        sk_layout.addWidget(self.skill_list)
+        
+        self.skill_editor = SkillEditor()
+        self.skill_editor.data_changed.connect(self._on_skill_changed)
+        sk_layout.addWidget(self.skill_editor)
+        layout.addWidget(sk_group)
+        
+        # ===== v2 兼容: 射击类型（折叠） =====
+        shot_group = QGroupBox("射击类型 (v2 兼容)")
+        shot_group.setCheckable(True)
+        shot_group.setChecked(False)
         shot_layout = QVBoxLayout(shot_group)
         shot_btn = QHBoxLayout()
         btn_add_shot = QPushButton("+ 添加")
@@ -1313,27 +1589,6 @@ class PlayerEditor(QMainWindow):
         self.shot_editor.shot_changed.connect(self._on_shot_changed)
         shot_layout.addWidget(self.shot_editor)
         layout.addWidget(shot_group)
-        
-        # 子机
-        opt_group = QGroupBox("子机")
-        opt_layout = QVBoxLayout(opt_group)
-        opt_btn = QHBoxLayout()
-        btn_add_opt = QPushButton("+ 添加")
-        btn_add_opt.clicked.connect(self._add_option)
-        btn_del_opt = QPushButton("删除")
-        btn_del_opt.clicked.connect(self._delete_option)
-        opt_btn.addWidget(btn_add_opt)
-        opt_btn.addWidget(btn_del_opt)
-        opt_layout.addLayout(opt_btn)
-        
-        self.option_list = QListWidget()
-        self.option_list.currentRowChanged.connect(self._on_option_selected)
-        opt_layout.addWidget(self.option_list)
-        
-        self.option_editor = OptionEditor()
-        self.option_editor.option_changed.connect(self._on_option_changed)
-        opt_layout.addWidget(self.option_editor)
-        layout.addWidget(opt_group)
         
         layout.addStretch()
         scroll.setWidget(inner)
@@ -1644,9 +1899,69 @@ class PlayerEditor(QMainWindow):
                     loop=anim_data.get('loop', True)
                 )
             
+            # v3: 加载 bullet_anims
+            self.player_data.bullet_anims.clear()
+            for name, ba_cfg in data.get('bullet_anims', {}).items():
+                self.player_data.bullet_anims[name] = BulletAnimData(
+                    name=name,
+                    frames=ba_cfg.get('frames', []),
+                    frame_duration=ba_cfg.get('frame_duration', 4),
+                    loop=ba_cfg.get('loop', True),
+                    hitbox_radius=ba_cfg.get('hitbox_radius', 0.02),
+                )
+
+            # v3: 加载 option_anims
+            self.player_data.option_anims.clear()
+            for name, oa_cfg in data.get('option_anims', {}).items():
+                self.player_data.option_anims[name] = OptionAnimData(
+                    name=name,
+                    frames=oa_cfg.get('frames', []),
+                    frame_duration=oa_cfg.get('frame_duration', 8),
+                    loop=oa_cfg.get('loop', True),
+                    render_size_px=oa_cfg.get('render_size_px', 16.0),
+                )
+
+            # v3: 加载 skills
+            self.player_data.skills.clear()
+            for sk_cfg in data.get('skills', []):
+                self.player_data.skills.append(SkillData(
+                    slot=sk_cfg.get('slot', 'bomb'),
+                    name=sk_cfg.get('name', ''),
+                    icon=sk_cfg.get('icon', ''),
+                    cooldown=sk_cfg.get('cooldown', 300),
+                    description=sk_cfg.get('description', ''),
+                ))
+
+            # v2: 加载 shot_types
+            self.player_data.shot_types.clear()
+            for name, st_cfg in data.get('shot_types', {}).items():
+                self.player_data.shot_types[name] = ShotTypeData(
+                    name=name,
+                    damage=st_cfg.get('damage', 10),
+                    speed=st_cfg.get('speed', 0.05),
+                    interval=st_cfg.get('interval', 4),
+                    spread=st_cfg.get('spread', 0),
+                    count=st_cfg.get('count', 1),
+                    sprite=st_cfg.get('sprite', ''),
+                )
+
             # 更新UI
             self._update_ui()
-            
+
+            # 更新 v3 列表 UI
+            self.bullet_anim_list.clear()
+            for name in self.player_data.bullet_anims:
+                self.bullet_anim_list.addItem(name)
+            self.option_anim_list.clear()
+            for name in self.player_data.option_anims:
+                self.option_anim_list.addItem(name)
+            self.skill_list.clear()
+            for sk in self.player_data.skills:
+                self.skill_list.addItem(f"{sk.slot}: {sk.name}")
+            self.shot_list.clear()
+            for name in self.player_data.shot_types:
+                self.shot_list.addItem(name)
+
             # 加载纹理
             config_dir = Path(path).parent
             if self.player_data.texture:
@@ -2492,7 +2807,87 @@ class PlayerEditor(QMainWindow):
         self.anim_preview.set_animation(self.player_data.animations[name])
         self._update_frame_strip()
     
-    # 射击操作
+    # ===== v3 子弹动画操作 =====
+    def _add_bullet_anim(self):
+        idx = len(self.player_data.bullet_anims)
+        name = f"bullet_anim_{idx}"
+        self.player_data.bullet_anims[name] = BulletAnimData(name=name)
+        self.bullet_anim_list.addItem(name)
+
+    def _delete_bullet_anim(self):
+        item = self.bullet_anim_list.currentItem()
+        if item:
+            name = item.text()
+            self.player_data.bullet_anims.pop(name, None)
+            self.bullet_anim_list.takeItem(self.bullet_anim_list.row(item))
+
+    def _on_bullet_anim_selected(self, name: str):
+        if name and name in self.player_data.bullet_anims:
+            self.bullet_anim_editor.set_anim(self.player_data.bullet_anims[name])
+
+    def _on_bullet_anim_changed(self):
+        item = self.bullet_anim_list.currentItem()
+        if item and self.bullet_anim_editor._anim:
+            old_name = item.text()
+            new_name = self.bullet_anim_editor._anim.name
+            if old_name != new_name and new_name:
+                data = self.player_data.bullet_anims.pop(old_name, None)
+                if data:
+                    self.player_data.bullet_anims[new_name] = data
+                    item.setText(new_name)
+
+    # ===== v3 僚机动画操作 =====
+    def _add_option_anim(self):
+        idx = len(self.player_data.option_anims)
+        name = f"option_anim_{idx}"
+        self.player_data.option_anims[name] = OptionAnimData(name=name)
+        self.option_anim_list.addItem(name)
+
+    def _delete_option_anim(self):
+        item = self.option_anim_list.currentItem()
+        if item:
+            name = item.text()
+            self.player_data.option_anims.pop(name, None)
+            self.option_anim_list.takeItem(self.option_anim_list.row(item))
+
+    def _on_option_anim_selected(self, name: str):
+        if name and name in self.player_data.option_anims:
+            self.option_anim_editor.set_anim(self.player_data.option_anims[name])
+
+    def _on_option_anim_changed(self):
+        item = self.option_anim_list.currentItem()
+        if item and self.option_anim_editor._anim:
+            old_name = item.text()
+            new_name = self.option_anim_editor._anim.name
+            if old_name != new_name and new_name:
+                data = self.player_data.option_anims.pop(old_name, None)
+                if data:
+                    self.player_data.option_anims[new_name] = data
+                    item.setText(new_name)
+
+    # ===== v3 技能操作 =====
+    def _add_skill(self):
+        skill = SkillData(slot="bomb", name=f"技能_{len(self.player_data.skills)}")
+        self.player_data.skills.append(skill)
+        self.skill_list.addItem(f"{skill.slot}: {skill.name}")
+
+    def _delete_skill(self):
+        row = self.skill_list.currentRow()
+        if 0 <= row < len(self.player_data.skills):
+            del self.player_data.skills[row]
+            self.skill_list.takeItem(row)
+
+    def _on_skill_selected(self, row: int):
+        if 0 <= row < len(self.player_data.skills):
+            self.skill_editor.set_skill(self.player_data.skills[row])
+
+    def _on_skill_changed(self):
+        row = self.skill_list.currentRow()
+        if 0 <= row < len(self.player_data.skills):
+            skill = self.player_data.skills[row]
+            self.skill_list.item(row).setText(f"{skill.slot}: {skill.name}")
+
+    # ===== v2 射击操作（兼容）=====
     def _add_shot_type(self):
         idx = len(self.player_data.shot_types)
         name = f"shot_{idx}"
@@ -2511,26 +2906,6 @@ class PlayerEditor(QMainWindow):
             self.shot_editor.set_shot(self.player_data.shot_types[name])
     
     def _on_shot_changed(self):
-        pass
-    
-    # 子机操作
-    def _add_option(self):
-        idx = len(self.player_data.options)
-        option = OptionData(name=f"option_{idx}")
-        self.player_data.options.append(option)
-        self.option_list.addItem(option.name)
-    
-    def _delete_option(self):
-        row = self.option_list.currentRow()
-        if 0 <= row < len(self.player_data.options):
-            del self.player_data.options[row]
-            self.option_list.takeItem(row)
-    
-    def _on_option_selected(self, row: int):
-        if 0 <= row < len(self.player_data.options):
-            self.option_editor.set_option(self.player_data.options[row])
-    
-    def _on_option_changed(self):
         pass
     
     # 文件操作
@@ -2660,6 +3035,16 @@ class PlayerEditor(QMainWindow):
                     }
                 },
                 "shot_types": {
+                    name: {
+                        "damage": st.damage,
+                        "speed": st.speed,
+                        "interval": st.interval,
+                        "spread": st.spread,
+                        "count": st.count,
+                        "sprite": st.sprite,
+                    }
+                    for name, st in self.player_data.shot_types.items()
+                } if self.player_data.shot_types else {
                     "unfocused": {
                         "damage": 10,
                         "speed": 0.05,
@@ -2677,6 +3062,34 @@ class PlayerEditor(QMainWindow):
                         "interval": opt.interval
                     }
                     for opt in self.player_data.options
+                ],
+                "bullet_anims": {
+                    name: {
+                        "frames": ba.frames,
+                        "frame_duration": ba.frame_duration,
+                        "loop": ba.loop,
+                        "hitbox_radius": ba.hitbox_radius,
+                    }
+                    for name, ba in self.player_data.bullet_anims.items()
+                },
+                "option_anims": {
+                    name: {
+                        "frames": oa.frames,
+                        "frame_duration": oa.frame_duration,
+                        "loop": oa.loop,
+                        "render_size_px": oa.render_size_px,
+                    }
+                    for name, oa in self.player_data.option_anims.items()
+                },
+                "skills": [
+                    {
+                        "slot": sk.slot,
+                        "name": sk.name,
+                        "icon": sk.icon,
+                        "cooldown": sk.cooldown,
+                        "description": sk.description,
+                    }
+                    for sk in self.player_data.skills
                 ]
             })
             

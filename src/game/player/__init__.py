@@ -27,6 +27,8 @@ from .player_config import (
     generate_config_template
 )
 from .player_script import PlayerScript, load_player_script
+from .option_entity import OptionEntity, OptionManager
+from .skill_manager import SkillSlot, SkillSlotManager
 
 # 兼容旧代码：Player 别名指向 PlayerBase
 Player = PlayerBase
@@ -45,6 +47,10 @@ __all__ = [
     'PlayerAnimationStateMachine',
     'PlayerConfigLoader',
     'PlayerScript',
+    'OptionEntity',
+    'OptionManager',
+    'SkillSlot',
+    'SkillSlotManager',
     
     # 数据类
     'ShotPattern',
