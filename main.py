@@ -321,7 +321,7 @@ def main():
 
         # 碰撞检测（对话期间跳过）
         if not dialog_active:
-            # 碰撞检测 - 子弹（使用统一碰撞管理器）
+            # 碰撞检测 - 玩家 vs 敌弹
             hit_x, hit_y = player.get_hit_position()
             if player.invincible_timer <= 0:
                 bullet_result = collision_mgr.check_player_vs_bullets(
@@ -332,7 +332,7 @@ def main():
                         print(f"Player hit by bullet! Lives left: {player.lives}")
                         bullet_pool.data['alive'][bullet_result.index] = 0
 
-            # 碰撞检测 - 激光（使用统一碰撞管理器）
+            # 碰撞检测 - 玩家 vs 激光
             if player.invincible_timer <= 0:
                 laser_result = collision_mgr.check_player_vs_lasers(
                     hit_x, hit_y, player.hit_radius, laser_pool
@@ -340,6 +340,23 @@ def main():
                 if laser_result.occurred:
                     if player.take_damage():
                         print(f"Player hit by laser! Lives left: {player.lives}")
+            
+            # 碰撞检测 - 玩家子弹 vs 敌人/Boss（P0：补全伤害流程）
+            collision_targets = []
+            if stage_manager.current_context:
+                collision_targets.extend(stage_manager.current_context.get_enemy_scripts())
+            if stage_manager.current_stage and stage_manager.current_stage._current_boss:
+                boss = stage_manager.current_stage._current_boss
+                if boss._active:
+                    collision_targets.append(boss)
+            
+            if collision_targets:
+                hits = player.check_bullet_collisions(collision_targets)
+                for b_idx, e_idx, damage in hits:
+                    if 0 <= e_idx < len(collision_targets):
+                        target = collision_targets[e_idx]
+                        if hasattr(target, 'damage'):
+                            target.damage(int(damage))
         
         # 更新 HUD 状态
         hud.update_from_player(player)

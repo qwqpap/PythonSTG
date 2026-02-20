@@ -239,8 +239,51 @@ class PlayerShotSystem:
         return result
 
 
+def _create_shot_type_from_compact_config(config: dict) -> ShotType:
+    """
+    从 compact 格式创建 ShotType（Orin/Tenshi 等）
+    格式: damage, speed, interval, spread, count, sprite
+    """
+    count = config.get('count', 2)
+    spread = config.get('spread', 5)  # 总散射角度（度）
+    damage = config.get('damage', 10)
+    sprite = config.get('sprite', 'player_bullet')
+    # speed: 0.05 等，与 sakuya 的 24/1000=0.024 类似，compact 用小数直接表示
+    speed_val = config.get('speed', 0.05)
+    speed = speed_val / 1000.0 if speed_val > 1 else speed_val  # 24->0.024, 0.05->0.05
+    
+    interval = config.get('interval', 4)
+    fire_rate = interval / 60.0  # 帧间隔转秒
+    
+    shot_type = ShotType(name=config.get('name', ''), fire_rate=fire_rate)
+    
+    # 生成 count 个子弹，均匀分布在 spread 范围内
+    if count <= 1:
+        shot_type.patterns.append(ShotPattern(
+            offset_x=0, offset_y=0.02,
+            angle=90, speed=speed, bullet_sprite=sprite, damage=damage
+        ))
+    else:
+        half_spread = spread / 2.0
+        start_angle = 90 - half_spread
+        step = spread / (count - 1) if count > 1 else 0
+        for i in range(count):
+            angle = start_angle + step * i
+            offset_x = (i - (count - 1) / 2) * 0.02  # 轻微横向偏移
+            shot_type.patterns.append(ShotPattern(
+                offset_x=offset_x, offset_y=0.02,
+                angle=angle, speed=speed, bullet_sprite=sprite, damage=damage
+            ))
+    
+    return shot_type
+
+
 def create_shot_type_from_config(config: dict) -> ShotType:
     """从配置字典创建ShotType"""
+    # 支持 compact 格式（Orin/Tenshi 等）：damage, speed, interval, spread, count, sprite
+    if 'patterns' not in config and 'count' in config:
+        return _create_shot_type_from_compact_config(config)
+    
     shot_type = ShotType(
         name=config.get('name', ''),
         fire_rate=config.get('fire_rate', 0.05)

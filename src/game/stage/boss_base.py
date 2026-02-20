@@ -55,6 +55,7 @@ class BossBase:
         
         self.ctx: Optional['SpellCardContext'] = None
         self._active: bool = False
+        self.hit_radius: float = 0.08  # 碰撞半径（Boss 通常比小怪大）
         
         # 动画/渲染相关
         self.texture: str = ""

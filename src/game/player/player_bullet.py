@@ -141,12 +141,12 @@ class PlayerBulletPool:
     def check_collision_with_enemies(self, enemies) -> list:
         """
         检查与敌人的碰撞
-        :param enemies: 敌人管理器
+        :param enemies: 敌人/Boss 列表，支持 EnemyScript、BossBase 或任意有 x,y 和 damage(amount) 的对象
         :return: 碰撞列表 [(bullet_idx, enemy_idx, damage), ...]
         """
         collisions = []
         
-        if enemies is None:
+        if enemies is None or len(enemies) == 0:
             return collisions
         
         for b_idx in range(self.max_bullets):
@@ -154,20 +154,28 @@ class PlayerBulletPool:
                 continue
             
             bx, by = self.data[b_idx]['pos']
-            damage = self.data[b_idx]['damage']
-            penetrate = self.data[b_idx]['penetrate']
+            damage = float(self.data[b_idx]['damage'])
+            penetrate = int(self.data[b_idx]['penetrate'])
             
-            # 简单的圆形碰撞检测
             for e_idx, enemy in enumerate(enemies):
-                if not enemy.alive:
+                # 支持 _active / alive / is_active
+                alive = getattr(enemy, 'alive', getattr(enemy, '_active', True))
+                if not alive:
                     continue
                 
-                ex, ey = enemy.pos
-                # 假设敌人碰撞半径为0.05
-                dist_sq = (bx - ex) ** 2 + (by - ey) ** 2
-                hit_radius = 0.05
+                # 支持 pos 或 (x, y)
+                pos = getattr(enemy, 'pos', None)
+                if pos is None:
+                    ex = getattr(enemy, 'x', 0)
+                    ey = getattr(enemy, 'y', 0)
+                else:
+                    ex, ey = pos[0], pos[1]
                 
-                if dist_sq < hit_radius ** 2:
+                hit_radius = getattr(enemy, 'hitbox_radius', getattr(enemy, 'hit_radius', 0.05))
+                combined_r = hit_radius + 0.02  # 子弹半径约 0.02
+                dist_sq = (bx - ex) ** 2 + (by - ey) ** 2
+                
+                if dist_sq < combined_r ** 2:
                     collisions.append((b_idx, e_idx, damage))
                     
                     if penetrate <= 0:
