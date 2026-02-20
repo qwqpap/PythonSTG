@@ -38,34 +38,6 @@ from src.ui.bitmap_font import get_font_manager
 from game_content.stages.stage1.stage_script import Stage1
 
 
-class _CollisionTargetAdapter:
-    """
-    适配器：将 enemy_scripts + boss 转为 CollisionManager 所需的 enemy_manager 接口。
-    供 check_player_bullets_vs_enemies 使用 Numba 加速。
-    """
-    
-    def __init__(self, targets):
-        self._targets = []
-        for t in targets:
-            if getattr(t, '_active', getattr(t, 'alive', True)):
-                self._targets.append(_CollisionTargetWrapper(t))
-    
-    def get_active_enemies(self):
-        return self._targets
-
-
-class _CollisionTargetWrapper:
-    """包装器：提供 .pos 和 .hit_radius 接口，damage() 委托给实际目标"""
-    
-    def __init__(self, target):
-        self._target = target
-        self.pos = (getattr(target, 'x', 0), getattr(target, 'y', 0))
-        self.hit_radius = getattr(target, 'hitbox_radius', getattr(target, 'hit_radius', 0.05))
-    
-    def damage(self, amount):
-        self._target.damage(int(amount))
-
-
 def initialize_pygame_and_context():
     """初始化Pygame和ModernGL上下文"""
     pygame.init()
@@ -307,18 +279,15 @@ def main():
 
         # ===== 加载画面模式 =====
         if stage_manager.loading_info:
-            # 加载期间只推进关卡协程，不更新游戏逻辑
+            # 先渲染加载画面（flip 后画面立即可见），再推进协程（可能阻塞 I/O）
+            ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+            ctx.clear(0.0, 0.0, 0.0)
+            loading_renderer.render(stage_manager.loading_info)
+            hud.state.fps = int(clock.get_fps())
+            pygame.display.flip()
+
             stage_manager.update(dt, bullet_pool, player)
-
-            # 协程可能在 update 中清除了 loading_info，需要重新检查
-            if stage_manager.loading_info:
-                ctx.viewport = (0, 0, screen_size[0], screen_size[1])
-                ctx.clear(0.0, 0.0, 0.0)
-                loading_renderer.render(stage_manager.loading_info)
-
-                hud.state.fps = int(clock.get_fps())
-                pygame.display.flip()
-                continue
+            continue
 
         # ===== 正常游戏模式 =====
         # 检查是否有活跃的对话（对话期间暂停游戏逻辑）
@@ -337,6 +306,15 @@ def main():
 
         # 关卡协程始终更新（包括对话协程）
         stage_manager.update(dt, bullet_pool, player)
+
+        # 协程可能刚进入加载阶段（第一次 step 设置了 loading_info）
+        if stage_manager.loading_info:
+            ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+            ctx.clear(0.0, 0.0, 0.0)
+            loading_renderer.render(stage_manager.loading_info)
+            hud.state.fps = int(clock.get_fps())
+            pygame.display.flip()
+            continue
         
         # 同步物品统计到玩家和HUD
         player.score = item_pool.stats.score
@@ -378,20 +356,18 @@ def main():
                     collision_targets.append(boss)
             
             if collision_targets:
-                adapter = _CollisionTargetAdapter(collision_targets)
-                hits = collision_mgr.check_player_bullets_vs_enemies(
+                hits, active_targets = collision_mgr.check_player_bullets_vs_targets(
                     player.bullet_pool,
-                    adapter,
-                    hit_radius=0.02,  # 子弹判定半径
+                    collision_targets,
+                    hit_radius=0.02,
                 )
-                targets = adapter.get_active_enemies()
                 for hit in hits:
-                    if 0 <= hit.target_idx < len(targets):
-                        target = targets[hit.target_idx]
-                        target.damage(hit.damage)
+                    if 0 <= hit.target_idx < len(active_targets):
+                        target = active_targets[hit.target_idx]
+                        target.damage(int(hit.damage))
                         if player.script and hasattr(player.script, 'on_bullet_hit_enemy'):
                             player.script.on_bullet_hit_enemy(
-                                hit.bullet_idx, target._target, hit.damage)
+                                hit.bullet_idx, target, hit.damage)
         
         # 更新 HUD 状态
         hud.update_from_player(player)

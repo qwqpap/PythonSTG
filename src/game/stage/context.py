@@ -219,9 +219,12 @@ class StageContext(SpellCardContext):
 
     def update_enemy_scripts(self):
         """更新所有敌人脚本（每帧调用）"""
-        for enemy in self._enemy_scripts[:]:  # 使用切片避免修改列表时出错
-            if not enemy.update():  # update() 返回 False 表示敌人已死亡
-                self._enemy_scripts.remove(enemy)
+        write = 0
+        for i in range(len(self._enemy_scripts)):
+            if self._enemy_scripts[i].update():
+                self._enemy_scripts[write] = self._enemy_scripts[i]
+                write += 1
+        del self._enemy_scripts[write:]
 
     def get_enemy_scripts(self) -> List[Any]:
         """获取所有活跃的敌人脚本"""

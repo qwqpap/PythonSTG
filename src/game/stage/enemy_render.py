@@ -118,13 +118,17 @@ class EnemyRenderObject:
 
     def _get_current_animation(self):
         """获取当前应播放的动画"""
-        if self.directional:
-            anims = {
-                'idle': self.idle_anim,
-                'move_left': self.left_anim,
-                'move_right': self.right_anim,
-                'move_left_full': self.left_full_anim if self.has_full_tilt else self.left_anim,
-                'move_right_full': self.right_full_anim if self.has_full_tilt else self.right_anim,
-            }
-            return anims.get(self.state, self.idle_anim)
-        return self.simple_anim
+        if not self.directional:
+            return self.simple_anim
+        s = self.state
+        if s == 'idle':
+            return self.idle_anim
+        if s == 'move_left':
+            return self.left_anim
+        if s == 'move_right':
+            return self.right_anim
+        if s == 'move_left_full':
+            return self.left_full_anim if self.has_full_tilt else self.left_anim
+        if s == 'move_right_full':
+            return self.right_full_anim if self.has_full_tilt else self.right_anim
+        return self.idle_anim

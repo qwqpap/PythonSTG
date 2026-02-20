@@ -84,17 +84,30 @@ class StageManager:
             "subtitle": getattr(stage_class, 'subtitle', ''),
             "hint": "Loading...",
         }
-        yield  # 显示加载画面
+        yield  # 让 main loop 看到 loading_info 并渲染
 
-        # 加载关卡私有音频
+        # 拆分加载步骤：每步之间 yield 一帧让画面刷新
         stage_dir = self._find_stage_directory(stage_class)
+        yield
+
         if self._audio_manager and stage_dir:
             stage_id = getattr(stage_class, 'id', 'unknown')
-            stage_bank = StageAudioBank.from_directory(stage_id, stage_dir)
-            self._audio_manager.set_stage_bank(stage_bank)
-            self.loading_info["hint"] = "Ready"
+            # SE 加载（磁盘 I/O）
+            stage_bank = StageAudioBank(stage_id)
+            se_dir = os.path.join(stage_dir, "audio", "se")
+            if os.path.isdir(se_dir):
+                stage_bank.load_se_directory(se_dir)
+            yield
 
-        yield  # 刷新一帧
+            # BGM 注册（轻量，只记路径）
+            bgm_dir = os.path.join(stage_dir, "audio", "music")
+            if os.path.isdir(bgm_dir):
+                stage_bank.load_bgm_directory(bgm_dir)
+
+            self._audio_manager.set_stage_bank(stage_bank)
+
+        self.loading_info["hint"] = "Ready"
+        yield
 
         # 停留一段时间让玩家看到关卡信息
         for _ in range(120):

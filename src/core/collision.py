@@ -428,6 +428,65 @@ class CollisionManager:
         
         return results
     
+    def check_player_bullets_vs_targets(
+        self,
+        bullet_pool,
+        targets: list,
+        hit_radius: float = 0.05,
+    ) -> 'tuple[list[BulletCollisionResult], list]':
+        """
+        检查玩家子弹与目标列表碰撞（无需 adapter/wrapper）
+
+        targets 中的元素需提供 x, y 属性和 hitbox_radius 或 hit_radius 属性。
+
+        Returns:
+            (碰撞结果列表, 活跃目标列表)
+        """
+        if not targets:
+            return [], []
+
+        active = [t for t in targets
+                  if getattr(t, '_active', getattr(t, 'alive', True))]
+        if not active:
+            return [], active
+
+        n = len(active)
+        enemy_pos = np.zeros((n, 2), dtype=np.float32)
+        enemy_alive = np.ones(n, dtype=np.int32)
+        enemy_radius = np.zeros(n, dtype=np.float32)
+
+        for i, t in enumerate(active):
+            enemy_pos[i, 0] = getattr(t, 'x', 0.0)
+            enemy_pos[i, 1] = getattr(t, 'y', 0.0)
+            enemy_radius[i] = getattr(
+                t, 'hitbox_radius', getattr(t, 'hit_radius', 0.05))
+
+        bullet_data = bullet_pool.data
+        raw_results = _check_player_bullets_vs_enemies(
+            bullet_data['pos'],
+            bullet_data['alive'],
+            bullet_data['damage'],
+            bullet_data['penetrate'],
+            enemy_pos,
+            enemy_alive,
+            enemy_radius,
+            hit_radius,
+        )
+
+        results = []
+        for row in raw_results:
+            results.append(BulletCollisionResult(
+                bullet_idx=int(row[0]),
+                target_idx=int(row[1]),
+                damage=row[2],
+                position=(
+                    bullet_data['pos'][int(row[0]), 0],
+                    bullet_data['pos'][int(row[0]), 1]
+                ),
+            ))
+
+        return results, active
+
     def check_player_vs_lasers(
         self,
         player_x: float,

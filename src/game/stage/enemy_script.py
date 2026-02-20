@@ -61,6 +61,7 @@ class EnemyScript(ABC):
     score: int = 100                    # 击破得分
     hitbox_radius: float = 0.02         # 碰撞半径
     drops: dict = {}                    # 击破掉落 {"power": N, "point": N, "faith": N}
+    clear_bullets_on_death: bool = False # 死亡时是否清除自身发射的子弹
     
     def __init__(self):
         self.x: float = 0.0
@@ -154,10 +155,11 @@ class EnemyScript(ABC):
     def _on_death(self):
         """死亡处理"""
         self._active = False
-        # 清除该敌人创建的子弹
-        for bullet_idx in self._bullets:
-            if self.ctx:
-                self.ctx.remove_bullet(bullet_idx)
+
+        if self.clear_bullets_on_death:
+            for bullet_idx in self._bullets:
+                if self.ctx:
+                    self.ctx.remove_bullet(bullet_idx)
         self._bullets.clear()
 
         # 掉道具
@@ -197,6 +199,16 @@ class EnemyScript(ABC):
         if self._render_obj:
             return self._render_obj.get_current_frame()
         return None, None
+
+    def clear_bullets(self, to_items: bool = False):
+        """手动清除该敌人创建的所有子弹"""
+        for bullet_idx in self._bullets:
+            if self.ctx:
+                if to_items:
+                    self.ctx.bullet_to_item(bullet_idx)
+                else:
+                    self.ctx.remove_bullet(bullet_idx)
+        self._bullets.clear()
 
     # ==================== 弹幕 API ====================
     
