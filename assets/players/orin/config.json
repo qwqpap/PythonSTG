@@ -230,6 +230,15 @@
       ],
       "source": "player"
     },
+    "orin_23": {
+      "rect": [
+        224,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
     "sprite_0": {
       "rect": [
         0,
@@ -521,7 +530,12 @@
         "loop": true
       },
       "move_left": {
-        "frames": [],
+        "frames": [
+          "orin_8",
+          "orin_9",
+          "orin_10",
+          "orin_11"
+        ],
         "frame_duration": 8,
         "loop": true
       },

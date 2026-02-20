@@ -412,14 +412,12 @@ def main():
             bullet_pool, player, stage_manager, laser_pool,
             viewport_rect=game_viewport,
             item_renderer=item_renderer,
-            items=item_pool.get_active_items(),
-            dt=dt,  # 传递时间步长用于背景动画
-            enemy_scripts=enemy_scripts  # 传递敌人脚本列表
+            item_pool=item_pool,
+            dt=dt,
+            enemy_scripts=enemy_scripts
         )
         
-        # 注意：道具现在在renderer.render_frame中渲染，不需要单独调用
-        # ctx.viewport = game_viewport
-        # item_renderer.render_items(item_pool.get_active_items())
+        # 道具在 renderer.render_frame 中通过 item_pool SoA 数据直接渲染
         
         # 将视口恢复为全窗口，渲染HUD
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])

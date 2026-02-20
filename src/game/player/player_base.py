@@ -131,8 +131,12 @@ class PlayerBase(Entity):
         
         if 'sprites' in config:
             self.sprites = config['sprites']
+            # 自动将 source="bullet" 的精灵也放入 bullet_sprites
+            for sname, sdata in self.sprites.items():
+                if isinstance(sdata, dict) and sdata.get('source') == 'bullet':
+                    self.bullet_sprites[sname] = sdata
         if 'bullet_sprites' in config:
-            self.bullet_sprites = config['bullet_sprites']
+            self.bullet_sprites.update(config['bullet_sprites'])
         
         # 属性
         stats = config.get('stats', {})

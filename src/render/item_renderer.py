@@ -204,37 +204,34 @@ class ItemRenderer:
         """从配置计算 UV"""
         tex_w, tex_h = self.texture_size
         
-        # 反向映射: 名字 -> ID
-        name_to_id = {v: k for k, v in self.ITEM_TYPE_NAMES.items()}
+        # 反向映射: 名字 -> 0-based sprite index (matching ITEM_TEXTURE_INDEX)
+        name_to_idx = {}
+        for type_id, name in self.ITEM_TYPE_NAMES.items():
+            name_to_idx[name] = type_id - 1  # 1-based ItemType -> 0-based sprite index
         
         for name, data in sprites_config.items():
-            if name in name_to_id:
-                item_id = name_to_id[name]
+            if name in name_to_idx:
+                sprite_idx = name_to_idx[name]
                 rect = data.get("rect", [0, 0, 32, 32])
                 x, y, w, h = rect
-                
-                # tobytes(flip=True) 已翻转纹理，ModernGL 中 (0,0) 左下
-                # 如果 texture 加载时用了 vertical flip, 则 v_top 对应 y=0 的行
-                # 但是 Pygame tobytes(flip=True) 意味着 y=0 变成了底部
-                # 通常 UV: (0,0) is bottom-left
-                # Rect (x, y, w, h) 通常 y 是从顶部开始 (top-left system)
-                # 所以 y_in_gl = height - y - h
                 
                 u_left = x / tex_w
                 u_right = (x + w) / tex_w
                 
+                # tobytes(flip=True) flips Y: v=0 is image bottom, v=1 is image top.
+                # Rect y is top-down (Pygame convention), so convert: v_gl = 1 - y/tex_h
+                v_top = (tex_h - y) / tex_h
+                v_bottom = (tex_h - (y + h)) / tex_h
 
-                
-                v_top = y / tex_h 
-                v_bottom = (y + h) / tex_h
-
-                self.sprite_uvs[item_id] = (u_left, v_bottom, u_right, v_top)
+                # Stored as (u_left, v_start, u_right, v_end) where v_start maps to
+                # quad top (uv_base.y=0) and v_end maps to quad bottom (uv_base.y=1).
+                # Top of quad should show top of sprite (high v), bottom shows low v.
+                self.sprite_uvs[sprite_idx] = (u_left, v_top, u_right, v_bottom)
                 
     def _precompute_uvs(self):
-        """预计算所有物品类型的 UV 坐标"""
+        """预计算所有物品类型的 UV 坐标（fallback when no config）"""
         tex_w, tex_h = self.texture_size
         
-        # item.png: 64x160, 每个 32x32, 2列5行
         item_size = 32
         cols = 2
         
@@ -245,58 +242,91 @@ class ItemRenderer:
             x = col * item_size
             y = row * item_size
             
-            # tobytes(flip=True) 已翻转纹理，UV 使用原始坐标
             u_left = x / tex_w
             u_right = (x + item_size) / tex_w
-            v_top = y / tex_h
-            v_bottom = (y + item_size) / tex_h
+            v_top = (tex_h - y) / tex_h
+            v_bottom = (tex_h - (y + item_size)) / tex_h
             
-            self.sprite_uvs[i] = (u_left, v_bottom, u_right, v_top)
+            self.sprite_uvs[i] = (u_left, v_top, u_right, v_bottom)
     
     def render_items(self, items: list):
         """
-        渲染所有物品
-        
-        Args:
-            items: Item 对象列表
+        渲染所有物品（兼容旧 List[Item] 接口）
         """
         if not self.texture or not items:
             return
-        
+
         count = len(items)
         if count == 0:
             return
-        
-        # 准备实例数据
+
         offsets = np.zeros((count, 2), dtype='f4')
         scales = np.ones(count, dtype='f4')
         uv_rects = np.zeros((count, 4), dtype='f4')
-        
+
         for i, item in enumerate(items):
             offsets[i] = [item.x, item.y]
-            
-            # 弹出动画缩放
+
             if item.timer < 24:
                 scales[i] = (item.timer + 25) / 48
-            else:
-                scales[i] = 1.0
-            
-            # UV
+
             sprite_idx = item.sprite_index
             if sprite_idx in self.sprite_uvs:
                 uv_rects[i] = self.sprite_uvs[sprite_idx]
             else:
                 uv_rects[i] = [0, 0, 1, 1]
-        
-        # 上传数据
+
+        self._upload_and_draw(offsets, scales, uv_rects, count)
+
+    def render_items_soa(self, x, y, timer, sprite_index, alive, n):
+        """
+        渲染物品（直接从 SoA 数组，零 Python 循环准备数据）
+        """
+        if not self.texture or n == 0:
+            return
+
+        mask = alive[:n].astype(bool)
+        count = int(np.sum(mask))
+        if count == 0:
+            return
+
+        ax = x[:n][mask]
+        ay = y[:n][mask]
+        at = timer[:n][mask]
+        asi = sprite_index[:n][mask]
+
+        offsets = np.column_stack((ax, ay)).astype('f4')
+        scales = np.where(at < 24, (at + 25) / 48.0, 1.0).astype('f4')
+
+        # Build UV rects via precomputed lookup table
+        uv_rects = self._build_uv_array(asi, count)
+
+        self._upload_and_draw(offsets, scales, uv_rects, count)
+
+    def _build_uv_array(self, sprite_indices, count):
+        """Build UV rect array from sprite indices using cached UVs."""
+        uv_rects = np.zeros((count, 4), dtype='f4')
+        for idx in self.sprite_uvs:
+            mask = sprite_indices == idx
+            if np.any(mask):
+                uv_rects[mask] = self.sprite_uvs[idx]
+        return uv_rects
+
+    def _upload_and_draw(self, offsets, scales, uv_rects, count):
+        """Upload instance data to GPU and issue draw call."""
+        buf_needed = count * 2 * 4
+        if self.instance_vbo.size < buf_needed:
+            self.instance_vbo.orphan(count * 2 * 4)
+            self.scale_vbo.orphan(count * 1 * 4)
+            self.uv_vbo.orphan(count * 4 * 4)
+
         self.instance_vbo.write(offsets.tobytes())
         self.scale_vbo.write(scales.tobytes())
         self.uv_vbo.write(uv_rects.tobytes())
-        
-        # 渲染
+
         self.texture.use(0)
         self.vao.render(moderngl.TRIANGLES, instances=count)
-    
+
     def cleanup(self):
         """清理资源"""
         pass

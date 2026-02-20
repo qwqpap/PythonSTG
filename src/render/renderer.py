@@ -366,7 +366,7 @@ class Renderer:
         """
         self.background_renderer = background_renderer
     
-    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None, item_renderer=None, items=None, dt=0.0, enemy_scripts=None):
+    def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None, item_renderer=None, items=None, dt=0.0, enemy_scripts=None, item_pool=None):
         """
         渲染一帧（按正确的图层顺序）
 
@@ -410,9 +410,12 @@ class Renderer:
         self._render_enemies(stage_manager, enemy_scripts)
 
         # ===== 层级 2: 道具 =====
-        # 道具在敌弹下层，避免遮挡弹幕导致玩家看不清
-        if item_renderer and items:
-            item_renderer.render_items(items)
+        if item_renderer:
+            if item_pool is not None and hasattr(item_pool, 'get_render_data'):
+                render_data = item_pool.get_render_data()
+                item_renderer.render_items_soa(*render_data)
+            elif items:
+                item_renderer.render_items(items)
 
         # ===== 层级 3: 自机子弹 =====
         self._render_player_bullets(player)
@@ -692,36 +695,116 @@ class Renderer:
             self._render_options(player)
     
     def _render_options(self, player):
-        """渲染玩家的 Options"""
+        """渲染玩家的 Options（支持 v3 OptionEntity 和 v2 模式）"""
+        # v3: 使用 option_manager 的渲染数据
+        option_manager = getattr(player, 'option_manager', None)
+        option_anims = getattr(player, 'option_anims', {})
+        has_v3_options = (option_manager and option_manager.options and option_anims)
+
+        if has_v3_options:
+            self._render_options_v3(player, option_manager, option_anims)
+        else:
+            self._render_options_v2(player)
+
+    def _render_options_v3(self, player, option_manager, option_anims):
+        """v3: 从 option_anims 配置获取精灵帧，使用对应纹理渲染"""
+        import os
+        from PIL import Image
+
+        # 确保子弹纹理已加载（option 精灵可能在子弹纹理上）
+        bullet_tex_path = getattr(player, 'bullet_texture_path', '') or ''
+        if bullet_tex_path and self.player_bullet_texture is None:
+            if os.path.exists(bullet_tex_path):
+                img = Image.open(bullet_tex_path).convert('RGBA')
+                self.player_bullet_texture = self.ctx.texture(img.size, 4, img.tobytes())
+                self.player_bullet_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+                self.player_bullet_texture_size = img.size
+
+        sprites = getattr(player, 'sprites', {})
+        bullet_sprites = getattr(player, 'bullet_sprites', {}) or {}
+        all_sprites = {**sprites, **bullet_sprites}
+
+        for opt in option_manager.options:
+            if not opt.active:
+                continue
+            anim_cfg = option_anims.get(opt.anim_id)
+            if not anim_cfg:
+                continue
+            frames = anim_cfg.get('frames', [])
+            if not frames:
+                continue
+
+            frame_idx = opt.current_frame % len(frames)
+            sprite_name = frames[frame_idx]
+
+            spr_data = all_sprites.get(sprite_name)
+            if not spr_data:
+                continue
+            rect = spr_data.get('rect', [0, 0, 16, 16])
+            source = spr_data.get('source', 'player')
+
+            if source == 'bullet' and self.player_bullet_texture is not None:
+                tex_obj = self.player_bullet_texture
+                tex_size = self.player_bullet_texture_size
+            elif self.player_texture is not None:
+                tex_obj = self.player_texture
+                tex_size = self.player_texture_size
+            else:
+                continue
+
+            tex_w, tex_h = tex_size
+            u0 = rect[0] / tex_w
+            v0 = rect[1] / tex_h
+            u1 = (rect[0] + rect[2]) / tex_w
+            v1 = (rect[1] + rect[3]) / tex_h
+
+            sprite_w = rect[2] / 192.0
+            sprite_h = rect[3] / 192.0
+            ox, oy = opt.current_x, opt.current_y
+
+            vertices = np.array([
+                ox - sprite_w/2, oy - sprite_h/2, u0, v1,
+                ox + sprite_w/2, oy - sprite_h/2, u1, v1,
+                ox + sprite_w/2, oy + sprite_h/2, u1, v0,
+                ox - sprite_w/2, oy - sprite_h/2, u0, v1,
+                ox + sprite_w/2, oy + sprite_h/2, u1, v0,
+                ox - sprite_w/2, oy + sprite_h/2, u0, v0,
+            ], dtype='f4')
+
+            tex_obj.use(0)
+            self.player_tex_vbo.write(vertices.tobytes())
+            self.player_tex_vao.render(moderngl.TRIANGLES)
+
+    def _render_options_v2(self, player):
+        """v2: 在 player.sprites 中查找名含 'option' 的精灵"""
         if self.player_texture is None:
             return
-        
+
         option_positions = player.get_option_positions()
         if not option_positions:
             return
-        
-        # 获取 Option 精灵
+
         option_sprite = None
         if hasattr(player, 'sprites') and player.sprites:
-            # 查找 option 精灵
             for key, val in player.sprites.items():
                 if 'option' in key.lower():
                     option_sprite = val
                     break
-        
+
         if option_sprite is None:
             return
-        
+
         tex_w, tex_h = self.player_texture_size
         rect = option_sprite.get('rect', [0, 0, 16, 16])
         u0 = rect[0] / tex_w
         v0 = rect[1] / tex_h
         u1 = (rect[0] + rect[2]) / tex_w
         v1 = (rect[1] + rect[3]) / tex_h
-        
+
         sprite_w = rect[2] / 192.0
         sprite_h = rect[3] / 192.0
-        
+
+        self.player_texture.use(0)
         for ox, oy in option_positions:
             vertices = np.array([
                 ox - sprite_w/2, oy - sprite_h/2, u0, v1,
@@ -731,7 +814,7 @@ class Renderer:
                 ox + sprite_w/2, oy + sprite_h/2, u1, v0,
                 ox - sprite_w/2, oy + sprite_h/2, u0, v0,
             ], dtype='f4')
-            
+
             self.player_tex_vbo.write(vertices.tobytes())
             self.player_tex_vao.render(moderngl.TRIANGLES)
     
