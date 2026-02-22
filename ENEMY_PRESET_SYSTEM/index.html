@@ -1,0 +1,2029 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://qwqpap.github.io/PythonSTG/ENEMY_PRESET_SYSTEM/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../TEXTURE_ASSET_SYSTEM/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+    
+    
+      
+        <title>敌人预设系统 - pystg Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#_1" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="pystg Docs" class="md-header__button md-logo" aria-label="pystg Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pystg Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              敌人预设系统
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/qwqpap/PythonSTG" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="pystg Docs" class="md-nav__button md-logo" aria-label="pystg Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    pystg Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/qwqpap/PythonSTG" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首页
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    快速开始
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../STAGE_SCRIPTING_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    弹幕脚本开发指南
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    架构概览
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    敌人预设系统
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    敌人预设系统
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        概述
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心概念
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="核心概念">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三种预设类型
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        使用方式
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="使用方式">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方式1: 预设 + 自定义行为（最灵活）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方式2: 预设 + 行为预设（最简单）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方式3: 动态创建（最适合编辑器）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置文件结构
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="配置文件结构">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        敌人预设示例
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        行为预设示例
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具脚本
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="工具脚本">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        列出所有预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        查看预设详情
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        导出为编辑器JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        生成使用代码
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        预设属性说明
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="预设属性说明">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        敌人预设属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#defaults" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        defaults 对象
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        行为预设阶段动作
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        可用的预设列表
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="可用的预设列表">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        敌人预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        行为预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        编辑器集成建议
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="编辑器集成建议">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI 组件设计
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据流
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        性能和最佳实践
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="性能和最佳实践">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ 推荐做法
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ❌ 避免做法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩展和自定义
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="扩展和自定义">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        添加新的敌人预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_26" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        添加新的行为预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        创建自定义动作
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#luastg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        与 LuaSTG 的对比
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        示例代码
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        故障排除
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="故障排除">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_30" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        问题：找不到预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        问题：行为预设不执行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TEXTURE_ASSET_SYSTEM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    纹理资产系统
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../EDITOR_TOOLS_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    编辑器工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        概述
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心概念
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="核心概念">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三种预设类型
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        使用方式
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="使用方式">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方式1: 预设 + 自定义行为（最灵活）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方式2: 预设 + 行为预设（最简单）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方式3: 动态创建（最适合编辑器）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置文件结构
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="配置文件结构">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        敌人预设示例
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        行为预设示例
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工具脚本
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="工具脚本">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        列出所有预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        查看预设详情
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        导出为编辑器JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        生成使用代码
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        预设属性说明
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="预设属性说明">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        敌人预设属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#defaults" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        defaults 对象
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        行为预设阶段动作
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        可用的预设列表
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="可用的预设列表">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        敌人预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        行为预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        编辑器集成建议
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="编辑器集成建议">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI 组件设计
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据流
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        性能和最佳实践
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="性能和最佳实践">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ 推荐做法
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ❌ 避免做法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩展和自定义
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="扩展和自定义">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        添加新的敌人预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_26" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        添加新的行为预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        创建自定义动作
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#luastg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        与 LuaSTG 的对比
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        示例代码
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        故障排除
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="故障排除">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_30" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        问题：找不到预设
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        问题：行为预设不执行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="_1">敌人预设系统文档<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<h2 id="_2">概述<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>本项目实现了类似 LuaSTG 的敌人预设系统（style system），通过预先定义的配置文件快速创建具有特定外观和行为的敌人。这个系统将<strong>外观配置</strong>和<strong>行为编写</strong>解耦，让内容创作更加高效。</p>
+<h2 id="_3">核心概念<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="_4">三种预设类型<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>敌人预设（Enemy Presets）</strong></li>
+<li>定义敌人的外观、生命值、得分等基础属性</li>
+<li>类似 LuaSTG 的 style 参数（1-18数字ID）</li>
+<li>
+<p>示例：<code>fairy_red</code>, <code>orb_blue</code>, <code>ghost_fire_red</code></p>
+</li>
+<li>
+<p><strong>行为预设（Behavior Presets）</strong></p>
+</li>
+<li>定义敌人的行动模式（进场-射击-离开等）</li>
+<li>可复用的行为流程</li>
+<li>
+<p>示例：<code>rush_in_shoot_leave</code>, <code>side_pass_shoot</code>, <code>dive_attack</code></p>
+</li>
+<li>
+<p><strong>攻击预设（Attack Presets）</strong></p>
+</li>
+<li>定义弹幕发射模式</li>
+<li>可组合的攻击方式</li>
+<li>示例：<code>burst_8way</code>, <code>aimed_3shot</code>, <code>spiral_dense</code></li>
+</ol>
+<h2 id="_5">使用方式<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="1">方式1: 预设 + 自定义行为（最灵活）<a class="headerlink" href="#1" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.preset_enemy</span><span class="w"> </span><span class="kn">import</span> <span class="n">PresetEnemy</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CustomRedFairy</span><span class="p">(</span><span class="n">PresetEnemy</span><span class="p">):</span>
+    <span class="n">preset_id</span> <span class="o">=</span> <span class="s2">&quot;fairy_red&quot;</span>  <span class="c1"># 指定预设ID</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 自定义行为逻辑</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+
+        <span class="c1"># 使用预设的默认参数</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span>
+            <span class="n">count</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+            <span class="n">speed</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">defaults</span><span class="p">[</span><span class="s1">&#39;move_speed&#39;</span><span class="p">],</span>
+            <span class="n">bullet_type</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">defaults</span><span class="p">[</span><span class="s1">&#39;bullet_type&#39;</span><span class="p">],</span>
+            <span class="n">color</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">defaults</span><span class="p">[</span><span class="s1">&#39;bullet_color&#39;</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>优点</strong>：完全自定义行为，同时享受预设的外观配置
+<strong>适用场景</strong>：需要独特行为的敌人</p>
+<h3 id="2">方式2: 预设 + 行为预设（最简单）<a class="headerlink" href="#2" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.preset_enemy</span><span class="w"> </span><span class="kn">import</span> <span class="n">PresetEnemy</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">AutoRedFairy</span><span class="p">(</span><span class="n">PresetEnemy</span><span class="p">):</span>
+    <span class="n">preset_id</span> <span class="o">=</span> <span class="s2">&quot;fairy_red&quot;</span>
+    <span class="n">behavior_preset</span> <span class="o">=</span> <span class="s2">&quot;rush_in_shoot_leave&quot;</span>
+    <span class="c1"># 无需写 run() 方法！</span>
+</code></pre></div>
+
+<p><strong>优点</strong>：一行代码创建敌人，零行为代码
+<strong>适用场景</strong>：标准的杂兵敌人</p>
+<h3 id="3">方式3: 动态创建（最适合编辑器）<a class="headerlink" href="#3" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.preset_enemy</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_preset_enemy</span>
+
+<span class="c1"># 在编辑器中根据用户选择动态创建</span>
+<span class="n">EnemyClass</span> <span class="o">=</span> <span class="n">create_preset_enemy</span><span class="p">(</span>
+    <span class="n">preset_id</span><span class="o">=</span><span class="s2">&quot;fairy_blue&quot;</span><span class="p">,</span>
+    <span class="n">behavior</span><span class="o">=</span><span class="s2">&quot;side_pass_shoot&quot;</span><span class="p">,</span>
+    <span class="n">overrides</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;hp&quot;</span><span class="p">:</span> <span class="mi">50</span><span class="p">,</span> <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="mi">200</span><span class="p">}</span>  <span class="c1"># 可选：覆盖默认值</span>
+<span class="p">)</span>
+
+<span class="n">enemy</span> <span class="o">=</span> <span class="n">EnemyClass</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>优点</strong>：运行时动态创建，适合编辑器/工具使用
+<strong>适用场景</strong>：可视化编辑器、关卡生成器</p>
+<h2 id="_6">配置文件结构<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>配置文件位置：<code>assets/configs/enemy_presets.json</code></p>
+<h3 id="_7">敌人预设示例<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;fairy_red&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;红色妖精&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;sprite&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;enemy_fairy_red&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;score&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;hitbox_radius&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.02</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;drop&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;power_small&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;defaults&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;bullet_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ball_s&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;bullet_color&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;red&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;move_speed&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">2.0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;fire_rate&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="_8">行为预设示例<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;rush_in_shoot_leave&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;冲入-射击-离开&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;从屏幕顶部飞入，停顿射击，然后飞出&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;phases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;move_to&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;y=0.3&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">}},</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;shoot_burst&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="p">}},</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;move_to&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;y=-0.2&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">}}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="_9">工具脚本<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<h3 id="_10">列出所有预设<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>python<span class="w"> </span>tools/enemy/list_presets.py
+</code></pre></div>
+
+<p>输出：</p>
+<div class="codehilite"><pre><span></span><code>==============================================================
+  可用的敌人预设
+==============================================================
+  • fairy_red           → 红色妖精 (HP:30, 得分:100)
+  • fairy_blue          → 蓝色妖精 (HP:30, 得分:100)
+  • orb_red             → 红色幽灵球 (HP:50, 得分:200)
+  ...
+
+==============================================================
+  可用的行为预设
+==============================================================
+  • rush_in_shoot_leave → 冲入-射击-离开
+    从屏幕顶部飞入，停顿射击，然后飞出
+  • side_pass_shoot     → 横向掠过射击
+    从侧面横向飞过,边移动边射击
+  ...
+</code></pre></div>
+
+<h3 id="_11">查看预设详情<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>python<span class="w"> </span>tools/enemy/list_presets.py<span class="w"> </span>--detail<span class="w"> </span>fairy_red
+</code></pre></div>
+
+<h3 id="json">导出为编辑器JSON<a class="headerlink" href="#json" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>python<span class="w"> </span>tools/enemy/list_presets.py<span class="w"> </span>--export<span class="w"> </span>editor_presets.json
+</code></pre></div>
+
+<p>生成的JSON可直接用于编辑器UI的下拉菜单。</p>
+<h3 id="_12">生成使用代码<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>python<span class="w"> </span>tools/enemy/list_presets.py<span class="w"> </span>--usage<span class="w"> </span>fairy_red<span class="w"> </span>--behavior<span class="w"> </span>rush_in_shoot_leave
+</code></pre></div>
+
+<p>自动生成可复制粘贴的示例代码。</p>
+<h2 id="_13">预设属性说明<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
+<h3 id="_14">敌人预设属性<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>属性</th>
+<th>类型</th>
+<th>说明</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>友好名称</td>
+<td>"红色妖精"</td>
+</tr>
+<tr>
+<td><code>sprite</code></td>
+<td>string</td>
+<td>精灵ID</td>
+<td>"enemy_fairy_red"</td>
+</tr>
+<tr>
+<td><code>hp</code></td>
+<td>int</td>
+<td>生命值</td>
+<td>30</td>
+</tr>
+<tr>
+<td><code>score</code></td>
+<td>int</td>
+<td>击破得分</td>
+<td>100</td>
+</tr>
+<tr>
+<td><code>hitbox_radius</code></td>
+<td>float</td>
+<td>碰撞半径</td>
+<td>0.02</td>
+</tr>
+<tr>
+<td><code>drop</code></td>
+<td>string</td>
+<td>掉落物品</td>
+<td>"power_small"</td>
+</tr>
+<tr>
+<td><code>defaults</code></td>
+<td>object</td>
+<td>默认参数</td>
+<td>见下表</td>
+</tr>
+</tbody>
+</table>
+<h3 id="defaults">defaults 对象<a class="headerlink" href="#defaults" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>属性</th>
+<th>说明</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bullet_type</code></td>
+<td>弹幕类型</td>
+<td>"ball_s"</td>
+</tr>
+<tr>
+<td><code>bullet_color</code></td>
+<td>弹幕颜色</td>
+<td>"red"</td>
+</tr>
+<tr>
+<td><code>move_speed</code></td>
+<td>移动速度</td>
+<td>2.0</td>
+</tr>
+<tr>
+<td><code>fire_rate</code></td>
+<td>射击间隔（帧）</td>
+<td>20</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_15">行为预设阶段动作<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>动作</th>
+<th>参数</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>move_to</code></td>
+<td>target, duration</td>
+<td>移动到目标位置</td>
+</tr>
+<tr>
+<td><code>move_linear</code></td>
+<td>dx, dy, duration</td>
+<td>线性移动</td>
+</tr>
+<tr>
+<td><code>move_circle</code></td>
+<td>radius, duration, center</td>
+<td>圆形移动</td>
+</tr>
+<tr>
+<td><code>shoot_burst</code></td>
+<td>count, interval</td>
+<td>连发弹幕</td>
+</tr>
+<tr>
+<td><code>shoot_continuous</code></td>
+<td>count, interval</td>
+<td>持续射击</td>
+</tr>
+<tr>
+<td><code>shoot_pattern</code></td>
+<td>pattern, count</td>
+<td>发射弹幕模式</td>
+</tr>
+<tr>
+<td><code>wait</code></td>
+<td>duration</td>
+<td>等待帧数</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_16">可用的预设列表<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h2>
+<h3 id="_17">敌人预设<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>名称</th>
+<th>HP</th>
+<th>得分</th>
+<th>特点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fairy_red</code></td>
+<td>红色妖精</td>
+<td>30</td>
+<td>100</td>
+<td>基础杂兵</td>
+</tr>
+<tr>
+<td><code>fairy_blue</code></td>
+<td>蓝色妖精</td>
+<td>30</td>
+<td>100</td>
+<td>基础杂兵</td>
+</tr>
+<tr>
+<td><code>fairy_green</code></td>
+<td>绿色妖精</td>
+<td>35</td>
+<td>150</td>
+<td>稍强杂兵</td>
+</tr>
+<tr>
+<td><code>orb_red</code></td>
+<td>红色幽灵球</td>
+<td>50</td>
+<td>200</td>
+<td>中型敌人</td>
+</tr>
+<tr>
+<td><code>orb_blue</code></td>
+<td>蓝色幽灵球</td>
+<td>50</td>
+<td>200</td>
+<td>中型敌人</td>
+</tr>
+<tr>
+<td><code>ghost_fire_red</code></td>
+<td>红色火焰幽灵</td>
+<td>80</td>
+<td>300</td>
+<td>强敌</td>
+</tr>
+<tr>
+<td><code>ghost_fire_blue</code></td>
+<td>蓝色火焰幽灵</td>
+<td>80</td>
+<td>300</td>
+<td>强敌</td>
+</tr>
+<tr>
+<td><code>kedama_pink</code></td>
+<td>粉色毛玉</td>
+<td>20</td>
+<td>50</td>
+<td>快速小型敌人</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_18">行为预设<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>名称</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rush_in_shoot_leave</code></td>
+<td>冲入-射击-离开</td>
+<td>最经典的杂兵模式</td>
+</tr>
+<tr>
+<td><code>side_pass_shoot</code></td>
+<td>横向掠过射击</td>
+<td>从侧面横向飞过</td>
+</tr>
+<tr>
+<td><code>circle_strafe</code></td>
+<td>环绕射击</td>
+<td>以圆形路径移动</td>
+</tr>
+<tr>
+<td><code>dive_attack</code></td>
+<td>俯冲攻击</td>
+<td>快速俯冲到底部</td>
+</tr>
+<tr>
+<td><code>ambush_retreat</code></td>
+<td>突袭-撤退</td>
+<td>快速飞入后撤退</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_19">编辑器集成建议<a class="headerlink" href="#_19" title="Permanent link">&para;</a></h2>
+<h3 id="ui">UI 组件设计<a class="headerlink" href="#ui" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>┌─────────────────────────────────┐
+│ 敌人创建器                      │
+├─────────────────────────────────┤
+│                                 │
+│ 敌人预设:  [fairy_red ▼]       │   ← 从 enemy_presets.json 加载
+│                                 │
+│ 行为预设:  [rush_in_shoot_leave│   ← 从 behavior_presets.json 加载
+│            ▼]                   │
+│                                 │
+│ ┌─ 覆盖属性 ──────────────────┐│
+│ │                             ││
+│ │ HP:    [30 ]  得分: [100 ] ││   ← 可选：覆盖默认值
+│ │                             ││
+│ │ 位置:  X [0.0] Y [1.0]     ││
+│ │                             ││
+│ └─────────────────────────────┘│
+│                                 │
+│      [预览]  [创建]  [取消]    │
+└─────────────────────────────────┘
+</code></pre></div>
+
+<h3 id="_20">数据流<a class="headerlink" href="#_20" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>用户选择 → 加载预设 → 预览属性 → 生成代码 → 保存到文件
+   │           │          │          │          │
+   │           │          │          │          └→ game_content/stages/.../
+   │           │          │          │
+   │           │          │          └→ create_preset_enemy(...)
+   │           │          │
+   │           │          └→ 显示：HP=30, 速度=2.0, 颜色=red
+   │           │
+   │           └→ 读取 enemy_presets.json
+   │
+   └→ 下拉菜单: fairy_red
+</code></pre></div>
+
+<h2 id="_21">性能和最佳实践<a class="headerlink" href="#_21" title="Permanent link">&para;</a></h2>
+<h3 id="_22">✅ 推荐做法<a class="headerlink" href="#_22" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>复用预设</strong>：为常见敌人类型创建预设，避免重复代码</li>
+<li><strong>组合优于继承</strong>：使用行为预设组合而非深度继承</li>
+<li><strong>预加载配置</strong>：在游戏启动时加载预设文件，而非每次创建敌人时加载</li>
+<li><strong>命名规范</strong>：预设ID使用 <code>snake_case</code>，类名使用 <code>PascalCase</code></li>
+</ol>
+<h3 id="_23">❌ 避免做法<a class="headerlink" href="#_23" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>过度抽象</strong>：不要为每个细微差别都创建新预设</li>
+<li><strong>硬编码配置</strong>：避免在代码中硬编码敌人属性</li>
+<li><strong>循环依赖</strong>：行为预设不应相互引用</li>
+</ol>
+<h2 id="_24">扩展和自定义<a class="headerlink" href="#_24" title="Permanent link">&para;</a></h2>
+<h3 id="_25">添加新的敌人预设<a class="headerlink" href="#_25" title="Permanent link">&para;</a></h3>
+<ol>
+<li>编辑 <code>assets/configs/enemy_presets.json</code></li>
+<li>在 <code>presets</code> 节添加新条目</li>
+<li>运行 <code>python tools/enemy/list_presets.py</code> 验证</li>
+</ol>
+<h3 id="_26">添加新的行为预设<a class="headerlink" href="#_26" title="Permanent link">&para;</a></h3>
+<ol>
+<li>编辑 <code>assets/configs/enemy_presets.json</code></li>
+<li>在 <code>behavior_presets</code> 节添加新条目</li>
+<li>如需新动作类型，在 <code>PresetEnemy._execute_behavior_preset()</code> 中添加处理逻辑</li>
+</ol>
+<h3 id="_27">创建自定义动作<a class="headerlink" href="#_27" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 在 PresetEnemy 类中添加新方法</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_execute_my_custom_action</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;自定义动作&quot;&quot;&quot;</span>
+    <span class="c1"># 实现你的动作逻辑</span>
+    <span class="k">pass</span>
+
+<span class="c1"># 然后在 _execute_behavior_preset() 中注册</span>
+<span class="k">elif</span> <span class="n">action</span> <span class="o">==</span> <span class="s1">&#39;my_custom_action&#39;</span><span class="p">:</span>
+    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_execute_my_custom_action</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+</code></pre></div>
+
+<h2 id="luastg">与 LuaSTG 的对比<a class="headerlink" href="#luastg" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>LuaSTG</th>
+<th>本项目</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>预设标识</td>
+<td>数字ID (1-18)</td>
+<td>字符串ID ("fairy_red")</td>
+</tr>
+<tr>
+<td>配置存储</td>
+<td>Lua代码</td>
+<td>JSON文件</td>
+</tr>
+<tr>
+<td>行为定义</td>
+<td>手写任务函数</td>
+<td>预设+类方法</td>
+</tr>
+<tr>
+<td>动态创建</td>
+<td>✗</td>
+<td>✓ 支持</td>
+</tr>
+<tr>
+<td>编辑器友好</td>
+<td>✗</td>
+<td>✓ 高度友好</td>
+</tr>
+<tr>
+<td>类型安全</td>
+<td>✗</td>
+<td>✓ Python类型提示</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_28">示例代码<a class="headerlink" href="#_28" title="Permanent link">&para;</a></h2>
+<p>完整示例请查看：
+- <code>game_content/stages/stage1/enemies/preset_examples.py</code></p>
+<h2 id="_29">故障排除<a class="headerlink" href="#_29" title="Permanent link">&para;</a></h2>
+<h3 id="_30">问题：找不到预设<a class="headerlink" href="#_30" title="Permanent link">&para;</a></h3>
+<p><strong>错误</strong>：<code>ValueError: 未找到预设: xxx</code></p>
+<p><strong>解决</strong>：
+1. 确认 <code>assets/configs/enemy_presets.json</code> 存在
+2. 运行 <code>python tools/enemy/list_presets.py</code> 查看可用预设
+3. 检查预设ID拼写</p>
+<h3 id="_31">问题：行为预设不执行<a class="headerlink" href="#_31" title="Permanent link">&para;</a></h3>
+<p><strong>原因</strong>：子类覆盖了 <code>run()</code> 方法</p>
+<p><strong>解决</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 错误 ❌</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">MyEnemy</span><span class="p">(</span><span class="n">PresetEnemy</span><span class="p">):</span>
+    <span class="n">preset_id</span> <span class="o">=</span> <span class="s2">&quot;fairy_red&quot;</span>
+    <span class="n">behavior_preset</span> <span class="o">=</span> <span class="s2">&quot;rush_in_shoot_leave&quot;</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># 这会覆盖默认行为！</span>
+        <span class="k">pass</span>
+
+<span class="c1"># 正确 ✅</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">MyEnemy</span><span class="p">(</span><span class="n">PresetEnemy</span><span class="p">):</span>
+    <span class="n">preset_id</span> <span class="o">=</span> <span class="s2">&quot;fairy_red&quot;</span>
+    <span class="n">behavior_preset</span> <span class="o">=</span> <span class="s2">&quot;rush_in_shoot_leave&quot;</span>
+    <span class="c1"># 不要覆盖 run()，让基类处理</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
