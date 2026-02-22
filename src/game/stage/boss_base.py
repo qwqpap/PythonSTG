@@ -60,6 +60,11 @@ class BossBase:
         # 动画/渲染相关
         self.texture: str = ""
         self.animations: Dict[str, Any] = {}
+        
+        # ===== 积分系统 =====
+        self._spell_bonus: int = 0         # 当前符卡 bonus（逐帧衰减）
+        self._spell_no_miss: bool = True   # 当前符卡期间玩家未被击中
+        self._spell_no_bomb: bool = True   # 当前符卡期间玩家未使用 bomb
     
     @classmethod
     def from_config(cls, config_path: str, ctx: 'SpellCardContext') -> 'BossBase':
@@ -129,6 +134,11 @@ class BossBase:
         self.hp = phase.hp
         self.max_hp = phase.hp
         
+        # 重置符卡积分追踪
+        self._spell_bonus = phase.bonus
+        self._spell_no_miss = True
+        self._spell_no_bomb = True
+        
         # 加载并启动符卡：优先使用 script_class，回退到 script_path
         if phase.script_class:
             spellcard = phase.script_class()
@@ -183,6 +193,17 @@ class BossBase:
             return
         
         if self.current_spellcard:
+            # 逐帧衰减符卡 bonus（从 max 线性衰减到 base = max/2）
+            phase = self.phases[self.current_phase_index]
+            if phase.bonus > 0 and self.current_spellcard._active:
+                elapsed = self.current_spellcard.time_seconds
+                total = phase.time_limit
+                if total > 0:
+                    base_bonus = phase.bonus // 2
+                    ratio = min(1.0, elapsed / total)
+                    self._spell_bonus = int(phase.bonus - (phase.bonus - base_bonus) * ratio)
+                    self._spell_bonus = max(base_bonus, self._spell_bonus)
+            
             if not self.current_spellcard.update():
                 # 当前符卡结束，进入下一阶段
                 self._on_phase_end()
@@ -199,8 +220,36 @@ class BossBase:
             self.current_spellcard.end("defeated")
     
     def _on_phase_end(self):
-        """阶段结束"""
+        """阶段结束 - 结算积分、掉落道具、子弹转化"""
         phase = self.phases[self.current_phase_index]
+        
+        # 1. 结算符卡 bonus
+        defeated = (self.hp <= 0)
+        if defeated and self._spell_no_miss and self._spell_no_bomb and phase.bonus > 0:
+            # 取整到 10 的倍数
+            awarded = self._spell_bonus - (self._spell_bonus % 10)
+            if self.ctx and awarded > 0:
+                self.ctx.add_score(awarded)
+            print(f"Spell Bonus! +{awarded:,}")
+        elif phase.bonus > 0:
+            print(f"Spell Failed (miss={not self._spell_no_miss}, bomb={not self._spell_no_bomb})")
+        
+        # 2. 子弹转化为道具
+        if self.current_spellcard:
+            self.current_spellcard.clear_bullets(to_items=True)
+        
+        # 3. Boss 阶段掉落道具
+        if self.ctx:
+            drops = {}
+            if self._spell_no_miss:
+                drops['life_chip'] = 1
+            if self._spell_no_bomb:
+                drops['bomb_chip'] = 1
+            # 每个阶段额外掉一些点和 P
+            drops['point'] = 5
+            drops['power'] = 10
+            self.ctx.spawn_drop(self.x, self.y, **drops)
+        
         if phase.phase_type == BossPhaseType.SPELLCARD:
             self._on_spellcard_end(phase)
     
@@ -213,9 +262,46 @@ class BossBase:
         print(f"符卡结束: {phase.name}")
     
     def _on_all_phases_complete(self):
-        """所有阶段完成（可覆盖）"""
+        """所有阶段完成 - 收集所有道具"""
         self._active = False
+        # Boss 击破时，吸收场上所有道具
+        if self.ctx and hasattr(self.ctx, '_item_pool') and self.ctx._item_pool:
+            px = self.ctx.get_player().x if self.ctx.get_player() else 0
+            py = self.ctx.get_player().y if self.ctx.get_player() else 0
+            self.ctx._item_pool.collect_all(px, py)
         print(f"Boss {self.name} 击破!")
+    
+    # ==================== 积分系统通知 ====================
+    
+    def on_player_miss(self):
+        """玩家被击中时由引擎调用"""
+        self._spell_no_miss = False
+    
+    def on_player_bomb(self):
+        """玩家使用 bomb 时由引擎调用"""
+        self._spell_no_bomb = False
+    
+    @property
+    def alive(self) -> bool:
+        """是否存活（兼容 HUD 系统）"""
+        return self._active
+    
+    @property
+    def current_spell(self):
+        """当前符卡（兼容 HUD 系统）"""
+        return self.current_spellcard
+    
+    @property
+    def current_hp(self) -> int:
+        """当前 HP（兼容 HUD）"""
+        return self.hp
+    
+    @property
+    def spell_bonus_display(self) -> int:
+        """当前可获得的符卡 bonus（HUD 显示用，逐帧衰减值）"""
+        if self._spell_no_miss and self._spell_no_bomb:
+            return self._spell_bonus
+        return 0
     
     # ==================== 移动 API ====================
     

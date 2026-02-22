@@ -152,20 +152,21 @@ class HUD:
         从Boss对象更新状态
         
         Args:
-            boss: Boss对象
+            boss: Boss对象 (BossBase)
         """
-        if boss and boss.alive:
+        if boss and getattr(boss, 'alive', getattr(boss, '_active', False)):
             self.state.is_boss_fight = True
             self.state.boss_name = getattr(boss, 'name', 'Boss')
             boss_hp = getattr(boss, 'current_hp', getattr(boss, 'hp', 0))
             boss_max_hp = getattr(boss, 'max_hp', 1)
             self.state.boss_hp_ratio = boss_hp / boss_max_hp if boss_max_hp > 0 else 0
-            # 符卡相关（如果有）
-            if hasattr(boss, 'current_spell'):
-                spell = boss.current_spell
+            # 符卡相关
+            spell = getattr(boss, 'current_spell', getattr(boss, 'current_spellcard', None))
+            if spell:
                 self.state.spell_name = getattr(spell, 'name', '')
-                self.state.spell_time = getattr(spell, 'time_left', 0)
-                self.state.spell_bonus = getattr(spell, 'bonus', 0)
+                self.state.spell_time = getattr(spell, 'time_remaining', getattr(spell, 'time_left', 0))
+                # 显示实时衰减的 bonus
+                self.state.spell_bonus = getattr(boss, 'spell_bonus_display', getattr(spell, 'bonus', 0))
         else:
             self.state.is_boss_fight = False
             self.state.boss_hp_ratio = 0
@@ -459,6 +460,19 @@ class HUD:
                     'font': 'score',
                     'scale': self.font_scale,
                     'color': (255, 255, 255) if self.state.spell_time > 10 else (255, 64, 64)
+                })
+            
+            # 符卡 Bonus（实时衰减值）
+            if self.state.spell_bonus > 0:
+                elements.append({
+                    'type': 'text',
+                    'text': f'Bonus {self.state.spell_bonus:,}',
+                    'position': (self.game_origin[0] + self.layout['spell_bonus'][0],
+                                 self.game_origin[1] + self.layout['spell_bonus'][1]),
+                    'font': 'score',
+                    'scale': self.small_font_scale,
+                    'color': (255, 255, 200),
+                    'align': 'center'
                 })
 
         # FPS 显示（窗口右下角）

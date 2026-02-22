@@ -25,6 +25,8 @@
 import numpy as np
 import math
 import random
+import json
+import os
 from numba import njit
 from enum import IntEnum
 from dataclasses import dataclass, field
@@ -93,6 +95,18 @@ class GameStats:
 
     items_collected: int = 0
 
+    # 收集 bonus 倍率系统
+    _collect_count: int = 0       # 当前连续收集计数
+    _collect_timer: int = 0       # 收集间隔计时器
+    COLLECT_BONUS_TABLE = [
+        (120, 8.0),
+        (100, 5.0),
+        (80, 3.6),
+        (60, 2.4),
+        (40, 1.5),
+        (0, 1.0),
+    ]
+
     def get_power_float(self) -> float:
         return self.power / 100.0
 
@@ -106,6 +120,60 @@ class GameStats:
 
     def update_point_rate(self):
         self.point_rate = 10000 + (self.graze // 10) * 10 + (self.faith // 10) * 10
+
+    def on_item_collected_top(self):
+        """顶部自动收取时调用，更新连续收集计数"""
+        self._collect_count += 1
+        self._collect_timer = 30  # 30帧内继续收取算连续
+
+    def get_collect_multiplier(self) -> float:
+        """根据连续收集数获取 faith 倍率"""
+        for threshold, mult in self.COLLECT_BONUS_TABLE:
+            if self._collect_count >= threshold:
+                return mult
+        return 1.0
+
+    def tick_collect_timer(self):
+        """每帧调用，管理收集连击计时"""
+        if self._collect_timer > 0:
+            self._collect_timer -= 1
+            if self._collect_timer <= 0:
+                # 连击结束，结算 faith bonus
+                mult = self.get_collect_multiplier()
+                if mult > 1.0:
+                    bonus_faith = int(mult * self._collect_count * 20)
+                    self.faith += bonus_faith
+                self._collect_count = 0
+
+    # ===== 高分持久化 =====
+    HISCORE_PATH = "userdata/hiscore.json"
+
+    def load_hiscore(self, key: str = "default"):
+        """从文件加载高分"""
+        try:
+            if os.path.exists(self.HISCORE_PATH):
+                with open(self.HISCORE_PATH, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.hiscore = data.get(key, 0)
+        except Exception as e:
+            print(f"[GameStats] 加载高分失败: {e}")
+
+    def save_hiscore(self, key: str = "default"):
+        """保存高分到文件"""
+        try:
+            data = {}
+            if os.path.exists(self.HISCORE_PATH):
+                with open(self.HISCORE_PATH, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            old = data.get(key, 0)
+            if self.score > old:
+                data[key] = self.score
+                os.makedirs(os.path.dirname(self.HISCORE_PATH), exist_ok=True)
+                with open(self.HISCORE_PATH, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+                print(f"[GameStats] 新高分! {self.score:,}")
+        except Exception as e:
+            print(f"[GameStats] 保存高分失败: {e}")
 
 
 class Item:
@@ -270,7 +338,7 @@ class ItemPool:
         x = max(-0.95, min(0.95, x))
 
         speed = speed if speed is not None else self.config.pop_speed
-        angle_rad = math.radians(angle if angle is not None else random.uniform(70, 110))
+        angle_rad = math.radians(angle if angle is not None else random.uniform(85, 95))
         vx = speed * math.cos(angle_rad)
         vy = speed * math.sin(angle_rad)
 
@@ -286,7 +354,9 @@ class ItemPool:
         return idx
 
     def spawn_drop(self, x: float, y: float,
-                   power: int = 0, point: int = 0, faith: int = 0):
+                   power: int = 0, point: int = 0, faith: int = 0,
+                   life_chip: int = 0, bomb_chip: int = 0,
+                   extend: int = 0, bomb: int = 0):
         """批量生成掉落物（敌人/Boss掉落）"""
         if power >= 400:
             self._spawn_scattered(x, y, ItemType.POWER_FULL, 1)
@@ -302,6 +372,14 @@ class ItemPool:
             self._spawn_scattered(x, y, ItemType.POINT, point)
         if faith > 0:
             self._spawn_scattered(x, y, ItemType.FAITH, faith)
+        if life_chip > 0:
+            self._spawn_scattered(x, y, ItemType.LIFE_CHIP, life_chip)
+        if bomb_chip > 0:
+            self._spawn_scattered(x, y, ItemType.BOMB_CHIP, bomb_chip)
+        if extend > 0:
+            self._spawn_scattered(x, y, ItemType.EXTEND, extend)
+        if bomb > 0:
+            self._spawn_scattered(x, y, ItemType.BOMB, bomb)
 
     def _spawn_scattered(self, cx: float, cy: float, item_type: ItemType, count: int):
         if count <= 0:
@@ -312,13 +390,17 @@ class ItemPool:
         if n == 0:
             return
 
-        scatter_radius = math.sqrt(count) * 0.02
-        r = np.random.uniform(0, scatter_radius, n) * np.sqrt(np.random.random(n))
+        scatter_radius_x = math.sqrt(count) * 0.008  # Reduced horizontal scatter
+        scatter_radius_y = math.sqrt(count) * 0.02
+        
+        r_x = np.random.uniform(0, scatter_radius_x, n) * np.sqrt(np.random.random(n))
+        r_y = np.random.uniform(0, scatter_radius_y, n) * np.sqrt(np.random.random(n))
         a = np.random.uniform(0, 2 * math.pi, n)
-        ox = r * np.cos(a)
-        oy = r * np.sin(a)
+        ox = r_x * np.cos(a)
+        oy = r_y * np.sin(a)
 
-        angles_rad = np.radians(np.random.uniform(60, 120, n))
+        # Narrower angles to reduce horizontal initial velocity (75 to 105 degrees instead of 60 to 120)
+        angles_rad = np.radians(np.random.uniform(75, 105, n))
         speed = self.config.pop_speed
 
         self.x[slots] = np.clip(cx + ox, -0.95, 0.95).astype(np.float32)
@@ -333,6 +415,9 @@ class ItemPool:
 
     def update(self, player_x, player_y, dt: float = 1/60):
         """更新所有物品（直接操作 SoA 数组，零拷贝）"""
+        # 每帧更新收集连击计时器
+        self.stats.tick_collect_timer()
+
         if self._count == 0:
             return
 
@@ -436,6 +521,7 @@ class ItemPool:
         elif t == ItemType.POINT:
             if self.attracting[idx] and self.y[idx] > self.config.collect_line_y * 0.5:
                 stats.score += stats.point_rate
+                stats.on_item_collected_top()
             else:
                 stats.score += stats.point_rate // 2
 

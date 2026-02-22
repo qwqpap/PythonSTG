@@ -355,6 +355,10 @@ class CollisionManager:
         # 确保擦弹标记数组存在
         self._ensure_graze_array(n)
         
+        # 清除已死亡子弹的擦弹标记（处理槽位复用：新子弹不会继承旧子弹的擦弹状态）
+        alive_arr = data['alive'][:n].astype(np.int32)
+        np.multiply(self._graze_flags[:n], alive_arr, out=self._graze_flags[:n])
+        
         graze_count = _check_player_vs_bullets_graze(
             player_x, player_y, graze_radius,
             data['pos'], data['alive'], self._graze_flags

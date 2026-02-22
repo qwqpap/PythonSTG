@@ -202,16 +202,20 @@ class Renderer:
         fragment_shader = """
         #version 330
         uniform sampler2D u_texture;
+        uniform float u_alpha;
         in vec2 v_uv;
         out vec4 f_color;
         void main() {
             vec4 tex_color = texture(u_texture, v_uv);
+            tex_color.a *= u_alpha;
             f_color = tex_color;
         }
         """
         
         self.bullet_program = self.ctx.program(vertex_shader=vertex_shader, fragment_shader=fragment_shader)
         self.bullet_program['u_texture'].value = 0
+        if 'u_alpha' in self.bullet_program:
+            self.bullet_program['u_alpha'].value = 1.0
         
         # 保存缩放因子供渲染时使用
         self.bullet_scale_factor = 2.0 / self.base_size[1]
@@ -309,15 +313,19 @@ class Renderer:
             fragment_shader="""
             #version 330
             uniform sampler2D tex;
+            uniform float u_alpha;
             in vec2 v_uv;
             out vec4 f_color;
             
             void main() {
                 f_color = texture(tex, v_uv);
+                f_color.a *= u_alpha;
                 if (f_color.a < 0.1) discard;
             }
             """
         )
+        if 'u_alpha' in self.player_tex_program:
+            self.player_tex_program['u_alpha'].value = 1.0
         
         # 玩家纹理渲染缓冲
         self.player_tex_vbo = self.ctx.buffer(reserve=6 * 4 * 4)  # 6 vertices * 4 floats (x,y,u,v)
@@ -686,13 +694,14 @@ class Renderer:
             px - sprite_w/2, py + sprite_h/2, u0, v0,  # 左上
         ], dtype='f4')
         
+        # 渲染 Options (在自机之下)
+        if hasattr(player, 'get_option_positions'):
+            self._render_options(player)
+
+        # 渲染自机本体
         self.player_tex_vbo.write(vertices.tobytes())
         self.player_texture.use(0)
         self.player_tex_vao.render(moderngl.TRIANGLES)
-        
-        # 渲染 Options
-        if hasattr(player, 'get_option_positions'):
-            self._render_options(player)
     
     def _render_options(self, player):
         """渲染玩家的 Options（支持 v3 OptionEntity 和 v2 模式）"""
@@ -772,8 +781,12 @@ class Renderer:
             ], dtype='f4')
 
             tex_obj.use(0)
+            if 'u_alpha' in self.player_tex_program:
+                self.player_tex_program['u_alpha'].value = 0.3
             self.player_tex_vbo.write(vertices.tobytes())
             self.player_tex_vao.render(moderngl.TRIANGLES)
+            if 'u_alpha' in self.player_tex_program:
+                self.player_tex_program['u_alpha'].value = 1.0
 
     def _render_options_v2(self, player):
         """v2: 在 player.sprites 中查找名含 'option' 的精灵"""
@@ -805,6 +818,8 @@ class Renderer:
         sprite_h = rect[3] / 192.0
 
         self.player_texture.use(0)
+        if 'u_alpha' in self.player_tex_program:
+            self.player_tex_program['u_alpha'].value = 0.3
         for ox, oy in option_positions:
             vertices = np.array([
                 ox - sprite_w/2, oy - sprite_h/2, u0, v1,
@@ -817,6 +832,8 @@ class Renderer:
 
             self.player_tex_vbo.write(vertices.tobytes())
             self.player_tex_vao.render(moderngl.TRIANGLES)
+        if 'u_alpha' in self.player_tex_program:
+            self.player_tex_program['u_alpha'].value = 1.0
     
     def _render_player_bullets(self, player):
         """渲染玩家子弹（使用独立的子弹纹理或共用自机纹理）"""
@@ -907,7 +924,11 @@ class Renderer:
         self.scale_vbo.write(scale_data.tobytes())
 
         tex_obj.use(0)
+        if 'u_alpha' in self.bullet_program:
+            self.bullet_program['u_alpha'].value = 0.3
         self.bullet_vao.render(moderngl.TRIANGLES, instances=count)
+        if 'u_alpha' in self.bullet_program:
+            self.bullet_program['u_alpha'].value = 1.0
     
     def _render_player_fallback(self, player):
         """备用：纯色渲染玩家"""
