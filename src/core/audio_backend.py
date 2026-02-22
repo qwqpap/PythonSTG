@@ -20,9 +20,12 @@ except ImportError:
 class Sound:
     """Decoded sound effect stored in memory."""
 
-    def __init__(self, samples: bytes, nchannels: int, sample_rate: int):
-        self._samples = array.array('h')
-        self._samples.frombytes(samples)
+    def __init__(self, samples, nchannels: int, sample_rate: int):
+        if isinstance(samples, array.array):
+            self._samples = samples
+        else:
+            self._samples = array.array('h')
+            self._samples.frombytes(samples)
         self.nchannels = nchannels
         self.sample_rate = sample_rate
         self._volume = 1.0
@@ -86,7 +89,9 @@ class AudioBackend:
                 nchannels=nchannels,
                 sample_rate=sample_rate,
             )
-            self._device.start(self._mix_generator())
+            gen = self._mix_generator()
+            next(gen)
+            self._device.start(gen)
             self._initialized = True
         except Exception as e:
             print(f"[AudioBackend] Init failed: {e}")
@@ -150,14 +155,17 @@ class AudioBackend:
             return
 
         try:
-            bgm_chunk = next(self._bgm_generator)
+            bgm_chunk = self._bgm_generator.send(num_frames)
             if not bgm_chunk:
                 return
-            bgm = array.array('h')
-            if isinstance(bgm_chunk, bytes):
-                bgm.frombytes(bgm_chunk)
+            if isinstance(bgm_chunk, array.array):
+                bgm = bgm_chunk
             else:
-                bgm.frombytes(bytes(bgm_chunk))
+                bgm = array.array('h')
+                if isinstance(bgm_chunk, bytes):
+                    bgm.frombytes(bgm_chunk)
+                else:
+                    bgm.frombytes(bytes(bgm_chunk))
 
             vol = self._bgm_volume
 
@@ -230,6 +238,7 @@ class AudioBackend:
             )
             with self._lock:
                 self._bgm_generator = gen
+                next(self._bgm_generator)  # Prime generator
                 self._bgm_playing = True
                 self._bgm_fade_total = 0
                 self._bgm_fade_pos = 0
