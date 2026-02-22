@@ -1,7 +1,7 @@
 """
 ModernGL 对话渲染器
 
-使用 pygame.font 渲染中文文本到 Surface，
+使用 FontRenderer 渲染中文文本到 SoftwareSurface，
 然后上传为 GL 纹理并绘制 textured quad。
 
 支持:
@@ -16,9 +16,10 @@ ModernGL 对话渲染器
 import json
 import moderngl
 import numpy as np
-import pygame
 import os
 from typing import Dict, Tuple, Optional
+
+from ..core.image_loader import SoftwareSurface, FontRenderer, load_image_surface
 
 
 class DialogGLRenderer:
@@ -51,17 +52,16 @@ class DialogGLRenderer:
         self._balloon_default_right = (880, 880)
 
         # 加载中文字体
-        pygame.font.init()
         font_path = os.path.join("assets", "fonts", "SourceHanSansCN-Bold.otf")
         if not os.path.exists(font_path):
             font_path = os.path.join("assets", "fonts", "wqy-microhei-mono.ttf")
         if not os.path.exists(font_path):
-            font_path = None  # 使用 pygame 默认字体
+            font_path = None
 
-        self.font = pygame.font.Font(font_path, 28)
-        self.name_font = pygame.font.Font(font_path, 22)
-        self.balloon_font = pygame.font.Font(font_path, 24)
-        self.balloon_hint_font = pygame.font.Font(font_path, 18)
+        self.font = FontRenderer(font_path, 28)
+        self.name_font = FontRenderer(font_path, 22)
+        self.balloon_font = FontRenderer(font_path, 24)
+        self.balloon_hint_font = FontRenderer(font_path, 18)
 
         # Balloon assets
         self._balloon_config = None
@@ -69,11 +69,11 @@ class DialogGLRenderer:
         self._load_balloon_assets()
 
         # Character portrait assets
-        self._character_portraits = {}  # {"CharName/portrait": Surface}
+        self._character_portraits = {}  # {"CharName/portrait": SoftwareSurface}
         self._portrait_configs = {}      # {"CharName": config dict}
         self._load_character_portraits()
-        self._portrait_default_left = (gx + 20, gy + gh - 350)   # 左侧立绘位置
-        self._portrait_default_right = (gx + gw - 120, gy + gh - 350)  # 右侧立绘位置
+        self._portrait_default_left = (gx + 20, gy + gh - 350)
+        self._portrait_default_right = (gx + gw - 120, gy + gh - 350)
 
         # GL 资源
         self._init_shader()
@@ -146,7 +146,7 @@ class DialogGLRenderer:
         # 先渲染立绘（在气泡下层）
         self._render_portrait(sentence)
 
-        # Render to pygame Surface
+        # Render to SoftwareSurface
         surface, quad_rect = self._render_to_surface(dialog_state)
         if surface is None:
             return
@@ -160,7 +160,7 @@ class DialogGLRenderer:
         self._draw_quad()
 
     def _render_to_surface(self, dialog_state):
-        """Render dialog content to pygame Surface."""
+        """Render dialog content to SoftwareSurface."""
         sentence = dialog_state.current_sentence
         if sentence is None:
             return None, self._quad_rect
@@ -169,7 +169,7 @@ class DialogGLRenderer:
             return self._render_balloon_surface(sentence, dialog_state.visible_chars, dialog_state.frame_counter)
 
         # Fallback: dialog box
-        surface = pygame.Surface((self.box_width, self.box_height), pygame.SRCALPHA)
+        surface = SoftwareSurface(self.box_width, self.box_height)
         surface.fill((0, 0, 0, 180))
 
         if sentence.character:
@@ -203,8 +203,8 @@ class DialogGLRenderer:
         return lines
 
     def _upload_texture(self, surface):
-        """将 pygame Surface 上传为 ModernGL 纹理"""
-        data = pygame.image.tobytes(surface, "RGBA", True)
+        """将 SoftwareSurface 上传为 ModernGL 纹理"""
+        data = surface.to_bytes("RGBA", flip_y=True)
         w, h = surface.get_size()
 
         if self._dialog_texture is not None:
@@ -285,10 +285,10 @@ class DialogGLRenderer:
         if portrait_scale != 1.0:
             pw = int(pw * portrait_scale)
             ph = int(ph * portrait_scale)
-            portrait_surface = pygame.transform.smoothscale(portrait_surface, (pw, ph))
+            portrait_surface = SoftwareSurface.smoothscale(portrait_surface, (pw, ph))
 
         # 上传纹理
-        data = pygame.image.tobytes(portrait_surface, "RGBA", True)
+        data = portrait_surface.to_bytes("RGBA", flip_y=True)
         if self._portrait_texture is not None:
             if self._portrait_texture.size == (pw, ph):
                 self._portrait_texture.write(data)
@@ -331,21 +331,21 @@ class DialogGLRenderer:
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 self._balloon_config = json.load(f)
-            sheet = pygame.image.load(sheet_path).convert_alpha()
+            sheet = load_image_surface(sheet_path)
             self._balloon_sprites = self._slice_balloon_sprites(sheet, self._balloon_config)
         except Exception:
             self._balloon_config = None
             self._balloon_sprites = {}
 
-    def _slice_balloon_sprites(self, sheet: pygame.Surface, config: Dict) -> Dict[str, pygame.Surface]:
+    def _slice_balloon_sprites(self, sheet: SoftwareSurface, config: Dict) -> Dict[str, SoftwareSurface]:
         sprites = {}
         for name, info in config.get("sprites", {}).items():
             rect = info.get("rect")
             if not rect or len(rect) != 4:
                 continue
             x, y, w, h = rect
-            sprite = pygame.Surface((w, h), pygame.SRCALPHA)
-            sprite.blit(sheet, (0, 0), pygame.Rect(x, y, w, h))
+            sprite = SoftwareSurface(w, h)
+            sprite.blit(sheet, (0, 0), (x, y, w, h))
             sprites[name] = sprite
         return sprites
 
@@ -369,19 +369,17 @@ class DialogGLRenderer:
                     config = json.load(f)
                 self._portrait_configs[char_name] = config
 
-                # Load each portrait defined in config
                 for portrait_key, portrait_info in config.get("portraits", {}).items():
                     file_path = portrait_info.get("file")
                     if not file_path:
                         continue
                     full_path = os.path.join(char_dir, file_path)
                     if os.path.exists(full_path):
-                        img = pygame.image.load(full_path).convert_alpha()
-                        # Apply scale if specified
+                        img = load_image_surface(full_path)
                         scale = portrait_info.get("scale", 1.0)
                         if scale != 1.0:
                             new_size = (int(img.get_width() * scale), int(img.get_height() * scale))
-                            img = pygame.transform.smoothscale(img, new_size)
+                            img = SoftwareSurface.smoothscale(img, new_size)
                         self._character_portraits[f"{char_name}/{portrait_key}"] = img
             except Exception as e:
                 print(f"[DialogGLRenderer] Failed to load character {char_name}: {e}")
@@ -391,7 +389,7 @@ class DialogGLRenderer:
         sentence,
         visible_chars: int,
         frame_counter: int
-    ) -> Tuple[pygame.Surface, Tuple[int, int, int, int]]:
+    ) -> Tuple[SoftwareSurface, Tuple[int, int, int, int]]:
         """
         Render balloon dialog surface and target quad rect.
 
@@ -417,8 +415,8 @@ class DialogGLRenderer:
         is_multi = style_cfg.get("type") == "multi_line"
 
         # --- 获取 sprite ---
-        head_name = style_cfg["head"]   # 头部 sprite（左侧是 head cap，右侧是 body）
-        tail_name = style_cfg["body"]   # 配置中叫 "body"，实际是尾部件（左侧 body，右侧 tail cap）
+        head_name = style_cfg["head"]
+        tail_name = style_cfg["body"]
 
         head_sprite = self._balloon_sprites.get(head_name)
         tail_sprite = self._balloon_sprites.get(tail_name)
@@ -428,7 +426,6 @@ class DialogGLRenderer:
         head_info = sprites_cfg.get(head_name, {})
         tail_info = sprites_cfg.get(tail_name, {})
 
-        # center_x 标记 cap 和 body 的边界（作为默认值）
         head_center_x = head_info.get("center", [head_sprite.get_width() // 3])[0]
         tail_center_x = tail_info.get("center", [tail_sprite.get_width() // 2])[0]
 
@@ -437,11 +434,9 @@ class DialogGLRenderer:
         sprite_h = head_sprite.get_height()
 
         # --- 切分 cap 和 body tile ---
-        # 优先使用 config 中编辑器保存的值，回退到 center_x 默认值
         head_cap_w = int(style_cfg.get("head_cap_width", head_center_x))
         tail_cap_w = int(style_cfg.get("tail_cap_width", tail_w - tail_center_x))
 
-        # body tile：从 head sprite 提取
         tile_width = int(style_cfg.get("body_repeat_width", 16))
         tile_x = int(style_cfg.get("body_tile_offset", head_center_x))
         if tile_x + tile_width > head_w:
@@ -450,8 +445,8 @@ class DialogGLRenderer:
         if actual_tile_w <= 0:
             actual_tile_w = 1
 
-        body_tile = pygame.Surface((actual_tile_w, sprite_h), pygame.SRCALPHA)
-        body_tile.blit(head_sprite, (0, 0), pygame.Rect(tile_x, 0, actual_tile_w, sprite_h))
+        body_tile = SoftwareSurface(actual_tile_w, sprite_h)
+        body_tile.blit(head_sprite, (0, 0), (tile_x, 0, actual_tile_w, sprite_h))
 
         # --- 计算文本行和字符数 ---
         full_lines = self._split_lines(full_text, 2 if is_multi else 1)
@@ -466,11 +461,11 @@ class DialogGLRenderer:
         bubble_width = head_cap_w + body_total_w + tail_cap_w
         bubble_height = sprite_h
 
-        bubble_surface = pygame.Surface((bubble_width, bubble_height), pygame.SRCALPHA)
+        bubble_surface = SoftwareSurface(bubble_width, bubble_height)
 
         # 1) HEAD CAP（head sprite 的左侧 head_cap_w 像素）
         bubble_surface.blit(head_sprite, (0, 0),
-                            pygame.Rect(0, 0, head_cap_w, sprite_h))
+                            (0, 0, head_cap_w, sprite_h))
 
         # 2) BODY TILES（平铺）
         x = head_cap_w
@@ -481,13 +476,13 @@ class DialogGLRenderer:
         # 3) TAIL CAP（tail sprite 的右侧 tail_cap_w 像素）
         tail_start = tail_w - tail_cap_w
         bubble_surface.blit(tail_sprite, (x, 0),
-                            pygame.Rect(tail_start, 0, tail_cap_w, sprite_h))
+                            (tail_start, 0, tail_cap_w, sprite_h))
 
         # --- 渲染文字 ---
         line_height = self.balloon_font.get_linesize()
         text_block_height = line_height * len(full_lines)
         text_y = max(0, (bubble_height - text_block_height) // 2)
-        text_x = head_cap_w + 4  # 文字从 body 区域开始，留小边距
+        text_x = head_cap_w + 4
 
         for line in visible_lines:
             if line:
@@ -503,7 +498,7 @@ class DialogGLRenderer:
         if scale < 1.0:
             scaled_w = max(1, int(bubble_width * scale))
             scaled_h = max(1, int(bubble_height * scale))
-            bubble_surface = pygame.transform.smoothscale(bubble_surface, (scaled_w, scaled_h))
+            bubble_surface = SoftwareSurface.smoothscale(bubble_surface, (scaled_w, scaled_h))
             bubble_width, bubble_height = bubble_surface.get_size()
 
         # 窗口坐标定位

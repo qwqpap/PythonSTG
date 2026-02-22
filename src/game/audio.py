@@ -12,9 +12,10 @@
 """
 
 import os
-import pygame
 from typing import Optional, Dict
 from enum import Enum
+
+from ..core.audio_backend import get_audio_backend, init_audio_backend, Sound as BackendSound
 
 
 class AudioChannel(Enum):
@@ -39,7 +40,7 @@ class AudioBank:
     
     def __init__(self, name: str = "default"):
         self.name = name
-        self._se_cache: Dict[str, pygame.mixer.Sound] = {}
+        self._se_cache: Dict[str, BackendSound] = {}
         self._bgm_paths: Dict[str, str] = {}
         self._se_volume: float = 1.0
         self._bgm_volume: float = 1.0
@@ -48,11 +49,12 @@ class AudioBank:
         self._ensure_mixer()
     
     def _ensure_mixer(self):
-        """确保 pygame.mixer 已初始化"""
-        if not pygame.mixer.get_init():
+        """确保音频后端已初始化"""
+        backend = get_audio_backend()
+        if backend is None or not backend.is_initialized():
             try:
-                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
-            except pygame.error:
+                init_audio_backend()
+            except Exception:
                 print(f"[AudioBank:{self.name}] mixer 初始化失败")
                 return
         self._initialized = True
@@ -78,11 +80,14 @@ class AudioBank:
             return False
         
         try:
-            sound = pygame.mixer.Sound(path)
+            sound = get_audio_backend().load_sound(path)
+            if sound is None:
+                print(f"[AudioBank:{self.name}] 加载 SE 失败 '{name}'")
+                return False
             sound.set_volume(self._se_volume)
             self._se_cache[name] = sound
             return True
-        except pygame.error as e:
+        except Exception as e:
             print(f"[AudioBank:{self.name}] 加载 SE 失败 '{name}': {e}")
             return False
     
@@ -222,26 +227,22 @@ class AudioBank:
             return False
         
         try:
-            pygame.mixer.music.load(path)
-            pygame.mixer.music.set_volume(self._bgm_volume)
-            if fade_ms > 0:
-                pygame.mixer.music.play(loops=loops, start=start, fade_ms=fade_ms)
-            else:
-                pygame.mixer.music.play(loops=loops, start=start)
-            return True
-        except pygame.error as e:
+            backend = get_audio_backend()
+            backend.set_bgm_volume(self._bgm_volume)
+            return backend.load_and_play_bgm(path, loops=loops, start=start, fade_ms=fade_ms)
+        except Exception as e:
             print(f"[AudioBank:{self.name}] 播放 BGM 失败 '{name}': {e}")
             return False
     
     def pause_bgm(self):
         """暂停 BGM"""
         if self._initialized:
-            pygame.mixer.music.pause()
+            get_audio_backend().pause_bgm()
     
     def unpause_bgm(self):
         """恢复 BGM"""
         if self._initialized:
-            pygame.mixer.music.unpause()
+            get_audio_backend().unpause_bgm()
     
     def stop_bgm(self, fade_ms: int = 0):
         """
@@ -252,16 +253,13 @@ class AudioBank:
         """
         if not self._initialized:
             return
-        if fade_ms > 0:
-            pygame.mixer.music.fadeout(fade_ms)
-        else:
-            pygame.mixer.music.stop()
+        get_audio_backend().stop_bgm(fade_ms)
     
     def is_bgm_playing(self) -> bool:
         """BGM 是否正在播放"""
         if not self._initialized:
             return False
-        return pygame.mixer.music.get_busy()
+        return get_audio_backend().is_bgm_playing()
     
     # ==================== 音量控制 ====================
     
@@ -275,7 +273,7 @@ class AudioBank:
         """设置 BGM 音量（0.0 ~ 1.0）"""
         self._bgm_volume = max(0.0, min(1.0, volume))
         if self._initialized:
-            pygame.mixer.music.set_volume(self._bgm_volume)
+            get_audio_backend().set_bgm_volume(self._bgm_volume)
     
     @property
     def se_volume(self) -> float:

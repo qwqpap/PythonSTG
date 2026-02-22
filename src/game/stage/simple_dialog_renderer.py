@@ -5,9 +5,9 @@
 后续可以替换为完整的 DialogRenderer。
 """
 
-import pygame
 from typing import Optional
 from .dialog_data import DialogSentence
+from ...core.image_loader import SoftwareSurface, FontRenderer
 
 
 class SimpleDialogTextRenderer:
@@ -24,8 +24,8 @@ class SimpleDialogTextRenderer:
 
         # 字体
         try:
-            self.font = pygame.font.Font(None, 32)  # 默认字体
-            self.name_font = pygame.font.Font(None, 24)
+            self.font = FontRenderer(None, 32)
+            self.name_font = FontRenderer(None, 24)
         except:
             self.font = None
             self.name_font = None
@@ -48,13 +48,13 @@ class SimpleDialogTextRenderer:
             if self.visible_chars < len(self.current_sentence.text):
                 self.visible_chars += 1
 
-    def render(self, screen: pygame.Surface):
+    def render(self, screen: SoftwareSurface):
         """渲染对话文本"""
         if not self.current_sentence or not self.font:
             return
 
         # 背景半透明遮罩
-        overlay = pygame.Surface((self.screen_width, 200))
+        overlay = SoftwareSurface(self.screen_width, 200)
         overlay.set_alpha(180)
         overlay.fill((0, 0, 0))
         screen.blit(overlay, (0, self.screen_height - 200))

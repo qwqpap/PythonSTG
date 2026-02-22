@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union, TYPE_CHECKING
-import pygame
+from ..core.image_loader import load_image_surface, SoftwareSurface
 import numpy as np
 
 if TYPE_CHECKING:
@@ -386,8 +386,7 @@ class TextureSheet:
     bent_lasers: Dict[str, BentLaserAsset] = field(default_factory=dict)
     color_groups: Dict[str, ColorVariantGroup] = field(default_factory=dict)
     
-    # pygame Surface
-    _surface: Optional[pygame.Surface] = field(default=None, repr=False)
+    _surface: Optional[SoftwareSurface] = field(default=None, repr=False)
     
     def load(self, base_path: str = "") -> bool:
         """加载纹理"""
@@ -398,7 +397,7 @@ class TextureSheet:
             return False
         
         try:
-            self._surface = pygame.image.load(full_path)
+            self._surface = load_image_surface(full_path)
             self.width, self.height = self._surface.get_size()
             return True
         except Exception as e:
@@ -406,7 +405,7 @@ class TextureSheet:
             return False
     
     @property
-    def surface(self) -> Optional[pygame.Surface]:
+    def surface(self) -> Optional[SoftwareSurface]:
         return self._surface
     
     def get_uv(self, asset_name: str, **kwargs) -> Optional[Tuple[float, float, float, float]]:
@@ -995,7 +994,7 @@ class UnifiedTextureManager:
         
         return None
     
-    def get_texture_surface(self, asset_name: str) -> Optional[pygame.Surface]:
+    def get_texture_surface(self, asset_name: str) -> Optional[SoftwareSurface]:
         """获取资产所属的纹理Surface"""
         sheet_name = self._asset_to_sheet.get(asset_name)
         if sheet_name:

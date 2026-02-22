@@ -4,10 +4,10 @@
 
 import moderngl
 import numpy as np
-import pygame
 import os
 import json
 from typing import List, Dict, Optional, TYPE_CHECKING, Any
+from ..core.image_loader import load_image_rgba
 
 if TYPE_CHECKING:
     from ..resource.texture_asset import TextureAssetManager
@@ -180,11 +180,11 @@ class ItemRenderer:
             return False
         
         try:
-            img = pygame.image.load(texture_path).convert_alpha()
-            self.texture_size = img.get_size()
+            w, h, data = load_image_rgba(texture_path, flip_y=True)
+            self.texture_size = (w, h)
             self.texture = self.ctx.texture(
                 self.texture_size, 4,
-                pygame.image.tobytes(img, "RGBA", True)
+                data
             )
             self.texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
             

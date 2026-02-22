@@ -9,8 +9,8 @@ UI渲染器 - 使用ModernGL渲染UI元素
 
 import moderngl
 import numpy as np
-import pygame
 from typing import Dict, List, Optional
+from ..core.image_loader import SoftwareSurface
 from .bitmap_font import BitmapFont, get_font_manager
 
 
@@ -162,7 +162,7 @@ class UIRenderer:
             img = font.texture_surface
             texture = self.ctx.texture(
                 img.get_size(), 4,
-                pygame.image.tobytes(img, "RGBA", True)
+                img.to_bytes("RGBA", flip_y=True)
             )
             texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
             self.font_textures[font_name] = texture

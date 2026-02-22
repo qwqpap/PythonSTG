@@ -1,0 +1,7 @@
+glfw
+Pillow
+miniaudio
+freetype-py
+moderngl
+numpy
+numba

@@ -4,7 +4,12 @@
 v3: 脚本优先控制发射，支持 bullet_anims / option_anims / skills
 """
 import numpy as np
-import pygame
+from ...core.input_manager import (
+    KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
+    KEY_w, KEY_s, KEY_a, KEY_d,
+    KEY_LSHIFT, KEY_RSHIFT, KEY_z, KEY_x,
+    key_name_to_code,
+)
 import os
 from typing import Optional, Callable, Dict, Any, List, Tuple
 
@@ -68,13 +73,13 @@ class PlayerBase(Entity):
         self.option_anims: Dict[str, dict] = {}
         self._config_version: str = "2.0"
         
-        self.key_up = [pygame.K_UP, pygame.K_w]
-        self.key_down = [pygame.K_DOWN, pygame.K_s]
-        self.key_left = [pygame.K_LEFT, pygame.K_a]
-        self.key_right = [pygame.K_RIGHT, pygame.K_d]
-        self.key_focus = [pygame.K_LSHIFT, pygame.K_RSHIFT]
-        self.key_shoot = [pygame.K_z]
-        self.key_bomb = [pygame.K_x]
+        self.key_up = [KEY_UP, KEY_w]
+        self.key_down = [KEY_DOWN, KEY_s]
+        self.key_left = [KEY_LEFT, KEY_a]
+        self.key_right = [KEY_RIGHT, KEY_d]
+        self.key_focus = [KEY_LSHIFT, KEY_RSHIFT]
+        self.key_shoot = [KEY_z]
+        self.key_bomb = [KEY_x]
         
         self.on_death: Optional[Callable[[], None]] = None
         self.on_bomb_callback: Optional[Callable[[], None]] = None
@@ -199,19 +204,19 @@ class PlayerBase(Entity):
         if 'keybindings' in config:
             kb = config['keybindings']
             if 'up' in kb:
-                self.key_up = [getattr(pygame, k) for k in kb['up']]
+                self.key_up = [key_name_to_code(k) for k in kb['up']]
             if 'down' in kb:
-                self.key_down = [getattr(pygame, k) for k in kb['down']]
+                self.key_down = [key_name_to_code(k) for k in kb['down']]
             if 'left' in kb:
-                self.key_left = [getattr(pygame, k) for k in kb['left']]
+                self.key_left = [key_name_to_code(k) for k in kb['left']]
             if 'right' in kb:
-                self.key_right = [getattr(pygame, k) for k in kb['right']]
+                self.key_right = [key_name_to_code(k) for k in kb['right']]
             if 'focus' in kb:
-                self.key_focus = [getattr(pygame, k) for k in kb['focus']]
+                self.key_focus = [key_name_to_code(k) for k in kb['focus']]
             if 'shoot' in kb:
-                self.key_shoot = [getattr(pygame, k) for k in kb['shoot']]
+                self.key_shoot = [key_name_to_code(k) for k in kb['shoot']]
             if 'bomb' in kb:
-                self.key_bomb = [getattr(pygame, k) for k in kb['bomb']]
+                self.key_bomb = [key_name_to_code(k) for k in kb['bomb']]
         
         # ========== v3: 加载 bullet_anims ==========
         if 'bullet_anims' in config:

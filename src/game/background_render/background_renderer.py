@@ -11,11 +11,11 @@
 import moderngl
 import numpy as np
 import math
-import pygame
 import os
 from typing import List, Dict, Optional, Tuple, Callable
 from enum import Enum, auto
 from dataclasses import dataclass, field
+from ...core.image_loader import load_image_rgba
 
 
 class BlendMode(Enum):
@@ -507,11 +507,9 @@ class BackgroundRenderer:
             return None
         
         try:
-            img = pygame.image.load(path).convert_alpha()
-            # 翻转Y轴以匹配OpenGL坐标
-            img = pygame.transform.flip(img, False, True)
+            w, h, data = load_image_rgba(path, flip_y=True)
             
-            texture = self.ctx.texture(img.get_size(), 4, pygame.image.tobytes(img, "RGBA"))
+            texture = self.ctx.texture((w, h), 4, data)
             texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
             texture.repeat_x = True
             texture.repeat_y = True

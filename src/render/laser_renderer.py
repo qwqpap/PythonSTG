@@ -11,8 +11,8 @@
 import moderngl
 import numpy as np
 import math
-import pygame
 from typing import List, Dict, Optional, Tuple
+from ..core.image_loader import load_image_surface, SoftwareSurface
 from ..game.laser import Laser, BentLaser, get_laser_texture_data
 
 
@@ -125,17 +125,14 @@ class LaserRenderer:
             
             # 否则直接加载
             if surface is None:
-                surface = pygame.image.load(texture_path)
+                surface = load_image_surface(texture_path)
             
-            surface = pygame.transform.flip(surface, False, True)  # 翻转Y轴
-            
-            # 转换为RGBA
-            if surface.get_alpha() is None:
-                surface = surface.convert_alpha()
+            surface = SoftwareSurface.flip(surface, False, True)
+            surface = surface.convert_alpha()
             
             # 获取图片数据
             width, height = surface.get_size()
-            data = pygame.image.tostring(surface, 'RGBA', True)
+            data = surface.to_bytes('RGBA', flip_y=True)
             
             # 创建ModernGL纹理
             texture = self.ctx.texture((width, height), 4, data)

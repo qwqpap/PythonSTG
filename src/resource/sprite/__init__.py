@@ -6,9 +6,9 @@
 """
 import json
 import os
-import pygame
 from typing import Dict, List, Optional, Any
 from ..texture_asset import TextureAssetManager, get_texture_asset_manager, init_texture_asset_manager
+from ...core.image_loader import SoftwareSurface
 
 
 class SpriteManager:
@@ -25,8 +25,8 @@ class SpriteManager:
         
         # 保持旧接口的数据结构
         self.sprites: Dict[str, dict] = {}
-        self.image_cache: Dict[str, pygame.Surface] = {}
-        self.subsurface_cache: Dict[str, pygame.Surface] = {}
+        self.image_cache: Dict[str, SoftwareSurface] = {}
+        self.subsurface_cache: Dict[str, SoftwareSurface] = {}
         self.config_files: List[str] = []
         self.sprite_texture_map: Dict[str, str] = {}
         self.texture_paths: set = set()
@@ -131,7 +131,7 @@ class SpriteManager:
             self.sprites[sprite_id] = data
         return data
     
-    def get_sprite_image(self, sprite_id: str) -> Optional[pygame.Surface]:
+    def get_sprite_image(self, sprite_id: str) -> Optional[SoftwareSurface]:
         """
         获取精灵对应的纹理图片
         
@@ -139,11 +139,11 @@ class SpriteManager:
             sprite_id: 精灵ID
             
         Returns:
-            pygame.Surface对象
+            SoftwareSurface
         """
         return self.asset_manager.get_sprite_image(sprite_id)
 
-    def get_sprite_surface(self, sprite_id: str) -> Optional[pygame.Surface]:
+    def get_sprite_surface(self, sprite_id: str) -> Optional[SoftwareSurface]:
         """
         返回裁剪后的子精灵 Surface
         
@@ -151,7 +151,7 @@ class SpriteManager:
             sprite_id: 精灵ID
             
         Returns:
-            pygame.Surface
+            SoftwareSurface
         """
         # 缓存优先
         if sprite_id in self.subsurface_cache:

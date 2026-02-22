@@ -9,7 +9,7 @@ Char="0",x,y,width,height,xoffset,yoffset
 
 import os
 import re
-import pygame
+from ..core.image_loader import load_image_surface, SoftwareSurface
 
 
 class BitmapFont:
@@ -55,7 +55,7 @@ class BitmapFont:
             self.texture_path = os.path.join(font_dir, bitmap_name)
             
             if os.path.exists(self.texture_path):
-                self.texture_surface = pygame.image.load(self.texture_path).convert_alpha()
+                self.texture_surface = load_image_surface(self.texture_path)
                 print(f"已加载字体纹理: {self.texture_path}")
             else:
                 print(f"字体纹理不存在: {self.texture_path}")
@@ -166,41 +166,36 @@ class BitmapFont:
         """
         return self.chars.get(char, None)
     
-    def render_to_surface(self, text: str, scale: float = 1.0) -> pygame.Surface:
+    def render_to_surface(self, text: str, scale: float = 1.0) -> SoftwareSurface:
         """
-        将文本渲染到pygame Surface（用于调试）
+        将文本渲染到SoftwareSurface（用于调试）
         
         Args:
             text: 文本字符串
             scale: 缩放比例
             
         Returns:
-            pygame.Surface: 渲染后的表面
+            SoftwareSurface: 渲染后的表面
         """
         if self.texture_surface is None:
             return None
         
-        # 计算总宽度
         total_width = int(self.get_text_width(text, scale))
         total_height = int(self.line_height * scale)
         
-        # 创建透明表面
-        surface = pygame.Surface((total_width, total_height), pygame.SRCALPHA)
+        surface = SoftwareSurface(total_width, total_height)
         
         x_cursor = 0
         for char in text:
             if char in self.chars:
                 c = self.chars[char]
-                # 从纹理中获取字符区域
-                char_rect = pygame.Rect(c['x'], c['y'], c['width'], c['height'])
+                char_rect = (c['x'], c['y'], c['width'], c['height'])
                 char_surface = self.texture_surface.subsurface(char_rect)
                 
-                # 缩放
                 if scale != 1.0:
                     new_size = (int(c['width'] * scale), int(c['height'] * scale))
-                    char_surface = pygame.transform.scale(char_surface, new_size)
+                    char_surface = SoftwareSurface.scale(char_surface, new_size)
                 
-                # 绘制到目标表面
                 surface.blit(char_surface, (x_cursor, 0))
                 x_cursor += int((c['width'] + c['xoffset']) * scale)
         

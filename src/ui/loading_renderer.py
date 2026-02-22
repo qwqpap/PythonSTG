@@ -2,13 +2,14 @@
 加载画面渲染器
 
 在关卡加载期间显示黑屏 + 关卡信息。
-使用 pygame.font → Surface → GL texture → quad 方式渲染。
+使用 FontRenderer → SoftwareSurface → GL texture → quad 方式渲染。
 """
 
 import moderngl
 import numpy as np
-import pygame
 import os
+
+from ..core.image_loader import SoftwareSurface, FontRenderer
 
 
 class LoadingScreenRenderer:
@@ -20,17 +21,16 @@ class LoadingScreenRenderer:
         self.screen_height = screen_height
 
         # 字体
-        pygame.font.init()
         font_path = os.path.join("assets", "fonts", "SourceHanSansCN-Bold.otf")
         if not os.path.exists(font_path):
             font_path = os.path.join("assets", "fonts", "wqy-microhei-mono.ttf")
         if not os.path.exists(font_path):
             font_path = None
 
-        self.font_stage = pygame.font.Font(font_path, 48)
-        self.font_title = pygame.font.Font(font_path, 36)
-        self.font_subtitle = pygame.font.Font(font_path, 22)
-        self.font_hint = pygame.font.Font(font_path, 20)
+        self.font_stage = FontRenderer(font_path, 48)
+        self.font_title = FontRenderer(font_path, 36)
+        self.font_subtitle = FontRenderer(font_path, 22)
+        self.font_hint = FontRenderer(font_path, 20)
 
         # GL shader（与 DialogGLRenderer 相同的 textured quad）
         vertex_shader = """
@@ -86,9 +86,9 @@ class LoadingScreenRenderer:
         self._upload_texture(surface)
         self._draw_fullscreen_quad()
 
-    def _render_to_surface(self, info: dict) -> pygame.Surface:
+    def _render_to_surface(self, info: dict) -> SoftwareSurface:
         sw, sh = self.screen_width, self.screen_height
-        surface = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        surface = SoftwareSurface(sw, sh)
         surface.fill((0, 0, 0, 255))
 
         stage_name = info.get("stage_name", "")
@@ -127,16 +127,16 @@ class LoadingScreenRenderer:
             bar_x = center_x - bar_w // 2
             bar_y = sh - 50
             # 底色
-            pygame.draw.rect(surface, (60, 60, 60), (bar_x, bar_y, bar_w, bar_h))
+            surface.draw_rect((60, 60, 60), (bar_x, bar_y, bar_w, bar_h))
             # 填充
             fill_w = int(bar_w * max(0.0, min(1.0, progress)))
             if fill_w > 0:
-                pygame.draw.rect(surface, (180, 180, 255), (bar_x, bar_y, fill_w, bar_h))
+                surface.draw_rect((180, 180, 255), (bar_x, bar_y, fill_w, bar_h))
 
         return surface
 
-    def _upload_texture(self, surface: pygame.Surface):
-        data = pygame.image.tobytes(surface, "RGBA", True)
+    def _upload_texture(self, surface: SoftwareSurface):
+        data = surface.to_bytes("RGBA", flip_y=True)
         w, h = surface.get_size()
         if self._texture is not None:
             if self._texture.size == (w, h):

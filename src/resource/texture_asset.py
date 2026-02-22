@@ -26,7 +26,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 from pathlib import Path
-import pygame
+from ..core.image_loader import load_image_surface, SoftwareSurface
 
 # 可选的 ModernGL 支持
 try:
@@ -193,7 +193,7 @@ class TextureAtlas:
     texture_path: str
     sprites: Dict[str, Sprite] = field(default_factory=dict)
     animations: Dict[str, AnimatedSprite] = field(default_factory=dict)
-    _surface: Optional[pygame.Surface] = field(default=None, repr=False)
+    _surface: Optional[SoftwareSurface] = field(default=None, repr=False)
     _texture_size: Optional[Tuple[int, int]] = field(default=None, repr=False)
     
     def load_texture(self, base_path: str = "") -> bool:
@@ -214,7 +214,7 @@ class TextureAtlas:
             return False
         
         try:
-            self._surface = pygame.image.load(full_path)
+            self._surface = load_image_surface(full_path)
             self._texture_size = self._surface.get_size()
             print(f"已加载纹理图集: {self.name} ({self._texture_size[0]}x{self._texture_size[1]})")
             return True
@@ -223,7 +223,7 @@ class TextureAtlas:
             return False
     
     @property
-    def surface(self) -> Optional[pygame.Surface]:
+    def surface(self) -> Optional[SoftwareSurface]:
         return self._surface
     
     @property
@@ -236,7 +236,7 @@ class TextureAtlas:
     def get_animation(self, name: str) -> Optional[AnimatedSprite]:
         return self.animations.get(name)
     
-    def get_sprite_surface(self, name: str) -> Optional[pygame.Surface]:
+    def get_sprite_surface(self, name: str) -> Optional[SoftwareSurface]:
         """获取精灵的子Surface"""
         sprite = self.get_sprite(name)
         if sprite and self._surface:
@@ -246,7 +246,7 @@ class TextureAtlas:
                 print(f"获取精灵Surface失败 {name}: {e}")
         return None
     
-    def get_animation_frame_surface(self, name: str, frame_index: int) -> Optional[pygame.Surface]:
+    def get_animation_frame_surface(self, name: str, frame_index: int) -> Optional[SoftwareSurface]:
         """获取动画某帧的子Surface"""
         anim = self.get_animation(name)
         if anim and self._surface and 0 <= frame_index < len(anim.frames):
@@ -279,10 +279,10 @@ class TextureAssetManager:
         self.animations: Dict[str, AnimatedSprite] = {}  # 所有动画（扁平化索引）
         
         # 纹理缓存（按路径）
-        self.texture_cache: Dict[str, pygame.Surface] = {}
+        self.texture_cache: Dict[str, SoftwareSurface] = {}
         
         # 精灵Surface缓存
-        self.sprite_surface_cache: Dict[str, pygame.Surface] = {}
+        self.sprite_surface_cache: Dict[str, SoftwareSurface] = {}
     
     def load_atlas_config(self, config_path: str, atlas_name: Optional[str] = None) -> Optional[TextureAtlas]:
         """
@@ -528,11 +528,11 @@ class TextureAssetManager:
         """获取纹理图集"""
         return self.atlases.get(name)
     
-    def get_texture(self, path: str) -> Optional[pygame.Surface]:
+    def get_texture(self, path: str) -> Optional[SoftwareSurface]:
         """获取纹理Surface"""
         return self.texture_cache.get(path)
     
-    def get_sprite_surface(self, name: str) -> Optional[pygame.Surface]:
+    def get_sprite_surface(self, name: str) -> Optional[SoftwareSurface]:
         """
         获取精灵的Surface（带缓存）
         
@@ -732,7 +732,7 @@ class TextureAssetManager:
         sprite = self.get_sprite(sprite_id)
         return sprite.texture_path if sprite else None
     
-    def get_sprite_image(self, sprite_id: str) -> Optional[pygame.Surface]:
+    def get_sprite_image(self, sprite_id: str) -> Optional[SoftwareSurface]:
         """获取精灵所属的纹理图片（兼容旧接口）"""
         sprite = self.get_sprite(sprite_id)
         if sprite:
@@ -762,7 +762,7 @@ class TextureAssetManager:
     def create_gl_texture(self, ctx: 'moderngl.Context', texture_path: str, 
                           flip_y: bool = True) -> Optional['moderngl.Texture']:
         """
-        从缓存的pygame Surface创建ModernGL纹理
+        从缓存的SoftwareSurface创建ModernGL纹理
         
         Args:
             ctx: ModernGL上下文
@@ -780,12 +780,8 @@ class TextureAssetManager:
         if not surface:
             return None
         
-        # 确保有alpha通道
-        if surface.get_alpha() is None:
-            surface = surface.convert_alpha()
-        
         # 获取图片数据
-        data = pygame.image.tobytes(surface, "RGBA", flip_y)
+        data = surface.to_bytes("RGBA", flip_y)
         size = surface.get_size()
         
         # 创建ModernGL纹理

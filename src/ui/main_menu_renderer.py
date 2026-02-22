@@ -2,13 +2,14 @@
 主菜单渲染器
 
 纯文字 + 背景，无素材依赖。
-使用 pygame.font → Surface → GL texture → quad 方式渲染。
+使用 FontRenderer → SoftwareSurface → GL texture → quad 方式渲染。
 """
 
 import moderngl
 import numpy as np
-import pygame
 import os
+
+from ..core.image_loader import SoftwareSurface, FontRenderer
 
 
 class MainMenuRenderer:
@@ -20,16 +21,15 @@ class MainMenuRenderer:
         self.screen_height = screen_height
 
         # 字体
-        pygame.font.init()
         font_path = os.path.join("assets", "fonts", "SourceHanSansCN-Bold.otf")
         if not os.path.exists(font_path):
             font_path = os.path.join("assets", "fonts", "wqy-microhei-mono.ttf")
         if not os.path.exists(font_path):
             font_path = None
 
-        self.font_title = pygame.font.Font(font_path, 56)
-        self.font_option = pygame.font.Font(font_path, 32)
-        self.font_hint = pygame.font.Font(font_path, 18)
+        self.font_title = FontRenderer(font_path, 56)
+        self.font_option = FontRenderer(font_path, 32)
+        self.font_hint = FontRenderer(font_path, 18)
 
         # GL shader（与 LoadingScreenRenderer 相同）
         vertex_shader = """
@@ -79,9 +79,9 @@ class MainMenuRenderer:
         self._upload_texture(surface)
         self._draw_fullscreen_quad()
 
-    def _render_to_surface(self, selected_index: int) -> pygame.Surface:
+    def _render_to_surface(self, selected_index: int) -> SoftwareSurface:
         sw, sh = self.screen_width, self.screen_height
-        surface = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        surface = SoftwareSurface(sw, sh)
 
         # 背景：深色渐变（上深下浅）
         for y in range(sh):
@@ -89,7 +89,7 @@ class MainMenuRenderer:
             r = int(12 + 8 * t)
             g = int(8 + 12 * t)
             b = int(28 + 16 * t)
-            pygame.draw.line(surface, (r, g, b), (0, y), (sw, y))
+            surface.draw_line((r, g, b), (0, y), (sw, y))
 
         center_x = sw // 2
         y = sh // 4
@@ -117,8 +117,8 @@ class MainMenuRenderer:
 
         return surface
 
-    def _upload_texture(self, surface: pygame.Surface):
-        data = pygame.image.tobytes(surface, "RGBA", True)
+    def _upload_texture(self, surface: SoftwareSurface):
+        data = surface.to_bytes("RGBA", flip_y=True)
         w, h = surface.get_size()
         if self._texture is not None:
             if self._texture.size == (w, h):

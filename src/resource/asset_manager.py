@@ -4,9 +4,10 @@
 """
 import os
 import json
-import pygame
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
+from ..core.image_loader import load_image_surface, SoftwareSurface
+from ..core.audio_backend import get_audio_backend
 
 
 class AssetManager:
@@ -25,16 +26,16 @@ class AssetManager:
         self.asset_root = Path(asset_root)
         
         # 资源缓存
-        self.textures: Dict[str, pygame.Surface] = {}  # 纹理缓存
+        self.textures: Dict[str, SoftwareSurface] = {}  # 纹理缓存
         self.sprites: Dict[str, dict] = {}  # 精灵配置缓存
-        self.sounds: Dict[str, pygame.mixer.Sound] = {}  # 音效缓存
+        self.sounds: Dict[str, object] = {}  # 音效缓存
         self.music: Dict[str, str] = {}  # 音乐文件路径
         self.configs: Dict[str, dict] = {}  # 配置文件缓存
         
         # 资源组（用于批量加载/卸载）
         self.resource_groups: Dict[str, List[str]] = {}
         
-    def load_texture(self, name: str, path: str, convert_alpha: bool = True) -> pygame.Surface:
+    def load_texture(self, name: str, path: str, convert_alpha: bool = True) -> SoftwareSurface:
         """
         加载纹理
         
@@ -52,21 +53,18 @@ class AssetManager:
         full_path = self.asset_root / path
         if not full_path.exists():
             print(f"Warning: Texture not found: {full_path}")
-            # 创建默认纹理
-            surface = pygame.Surface((32, 32))
-            surface.fill((255, 0, 255))  # 洋红色表示缺失纹理
+            surface = SoftwareSurface(32, 32)
+            surface.fill((255, 0, 255))
             self.textures[name] = surface
             return surface
         
-        surface = pygame.image.load(str(full_path))
-        if convert_alpha:
-            surface = surface.convert_alpha()
+        surface = load_image_surface(str(full_path))
         
         self.textures[name] = surface
         print(f"Loaded texture: {name} from {path}")
         return surface
     
-    def get_texture(self, name: str) -> Optional[pygame.Surface]:
+    def get_texture(self, name: str) -> Optional[SoftwareSurface]:
         """获取已加载的纹理"""
         return self.textures.get(name)
     
@@ -100,7 +98,7 @@ class AssetManager:
         """获取精灵配置"""
         return self.sprites.get(name)
     
-    def load_sound(self, name: str, path: str) -> Optional[pygame.mixer.Sound]:
+    def load_sound(self, name: str, path: str) -> Optional[object]:
         """
         加载音效
         
@@ -120,15 +118,15 @@ class AssetManager:
             return None
         
         try:
-            sound = pygame.mixer.Sound(str(full_path))
+            sound = get_audio_backend().load_sound(str(full_path))
             self.sounds[name] = sound
             print(f"Loaded sound: {name} from {path}")
             return sound
-        except pygame.error as e:
+        except Exception as e:
             print(f"Error loading sound {name}: {e}")
             return None
     
-    def get_sound(self, name: str) -> Optional[pygame.mixer.Sound]:
+    def get_sound(self, name: str) -> Optional[object]:
         """获取音效"""
         return self.sounds.get(name)
     
@@ -182,17 +180,15 @@ class AssetManager:
             return False
         
         try:
-            pygame.mixer.music.load(self.music[name])
-            pygame.mixer.music.set_volume(volume)
-            pygame.mixer.music.play(loops)
+            get_audio_backend().load_and_play_bgm(self.music[name], loops=loops, volume=volume)
             return True
-        except pygame.error as e:
+        except Exception as e:
             print(f"Error playing music {name}: {e}")
             return False
     
     def stop_music(self):
         """停止背景音乐"""
-        pygame.mixer.music.stop()
+        get_audio_backend().stop_bgm()
     
     def load_config(self, name: str, path: str) -> dict:
         """

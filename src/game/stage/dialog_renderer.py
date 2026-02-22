@@ -11,12 +11,9 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 
-try:
-    import pygame
-    from pygame import Surface
-except ImportError:
-    pygame = None
-    Surface = Any
+from ...core.image_loader import load_image_surface, SoftwareSurface, FontRenderer
+
+Surface = SoftwareSurface
 
 
 @dataclass
@@ -87,9 +84,9 @@ class PortraitRenderer:
             portrait_key = f"{character}:{portrait_name}"
             if portrait_key not in self._portraits:
                 portrait_file = self.assets_dir / portrait_info["file"]
-                if portrait_file.exists() and pygame:
+                if portrait_file.exists():
                     try:
-                        surface = pygame.image.load(str(portrait_file)).convert_alpha()
+                        surface = load_image_surface(str(portrait_file))
                         self._portraits[portrait_key] = surface
                     except Exception as e:
                         print(f"[PortraitRenderer] 加载立绘失败 {portrait_file}: {e}")
@@ -189,12 +186,9 @@ class PortraitRenderer:
         渲染所有立绘
 
         Args:
-            screen: pygame Surface
+            screen: SoftwareSurface
             camera_offset: 摄像机偏移（通常为(0,0)）
         """
-        if not pygame:
-            return
-
         for state in self._active_portraits.values():
             portrait_key = f"{state.character}:{state.portrait}"
             if portrait_key not in self._portraits:
@@ -221,7 +215,7 @@ class PortraitRenderer:
                 w, h = surface.get_size()
                 new_w = int(w * state.scale)
                 new_h = int(h * state.scale)
-                surface = pygame.transform.scale(surface, (new_w, new_h))
+                surface = SoftwareSurface.scale(surface, (new_w, new_h))
 
             # 应用透明度
             if state.alpha < 1.0:
@@ -230,7 +224,7 @@ class PortraitRenderer:
 
             # 居中渲染
             rect = surface.get_rect(center=(int(x), int(y)))
-            screen.blit(surface, rect)
+            screen.blit(surface, (rect[0], rect[1]))
 
     def clear_all(self):
         """清空所有立绘"""
@@ -253,7 +247,7 @@ class BalloonRenderer:
         """
         Args:
             balloon_config: dialog_balloon.json 配置
-            font: pygame Font 对象
+            font: FontRenderer 对象
         """
         self.config = balloon_config
         self.font = font
@@ -302,10 +296,10 @@ class BalloonRenderer:
         渲染所有气泡
 
         Args:
-            screen: pygame Surface
+            screen: SoftwareSurface
             balloon_sprites: 气泡精灵字典 {sprite_name: Surface}
         """
-        if not pygame or not self.font:
+        if not self.font:
             return
 
         for balloon in self._active_balloons:
@@ -342,7 +336,7 @@ class BalloonRenderer:
         if visible_text and self.font:
             text_surface = self.font.render(visible_text, True, (0, 0, 0))
             text_rect = text_surface.get_rect(center=(int(x), int(y)))
-            screen.blit(text_surface, text_rect)
+            screen.blit(text_surface, (text_rect[0], text_rect[1]))
 
     def clear_all(self):
         """清空所有气泡"""
@@ -372,14 +366,13 @@ class DialogRenderer:
 
         # 加载字体
         font = None
-        if pygame:
-            try:
-                font_path = assets_dir.parent.parent / "fonts" / "SourceHanSansCN-Bold.otf"
-                if font_path.exists():
-                    font = pygame.font.Font(str(font_path), 24)
-            except Exception as e:
-                print(f"[DialogRenderer] 加载字体失败: {e}")
-                font = pygame.font.Font(None, 24)  # 使用默认字体
+        try:
+            font_path = assets_dir.parent.parent / "fonts" / "SourceHanSansCN-Bold.otf"
+            if font_path.exists():
+                font = FontRenderer(str(font_path), 24)
+        except Exception as e:
+            print(f"[DialogRenderer] 加载字体失败: {e}")
+            font = FontRenderer(None, 24)
 
         self.balloon_renderer = BalloonRenderer(balloon_config, font)
 
