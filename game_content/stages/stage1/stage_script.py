@@ -19,8 +19,8 @@ class Stage1(StageScript):
     name = "Stage 1"
     title = "从旧地狱街道到地灵殿"
     subtitle = "From Old Hell to the Moriya Shrine"
-    bgm = "stage1.ogg"
-    boss_bgm = "boss1.ogg"
+    bgm = "00.wav"
+    boss_bgm = "01.wav"
     background = "stage1_bg"
 
     # ===== Boss 定义 =====
