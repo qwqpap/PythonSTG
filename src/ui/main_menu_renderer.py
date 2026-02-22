@@ -3,13 +3,16 @@
 
 纯文字 + 背景，无素材依赖。
 使用 FontRenderer → SoftwareSurface → GL texture → quad 方式渲染。
+支持从 JSON 布局配置渲染 (render_from_layout)。
 """
 
 import moderngl
 import numpy as np
 import os
+from typing import Dict, Any, Optional
 
 from ..core.image_loader import SoftwareSurface, FontRenderer
+from .main_menu_layout import default_layout
 
 
 class MainMenuRenderer:
@@ -20,16 +23,16 @@ class MainMenuRenderer:
         self.screen_width = screen_width
         self.screen_height = screen_height
 
-        # 字体
+        # 字体路径
         font_path = os.path.join("assets", "fonts", "SourceHanSansCN-Bold.otf")
         if not os.path.exists(font_path):
             font_path = os.path.join("assets", "fonts", "wqy-microhei-mono.ttf")
         if not os.path.exists(font_path):
             font_path = None
+        self._font_path = font_path
 
-        self.font_title = FontRenderer(font_path, 56)
-        self.font_option = FontRenderer(font_path, 32)
-        self.font_hint = FontRenderer(font_path, 18)
+        # 字体缓存: size -> FontRenderer
+        self._font_cache: Dict[int, FontRenderer] = {}
 
         # GL shader（与 LoadingScreenRenderer 相同）
         vertex_shader = """
@@ -68,52 +71,89 @@ class MainMenuRenderer:
         )
         self._texture = None
 
-    def render(self, selected_index: int = 0):
+    def _get_font(self, size: int) -> FontRenderer:
+        """按字号获取字体，带缓存。"""
+        if size not in self._font_cache:
+            self._font_cache[size] = FontRenderer(self._font_path, size)
+        return self._font_cache[size]
+
+    def render(self, selected_index: int = 0, layout: Optional[Dict[str, Any]] = None):
         """
         渲染主菜单
 
         Args:
             selected_index: 当前选中的菜单项索引（0=开始游戏, 1=退出）
+            layout: 布局配置 dict，为 None 时使用 default_layout()
         """
-        surface = self._render_to_surface(selected_index)
+        if layout is None:
+            layout = default_layout()
+        surface = self._render_to_surface(layout, selected_index)
         self._upload_texture(surface)
         self._draw_fullscreen_quad()
 
-    def _render_to_surface(self, selected_index: int) -> SoftwareSurface:
+    def render_from_layout(self, layout: Dict[str, Any], selected_index: int = 0):
+        """
+        从 layout 配置渲染主菜单。供编辑器或自定义布局使用。
+
+        Args:
+            layout: 布局配置 dict（见 main_menu_layout.default_layout）
+            selected_index: 当前选中的菜单项索引
+        """
+        self.render(selected_index=selected_index, layout=layout)
+
+    def _render_to_surface(self, layout: Dict[str, Any], selected_index: int) -> SoftwareSurface:
         sw, sh = self.screen_width, self.screen_height
         surface = SoftwareSurface(sw, sh)
 
-        # 背景：深色渐变（上深下浅）
+        bg = layout.get("bg_gradient", {"top": [12, 8, 28], "bottom": [20, 20, 44]})
+        top = bg.get("top", [12, 8, 28])
+        bot = bg.get("bottom", [20, 20, 44])
         for y in range(sh):
             t = y / sh
-            r = int(12 + 8 * t)
-            g = int(8 + 12 * t)
-            b = int(28 + 16 * t)
+            r = int(top[0] + (bot[0] - top[0]) * t)
+            g = int(top[1] + (bot[1] - top[1]) * t)
+            b = int(top[2] + (bot[2] - top[2]) * t)
             surface.draw_line((r, g, b), (0, y), (sw, y))
 
         center_x = sw // 2
-        y = sh // 4
+        opt_colors = layout.get("option_colors", {"normal": [160, 160, 180], "selected": [255, 255, 200]})
+        col_norm = tuple(opt_colors.get("normal", [160, 160, 180]))
+        col_sel = tuple(opt_colors.get("selected", [255, 255, 200]))
 
         # 标题
-        title = "弹幕游戏"
-        s_title = self.font_title.render(title, True, (220, 220, 255))
+        title_cfg = layout.get("title", {"text": "弹幕游戏", "font_size": 56, "color": [220, 220, 255], "y_ratio": 0.25})
+        title_text = title_cfg.get("text", "弹幕游戏")
+        title_size = int(title_cfg.get("font_size", 56))
+        title_color = tuple(title_cfg.get("color", [220, 220, 255]))
+        y_ratio = float(title_cfg.get("y_ratio", 0.25))
+        y = int(sh * y_ratio)
+        font_title = self._get_font(title_size)
+        s_title = font_title.render(title_text, True, title_color)
         surface.blit(s_title, (center_x - s_title.get_width() // 2, y))
         y += s_title.get_height() + 60
 
         # 菜单项
-        options = ["开始游戏", "退出"]
-        option_spacing = 48
+        options = layout.get("options", [{"text": "开始游戏"}, {"text": "退出"}])
+        option_spacing = int(layout.get("option_spacing", 48))
+        font_option = self._get_font(32)  # 选项使用 32 号字
         for i, opt in enumerate(options):
-            color = (255, 255, 200) if i == selected_index else (160, 160, 180)
+            opt_text = opt.get("text", "") if isinstance(opt, dict) else str(opt)
+            color = col_sel if i == selected_index else col_norm
             prefix = "> " if i == selected_index else "  "
-            s = self.font_option.render(prefix + opt, True, color)
+            s = font_option.render(prefix + opt_text, True, color)
             surface.blit(s, (center_x - s.get_width() // 2, y))
             y += option_spacing
 
         # 底部提示
-        hint = "方向键 ↑↓ 选择  Z 确认  ESC 退出"
-        s_hint = self.font_hint.render(hint, True, (100, 100, 120))
-        surface.blit(s_hint, (center_x - s_hint.get_width() // 2, sh - 50))
+        hint_cfg = layout.get("hint", {"text": "方向键 ↑↓ 选择  Z 确认  ESC 退出", "font_size": 18, "color": [100, 100, 120], "y_offset": -50})
+        hint_text = hint_cfg.get("text", "方向键 ↑↓ 选择  Z 确认  ESC 退出")
+        hint_size = int(hint_cfg.get("font_size", 18))
+        hint_color = tuple(hint_cfg.get("color", [100, 100, 120]))
+        hint_y_offset = int(hint_cfg.get("y_offset", -50))
+        font_hint = self._get_font(hint_size)
+        s_hint = font_hint.render(hint_text, True, hint_color)
+        hint_y = sh + hint_y_offset if hint_y_offset < 0 else hint_y_offset
+        surface.blit(s_hint, (center_x - s_hint.get_width() // 2, hint_y))
 
         return surface
 

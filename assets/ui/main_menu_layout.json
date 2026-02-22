@@ -1,0 +1,55 @@
+{
+  "title": {
+    "text": "东方撸几把",
+    "font_size": 83,
+    "color": [
+      220,
+      220,
+      255
+    ],
+    "y_ratio": 0.25
+  },
+  "options": [
+    {
+      "text": "开始游戏"
+    },
+    {
+      "text": "退出"
+    }
+  ],
+  "option_spacing": 48,
+  "option_colors": {
+    "normal": [
+      160,
+      160,
+      180
+    ],
+    "selected": [
+      255,
+      255,
+      200
+    ]
+  },
+  "hint": {
+    "text": "方向键 ↑↓ 选择  Z 确认  ESC 退出",
+    "font_size": 18,
+    "color": [
+      100,
+      100,
+      120
+    ],
+    "y_offset": -50
+  },
+  "bg_gradient": {
+    "top": [
+      12,
+      8,
+      28
+    ],
+    "bottom": [
+      20,
+      20,
+      44
+    ]
+  }
+}

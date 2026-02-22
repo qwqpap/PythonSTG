@@ -35,6 +35,7 @@ from src.ui import HUD, UIRenderer
 from src.ui.dialog_gl_renderer import DialogGLRenderer
 from src.ui.loading_renderer import LoadingScreenRenderer
 from src.ui.main_menu_renderer import MainMenuRenderer
+from src.ui.main_menu_layout import load_layout as load_main_menu_layout
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from game_content.stages.stage1.stage_script import Stage1
@@ -122,6 +123,8 @@ def run_main_menu(window, ctx, screen_size) -> bool:
         False: 用户选择退出
     """
     main_menu_renderer = MainMenuRenderer(ctx, screen_size[0], screen_size[1])
+    main_menu_layout = load_main_menu_layout("assets/ui/main_menu_layout.json")
+    num_options = max(1, len(main_menu_layout.get("options", [])))
     selected_index = 0
     clock = FrameClock()
 
@@ -134,9 +137,9 @@ def run_main_menu(window, ctx, screen_size) -> bool:
                 return False
             if event['type'] == EVENT_KEYDOWN:
                 if event['key'] == KEY_UP:
-                    selected_index = (selected_index - 1) % 2
+                    selected_index = (selected_index - 1) % num_options
                 elif event['key'] == KEY_DOWN:
-                    selected_index = (selected_index + 1) % 2
+                    selected_index = (selected_index + 1) % num_options
                 elif event['key'] == KEY_z:
                     main_menu_renderer.cleanup()
                     return selected_index == 0
@@ -146,7 +149,7 @@ def run_main_menu(window, ctx, screen_size) -> bool:
 
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])
         ctx.clear(0.0, 0.0, 0.0)
-        main_menu_renderer.render(selected_index)
+        main_menu_renderer.render(selected_index, layout=main_menu_layout)
         window.swap_buffers()
 
 
