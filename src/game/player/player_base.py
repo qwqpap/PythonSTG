@@ -264,7 +264,7 @@ class PlayerBase(Entity):
             return False
         return type(self.script).on_shoot is not PlayerScript.on_shoot
 
-    def update(self, dt: float, keys):
+    def update(self, dt: float, keys, enemies=None):
         if self.invincible_timer > 0:
             self.invincible_timer -= dt
         
@@ -330,8 +330,8 @@ class PlayerBase(Entity):
             } if self.option_anims else None
         )
         
-        # 更新子弹
-        self.bullet_pool.update(dt)
+        # 更新子弹（传入敌人列表用于追踪弹）
+        self.bullet_pool.update(dt, enemies=enemies)
         
         # 更新动画
         move_x = self.pos[0] - self.last_pos_x

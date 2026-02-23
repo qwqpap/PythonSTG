@@ -28,7 +28,8 @@ from PyQt5.QtWidgets import (
     QFileDialog, QMessageBox, QToolBar, QAction, QStatusBar, QSlider,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem,
     QGraphicsEllipseItem, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QDialog, QDialogButtonBox, QStackedWidget
+    QAbstractItemView, QDialog, QDialogButtonBox, QStackedWidget,
+    QGridLayout, QToolButton
 )
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import (
@@ -200,6 +201,9 @@ class SpritePreviewView(QGraphicsView):
         self._region_start: Optional[QPointF] = None
         self._region_rect_item: Optional[QGraphicsRectItem] = None
         
+        # 实时预览网格切割
+        self._preview_grid_items: List[QGraphicsRectItem] = []
+        
         self._zoom = 2.0
         self.setTransform(QTransform().scale(self._zoom, self._zoom))
     
@@ -249,6 +253,25 @@ class SpritePreviewView(QGraphicsView):
         cy = y + h / 2 + offset_y
         r = self._hitbox_radius
         self.hitbox_item.setRect(cx - r, cy - r, r * 2, r * 2)
+    
+    def set_preview_grid(self, rows: int, cols: int, sx: int, sy: int, cw: int, ch: int, gx: int, gy: int):
+        """设置临时网格预览"""
+        self.clear_preview_grid()
+        pen = QPen(QColor(180, 50, 255), 2, Qt.DashLine)
+        brush = QBrush(QColor(180, 50, 255, 30))
+        for r in range(rows):
+            for c in range(cols):
+                x = sx + c * (cw + gx)
+                y = sy + r * (ch + gy)
+                item = self.scene.addRect(x, y, cw, ch, pen, brush)
+                item.setZValue(25)
+                self._preview_grid_items.append(item)
+                
+    def clear_preview_grid(self):
+        """清除临时网格预览"""
+        for item in self._preview_grid_items:
+            self.scene.removeItem(item)
+        self._preview_grid_items.clear()
     
     def add_sprite_rect(self, name: str, rect: Tuple[int, int, int, int],
                          selected: bool = False, for_anim: bool = False):
@@ -667,8 +690,9 @@ class BulletAnimEditor(QWidget):
     
     data_changed = pyqtSignal()
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_window=None):
         super().__init__(parent)
+        self.app_window = app_window
         self._anim: Optional[BulletAnimData] = None
         self._setup_ui()
     
@@ -680,6 +704,11 @@ class BulletAnimEditor(QWidget):
         self.name_edit.textChanged.connect(self._on_change)
         form.addRow("名称:", self.name_edit)
         
+        self.import_combo = QComboBox()
+        self.import_combo.addItem("(无)", "")
+        self.import_combo.currentIndexChanged.connect(self._on_import_anim)
+        form.addRow("从已有动画导入:", self.import_combo)
+        
         self.frames_edit = QLineEdit()
         self.frames_edit.setPlaceholderText("逗号分隔精灵名: sprite_0,sprite_1,...")
         self.frames_edit.textChanged.connect(self._on_change)
@@ -689,7 +718,7 @@ class BulletAnimEditor(QWidget):
         self.duration_spin.setRange(1, 60)
         self.duration_spin.setValue(4)
         self.duration_spin.valueChanged.connect(self._on_change)
-        form.addRow("帧间隔:", self.duration_spin)
+        form.addRow("帧间隔(游戏帧):", self.duration_spin)
         
         self.loop_check = QCheckBox("循环")
         self.loop_check.setChecked(True)
@@ -706,6 +735,33 @@ class BulletAnimEditor(QWidget):
         
         layout.addLayout(form)
     
+    def refresh_combos(self):
+        """刷新导入下拉列表"""
+        if not self.app_window: return
+        self.import_combo.blockSignals(True)
+        self.import_combo.clear()
+        self.import_combo.addItem("(无)", "")
+        for anim in self.app_window.player_data.animations.keys():
+            self.import_combo.addItem(anim, anim)
+        self.import_combo.blockSignals(False)
+        
+    def _on_import_anim(self, idx: int):
+        anim_name = self.import_combo.currentData()
+        if not anim_name or not self.app_window or not self._anim: return
+        
+        # 从 player_data.animations 中复制
+        source_anim = self.app_window.player_data.animations.get(anim_name)
+        if source_anim:
+            self.frames_edit.setText(",".join(source_anim.frames))
+            # BulletAnimData 使用 frame_duration (游戏帧)
+            # AnimationData 提供 fps (动画帧每秒)，转换为 duration(游戏帧) 
+            # 60fps 游戏，duration = 60 // fps
+            fps = source_anim.fps if source_anim.fps > 0 else 8
+            dur = max(1, 60 // fps)
+            self.duration_spin.setValue(dur)
+            self.loop_check.setChecked(source_anim.loop)
+            self.import_combo.setCurrentIndex(0) # 导入完归位
+            
     def set_anim(self, anim: BulletAnimData):
         self._anim = anim
         self.blockSignals(True)
@@ -714,6 +770,7 @@ class BulletAnimEditor(QWidget):
         self.duration_spin.setValue(anim.frame_duration)
         self.loop_check.setChecked(anim.loop)
         self.hitbox_spin.setValue(anim.hitbox_radius)
+        self.refresh_combos()
         self.blockSignals(False)
     
     def _on_change(self):
@@ -735,8 +792,9 @@ class OptionAnimEditor(QWidget):
     
     data_changed = pyqtSignal()
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_window=None):
         super().__init__(parent)
+        self.app_window = app_window
         self._anim: Optional[OptionAnimData] = None
         self._setup_ui()
     
@@ -748,6 +806,11 @@ class OptionAnimEditor(QWidget):
         self.name_edit.textChanged.connect(self._on_change)
         form.addRow("名称:", self.name_edit)
         
+        self.import_combo = QComboBox()
+        self.import_combo.addItem("(无)", "")
+        self.import_combo.currentIndexChanged.connect(self._on_import_anim)
+        form.addRow("从已有动画导入:", self.import_combo)
+        
         self.frames_edit = QLineEdit()
         self.frames_edit.setPlaceholderText("逗号分隔精灵名")
         self.frames_edit.textChanged.connect(self._on_change)
@@ -757,7 +820,7 @@ class OptionAnimEditor(QWidget):
         self.duration_spin.setRange(1, 60)
         self.duration_spin.setValue(8)
         self.duration_spin.valueChanged.connect(self._on_change)
-        form.addRow("帧间隔:", self.duration_spin)
+        form.addRow("帧间隔(游戏帧):", self.duration_spin)
         
         self.loop_check = QCheckBox("循环")
         self.loop_check.setChecked(True)
@@ -771,6 +834,30 @@ class OptionAnimEditor(QWidget):
         form.addRow("渲染尺寸(px):", self.size_spin)
         
         layout.addLayout(form)
+        
+    def refresh_combos(self):
+        """刷新导入下拉列表"""
+        if not self.app_window: return
+        self.import_combo.blockSignals(True)
+        self.import_combo.clear()
+        self.import_combo.addItem("(无)", "")
+        for anim in self.app_window.player_data.animations.keys():
+            self.import_combo.addItem(anim, anim)
+        self.import_combo.blockSignals(False)
+        
+    def _on_import_anim(self, idx: int):
+        anim_name = self.import_combo.currentData()
+        if not anim_name or not self.app_window or not self._anim: return
+        
+        # 从 player_data.animations 中复制
+        source_anim = self.app_window.player_data.animations.get(anim_name)
+        if source_anim:
+            self.frames_edit.setText(",".join(source_anim.frames))
+            fps = source_anim.fps if source_anim.fps > 0 else 8
+            dur = max(1, 60 // fps)
+            self.duration_spin.setValue(dur)
+            self.loop_check.setChecked(source_anim.loop)
+            self.import_combo.setCurrentIndex(0)
     
     def set_anim(self, anim: OptionAnimData):
         self._anim = anim
@@ -780,6 +867,7 @@ class OptionAnimEditor(QWidget):
         self.duration_spin.setValue(anim.frame_duration)
         self.loop_check.setChecked(anim.loop)
         self.size_spin.setValue(anim.render_size_px)
+        self.refresh_combos()
         self.blockSignals(False)
     
     def _on_change(self):
@@ -1226,9 +1314,11 @@ class PlayerEditor(QMainWindow):
         # 进入步骤③时刷新精灵缩略图网格
         if idx == 2:
             self._refresh_sprite_thumb_grid()
-        # 进入步骤④时刷新行为绑定下拉框
+        # 进入步骤④时刷新行为绑定下拉框和动画导入下拉框
         if idx == 3:
             self._refresh_behavior_combos()
+            self.bullet_anim_editor.refresh_combos()
+            self.option_anim_editor.refresh_combos()
     
     def _wizard_prev(self):
         idx = self._wizard_stack.currentIndex()
@@ -1520,7 +1610,7 @@ class PlayerEditor(QMainWindow):
         self.bullet_anim_list.currentTextChanged.connect(self._on_bullet_anim_selected)
         ba_layout.addWidget(self.bullet_anim_list)
         
-        self.bullet_anim_editor = BulletAnimEditor()
+        self.bullet_anim_editor = BulletAnimEditor(app_window=self)
         self.bullet_anim_editor.data_changed.connect(self._on_bullet_anim_changed)
         ba_layout.addWidget(self.bullet_anim_editor)
         layout.addWidget(ba_group)
@@ -1541,7 +1631,7 @@ class PlayerEditor(QMainWindow):
         self.option_anim_list.currentTextChanged.connect(self._on_option_anim_selected)
         oa_layout.addWidget(self.option_anim_list)
         
-        self.option_anim_editor = OptionAnimEditor()
+        self.option_anim_editor = OptionAnimEditor(app_window=self)
         self.option_anim_editor.data_changed.connect(self._on_option_anim_changed)
         oa_layout.addWidget(self.option_anim_editor)
         layout.addWidget(oa_group)
@@ -2258,7 +2348,32 @@ class PlayerEditor(QMainWindow):
         buttons.rejected.connect(dialog.reject)
         dlg_layout.addWidget(buttons)
         
-        if dialog.exec_() == QDialog.Accepted:
+        # 实时预览函数
+        def _update_grid_preview():
+            self.sprite_view.set_preview_grid(
+                rows_spin.value(), cols_spin.value(),
+                start_x.value(), start_y.value(),
+                cell_w.value(), cell_h.value(),
+                gap_x.value(), gap_y.value()
+            )
+            
+        # 绑定值变化事件
+        rows_spin.valueChanged.connect(lambda _: _update_grid_preview())
+        cols_spin.valueChanged.connect(lambda _: _update_grid_preview())
+        start_x.valueChanged.connect(lambda _: _update_grid_preview())
+        start_y.valueChanged.connect(lambda _: _update_grid_preview())
+        cell_w.valueChanged.connect(lambda _: _update_grid_preview())
+        cell_h.valueChanged.connect(lambda _: _update_grid_preview())
+        gap_x.valueChanged.connect(lambda _: _update_grid_preview())
+        gap_y.valueChanged.connect(lambda _: _update_grid_preview())
+        
+        # 初始画一次预览网格
+        _update_grid_preview()
+        
+        res = dialog.exec_()
+        self.sprite_view.clear_preview_grid()
+        
+        if res == QDialog.Accepted:
             self._create_grid_sprites(
                 rows_spin.value(), cols_spin.value(),
                 start_x.value(), start_y.value(),
@@ -2810,10 +2925,12 @@ class PlayerEditor(QMainWindow):
     # ===== v3 子弹动画操作 =====
     def _add_bullet_anim(self):
         idx = len(self.player_data.bullet_anims)
-        name = f"bullet_anim_{idx}"
-        self.player_data.bullet_anims[name] = BulletAnimData(name=name)
+        name = f"bullet_{idx}"
+        self.player_data.bullet_anims[name] = BulletAnimData(name=name, frames=[])
         self.bullet_anim_list.addItem(name)
-
+        self.bullet_anim_list.setCurrentRow(self.bullet_anim_list.count() - 1)
+        self.bullet_anim_editor.refresh_combos()
+        
     def _delete_bullet_anim(self):
         item = self.bullet_anim_list.currentItem()
         if item:
@@ -2839,10 +2956,12 @@ class PlayerEditor(QMainWindow):
     # ===== v3 僚机动画操作 =====
     def _add_option_anim(self):
         idx = len(self.player_data.option_anims)
-        name = f"option_anim_{idx}"
-        self.player_data.option_anims[name] = OptionAnimData(name=name)
+        name = f"option_{idx}"
+        self.player_data.option_anims[name] = OptionAnimData(name=name, frames=[])
         self.option_anim_list.addItem(name)
-
+        self.option_anim_list.setCurrentRow(self.option_anim_list.count() - 1)
+        self.option_anim_editor.refresh_combos()
+        
     def _delete_option_anim(self):
         item = self.option_anim_list.currentItem()
         if item:

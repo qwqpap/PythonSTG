@@ -3,7 +3,10 @@
   "name": "tao",
   "description": "",
   "author": "",
-  "texture": "",
+  "textures": {
+    "player": "tao.png",
+    "bullet": "a879e99ad3cd527b35c8a7a489e4ed78.png"
+  },
   "render_size_px": 32,
   "render_downsample": false,
   "stats": {
@@ -19,11 +22,485 @@
     "bombs": 3,
     "power": 1.0
   },
-  "sprites": {},
+  "sprites": {
+    "player_0": {
+      "rect": [
+        0,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_1": {
+      "rect": [
+        32,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_2": {
+      "rect": [
+        64,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_3": {
+      "rect": [
+        96,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_4": {
+      "rect": [
+        128,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_5": {
+      "rect": [
+        160,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_6": {
+      "rect": [
+        192,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_7": {
+      "rect": [
+        224,
+        0,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_8": {
+      "rect": [
+        0,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_9": {
+      "rect": [
+        32,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_10": {
+      "rect": [
+        64,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_11": {
+      "rect": [
+        96,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_12": {
+      "rect": [
+        128,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_13": {
+      "rect": [
+        160,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_14": {
+      "rect": [
+        192,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_15": {
+      "rect": [
+        224,
+        48,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_16": {
+      "rect": [
+        0,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_17": {
+      "rect": [
+        32,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_18": {
+      "rect": [
+        64,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_19": {
+      "rect": [
+        96,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_20": {
+      "rect": [
+        128,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_21": {
+      "rect": [
+        160,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_22": {
+      "rect": [
+        192,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "player_23": {
+      "rect": [
+        224,
+        96,
+        32,
+        48
+      ],
+      "source": "player"
+    },
+    "sprite_0": {
+      "rect": [
+        0,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    },
+    "sprite_1": {
+      "rect": [
+        32,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    },
+    "sprite_2": {
+      "rect": [
+        64,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    },
+    "sprite_3": {
+      "rect": [
+        96,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    },
+    "auto_28": {
+      "rect": [
+        1,
+        17,
+        13,
+        14
+      ],
+      "source": "bullet"
+    },
+    "sprite_4": {
+      "rect": [
+        0,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    },
+    "sprite_5": {
+      "rect": [
+        32,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    },
+    "sprite_6": {
+      "rect": [
+        64,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    },
+    "sprite_7": {
+      "rect": [
+        96,
+        0,
+        32,
+        12
+      ],
+      "source": "bullet"
+    }
+  },
   "animations": {
     "transition_speed": 8.0,
-    "animations": {}
+    "full_tilt_frames": 8,
+    "animations": {
+      "bullet": {
+        "frames": [
+          "sprite_0",
+          "sprite_1",
+          "sprite_2",
+          "sprite_3",
+          "sprite_6"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "coplane": {
+        "frames": [
+          "auto_28"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "stand": {
+        "frames": [
+          "player_0",
+          "player_1",
+          "player_2",
+          "player_3",
+          "player_4",
+          "player_5",
+          "player_6",
+          "player_7"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "left_l": {
+        "frames": [
+          "player_8",
+          "player_9",
+          "player_10",
+          "player_11"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "right_l": {
+        "frames": [
+          "player_19",
+          "player_18",
+          "player_17",
+          "player_16"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "left": {
+        "frames": [
+          "player_12",
+          "player_13",
+          "player_14",
+          "player_15"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "right": {
+        "frames": [
+          "player_20",
+          "player_21",
+          "player_22",
+          "player_23"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "idle": {
+        "frames": [
+          "player_0",
+          "player_1",
+          "player_2",
+          "player_3",
+          "player_4",
+          "player_5",
+          "player_6",
+          "player_7"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "move_left": {
+        "frames": [
+          "player_8",
+          "player_9",
+          "player_10",
+          "player_11"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "move_left_full": {
+        "frames": [
+          "player_12",
+          "player_13",
+          "player_14",
+          "player_15"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "move_right": {
+        "frames": [
+          "player_19",
+          "player_18",
+          "player_17",
+          "player_16"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "move_right_full": {
+        "frames": [
+          "player_20",
+          "player_21",
+          "player_22",
+          "player_23"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      },
+      "focus": {
+        "frames": [
+          "player_0",
+          "player_1",
+          "player_2",
+          "player_3",
+          "player_4",
+          "player_5",
+          "player_6",
+          "player_7"
+        ],
+        "frame_duration": 9,
+        "loop": true
+      }
+    }
   },
-  "shot_types": {},
-  "options": []
+  "shot_types": {
+    "unfocused": {
+      "damage": 10,
+      "speed": 0.05,
+      "interval": 4,
+      "spread": 5,
+      "count": 2,
+      "sprite": "player_bullet"
+    }
+  },
+  "options": [],
+  "bullet_anims": {
+    "bullet": {
+      "frames": [
+        "sprite_0",
+        "sprite_1",
+        "sprite_2",
+        "sprite_3",
+        "sprite_6"
+      ],
+      "frame_duration": 8,
+      "loop": true,
+      "hitbox_radius": 0.02
+    }
+  },
+  "option_anims": {
+    "coplane": {
+      "frames": [
+        "auto_28"
+      ],
+      "frame_duration": 8,
+      "loop": true,
+      "render_size_px": 18.0
+    }
+  },
+  "skills": []
 }

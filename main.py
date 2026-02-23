@@ -10,7 +10,7 @@ import moderngl
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.core.window import GameWindow, FrameClock, EVENT_QUIT, EVENT_KEYDOWN
-from src.core.input_manager import KeyboardState, KEY_UP, KEY_DOWN, KEY_z, KEY_ESCAPE
+from src.core.input_manager import KeyboardState, KEY_UP, KEY_DOWN, KEY_z, KEY_ESCAPE, KEY_c
 from src.core.audio_backend import init_audio_backend
 from src.render import Renderer
 from src.game.bullet import BulletPool
@@ -94,7 +94,7 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
 
 def initialize_game_objects(audio_manager=None, background_renderer=None):
     """初始化游戏对象（玩家、子弹池、关卡管理器等）"""
-    player = load_player("orin")
+    player = load_player("tao")
     print(f"已加载玩家: {player.name}")
     bullet_pool = BulletPool(max_bullets=50000)
     laser_pool = LaserPool(max_lasers=100)
@@ -287,6 +287,40 @@ def main():
                                     # 返回主菜单
                                     game_result_state = "MAIN_MENU"
                                     running = False
+                        else:
+                            if event['key'] == KEY_c:
+                                dialog_active = False
+                                if stage_manager.current_stage:
+                                    dialog_state = stage_manager.current_stage.get_dialog_renderer()
+                                    dialog_active = dialog_state and hasattr(dialog_state, 'is_active') and dialog_state.is_active()
+                                
+                                if not dialog_active and not stage_manager.loading_info:
+                                    new_name = "tao" if player.name == "orin" else "orin"
+                                    old_pos = list(player.pos)
+                                    old_lives = player.lives
+                                    old_power = player.power
+                                    old_invinc = player.invincible_timer
+                                    old_bullet_pool = player.bullet_pool
+                                    
+                                    player = load_player(new_name)
+                                    player.pos = old_pos
+                                    player.lives = old_lives
+                                    player.power = old_power
+                                    player.invincible_timer = max(old_invinc, 0.5)  # 给个短暂无敌防判定死
+                                    player.bullet_pool = old_bullet_pool
+                                    player.on_bomb_callback = _on_player_bomb
+                                    
+                                    # 强制清空渲染器的纹理缓存，以便下一次渲染加载新自机的图片
+                                    if hasattr(renderer, 'player_texture') and renderer.player_texture:
+                                        renderer.player_texture.release()
+                                        renderer.player_texture = None
+                                    if hasattr(renderer, 'player_bullet_texture') and renderer.player_bullet_texture:
+                                        renderer.player_bullet_texture.release()
+                                        renderer.player_bullet_texture = None
+                                        
+                                    stage_manager._engine_refs['player'] = player
+                                    if stage_manager.current_context:
+                                        stage_manager.current_context.player = player
                 
                 keys = KeyboardState(window.get_key_states())
 
@@ -311,7 +345,16 @@ def main():
 
                 if not paused:
                     if not dialog_active:
-                        player.update(dt, keys)
+                        # 收集敌人列表用于追踪弹
+                        _enemies_for_homing = []
+                        if stage_manager.current_context:
+                            _enemies_for_homing.extend(stage_manager.current_context.get_enemy_scripts())
+                        if stage_manager.current_stage and stage_manager.current_stage._current_boss:
+                            _boss = stage_manager.current_stage._current_boss
+                            if _boss._active:
+                                _enemies_for_homing.append(_boss)
+
+                        player.update(dt, keys, enemies=_enemies_for_homing or None)
                         bullet_pool.update(dt)
                         laser_pool.update()
                         item_pool.update(player.pos[0], player.pos[1], dt)

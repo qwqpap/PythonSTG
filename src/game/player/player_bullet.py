@@ -167,10 +167,51 @@ class PlayerBulletPool:
             self.free_indices.append(idx)
             self.active_count -= 1
     
+    _enemy_dtype = np.dtype([
+        ('pos', 'f4', 2),
+        ('alive', 'i4'),
+    ])
+
+    # 空的敌人数组（避免向 njit 传 None，防止类型推断问题）
+    _empty_enemy_data = np.zeros(0, dtype=_enemy_dtype)
+
+    def build_enemy_data(self, enemy_list):
+        """从敌人对象列表构建 njit 可用的 numpy 结构数组"""
+        if not enemy_list:
+            return self._empty_enemy_data
+        n = len(enemy_list)
+        arr = np.zeros(n, dtype=self._enemy_dtype)
+        count = 0
+        for i, e in enumerate(enemy_list):
+            alive = getattr(e, '_active', getattr(e, 'alive', True))
+            if not alive:
+                continue
+            # EnemyScript 用 .x/.y，Boss/Entity 用 .pos
+            pos = getattr(e, 'pos', None)
+            if pos is not None:
+                arr[i]['pos'][0] = float(pos[0])
+                arr[i]['pos'][1] = float(pos[1])
+                arr[i]['alive'] = 1
+                count += 1
+            elif hasattr(e, 'x') and hasattr(e, 'y'):
+                arr[i]['pos'][0] = float(e.x)
+                arr[i]['pos'][1] = float(e.y)
+                arr[i]['alive'] = 1
+                count += 1
+        return arr
+
     def update(self, dt: float, enemies=None):
+        if enemies is not None and not isinstance(enemies, np.ndarray):
+            # enemies 是 Python 对象列表，转成 numpy 数组
+            enemies_data = self.build_enemy_data(enemies)
+        elif enemies is not None:
+            enemies_data = enemies
+        else:
+            enemies_data = self._empty_enemy_data
+
         _update_player_bullets(
             self.data, dt,
-            enemies.data if enemies else None,
+            enemies_data,
             self.TYPE_HOMING,
             self.anim_registry.frame_table,
             self.anim_registry.frame_count,

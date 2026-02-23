@@ -20,6 +20,7 @@ KEY_RSHIFT = glfw.KEY_RIGHT_SHIFT
 # Action keys
 KEY_z = glfw.KEY_Z
 KEY_x = glfw.KEY_X
+KEY_c = glfw.KEY_C
 KEY_ESCAPE = glfw.KEY_ESCAPE
 KEY_RETURN = glfw.KEY_ENTER
 
@@ -39,6 +40,7 @@ _KEY_NAME_MAP = {
     'K_RSHIFT': KEY_RSHIFT,
     'K_z': KEY_z,
     'K_x': KEY_x,
+    'K_c': KEY_c,
     'K_ESCAPE': KEY_ESCAPE,
     'K_RETURN': KEY_RETURN,
     'K_w': KEY_w,
