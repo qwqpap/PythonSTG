@@ -1,0 +1,3944 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://qwqpap.github.io/PythonSTG/STAGE_SCRIPTING_GUIDE/">
+      
+      
+        <link rel="prev" href="../getting-started/">
+      
+      
+        <link rel="next" href="../architecture/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+    
+    
+      
+        <title>弹幕脚本开发指南 - pystg Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#pystg" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="pystg Docs" class="md-header__button md-logo" aria-label="pystg Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pystg Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              弹幕脚本开发指南
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/qwqpap/PythonSTG" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="pystg Docs" class="md-nav__button md-logo" aria-label="pystg Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    pystg Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/qwqpap/PythonSTG" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首页
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    快速开始
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    弹幕脚本开发指南
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    弹幕脚本开发指南
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        目录
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 架构概览
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. 架构概览">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心原则
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 目录结构规范
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 快速开始：5 分钟写出你的第一个符卡
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 快速开始：5 分钟写出你的第一个符卡">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第 1 步：创建符卡脚本
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第 2 步：在 Boss 配置中引用
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第 3 步：运行游戏看效果
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 核心概念
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 核心概念">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-coroutine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 协程（Coroutine）——弹幕的"时间控制器"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-spellcardboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 SpellCard（符卡）——Boss 的攻击模式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-nonspellboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 NonSpell（非符）——Boss 的普通攻击
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Wave（波次）——道中弹幕
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 EnemyScript（敌人脚本）——可复用的小怪行为
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-spellcard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 编写符卡（SpellCard）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 编写符卡（SpellCard）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 基本模板
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-run-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 在 run() 中可用的 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5.2 在 run() 中可用的 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        发弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        时间控制
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boss 操作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        音效
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        辅助
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 弹幕设计技巧
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5.3 弹幕设计技巧">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        分阶段难度递增
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boss_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boss 边移动边发弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        抽取辅助方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 编写波次（Wave）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 编写波次（Wave）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 基本模板
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-wave-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Wave 可用 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 兼容旧版函数风格
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 编写敌人脚本（EnemyScript）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 编写敌人脚本（EnemyScript）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 基本模板
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-enemyscript-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 EnemyScript 可用 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.2 EnemyScript 可用 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        移动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        发弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 编写 Boss 配置
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 编写 Boss 配置">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        字段说明
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-stagejson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 编写关卡配置（stage.json）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 编写关卡配置（stage.json）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section 类型
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 弹幕 API 参考
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 弹幕 API 参考">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selffire-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        self.fire(...) - 发射单发子弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bullet_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        弹幕类型（bullet_type）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#color" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        颜色（color）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 坐标系统
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. 坐标系统">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        角度系统
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-stage-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 完整示例：Stage 1 逐文件解析
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. 完整示例：Stage 1 逐文件解析">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121-stagejson-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 stage.json - 时间线
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122-wavesopening_wavepy-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 waves/opening_wave.py - 开场波次
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123-spellcardsnonspell_1py-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 spellcards/nonspell_1.py - 第一段非符
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124-spellcardsspell_1py-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 spellcards/spell_1.py - 月符
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#125-spellcardsspell_2py-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.5 spellcards/spell_2.py - 夜符
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#126-bossesbossjson-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.6 bosses/boss.json - 关底 Boss 配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. 常见问题
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. 常见问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#q-await-yield" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: await 和 yield 应该用哪个？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么让弹幕变成白色道具？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么获取玩家位置？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么发射"曲线弹"？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 一个波次脚本可以不用类吗？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 我新增了一个 stage，怎么让游戏加载它？
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. 从零创建一个新关卡
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14. 从零创建一个新关卡">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 1：创建目录
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-stagejson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 2：编写 stage.json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 3：编写波次脚本
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 4：编写符卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 5：编写 Boss 配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 6：创建加载脚本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. 音频系统
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. 音频系统">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#151" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.1 内容作者需要知道的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#152-gameaudiobank" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.2 全局音效（GameAudioBank）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#153-stageaudiobank" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.3 关卡私有音频（StageAudioBank）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#154" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.4 在脚本中使用音频
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.4 在脚本中使用音频">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#spellcard-nonspell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SpellCard / NonSpell 中
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wave 中
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnemyScript 中
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ctx-bgm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        通过 ctx 控制 BGM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#155" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.5 为新关卡添加音频
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        附录：文件分层一览
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    架构概览
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENEMY_PRESET_SYSTEM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    敌人预设系统
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TEXTURE_ASSET_SYSTEM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    纹理资产系统
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../EDITOR_TOOLS_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    编辑器工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        目录
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 架构概览
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. 架构概览">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心原则
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 目录结构规范
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 快速开始：5 分钟写出你的第一个符卡
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 快速开始：5 分钟写出你的第一个符卡">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第 1 步：创建符卡脚本
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第 2 步：在 Boss 配置中引用
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第 3 步：运行游戏看效果
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 核心概念
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 核心概念">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-coroutine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 协程（Coroutine）——弹幕的"时间控制器"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-spellcardboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 SpellCard（符卡）——Boss 的攻击模式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-nonspellboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 NonSpell（非符）——Boss 的普通攻击
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Wave（波次）——道中弹幕
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 EnemyScript（敌人脚本）——可复用的小怪行为
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-spellcard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 编写符卡（SpellCard）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 编写符卡（SpellCard）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 基本模板
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-run-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 在 run() 中可用的 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5.2 在 run() 中可用的 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        发弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        时间控制
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boss 操作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        音效
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        辅助
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 弹幕设计技巧
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5.3 弹幕设计技巧">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        分阶段难度递增
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boss_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boss 边移动边发弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        抽取辅助方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 编写波次（Wave）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 编写波次（Wave）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 基本模板
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-wave-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Wave 可用 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 兼容旧版函数风格
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 编写敌人脚本（EnemyScript）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 编写敌人脚本（EnemyScript）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 基本模板
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-enemyscript-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 EnemyScript 可用 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7.2 EnemyScript 可用 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        移动
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        发弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 编写 Boss 配置
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 编写 Boss 配置">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        字段说明
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-stagejson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 编写关卡配置（stage.json）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 编写关卡配置（stage.json）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section 类型
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 弹幕 API 参考
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 弹幕 API 参考">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selffire-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        self.fire(...) - 发射单发子弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bullet_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        弹幕类型（bullet_type）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#color" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        颜色（color）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 坐标系统
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. 坐标系统">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        角度系统
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-stage-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 完整示例：Stage 1 逐文件解析
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. 完整示例：Stage 1 逐文件解析">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121-stagejson-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 stage.json - 时间线
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122-wavesopening_wavepy-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 waves/opening_wave.py - 开场波次
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123-spellcardsnonspell_1py-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 spellcards/nonspell_1.py - 第一段非符
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124-spellcardsspell_1py-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 spellcards/spell_1.py - 月符
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#125-spellcardsspell_2py-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.5 spellcards/spell_2.py - 夜符
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#126-bossesbossjson-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.6 bosses/boss.json - 关底 Boss 配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. 常见问题
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. 常见问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#q-await-yield" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: await 和 yield 应该用哪个？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么让弹幕变成白色道具？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么获取玩家位置？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么发射"曲线弹"？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 一个波次脚本可以不用类吗？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 我新增了一个 stage，怎么让游戏加载它？
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. 从零创建一个新关卡
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14. 从零创建一个新关卡">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 1：创建目录
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-stagejson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 2：编写 stage.json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 3：编写波次脚本
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 4：编写符卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 5：编写 Boss 配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步骤 6：创建加载脚本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. 音频系统
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. 音频系统">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#151" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.1 内容作者需要知道的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#152-gameaudiobank" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.2 全局音效（GameAudioBank）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#153-stageaudiobank" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.3 关卡私有音频（StageAudioBank）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#154" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.4 在脚本中使用音频
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15.4 在脚本中使用音频">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#spellcard-nonspell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SpellCard / NonSpell 中
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wave 中
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnemyScript 中
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ctx-bgm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        通过 ctx 控制 BGM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#155" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15.5 为新关卡添加音频
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        附录：文件分层一览
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="pystg">pystg 关卡脚本编写指南<a class="headerlink" href="#pystg" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>本文档面向<strong>关卡内容创作者</strong>——只需要关心弹幕/敌人/Boss 的设计，不需要了解引擎内部。</p>
+</blockquote>
+<hr />
+<h2 id="_1">目录<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-架构概览">架构概览</a></li>
+<li><a href="#2-目录结构规范">目录结构规范</a></li>
+<li><a href="#3-快速开始5-分钟写出你的第一个符卡">快速开始：5 分钟写出你的第一个符卡</a></li>
+<li><a href="#4-核心概念">核心概念</a></li>
+<li><a href="#5-编写符卡spellcard">编写符卡（SpellCard）</a></li>
+<li><a href="#6-编写波次wave">编写波次（Wave）</a></li>
+<li><a href="#7-编写敌人脚本enemyscript">编写敌人脚本（EnemyScript）</a></li>
+<li><a href="#8-编写-boss-配置">编写 Boss 配置</a></li>
+<li><a href="#9-编写关卡配置stagejson">编写关卡配置（stage.json）</a></li>
+<li><a href="#10-弹幕-api-参考">弹幕 API 参考</a></li>
+<li><a href="#11-坐标系统">坐标系统</a></li>
+<li><a href="#12-完整示例stage-1-逐文件解析">完整示例：Stage 1 逐文件解析</a></li>
+<li><a href="#13-常见问题">常见问题</a></li>
+<li><a href="#14-从零创建一个新关卡">从零创建一个新关卡</a></li>
+<li><a href="#15-音频系统">音频系统</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 架构概览<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>pystg 的关卡系统采用<strong>引擎层 / 内容层</strong>分离的设计：</p>
+<div class="codehilite"><pre><span></span><code>┌──────────────────────────────────────────────────┐
+│                    引擎层 (src/)                   │
+│  提供能力，不关心具体关卡内容                        │
+│                                                    │
+│  Bullet（子弹池）  Player（玩家）  Renderer（渲染）  │
+│  Boss 基类        Enemy 基类     SpellCard 基类    │
+│  Wave 基类        Stage 基类     Coroutine（协程）  │
+│  StageContext（上下文桥梁）                         │
+└─────────────────────┬────────────────────────────┘
+                      │ StageContext
+                      │ （引擎向内容提供的统一接口）
+┌─────────────────────▼────────────────────────────┐
+│              内容层 (game_content/)                │
+│  只描述&quot;发生什么&quot;，不关心&quot;怎么实现&quot;                   │
+│                                                    │
+│  波次脚本    敌人定义    Boss配置    符卡脚本        │
+│  对话内容    时间线      资源引用                    │
+└──────────────────────────────────────────────────┘
+</code></pre></div>
+
+<h3 id="_2">核心原则<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>规则</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ 内容层只用基类 API</td>
+<td><code>self.fire()</code>, <code>self.wait()</code>, <code>self.move_to()</code></td>
+</tr>
+<tr>
+<td>✅ 内容层通过 <code>ctx</code> 与引擎交互</td>
+<td><code>ctx.create_bullet()</code>, <code>ctx.get_player()</code></td>
+</tr>
+<tr>
+<td>❌ 内容层不能 import 引擎模块</td>
+<td>不能出现 <code>from src.game.bullet import BulletPool</code></td>
+</tr>
+<tr>
+<td>❌ 内容层不处理渲染/碰撞/物理</td>
+<td>这些是引擎的事</td>
+</tr>
+</tbody>
+</table>
+<p><strong>你需要 import 的只有基类：</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.spellcard</span><span class="w"> </span><span class="kn">import</span> <span class="n">SpellCard</span><span class="p">,</span> <span class="n">NonSpell</span>   <span class="c1"># 符卡</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.wave_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Wave</span>                   <span class="c1"># 波次</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.enemy_script</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnemyScript</span>         <span class="c1"># 敌人脚本</span>
+</code></pre></div>
+
+<hr />
+<h2 id="2">2. 目录结构规范<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<p>每个关卡是 <code>game_content/stages/</code> 下的一个文件夹：</p>
+<div class="codehilite"><pre><span></span><code>game_content/stages/
+├── stage1/                      ← 关卡 1
+│   ├── __init__.py              ← 关卡元信息
+│   ├── stage.json               ← 时间线（定义关卡流程）
+│   │
+│   ├── waves/                   ← 道中波次脚本
+│   │   ├── opening_wave.py      ← 开场波次
+│   │   ├── fairy_wave.py        ← 妖精编队
+│   │   └── post_midboss_wave.py ← 道中Boss后收尾
+│   │
+│   ├── bosses/                  ← Boss 配置
+│   │   ├── midboss.json         ← 道中Boss的符卡序列
+│   │   └── boss.json            ← 关底Boss的符卡序列
+│   │
+│   ├── spellcards/              ← 符卡脚本（Boss 的攻击模式）
+│   │   ├── nonspell_1.py        ← 第1段非符
+│   │   ├── spell_1.py           ← 月符「Moonlight Ray」
+│   │   └── spell_2.py           ← 夜符「Night Bird」
+│   │
+│   ├── enemies/                 ← 可复用的敌人脚本
+│   │   └── fairy.py             ← 红/蓝妖精
+│   │
+│   ├── dialogue/                ← 对话脚本
+│   │   └── pre_boss.py          ← Boss前对话
+│   │
+│   └── audio/                   ← 关卡私有音频（可选）
+│       ├── se/                  ← 关卡专属音效
+│       └── music/               ← 关卡专属 BGM
+│
+├── stage2/                      ← 关卡 2（同样结构）
+│   ├── stage.json
+│   ├── waves/
+│   ├── bosses/
+│   ├── spellcards/
+│   ├── enemies/
+│   └── dialogue/
+│
+└── stage3/                      ← 关卡 3
+    └── ...
+</code></pre></div>
+
+<p><strong>关键规则：<code>game_content/</code> 下的文件不能出现引擎逻辑！</strong><br />
+只允许出现：弹幕定义、敌人行为、Boss配置、时间线、对话、音频资源、资源引用。</p>
+<hr />
+<h2 id="3-5">3. 快速开始：5 分钟写出你的第一个符卡<a class="headerlink" href="#3-5" title="Permanent link">&para;</a></h2>
+<h3 id="1_1">第 1 步：创建符卡脚本<a class="headerlink" href="#1_1" title="Permanent link">&para;</a></h3>
+<p>在 <code>game_content/stages/stage1/spellcards/</code> 下新建 <code>my_spell.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="sd">&quot;&quot;&quot;我的第一个符卡&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.spellcard</span><span class="w"> </span><span class="kn">import</span> <span class="n">SpellCard</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MySpell</span><span class="p">(</span><span class="n">SpellCard</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;火符「My First Spell」&quot;</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">1000</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="mi">45</span>
+    <span class="n">bonus</span> <span class="o">=</span> <span class="mi">500000</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Boss 移动到上方中央&quot;&quot;&quot;</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;弹幕逻辑&quot;&quot;&quot;</span>
+        <span class="n">angle</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># 发射 12-way 红色圆弹</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span>
+                <span class="n">count</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span>
+                <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                <span class="n">start_angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span>
+                <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span>
+                <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span>
+            <span class="p">)</span>
+            <span class="n">angle</span> <span class="o">+=</span> <span class="mi">10</span>  <span class="c1"># 每次旋转</span>
+
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">15</span><span class="p">)</span>  <span class="c1"># 等 15 帧（0.25秒）</span>
+
+
+<span class="c1"># 必须注册！</span>
+<span class="n">spellcard</span> <span class="o">=</span> <span class="n">MySpell</span>
+</code></pre></div>
+
+<h3 id="2-boss">第 2 步：在 Boss 配置中引用<a class="headerlink" href="#2-boss" title="Permanent link">&para;</a></h3>
+<p>编辑 <code>bosses/boss.json</code>，在 <code>phases</code> 数组中添加：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;spellcard&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">45</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my_spell&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;火符「My First Spell」&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;bonus&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">500000</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;practice_unlock&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="3">第 3 步：运行游戏看效果<a class="headerlink" href="#3" title="Permanent link">&para;</a></h3>
+<p>就这么简单。不需要改引擎代码，不需要注册任何东西。<br />
+<code>boss.json</code> 里的 <code>script</code> 字段会自动加载对应的 Python 文件。</p>
+<hr />
+<h2 id="4">4. 核心概念<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<h3 id="41-coroutine">4.1 协程（Coroutine）——弹幕的"时间控制器"<a class="headerlink" href="#41-coroutine" title="Permanent link">&para;</a></h3>
+<p>pystg 使用 Python 的 <code>async/await</code> 语法来控制弹幕的时间节奏。<strong>每一帧</strong>游戏会推进你的协程一步。</p>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="c1"># 这行在第 1 帧执行</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+
+    <span class="c1"># 暂停 30 帧（0.5秒），然后继续</span>
+    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+
+    <span class="c1"># 这行在第 31 帧执行</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">3.0</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong><code>await self.wait(N)</code></strong> = 暂停 N 帧。60帧 = 1秒。</p>
+<h3 id="42-spellcardboss">4.2 SpellCard（符卡）——Boss 的攻击模式<a class="headerlink" href="#42-spellcardboss" title="Permanent link">&para;</a></h3>
+<p>一个符卡就是 Boss 的一段攻击。它有：
+- <strong>HP</strong>：被打多少下结束
+- <strong>时间限制</strong>：超时自动结束
+- <strong>bonus</strong>：满血击破的奖励分数</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySpell</span><span class="p">(</span><span class="n">SpellCard</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;符卡名&quot;</span>     <span class="c1"># 符卡宣言时显示</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">1200</span>           <span class="c1"># Boss 在这段的 HP</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="mi">60</span>     <span class="c1"># 60秒时间限制</span>
+    <span class="n">bonus</span> <span class="o">=</span> <span class="mi">1000000</span>     <span class="c1"># 击破奖励</span>
+</code></pre></div>
+
+<h3 id="43-nonspellboss">4.3 NonSpell（非符）——Boss 的普通攻击<a class="headerlink" href="#43-nonspellboss" title="Permanent link">&para;</a></h3>
+<p>和符卡类似，但：
+- 没有名字显示
+- 奖励较少
+- 默认不能在练习模式单独练</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.spellcard</span><span class="w"> </span><span class="kn">import</span> <span class="n">NonSpell</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyNonSpell</span><span class="p">(</span><span class="n">NonSpell</span><span class="p">):</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">800</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="mi">30</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="o">...</span>
+</code></pre></div>
+
+<h3 id="44-wave">4.4 Wave（波次）——道中弹幕<a class="headerlink" href="#44-wave" title="Permanent link">&para;</a></h3>
+<p>不绑定 Boss 的弹幕脚本，用于道中小怪阶段。</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.wave_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Wave</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyWave</span><span class="p">(</span><span class="n">Wave</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">x</span><span class="o">=-</span><span class="mf">0.7</span> <span class="o">+</span> <span class="n">i</span><span class="o">*</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="45-enemyscript">4.5 EnemyScript（敌人脚本）——可复用的小怪行为<a class="headerlink" href="#45-enemyscript" title="Permanent link">&para;</a></h3>
+<p>定义一个敌人从出生到消失的完整行为。</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.enemy_script</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnemyScript</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">RedFairy</span><span class="p">(</span><span class="n">EnemyScript</span><span class="p">):</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">30</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="mi">100</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-spellcard">5. 编写符卡（SpellCard）<a class="headerlink" href="#5-spellcard" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 基本模板<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">符卡名「英文名」</span>
+
+<span class="sd">[设计思路简述]</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.spellcard</span><span class="w"> </span><span class="kn">import</span> <span class="n">SpellCard</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MySpellCard</span><span class="p">(</span><span class="n">SpellCard</span><span class="p">):</span>
+    <span class="c1"># ===== 元信息 =====</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;符卡名「English Name」&quot;</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">1200</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="mi">60</span>        <span class="c1"># 秒</span>
+    <span class="n">bonus</span> <span class="o">=</span> <span class="mi">1000000</span>
+
+    <span class="c1"># ===== 初始化 =====</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;符卡开始前的准备（可选）&quot;&quot;&quot;</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+
+    <span class="c1"># ===== 主逻辑 =====</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;弹幕主循环&quot;&quot;&quot;</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># 发弹</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+            <span class="c1"># 等待</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+
+
+<span class="c1"># 注册</span>
+<span class="n">spellcard</span> <span class="o">=</span> <span class="n">MySpellCard</span>
+</code></pre></div>
+
+<h3 id="52-run-api">5.2 在 <code>run()</code> 中可用的 API<a class="headerlink" href="#52-run-api" title="Permanent link">&para;</a></h3>
+<h4 id="_3">发弹<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>self.fire(...)</code></td>
+<td>发射单发子弹</td>
+<td><code>self.fire(angle=90, speed=2.0, color="red")</code></td>
+</tr>
+<tr>
+<td><code>self.fire_circle(...)</code></td>
+<td>发射圆形弹幕</td>
+<td><code>self.fire_circle(count=20, speed=2.5)</code></td>
+</tr>
+<tr>
+<td><code>self.fire_arc(...)</code></td>
+<td>发射扇形弹幕</td>
+<td><code>self.fire_arc(count=5, center_angle=-90, arc_angle=60)</code></td>
+</tr>
+<tr>
+<td><code>self.fire_at_player(...)</code></td>
+<td>发射自机狙</td>
+<td><code>self.fire_at_player(speed=3.0)</code></td>
+</tr>
+<tr>
+<td><code>self.clear_bullets()</code></td>
+<td>清除此符卡的所有子弹</td>
+<td><code>self.clear_bullets(to_items=True)</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="_4">时间控制<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await self.wait(frames)</code></td>
+<td>等待 N 帧</td>
+<td><code>await self.wait(30)</code></td>
+</tr>
+<tr>
+<td><code>await self.wait_seconds(sec)</code></td>
+<td>等待 N 秒</td>
+<td><code>await self.wait_seconds(1.5)</code></td>
+</tr>
+<tr>
+<td><code>await self.wait_until(cond)</code></td>
+<td>等待条件满足</td>
+<td><code>await self.wait_until(lambda: self.time &gt; 300)</code></td>
+</tr>
+<tr>
+<td><code>self.time</code></td>
+<td>当前帧数</td>
+<td><code>if self.time % 60 == 0:</code></td>
+</tr>
+<tr>
+<td><code>self.time_seconds</code></td>
+<td>当前秒数</td>
+<td><code>if self.time_seconds &gt; 15:</code></td>
+</tr>
+<tr>
+<td><code>self.time_remaining</code></td>
+<td>剩余秒数</td>
+<td><code>if self.time_remaining &lt; 10:</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="boss">Boss 操作<a class="headerlink" href="#boss" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>self.boss.x</code>, <code>self.boss.y</code></td>
+<td>Boss 当前位置</td>
+<td><code>x = self.boss.x</code></td>
+</tr>
+<tr>
+<td><code>await self.boss.move_to(x, y, duration)</code></td>
+<td>平滑移动 Boss</td>
+<td><code>await self.boss.move_to(0.3, 0.5, 60)</code></td>
+</tr>
+<tr>
+<td><code>self.boss.move_to_instant(x, y)</code></td>
+<td>瞬移 Boss</td>
+<td><code>self.boss.move_to_instant(0, 0.5)</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="_5">音效<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>self.play_se(name)</code></td>
+<td>播放音效（Stage私有优先，fallback全局）</td>
+</tr>
+<tr>
+<td><code>self.play_se(name, volume=0.5)</code></td>
+<td>指定音量播放音效</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_6">辅助<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>self.angle_to_player()</code></td>
+<td>计算到玩家的角度（度）</td>
+</tr>
+<tr>
+<td><code>self.ctx.get_player()</code></td>
+<td>获取玩家位置（<code>.x</code>, <code>.y</code>）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53">5.3 弹幕设计技巧<a class="headerlink" href="#53" title="Permanent link">&para;</a></h3>
+<h4 id="_7">分阶段难度递增<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="n">angle</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="c1"># 基础弹幕</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">start_angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 15秒后增加自机狙</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">time_seconds</span> <span class="o">&gt;</span> <span class="mi">15</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span><span class="n">speed</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 30秒后增加螺旋臂</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">time_seconds</span> <span class="o">&gt;</span> <span class="mi">30</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">arm</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">4</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=</span><span class="n">angle</span> <span class="o">+</span> <span class="n">arm</span> <span class="o">*</span> <span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;purple&quot;</span><span class="p">)</span>
+
+        <span class="n">angle</span> <span class="o">+=</span> <span class="mi">7</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="boss_1">Boss 边移动边发弹<a class="headerlink" href="#boss_1" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="c1"># 随机目标位置</span>
+        <span class="n">target_x</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)</span>
+        <span class="n">target_y</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">0.3</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">)</span>
+
+        <span class="c1"># 同时移动和发弹</span>
+        <span class="n">move_gen</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="n">target_x</span><span class="p">,</span> <span class="n">target_y</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">90</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">90</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="nb">next</span><span class="p">(</span><span class="n">move_gen</span><span class="p">)</span>  <span class="c1"># 推进移动</span>
+            <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+                <span class="k">pass</span>
+
+            <span class="c1"># 每 6 帧发一轮</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">time</span> <span class="o">%</span> <span class="mi">6</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span><span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+
+            <span class="k">yield</span>  <span class="c1"># ← 注意：并行操作时用 yield 而不是 await</span>
+
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="_8">抽取辅助方法<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySpell</span><span class="p">(</span><span class="n">SpellCard</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_wave_attack</span><span class="p">()</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_spiral_attack</span><span class="p">()</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_wave_attack</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;波浪攻击&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">wave</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span>
+                <span class="n">count</span><span class="o">=</span><span class="mi">20</span> <span class="o">+</span> <span class="n">wave</span> <span class="o">*</span> <span class="mi">4</span><span class="p">,</span>
+                <span class="n">speed</span><span class="o">=</span><span class="mf">1.5</span> <span class="o">+</span> <span class="n">wave</span> <span class="o">*</span> <span class="mf">0.2</span><span class="p">,</span>
+                <span class="n">start_angle</span><span class="o">=</span><span class="n">wave</span> <span class="o">*</span> <span class="mi">7</span><span class="p">,</span>
+                <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span>
+            <span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">6</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_spiral_attack</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;螺旋攻击&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">60</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">arm</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+                    <span class="n">angle</span><span class="o">=</span><span class="n">step</span> <span class="o">*</span> <span class="mi">13</span> <span class="o">+</span> <span class="n">arm</span> <span class="o">*</span> <span class="mi">120</span><span class="p">,</span>
+                    <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;purple&quot;</span>
+                <span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="6-wave">6. 编写波次（Wave）<a class="headerlink" href="#6-wave" title="Permanent link">&para;</a></h2>
+<h3 id="61">6.1 基本模板<a class="headerlink" href="#61" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">波次描述</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.wave_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Wave</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyWave</span><span class="p">(</span><span class="n">Wave</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 3波弹幕</span>
+        <span class="k">for</span> <span class="n">wave_num</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+                <span class="n">x</span> <span class="o">=</span> <span class="o">-</span><span class="mf">0.7</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="mf">0.2</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+                    <span class="n">x</span><span class="o">=</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span>
+                    <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">1.8</span><span class="p">,</span>
+                    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;rice&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span>
+                <span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+
+        <span class="c1"># 等待子弹飞出</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+
+
+<span class="c1"># 注册</span>
+<span class="n">wave</span> <span class="o">=</span> <span class="n">MyWave</span>
+</code></pre></div>
+
+<h3 id="62-wave-api">6.2 Wave 可用 API<a class="headerlink" href="#62-wave-api" title="Permanent link">&para;</a></h3>
+<p>和 SpellCard 类似，但没有 <code>self.boss</code>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>self.fire(x, y, angle, speed, ...)</code></td>
+<td>发射（必须指定 x, y）</td>
+</tr>
+<tr>
+<td><code>self.fire_circle(x, y, count, ...)</code></td>
+<td>圆形弹幕</td>
+</tr>
+<tr>
+<td><code>self.fire_arc(x, y, count, ...)</code></td>
+<td>扇形弹幕</td>
+</tr>
+<tr>
+<td><code>self.fire_at_player(x, y, speed, ...)</code></td>
+<td>自机狙</td>
+</tr>
+<tr>
+<td><code>await self.wait(frames)</code></td>
+<td>等待</td>
+</tr>
+<tr>
+<td><code>self.play_se(name)</code></td>
+<td>播放音效</td>
+</tr>
+<tr>
+<td><code>self.time</code> / <code>self.time_seconds</code></td>
+<td>当前时间</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63">6.3 兼容旧版函数风格<a class="headerlink" href="#63" title="Permanent link">&para;</a></h3>
+<p>如果你觉得类太重，也可以用函数风格（但不推荐用于复杂波次）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">ctx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;旧版函数风格，直接操作 ctx&quot;&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+        <span class="n">ctx</span><span class="o">.</span><span class="n">create_bullet</span><span class="p">(</span><span class="n">x</span><span class="o">=-</span><span class="mf">0.7</span> <span class="o">+</span> <span class="n">i</span><span class="o">*</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">1.8</span><span class="p">,</span>
+                          <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;rice&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">60</span><span class="p">):</span>
+        <span class="k">yield</span>
+</code></pre></div>
+
+<hr />
+<h2 id="7-enemyscript">7. 编写敌人脚本（EnemyScript）<a class="headerlink" href="#7-enemyscript" title="Permanent link">&para;</a></h2>
+<h3 id="71">7.1 基本模板<a class="headerlink" href="#71" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">红色妖精 - 飞入 → 射弹 → 飞走</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.enemy_script</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnemyScript</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">RedFairy</span><span class="p">(</span><span class="n">EnemyScript</span><span class="p">):</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">30</span>
+    <span class="n">sprite</span> <span class="o">=</span> <span class="s2">&quot;enemy_fairy_red&quot;</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="mi">100</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 飞到 y=0.3</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+
+        <span class="c1"># 发射 3 轮 8-way 弹幕</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+
+        <span class="c1"># 飞出屏幕</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="72-enemyscript-api">7.2 EnemyScript 可用 API<a class="headerlink" href="#72-enemyscript-api" title="Permanent link">&para;</a></h3>
+<h4 id="_9">移动<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await self.move_to(x, y, duration)</code></td>
+<td>平滑移动（smoothstep）</td>
+</tr>
+<tr>
+<td><code>await self.move_linear(dx, dy, duration)</code></td>
+<td>匀速直线移动</td>
+</tr>
+<tr>
+<td><code>self.set_position(x, y)</code></td>
+<td>瞬移</td>
+</tr>
+<tr>
+<td><code>self.x</code>, <code>self.y</code></td>
+<td>当前位置</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_10">发弹<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
+<p>和 SpellCard 完全相同：<code>self.fire()</code>, <code>self.fire_circle()</code>, <code>self.fire_at_player()</code> 等。<br />
+默认从自身位置发射。</p>
+<hr />
+<h2 id="8-boss">8. 编写 Boss 配置<a class="headerlink" href="#8-boss" title="Permanent link">&para;</a></h2>
+<p>Boss 用 JSON 配置，定义其符卡序列：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;rumia_boss&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ルーミア&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;texture&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;enemy_rumia&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;animations&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span>
+
+<span class="w">  </span><span class="nt">&quot;phases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nonspell&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">800</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nonspell_1&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;bonus&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">100000</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;comment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;第1段非符&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;spellcard&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1200</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;spell_1&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;月符「Moonlight Ray」&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;bonus&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000000</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;practice_unlock&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;comment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;第1张符卡&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="_11">字段说明<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td><code>"nonspell"</code> / <code>"spellcard"</code></td>
+<td>非符 / 符卡</td>
+</tr>
+<tr>
+<td><code>hp</code></td>
+<td>int</td>
+<td>此阶段 Boss 的 HP</td>
+</tr>
+<tr>
+<td><code>time</code></td>
+<td>int</td>
+<td>时间限制（秒）</td>
+</tr>
+<tr>
+<td><code>script</code></td>
+<td>string</td>
+<td>脚本文件名（不含 <code>.py</code>，在 <code>spellcards/</code> 目录下找）</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>符卡名称（符卡宣言时显示）</td>
+</tr>
+<tr>
+<td><code>bonus</code></td>
+<td>int</td>
+<td>满血击破奖励</td>
+</tr>
+<tr>
+<td><code>practice_unlock</code></td>
+<td>bool</td>
+<td>是否可在练习模式选择</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-stagejson">9. 编写关卡配置（stage.json）<a class="headerlink" href="#9-stagejson" title="Permanent link">&para;</a></h2>
+<p><code>stage.json</code> 定义关卡的<strong>时间线</strong>——按顺序执行各段落：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stage1&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Stage 1&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;赤より紅い夢&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;subtitle&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;A Dream More Scarlet than Red&quot;</span><span class="p">,</span>
+
+<span class="w">  </span><span class="nt">&quot;bgm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stage1.ogg&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;boss_bgm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;boss1.ogg&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;background&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stage1_bg&quot;</span><span class="p">,</span>
+
+<span class="w">  </span><span class="nt">&quot;sections&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;wave&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;waves/opening_wave&quot;</span><span class="w">      </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;wait&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="w">                      </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;wave&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;waves/fairy_wave&quot;</span><span class="w">         </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;wait&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="w">                       </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;midboss&quot;</span><span class="p">,</span><span class="w">  </span><span class="nt">&quot;boss&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bosses/midboss&quot;</span><span class="w">             </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;wave&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;waves/post_midboss_wave&quot;</span><span class="w">  </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dialogue&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dialogue/pre_boss&quot;</span><span class="w">        </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;boss&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;boss&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bosses/boss&quot;</span><span class="w">                </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="section">Section 类型<a class="headerlink" href="#section" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>type</th>
+<th>说明</th>
+<th>重要字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wave</code></td>
+<td>道中波次</td>
+<td><code>script</code>: 波次脚本路径（相对于 stage 目录，不含 <code>.py</code>）</td>
+</tr>
+<tr>
+<td><code>wait</code></td>
+<td>等待</td>
+<td><code>duration</code>: 帧数（60 = 1秒）</td>
+</tr>
+<tr>
+<td><code>midboss</code></td>
+<td>道中 Boss</td>
+<td><code>boss</code>: Boss 配置路径（不含 <code>.json</code>）</td>
+</tr>
+<tr>
+<td><code>boss</code></td>
+<td>关底 Boss</td>
+<td><code>boss</code>: 同上。会切换到 boss_bgm</td>
+</tr>
+<tr>
+<td><code>dialogue</code></td>
+<td>对话</td>
+<td><code>script</code>: 对话脚本路径</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10-api">10. 弹幕 API 参考<a class="headerlink" href="#10-api" title="Permanent link">&para;</a></h2>
+<h3 id="selffire-"><code>self.fire(...)</code> - 发射单发子弹<a class="headerlink" href="#selffire-" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+    <span class="n">x</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>           <span class="c1"># 位置（SpellCard 默认为 Boss 位置）</span>
+    <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span>             <span class="c1"># 角度（度，0=右，90=上，-90=下）</span>
+    <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>             <span class="c1"># 速度</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span>  <span class="c1"># 弹幕类型</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">,</span>           <span class="c1"># 颜色</span>
+    <span class="n">accel</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>               <span class="c1"># 加速度</span>
+    <span class="n">angle_accel</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>         <span class="c1"># 角速度（曲线弹）</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="bullet_type">弹幕类型（bullet_type）<a class="headerlink" href="#bullet_type" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>说明</th>
+<th>大小</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"ball_s"</code></td>
+<td>小弹</td>
+<td>小</td>
+</tr>
+<tr>
+<td><code>"ball_m"</code></td>
+<td>中弹</td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>"ball_l"</code></td>
+<td>大弹</td>
+<td>大</td>
+</tr>
+<tr>
+<td><code>"rice"</code></td>
+<td>米弹</td>
+<td>细长</td>
+</tr>
+<tr>
+<td><code>"scale"</code></td>
+<td>鳞弹</td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>"arrowhead"</code></td>
+<td>箭头弹</td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>"knife"</code></td>
+<td>刀弹</td>
+<td>细长</td>
+</tr>
+<tr>
+<td><code>"star_s"</code></td>
+<td>小星弹</td>
+<td>小</td>
+</tr>
+<tr>
+<td><code>"star_m"</code></td>
+<td>中星弹</td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>"needle"</code></td>
+<td>针弹</td>
+<td>细</td>
+</tr>
+<tr>
+<td><code>"oval"</code></td>
+<td>椭圆弹</td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>"bullet"</code></td>
+<td>普通弹</td>
+<td>小</td>
+</tr>
+</tbody>
+</table>
+<h3 id="color">颜色（color）<a class="headerlink" href="#color" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>颜色</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"red"</code></td>
+<td>红色</td>
+</tr>
+<tr>
+<td><code>"blue"</code></td>
+<td>蓝色</td>
+</tr>
+<tr>
+<td><code>"green"</code></td>
+<td>绿色</td>
+</tr>
+<tr>
+<td><code>"yellow"</code></td>
+<td>黄色</td>
+</tr>
+<tr>
+<td><code>"purple"</code></td>
+<td>紫色</td>
+</tr>
+<tr>
+<td><code>"white"</code></td>
+<td>白色</td>
+</tr>
+<tr>
+<td><code>"darkblue"</code></td>
+<td>深蓝色</td>
+</tr>
+<tr>
+<td><code>"orange"</code></td>
+<td>橙色</td>
+</tr>
+<tr>
+<td><code>"cyan"</code></td>
+<td>青色</td>
+</tr>
+<tr>
+<td><code>"pink"</code></td>
+<td>粉色</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="11">11. 坐标系统<a class="headerlink" href="#11" title="Permanent link">&para;</a></h2>
+<p>pystg 使用<strong>归一化坐标</strong>：</p>
+<div class="codehilite"><pre><span></span><code>         y = 1.0 (屏幕上方)
+            ┌──────────┐
+            │          │
+  x = -1.0  │  (0,0)   │  x = 1.0
+            │  中心     │
+            │          │
+            └──────────┘
+         y = -1.0 (屏幕下方)
+</code></pre></div>
+
+<ul>
+<li><strong>x 范围</strong>：约 -1.0 ~ 1.0（实际游戏区域可能更窄）</li>
+<li><strong>y 范围</strong>：约 -1.0 ~ 1.0</li>
+<li><strong>(0, 0)</strong> 是屏幕中心</li>
+<li>Boss 通常在 y = 0.3 ~ 0.7 的区域</li>
+<li>玩家通常在 y = -0.5 ~ -0.8 的区域</li>
+</ul>
+<h3 id="_12">角度系统<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>           90° (上)
+            ↑
+  180° ←────┼────→ 0° (右)
+            ↓
+          -90° (下)
+</code></pre></div>
+
+<ul>
+<li><strong>0°</strong> = 向右</li>
+<li><strong>90°</strong> = 向上  </li>
+<li><strong>-90°</strong> = 向下（最常用 - 子弹向下飞向玩家）</li>
+<li><strong>180°</strong> = 向左</li>
+</ul>
+<hr />
+<h2 id="12-stage-1">12. 完整示例：Stage 1 逐文件解析<a class="headerlink" href="#12-stage-1" title="Permanent link">&para;</a></h2>
+<h3 id="121-stagejson-">12.1 stage.json - 时间线<a class="headerlink" href="#121-stagejson-" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>开场波次 → 等2秒 → 妖精编队 → 等1秒 → 道中Boss → 收尾波次 → 对话 → 关底Boss
+</code></pre></div>
+
+<p>对应 <code>game_content/stages/stage1/stage.json</code>。</p>
+<h3 id="122-wavesopening_wavepy-">12.2 waves/opening_wave.py - 开场波次<a class="headerlink" href="#122-wavesopening_wavepy-" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.wave_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Wave</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">OpeningWave</span><span class="p">(</span><span class="n">Wave</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 3波，每波8列米弹从上方落下</span>
+        <span class="k">for</span> <span class="n">wave_num</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+                <span class="n">x</span> <span class="o">=</span> <span class="o">-</span><span class="mf">0.7</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="mf">0.2</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">1.8</span><span class="p">,</span>
+                          <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;rice&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+
+<span class="n">wave</span> <span class="o">=</span> <span class="n">OpeningWave</span>
+</code></pre></div>
+
+<p><strong>设计</strong>：最简单的波次。8 列蓝色米弹整齐下落，给玩家"战斗开始"的信号。</p>
+<h3 id="123-spellcardsnonspell_1py-">12.3 spellcards/nonspell_1.py - 第一段非符<a class="headerlink" href="#123-spellcardsnonspell_1py-" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.spellcard</span><span class="w"> </span><span class="kn">import</span> <span class="n">NonSpell</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">NonSpell1</span><span class="p">(</span><span class="n">NonSpell</span><span class="p">):</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">800</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="mi">30</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">angle</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># 16-way 红色旋转圆弹</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">start_angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span>
+                             <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+            <span class="n">angle</span> <span class="o">+=</span> <span class="mi">15</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+
+            <span class="c1"># 间歇自机狙</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">time</span> <span class="o">%</span> <span class="mi">120</span> <span class="o">&lt;</span> <span class="mi">60</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span><span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;rice&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;white&quot;</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+
+<span class="n">spellcard</span> <span class="o">=</span> <span class="n">NonSpell1</span>
+</code></pre></div>
+
+<p><strong>设计</strong>：
+- 旋转圆弹是基本盘（rhythm），玩家可以在间隙中穿梭
+- 自机狙增加变化，迫使玩家微调走位
+- <code>angle += 15</code> 让弹幕每次旋转，避免固定安全位</p>
+<h3 id="124-spellcardsspell_1py-">12.4 spellcards/spell_1.py - 月符<a class="headerlink" href="#124-spellcardsspell_1py-" title="Permanent link">&para;</a></h3>
+<p>分三层：圆形扩散 → 自机狙射线 → 15秒后加入螺旋弹幕。<br />
+展示了<strong>分阶段设计</strong>：前半段热身，后半段加压。</p>
+<h3 id="125-spellcardsspell_2py-">12.5 spellcards/spell_2.py - 夜符<a class="headerlink" href="#125-spellcardsspell_2py-" title="Permanent link">&para;</a></h3>
+<p>展示了：
+- <strong>Boss 随机移动</strong> + 边移动边射弹
+- <strong>抽取辅助方法</strong> (<code>_fire_bird_pattern</code>, <code>_fire_wave_attack</code>)
+- <strong>V字形弹幕</strong>的实现</p>
+<h3 id="126-bossesbossjson-boss">12.6 bosses/boss.json - 关底 Boss 配置<a class="headerlink" href="#126-bossesbossjson-boss" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;phases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nonspell&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nonspell_1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">800</span><span class="p">,</span><span class="w">  </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">30</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;spellcard&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;spell_1&quot;</span><span class="p">,</span><span class="w">   </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1200</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;月符「Moonlight Ray」&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;spellcard&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;spell_2&quot;</span><span class="p">,</span><span class="w">   </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1500</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;夜符「Night Bird」&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Boss 按顺序执行：非符1 → 月符 → 夜符。每段结束后自动进入下一段。</p>
+<hr />
+<h2 id="13">13. 常见问题<a class="headerlink" href="#13" title="Permanent link">&para;</a></h2>
+<h3 id="q-await-yield">Q: <code>await</code> 和 <code>yield</code> 应该用哪个？<a class="headerlink" href="#q-await-yield" title="Permanent link">&para;</a></h3>
+<p><strong>统一使用 <code>await</code></strong>（推荐）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>          <span class="c1"># ✅</span>
+    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="o">...</span><span class="p">)</span> <span class="c1"># ✅</span>
+</code></pre></div>
+
+<p>特殊情况（并行操作）才需要 <code>yield</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 同时移动 Boss 和发弹</span>
+<span class="n">move_gen</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mf">0.3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mi">60</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">60</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="nb">next</span><span class="p">(</span><span class="n">move_gen</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span><span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+    <span class="k">yield</span>  <span class="c1"># ← 这里必须用 yield</span>
+</code></pre></div>
+
+<h3 id="q">Q: 怎么让弹幕变成白色道具？<a class="headerlink" href="#q" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">clear_bullets</span><span class="p">(</span><span class="n">to_items</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+
+<p>通常在 <code>on_timeout</code> 或 <code>on_defeated</code> 中使用。</p>
+<h3 id="q_1">Q: 怎么获取玩家位置？<a class="headerlink" href="#q_1" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="n">player</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">get_player</span><span class="p">()</span>
+<span class="n">px</span><span class="p">,</span> <span class="n">py</span> <span class="o">=</span> <span class="n">player</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="n">player</span><span class="o">.</span><span class="n">y</span>
+</code></pre></div>
+
+<p>或者：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">angle</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">angle_to_player</span><span class="p">()</span>  <span class="c1"># 计算到玩家的角度</span>
+</code></pre></div>
+
+<h3 id="q_2">Q: 怎么发射"曲线弹"？<a class="headerlink" href="#q_2" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+    <span class="n">angle</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+    <span class="n">angle_accel</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>   <span class="c1"># 每帧旋转 2 度 → 螺旋弹</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;purple&quot;</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="q_3">Q: 一个波次脚本可以不用类吗？<a class="headerlink" href="#q_3" title="Permanent link">&para;</a></h3>
+<p>可以，用函数风格：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">ctx</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+        <span class="n">ctx</span><span class="o">.</span><span class="n">create_bullet</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="n">i</span><span class="o">*</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                          <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;rice&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">60</span><span class="p">):</span>
+        <span class="k">yield</span>
+</code></pre></div>
+
+<p>但推荐用 <code>Wave</code> 类，因为有更多 API 可用。</p>
+<h3 id="q-stage">Q: 我新增了一个 stage，怎么让游戏加载它？<a class="headerlink" href="#q-stage" title="Permanent link">&para;</a></h3>
+<ol>
+<li>在 <code>game_content/stages/stageN/</code> 创建完整目录结构</li>
+<li>在 <code>levels/</code> 中创建一个加载脚本（参考 <code>stage1_level.py</code>）</li>
+<li>在 <code>main.py</code> 中切换关卡</li>
+</ol>
+<hr />
+<h2 id="14">14. 从零创建一个新关卡<a class="headerlink" href="#14" title="Permanent link">&para;</a></h2>
+<h3 id="1_2">步骤 1：创建目录<a class="headerlink" href="#1_2" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>game_content/stages/stage2/
+├── __init__.py
+├── stage.json
+├── waves/
+│   └── __init__.py
+├── bosses/
+├── spellcards/
+│   └── __init__.py
+├── enemies/
+│   └── __init__.py
+└── dialogue/
+</code></pre></div>
+
+<h3 id="2-stagejson">步骤 2：编写 stage.json<a class="headerlink" href="#2-stagejson" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stage2&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Stage 2&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;你的关卡标题&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;bgm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stage2.ogg&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;boss_bgm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;boss2.ogg&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;background&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stage2_bg&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;sections&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;wave&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;waves/opening_wave&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;wait&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;boss&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;boss&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bosses/boss&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="3_1">步骤 3：编写波次脚本<a class="headerlink" href="#3_1" title="Permanent link">&para;</a></h3>
+<p><code>waves/opening_wave.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.wave_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Wave</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">OpeningWave</span><span class="p">(</span><span class="n">Wave</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 你的波次逻辑</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">count</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+
+<span class="n">wave</span> <span class="o">=</span> <span class="n">OpeningWave</span>
+</code></pre></div>
+
+<h3 id="4_1">步骤 4：编写符卡<a class="headerlink" href="#4_1" title="Permanent link">&para;</a></h3>
+<p><code>spellcards/nonspell_1.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.spellcard</span><span class="w"> </span><span class="kn">import</span> <span class="n">NonSpell</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">NonSpell1</span><span class="p">(</span><span class="n">NonSpell</span><span class="p">):</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">600</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="mi">25</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+
+<span class="n">spellcard</span> <span class="o">=</span> <span class="n">NonSpell1</span>
+</code></pre></div>
+
+<h3 id="5-boss">步骤 5：编写 Boss 配置<a class="headerlink" href="#5-boss" title="Permanent link">&para;</a></h3>
+<p><code>bosses/boss.json</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;stage2_boss&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Boss 名&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;texture&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;enemy_boss&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;phases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nonspell&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;hp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">600</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">25</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nonspell_1&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="6">步骤 6：创建加载脚本<a class="headerlink" href="#6" title="Permanent link">&para;</a></h3>
+<p><code>levels/stage2_level.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Generator</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.context</span><span class="w"> </span><span class="kn">import</span> <span class="n">StageContext</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.stage_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">StageBase</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">stage2_level</span><span class="p">(</span><span class="n">stage_manager</span><span class="p">,</span> <span class="n">bullet_pool</span><span class="p">,</span> <span class="n">player</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Generator</span><span class="p">:</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">StageContext</span><span class="p">(</span>
+        <span class="n">bullet_pool</span><span class="o">=</span><span class="n">bullet_pool</span><span class="p">,</span>
+        <span class="n">player</span><span class="o">=</span><span class="n">player</span><span class="p">,</span>
+        <span class="n">enemy_manager</span><span class="o">=</span><span class="n">stage_manager</span><span class="o">.</span><span class="n">enemy_manager</span>
+    <span class="p">)</span>
+    <span class="n">stage</span> <span class="o">=</span> <span class="n">StageBase</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span><span class="s2">&quot;game_content/stages/stage2/stage.json&quot;</span><span class="p">,</span> <span class="n">ctx</span><span class="p">)</span>
+    <span class="n">stage</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+    <span class="k">while</span> <span class="n">stage</span><span class="o">.</span><span class="n">_active</span><span class="p">:</span>
+        <span class="n">stage</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+        <span class="k">yield</span>
+
+    <span class="n">bullet_pool</span><span class="o">.</span><span class="n">clear_all</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">120</span><span class="p">):</span>
+        <span class="k">yield</span>
+</code></pre></div>
+
+<p>完成！运行游戏即可看到你的新关卡。</p>
+<hr />
+<h2 id="15">15. 音频系统<a class="headerlink" href="#15" title="Permanent link">&para;</a></h2>
+<p>pystg 采用<strong>两级音频管理</strong>：</p>
+<div class="codehilite"><pre><span></span><code>┌────────────────────────────────────────────┐
+│            AudioManager（统一调度）            │
+│                                              │
+│  查找顺序： Stage私有 → Game全局 → 警告缺失  │
+└─────────────┬────────────────┬─────────────┘
+              │                │
+    ┌────────┴───────┐  ┌─────┴─────────┐
+    │ GameAudioBank    │  │ StageAudioBank  │
+    │ （全局，始终存在） │  │ （关卡私有，可选）│
+    │                  │  │                 │
+    │ shoot, graze,    │  │ 可覆盖全局同名 SE│
+    │ pldead, bomb...  │  │ 关卡专属 BGM    │
+    └──────────────────┘  └─────────────────┘
+</code></pre></div>
+
+<h3 id="151">15.1 内容作者需要知道的<a class="headerlink" href="#151" title="Permanent link">&para;</a></h3>
+<p><strong>你不需要直接操作音频系统。</strong> 基类已经提供了便捷方法：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 在 SpellCard / Wave / EnemyScript 中</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;shoot&quot;</span><span class="p">)</span>            <span class="c1"># 播放音效</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;explode&quot;</span><span class="p">,</span> <span class="n">volume</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>  <span class="c1"># 指定音量</span>
+
+<span class="c1"># 通过 ctx 播放 BGM</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">play_bgm</span><span class="p">(</span><span class="s2">&quot;boss1&quot;</span><span class="p">)</span>       <span class="c1"># 播放 BGM</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">stop_bgm</span><span class="p">(</span><span class="n">fade_ms</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span>  <span class="c1"># 淡出停止</span>
+</code></pre></div>
+
+<h3 id="152-gameaudiobank">15.2 全局音效（GameAudioBank）<a class="headerlink" href="#152-gameaudiobank" title="Permanent link">&para;</a></h3>
+<p>全局音效由引擎在启动时加载，文件在 <code>assets/audio/se/</code> 目录下。
+所有内容脚本均可直接使用以下名称：</p>
+<table>
+<thead>
+<tr>
+<th>名称</th>
+<th>说明</th>
+<th>对应文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"shoot"</code></td>
+<td>自机射击</td>
+<td>se_plst00.wav</td>
+</tr>
+<tr>
+<td><code>"graze"</code></td>
+<td>擦弹</td>
+<td>se_graze.wav</td>
+</tr>
+<tr>
+<td><code>"pldead"</code></td>
+<td>自机死亡</td>
+<td>se_pldead00.wav</td>
+</tr>
+<tr>
+<td><code>"extend"</code></td>
+<td>续命</td>
+<td>se_extend.wav</td>
+</tr>
+<tr>
+<td><code>"powerup"</code></td>
+<td>满P</td>
+<td>se_powerup.wav</td>
+</tr>
+<tr>
+<td><code>"bomb"</code></td>
+<td>Bomb</td>
+<td>se_nep00.wav</td>
+</tr>
+<tr>
+<td><code>"pause"</code></td>
+<td>暂停</td>
+<td>se_pause.wav</td>
+</tr>
+<tr>
+<td><code>"select"</code></td>
+<td>菜单选择</td>
+<td>se_select00.wav</td>
+</tr>
+<tr>
+<td><code>"cancel"</code></td>
+<td>菜单取消</td>
+<td>se_cancel00.wav</td>
+</tr>
+<tr>
+<td><code>"ok"</code></td>
+<td>菜单确认</td>
+<td>se_ok00.wav</td>
+</tr>
+<tr>
+<td><code>"cardget"</code></td>
+<td>符卡取得</td>
+<td>se_cardget.wav</td>
+</tr>
+<tr>
+<td><code>"timeout"</code></td>
+<td>超时</td>
+<td>se_timeout.wav</td>
+</tr>
+<tr>
+<td><code>"item"</code></td>
+<td>道具回收</td>
+<td>se_item00.wav</td>
+</tr>
+<tr>
+<td><code>"damage"</code></td>
+<td>敌人受伤</td>
+<td>se_damage00.wav</td>
+</tr>
+<tr>
+<td><code>"explode"</code></td>
+<td>敌人爆炸</td>
+<td>se_explode.wav</td>
+</tr>
+<tr>
+<td><code>"kira"</code></td>
+<td>星星音效</td>
+<td>se_kira00.wav</td>
+</tr>
+<tr>
+<td><code>"lazer"</code></td>
+<td>激光</td>
+<td>se_lazer00.wav</td>
+</tr>
+<tr>
+<td><code>"bonus"</code></td>
+<td>奖励</td>
+<td>se_bonus.wav</td>
+</tr>
+<tr>
+<td><code>"warning"</code></td>
+<td>警告</td>
+<td>se_hyz_warning.wav</td>
+</tr>
+<tr>
+<td><code>"charge"</code></td>
+<td>蓄力</td>
+<td>se_hyz_charge00.wav</td>
+</tr>
+</tbody>
+</table>
+<h3 id="153-stageaudiobank">15.3 关卡私有音频（StageAudioBank）<a class="headerlink" href="#153-stageaudiobank" title="Permanent link">&para;</a></h3>
+<p>每个关卡可以有自己的专属音频，放在关卡目录的 <code>audio/</code> 子目录下：</p>
+<div class="codehilite"><pre><span></span><code>game_content/stages/stage1/
+  audio/
+    se/                    ← 关卡专属音效
+    │  se_custom_shot.wav  ← 文件名去掉 se_ 前缀和 .wav 后缀 → 名称为 &quot;custom_shot&quot;
+    │  se_boss_roar.wav    → 名称为 &quot;boss_roar&quot;
+    │
+    music/                 ← 关卡专属 BGM
+       stage1_road.ogg     → 名称为 &quot;stage1_road&quot;
+       boss1.ogg           → 名称为 &quot;boss1&quot;
+</code></pre></div>
+
+<p><strong>命名规则：</strong>
+- SE 文件名 <code>se_xxx.wav</code> 自动去掉 <code>se_</code> 前缀 → 音效名为 <code>"xxx"</code>
+- BGM 文件名去掉扩展名即为 BGM 名称
+- 支持格式：<code>.wav</code>（SE）、<code>.ogg</code> / <code>.mp3</code> / <code>.wav</code>（BGM）</p>
+<p><strong>覆盖机制：</strong> 如果关卡私有 SE 和全局 SE 同名，则关卡私有优先。例如关卡 <code>audio/se/se_shoot.wav</code> 会覆盖全局的 <code>"shoot"</code> 音效。</p>
+<h3 id="154">15.4 在脚本中使用音频<a class="headerlink" href="#154" title="Permanent link">&para;</a></h3>
+<h4 id="spellcard-nonspell">SpellCard / NonSpell 中<a class="headerlink" href="#spellcard-nonspell" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySpell</span><span class="p">(</span><span class="n">SpellCard</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;warning&quot;</span><span class="p">)</span>       <span class="c1"># 符卡开始时播放警告音</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;shoot&quot;</span><span class="p">)</span>     <span class="c1"># 每次发弹播放射击音</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">15</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">on_defeated</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">clear_bullets</span><span class="p">(</span><span class="n">to_items</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;explode&quot;</span><span class="p">)</span>       <span class="c1"># Boss 被击败时爆炸音</span>
+</code></pre></div>
+
+<h4 id="wave">Wave 中<a class="headerlink" href="#wave" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MyWave</span><span class="p">(</span><span class="n">Wave</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;warning&quot;</span><span class="p">)</span>       <span class="c1"># 波次开始提示</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">count</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;shoot&quot;</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="enemyscript">EnemyScript 中<a class="headerlink" href="#enemyscript" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">BigFairy</span><span class="p">(</span><span class="n">EnemyScript</span><span class="p">):</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">100</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;charge&quot;</span><span class="p">)</span>        <span class="c1"># 蓄力音</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">24</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;purple&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;lazer&quot;</span><span class="p">)</span>         <span class="c1"># 发射音</span>
+</code></pre></div>
+
+<h4 id="ctx-bgm">通过 ctx 控制 BGM<a class="headerlink" href="#ctx-bgm" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 在 Wave 或 SpellCard 中直接通过 ctx</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">play_bgm</span><span class="p">(</span><span class="s2">&quot;boss1&quot;</span><span class="p">)</span>               <span class="c1"># 播放 BGM</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">play_bgm</span><span class="p">(</span><span class="s2">&quot;boss1&quot;</span><span class="p">,</span> <span class="n">fade_ms</span><span class="o">=</span><span class="mi">2000</span><span class="p">)</span> <span class="c1"># 2秒淡入</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">stop_bgm</span><span class="p">(</span><span class="n">fade_ms</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span>          <span class="c1"># 1秒淡出停止</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">pause_bgm</span><span class="p">()</span>                     <span class="c1"># 暂停</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">unpause_bgm</span><span class="p">()</span>                   <span class="c1"># 恢复</span>
+</code></pre></div>
+
+<blockquote>
+<p><strong>注意：</strong> 通常不需要手动控制 BGM。<code>stage.json</code> 中配置的 <code>bgm</code> 和 <code>boss_bgm</code> 会由引擎自动在合适的时机播放。只有在需要特殊音频控制（如符卡中间切换 BGM、对话期间降低音量等）时才需要手动调用。</p>
+</blockquote>
+<h3 id="155">15.5 为新关卡添加音频<a class="headerlink" href="#155" title="Permanent link">&para;</a></h3>
+<ol>
+<li>在关卡目录下创建 <code>audio/se/</code> 和 <code>audio/music/</code> 目录</li>
+<li>将 SE 文件（<code>.wav</code>）放入 <code>audio/se/</code>，文件名以 <code>se_</code> 开头</li>
+<li>将 BGM 文件（<code>.ogg</code>/<code>.mp3</code>）放入 <code>audio/music/</code></li>
+<li>在加载脚本（<code>levels/stageN_level.py</code>）中初始化 StageAudioBank：</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.audio</span><span class="w"> </span><span class="kn">import</span> <span class="n">StageAudioBank</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">stageN_level</span><span class="p">(</span><span class="n">stage_manager</span><span class="p">,</span> <span class="n">bullet_pool</span><span class="p">,</span> <span class="n">player</span><span class="p">,</span> <span class="n">audio_manager</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="c1"># 加载关卡私有音频</span>
+    <span class="n">stage_bank</span> <span class="o">=</span> <span class="n">StageAudioBank</span><span class="o">.</span><span class="n">from_directory</span><span class="p">(</span><span class="s2">&quot;stageN&quot;</span><span class="p">,</span> <span class="s2">&quot;game_content/stages/stageN&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">audio_manager</span><span class="p">:</span>
+        <span class="n">audio_manager</span><span class="o">.</span><span class="n">set_stage_bank</span><span class="p">(</span><span class="n">stage_bank</span><span class="p">)</span>
+
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">StageContext</span><span class="p">(</span>
+        <span class="n">bullet_pool</span><span class="o">=</span><span class="n">bullet_pool</span><span class="p">,</span>
+        <span class="n">player</span><span class="o">=</span><span class="n">player</span><span class="p">,</span>
+        <span class="n">enemy_manager</span><span class="o">=</span><span class="n">stage_manager</span><span class="o">.</span><span class="n">enemy_manager</span><span class="p">,</span>
+        <span class="n">audio_manager</span><span class="o">=</span><span class="n">audio_manager</span>
+    <span class="p">)</span>
+    <span class="c1"># ... 其余逻辑</span>
+
+    <span class="c1"># 关卡结束时清理</span>
+    <span class="k">if</span> <span class="n">audio_manager</span><span class="p">:</span>
+        <span class="n">audio_manager</span><span class="o">.</span><span class="n">set_stage_bank</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+
+<ol>
+<li>完成！脚本中就可以通过 <code>self.play_se("xxx")</code> 使用新音效了。</li>
+</ol>
+<hr />
+<h2 id="_13">附录：文件分层一览<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code>你需要关心的（内容层）：
+  game_content/stages/stageN/
+    ├── stage.json          ← 时间线
+    ├── waves/*.py          ← 道中弹幕
+    ├── spellcards/*.py     ← 符卡脚本
+    ├── bosses/*.json       ← Boss 符卡序列
+    ├── enemies/*.py        ← 敌人脚本
+    ├── dialogue/*.py       ← 对话
+    └── audio/              ← 关卡私有音频（可选）
+        ├── se/*.wav        ← 关卡音效
+        └── music/*.ogg     ← 关卡 BGM
+
+你不需要关心的（引擎层）：
+  src/game/stage/
+    ├── spellcard.py        ← SpellCard/NonSpell 基类
+    ├── wave_base.py        ← Wave 基类
+    ├── enemy_script.py     ← EnemyScript 基类
+    ├── boss_base.py        ← BossBase（从 JSON 加载）
+    ├── stage_base.py       ← StageBase（从 JSON 加载）
+    ├── context.py          ← StageContext（引擎桥梁）
+    └── practice.py         ← 练习模式
+
+  src/game/audio.py           ← 音频系统（AudioBank / AudioManager）
+  src/game/bullet/            ← 子弹池（引擎内部）
+  src/game/player/            ← 玩家系统（引擎内部）
+  src/render/                 ← 渲染系统（引擎内部）
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
