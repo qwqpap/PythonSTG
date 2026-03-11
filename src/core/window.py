@@ -92,6 +92,8 @@ class FrameClock:
         self._fps_counter = 0
         self._fps_timer = 0.0
         self._current_fps = 60.0
+        self._work_time_accum = 0.0
+        self._max_fps = 0.0
 
     def tick(self, target_fps: int = 60) -> float:
         """
@@ -99,11 +101,18 @@ class FrameClock:
         Unlike pygame.time.Clock.tick() which returns ms, this returns seconds.
         """
         now = time.perf_counter()
-        dt = now - self._last_time
+        work_time = now - self._last_time  # 帧工作时间（不含 sleep/wait）
+        dt = work_time
 
         target_dt = 1.0 / target_fps
         if dt < target_dt:
-            time.sleep(target_dt - dt)
+            # sleep 大部分时间（留 1ms 余量给 busy-wait 补偿 sleep 精度不足）
+            sleep_time = target_dt - dt - 0.001
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            # busy-wait spin 到精确时间点
+            while time.perf_counter() - self._last_time < target_dt:
+                pass
             now = time.perf_counter()
             dt = now - self._last_time
 
@@ -111,12 +120,20 @@ class FrameClock:
 
         self._fps_counter += 1
         self._fps_timer += dt
+        self._work_time_accum += work_time
         if self._fps_timer >= 1.0:
             self._current_fps = self._fps_counter / self._fps_timer
+            avg_work = self._work_time_accum / self._fps_counter
+            self._max_fps = 1.0 / avg_work if avg_work > 0 else 9999.0
             self._fps_counter = 0
             self._fps_timer = 0.0
+            self._work_time_accum = 0.0
 
         return dt
 
     def get_fps(self) -> float:
         return self._current_fps
+
+    def get_max_fps(self) -> float:
+        """返回基于帧工作时间的理论最大帧率"""
+        return self._max_fps

@@ -118,7 +118,16 @@ class PlayerBulletPool:
         :return: 子弹索引，-1表示池已满
         """
         if not self.free_indices:
-            return -1
+            # FIFO 淘汰：找到存活时间最久的子弹并回收
+            oldest_idx = -1
+            oldest_lifetime = -1.0
+            for i in range(self.max_bullets):
+                if self.data[i]['alive'] and self.data[i]['lifetime'] > oldest_lifetime:
+                    oldest_lifetime = self.data[i]['lifetime']
+                    oldest_idx = i
+            if oldest_idx < 0:
+                return -1
+            self.kill(oldest_idx)
         
         idx = self.free_indices.pop()
         self.active_count += 1

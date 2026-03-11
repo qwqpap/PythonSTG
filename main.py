@@ -329,7 +329,8 @@ def main():
                     ctx.viewport = (0, 0, screen_size[0], screen_size[1])
                     ctx.clear(0.0, 0.0, 0.0)
                     loading_renderer.render(stage_manager.loading_info)
-                    hud.state.fps = int(clock.get_fps())
+                    hud.state.fps = round(clock.get_fps())
+                    hud.state.max_fps = round(clock.get_max_fps())
                     window.swap_buffers()
 
                     if not paused:
@@ -365,7 +366,8 @@ def main():
                     ctx.viewport = (0, 0, screen_size[0], screen_size[1])
                     ctx.clear(0.0, 0.0, 0.0)
                     loading_renderer.render(stage_manager.loading_info)
-                    hud.state.fps = int(clock.get_fps())
+                    hud.state.fps = round(clock.get_fps())
+                    hud.state.max_fps = round(clock.get_max_fps())
                     window.swap_buffers()
                     continue
                 
@@ -467,8 +469,9 @@ def main():
                 if paused:
                     pause_menu_renderer.render(pause_menu_index)
 
-                hud.state.fps = int(clock.get_fps())
-                
+                hud.state.fps = round(clock.get_fps())
+                hud.state.max_fps = round(clock.get_max_fps())
+
                 window.swap_buffers()
             
             # 保存高分记录

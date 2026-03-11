@@ -38,27 +38,27 @@ class TaoScript(PlayerScript):
         self.fire_timer = 4.0 / 60.0
 
         if is_focused:
-            # 低速：全部由僚机向前集中射击，制导能力极强，伤害高但弹幕略少
+            # 低速：全部由僚机向前集中射击，制导柔和，伤害高但弹幕略少
             if len(self.options) >= 2:
-                # 左僚机发射，完全正向，加强制导
-                self.fire_from_option(0, bullet_anim="bullet", angle=90, speed=6.5, damage=1, homing=True, homing_strength=12.0)
-                self.fire_from_option(0, bullet_anim="bullet", angle=88, speed=6.5, damage=1, homing=True, homing_strength=12.0)
+                # 左僚机发射，完全正向
+                self.fire_from_option(0, bullet_anim="bullet", angle=90, speed=6.5, damage=1, homing=True, homing_strength=4.0)
+                self.fire_from_option(0, bullet_anim="bullet", angle=88, speed=6.5, damage=1, homing=True, homing_strength=4.0)
                 
                 # 右僚机发射
-                self.fire_from_option(1, bullet_anim="bullet", angle=90, speed=6.5, damage=1, homing=True, homing_strength=12.0)
-                self.fire_from_option(1, bullet_anim="bullet", angle=92, speed=6.5, damage=1, homing=True, homing_strength=12.0)
+                self.fire_from_option(1, bullet_anim="bullet", angle=90, speed=6.5, damage=1, homing=True, homing_strength=4.0)
+                self.fire_from_option(1, bullet_anim="bullet", angle=92, speed=6.5, damage=1, homing=True, homing_strength=4.0)
         else:
             # 高速：由僚机发射较多扇形散弹，大范围制导索敌，覆盖面广
             if len(self.options) >= 2:
                 # 左僚机发射
-                self.fire_from_option(0, bullet_anim="bullet", angle=85, speed=5.5, damage=2, homing=True, homing_strength=7.0)
-                self.fire_from_option(0, bullet_anim="bullet", angle=95, speed=5.5, damage=2, homing=True, homing_strength=7.0)
-                self.fire_from_option(0, bullet_anim="bullet", angle=105, speed=5.5, damage=2, homing=True, homing_strength=7.0)
+                self.fire_from_option(0, bullet_anim="bullet", angle=85, speed=5.5, damage=2, homing=True, homing_strength=2.5)
+                self.fire_from_option(0, bullet_anim="bullet", angle=95, speed=5.5, damage=2, homing=True, homing_strength=2.5)
+                self.fire_from_option(0, bullet_anim="bullet", angle=105, speed=5.5, damage=2, homing=True, homing_strength=2.5)
                 
                 # 右僚机发射
-                self.fire_from_option(1, bullet_anim="bullet", angle=95, speed=5.5, damage=2, homing=True, homing_strength=7.0)
-                self.fire_from_option(1, bullet_anim="bullet", angle=85, speed=5.5, damage=2, homing=True, homing_strength=7.0)
-                self.fire_from_option(1, bullet_anim="bullet", angle=75, speed=5.5, damage=2, homing=True, homing_strength=7.0)
+                self.fire_from_option(1, bullet_anim="bullet", angle=95, speed=5.5, damage=2, homing=True, homing_strength=2.5)
+                self.fire_from_option(1, bullet_anim="bullet", angle=85, speed=5.5, damage=2, homing=True, homing_strength=2.5)
+                self.fire_from_option(1, bullet_anim="bullet", angle=75, speed=5.5, damage=2, homing=True, homing_strength=2.5)
 
     def on_bomb(self, is_focused):
         # 通用符卡无敌逻辑

@@ -36,6 +36,7 @@ class GameState:
     boss_hp_ratio: float = 0.0  # 0.0 ~ 1.0
     is_boss_fight: bool = False
     fps: int = 0
+    max_fps: int = 0
 
 
 def load_hud_layout(layout_path: str):
@@ -478,7 +479,7 @@ class HUD:
         # FPS 显示（窗口右下角）
         elements.append({
             'type': 'text',
-            'text': f'FPS {self.state.fps:03d}',
+            'text': f'FPS {self.state.fps:03d} ({self.state.max_fps})',
             'position': (self.screen_width - 16, self.screen_height - 24),
             'font': 'score',
             'scale': self.small_font_scale,
