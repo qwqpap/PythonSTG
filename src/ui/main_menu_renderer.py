@@ -31,10 +31,14 @@ class MainMenuRenderer:
             font_path = None
         self._font_path = font_path
         self._background_surface: Optional[SoftwareSurface] = None
+        self._scaled_background_surface: Optional[SoftwareSurface] = None
+        self._scaled_background_size = None
         self._load_background_image()
 
         # 字体缓存: size -> FontRenderer
         self._font_cache: Dict[int, FontRenderer] = {}
+        self._text_surface_cache: Dict[tuple, SoftwareSurface] = {}
+        self._last_render_signature = None
 
         # GL shader（与 LoadingScreenRenderer 相同）
         vertex_shader = """
@@ -102,8 +106,14 @@ class MainMenuRenderer:
         """
         if layout is None:
             layout = default_layout()
+        render_signature = (self._layout_signature(layout), selected_index)
+        if self._texture is not None and render_signature == self._last_render_signature:
+            self._draw_fullscreen_quad()
+            return
+
         surface = self._render_to_surface(layout, selected_index)
         self._upload_texture(surface)
+        self._last_render_signature = render_signature
         self._draw_fullscreen_quad()
 
     def render_from_layout(self, layout: Dict[str, Any], selected_index: int = 0):
@@ -121,8 +131,10 @@ class MainMenuRenderer:
         surface = SoftwareSurface(sw, sh)
 
         if self._background_surface is not None:
-            scaled = SoftwareSurface.smoothscale(self._background_surface, (sw, sh))
-            surface.blit(scaled, (0, 0))
+            if self._scaled_background_size != (sw, sh) or self._scaled_background_surface is None:
+                self._scaled_background_surface = SoftwareSurface.smoothscale(self._background_surface, (sw, sh))
+                self._scaled_background_size = (sw, sh)
+            surface.blit(self._scaled_background_surface, (0, 0))
         else:
             bg = layout.get("bg_gradient", {"top": [12, 8, 28], "bottom": [20, 20, 44]})
             top = bg.get("top", [12, 8, 28])
@@ -147,9 +159,9 @@ class MainMenuRenderer:
         y_ratio = float(title_cfg.get("y_ratio", 0.25))
         y = int(sh * y_ratio)
         font_title = self._get_font(title_size)
-        s_title = font_title.render(
+        s_title = self._render_text_cached(
+            font_title,
             title_text,
-            True,
             title_color,
             stroke_width=max(2, title_size // 24),
             stroke_color=(20, 20, 30),
@@ -166,9 +178,9 @@ class MainMenuRenderer:
             opt_text = opt.get("text", "") if isinstance(opt, dict) else str(opt)
             color = col_sel if i == selected_index else col_norm
             prefix = "> " if i == selected_index else "  "
-            s = font_option.render(
+            s = self._render_text_cached(
+                font_option,
                 prefix + opt_text,
-                True,
                 color,
                 stroke_width=max(1, opt_font_size // 24),
                 stroke_color=(16, 16, 24),
@@ -183,9 +195,9 @@ class MainMenuRenderer:
         hint_color = tuple(hint_cfg.get("color", [100, 100, 120]))
         hint_y_offset = int(hint_cfg.get("y_offset", -50))
         font_hint = self._get_font(hint_size)
-        s_hint = font_hint.render(
+        s_hint = self._render_text_cached(
+            font_hint,
             hint_text,
-            True,
             hint_color,
             stroke_width=1,
             stroke_color=(12, 12, 18),
@@ -193,6 +205,61 @@ class MainMenuRenderer:
         hint_y = sh + hint_y_offset if hint_y_offset < 0 else hint_y_offset
         surface.blit(s_hint, (center_x - s_hint.get_width() // 2, hint_y))
 
+        return surface
+
+    def _layout_signature(self, layout: Dict[str, Any]):
+        title = layout.get("title", {})
+        hint = layout.get("hint", {})
+        option_colors = layout.get("option_colors", {})
+        options = layout.get("options", [])
+        option_texts = tuple(
+            opt.get("text", "") if isinstance(opt, dict) else str(opt)
+            for opt in options
+        )
+        bg = layout.get("bg_gradient", {})
+        return (
+            title.get("text"),
+            title.get("font_size"),
+            tuple(title.get("color", [])),
+            title.get("y_ratio"),
+            option_texts,
+            layout.get("option_spacing"),
+            layout.get("option_font_size"),
+            tuple(option_colors.get("normal", [])),
+            tuple(option_colors.get("selected", [])),
+            hint.get("text"),
+            hint.get("font_size"),
+            tuple(hint.get("color", [])),
+            hint.get("y_offset"),
+            tuple(bg.get("top", [])),
+            tuple(bg.get("bottom", [])),
+        )
+
+    def _render_text_cached(
+        self,
+        font: FontRenderer,
+        text: str,
+        color,
+        stroke_width: int = 0,
+        stroke_color=(0, 0, 0),
+    ) -> SoftwareSurface:
+        key = (
+            id(font),
+            text,
+            tuple(color),
+            int(stroke_width),
+            tuple(stroke_color),
+        )
+        surface = self._text_surface_cache.get(key)
+        if surface is None:
+            surface = font.render(
+                text,
+                True,
+                color,
+                stroke_width=stroke_width,
+                stroke_color=stroke_color,
+            )
+            self._text_surface_cache[key] = surface
         return surface
 
     def _upload_texture(self, surface: SoftwareSurface):
@@ -234,3 +301,5 @@ class MainMenuRenderer:
         if self._texture:
             self._texture.release()
             self._texture = None
+        self._last_render_signature = None
+        self._text_surface_cache.clear()

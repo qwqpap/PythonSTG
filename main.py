@@ -562,6 +562,18 @@ def main():
             dialog_gl_renderer = DialogGLRenderer(ctx, screen_size[0], screen_size[1], game_viewport)
             pause_menu_renderer = PauseMenuRenderer(ctx, screen_size[0], screen_size[1])
 
+            # 符卡宣言渲染器（共享资源，服务所有 Boss 符卡）
+            # 需要窗口坐标下的游戏视口（y 从上），game_viewport 是 OpenGL 坐标（y 从下），
+            # 这里将 y 翻转一次
+            _gv_x, _gv_y_bot, _gv_w, _gv_h = game_viewport
+            _gv_y_top = screen_size[1] - (_gv_y_bot + _gv_h)
+            from src.game.stage.spell_declaration import SpellDeclarationRenderer
+            spell_declaration_renderer = SpellDeclarationRenderer(
+                ctx,
+                window_size=(screen_size[0], screen_size[1]),
+                game_viewport_win=(_gv_x, _gv_y_top, _gv_w, _gv_h),
+            )
+
             item_renderer = ItemRenderer(ctx, base_size)
             item_renderer.load_texture("assets/images/item/item.png")
 
@@ -617,6 +629,13 @@ def main():
                 item_pool.stats.bombs = max(0, item_pool.stats.bombs - 1)
                 trigger_player_bomb(player, bullet_pool, item_pool, stage_manager)
             player.on_bomb_callback = _on_player_bomb
+
+            def _get_active_boss():
+                if stage_manager.current_stage:
+                    boss = getattr(stage_manager.current_stage, '_current_boss', None)
+                    if boss is not None and getattr(boss, '_active', False):
+                        return boss
+                return stage_manager.get_active_boss()
             
             clock = FrameClock()
             running = True
@@ -941,7 +960,7 @@ def main():
                 hud.state.graze = item_pool.stats.graze
                 hud.state.bombs = item_pool.stats.bombs
                 hud.state.point_value = item_pool.stats.point_rate
-                active_boss = stage_manager.get_active_boss()
+                active_boss = _get_active_boss()
                 if active_boss:
                     hud.update_from_boss(active_boss)
                 
@@ -971,6 +990,12 @@ def main():
                 emoji_sys.render_ui(ui_renderer)
                 if PROFILE_MODE:
                     profile_acc["render_ui"] += time.perf_counter() - ui_start
+
+                # 符卡宣言动画（叠加在 HUD 上，带状文字经 scissor 裁剪到游戏视口）
+                if active_boss is not None:
+                    _decl = getattr(active_boss, 'declaration', None)
+                    if _decl is not None:
+                        spell_declaration_renderer.render(_decl)
 
                 if stage_manager.current_stage:
                     dialog_state = stage_manager.current_stage.get_dialog_renderer()
@@ -1009,6 +1034,7 @@ def main():
             dialog_gl_renderer.cleanup()
             loading_renderer.cleanup()
             pause_menu_renderer.cleanup()
+            spell_declaration_renderer.cleanup()
             if background_renderer:
                 background_renderer.cleanup()
             texture_asset_manager.clear_all()

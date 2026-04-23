@@ -166,11 +166,20 @@ class HUD:
             self.state.boss_hp_ratio = boss_hp / boss_max_hp if boss_max_hp > 0 else 0
             # 符卡相关
             spell = getattr(boss, 'current_spell', getattr(boss, 'current_spellcard', None))
+            # 宣言动画期间，符卡名由 SpellDeclarationRenderer 绘制，HUD 不再重复
+            declaration_active = False
+            if hasattr(boss, 'is_declaration_active'):
+                try:
+                    declaration_active = bool(boss.is_declaration_active())
+                except Exception:
+                    declaration_active = False
             if spell:
-                self.state.spell_name = getattr(spell, 'name', '')
+                if declaration_active:
+                    self.state.spell_name = ''
+                else:
+                    self.state.spell_name = getattr(spell, 'name', '')
                 self.state.spell_time = getattr(spell, 'time_remaining', getattr(spell, 'time_left', 0))
-                # 显示实时衰减的 bonus
-                self.state.spell_bonus = getattr(boss, 'spell_bonus_display', getattr(spell, 'bonus', 0))
+                self.state.spell_bonus = 0
         else:
             self.state.is_boss_fight = False
             self.state.boss_hp_ratio = 0
@@ -473,9 +482,9 @@ class HUD:
             # Boss HP条
             elements.append({
                 'type': 'bar',
-                'position': (self.game_origin[0] + self.layout['boss_hp_bar'][0],
+                'position': (self.game_origin[0],
                              self.game_origin[1] + self.layout['boss_hp_bar'][1]),
-                'width': self.layout['boss_hp_bar_width'],
+                'width': self.game_size[0],
                 'height': self.layout['boss_hp_bar_height'],
                 'value': self.state.boss_hp_ratio,
                 'color_bg': (64, 0, 0),
@@ -500,23 +509,11 @@ class HUD:
                 elements.append({
                     'type': 'text',
                     'text': f'{int(self.state.spell_time):02d}',
-                    'position': (self.game_origin[0] + self.layout['spell_time'][0],
-                                 self.game_origin[1] + self.layout['spell_time'][1]),
+                    'position': (self.game_origin[0] + self.game_size[0] * 0.5,
+                                 self.game_origin[1] + 18),
                     'font': 'score',
                     'scale': self.font_scale,
-                    'color': (255, 255, 255) if self.state.spell_time > 10 else (255, 64, 64)
-                })
-            
-            # 符卡 Bonus（实时衰减值）
-            if self.state.spell_bonus > 0:
-                elements.append({
-                    'type': 'text',
-                    'text': f'Bonus {self.state.spell_bonus:,}',
-                    'position': (self.game_origin[0] + self.layout['spell_bonus'][0],
-                                 self.game_origin[1] + self.layout['spell_bonus'][1]),
-                    'font': 'score',
-                    'scale': self.small_font_scale,
-                    'color': (255, 255, 200),
+                    'color': (255, 255, 255) if self.state.spell_time > 10 else (255, 64, 64),
                     'align': 'center'
                 })
 

@@ -67,6 +67,10 @@ class BossBase:
         self._spell_bonus: int = 0         # 当前符卡 bonus（逐帧衰减）
         self._spell_no_miss: bool = True   # 当前符卡期间玩家未被击中
         self._spell_no_bomb: bool = True   # 当前符卡期间玩家未使用 bomb
+
+        # ===== 符卡宣言（装饰动画） =====
+        # 在宣言期间暂停符卡 update，让动画完整播放完再开始弹幕
+        self._declaration = None  # SpellDeclaration 或 None
     
     @classmethod
     def from_config(cls, config_path: str, ctx: 'SpellCardContext') -> 'BossBase':
@@ -206,11 +210,16 @@ class BossBase:
         """每帧更新"""
         if not self._active:
             return
-        
+
         if self._render_obj is not None:
             vx = self.x - self._prev_x
             self._render_obj.update(vx=vx, dt=1 / 60.0)
         self._prev_x = self.x
+
+        # 符卡宣言播放期间暂停符卡推进（60fps → dt≈1/60s）
+        if self._declaration is not None and self._declaration.active:
+            self._declaration.update(1.0 / 60.0)
+            return
 
         if self.current_spellcard:
             # 逐帧衰减符卡 bonus（从 max 线性衰减到 base = max/2）
@@ -223,7 +232,7 @@ class BossBase:
                     ratio = min(1.0, elapsed / total)
                     self._spell_bonus = int(phase.bonus - (phase.bonus - base_bonus) * ratio)
                     self._spell_bonus = max(base_bonus, self._spell_bonus)
-            
+
             if not self.current_spellcard.update():
                 # 当前符卡结束，进入下一阶段
                 self._on_phase_end()
@@ -276,10 +285,31 @@ class BossBase:
     def _on_spellcard_start(self, phase: BossPhase):
         """符卡开始（可覆盖）"""
         print(f"符卡开始: {phase.name}")
+        # 启动符卡宣言动画（仅有名字的符卡才播放）
+        if phase.name:
+            try:
+                from .spell_declaration import SpellDeclaration
+                self._declaration = SpellDeclaration(phase.name)
+            except Exception as e:
+                print(f"[Boss] 无法启动符卡宣言: {e}")
+                self._declaration = None
+
+    @property
+    def declaration(self):
+        """当前正在播放的符卡宣言（若无则为 None）"""
+        if self._declaration is not None and self._declaration.active:
+            return self._declaration
+        return None
+
+    def is_declaration_active(self) -> bool:
+        """供 HUD 查询：宣言是否正在播放（HUD 在此期间应跳过符卡名绘制）"""
+        return self._declaration is not None and self._declaration.active
     
     def _on_spellcard_end(self, phase: BossPhase):
         """符卡结束（可覆盖）"""
         print(f"符卡结束: {phase.name}")
+        # 清除任何残留的宣言状态（通常动画早已播放完毕）
+        self._declaration = None
     
     def _on_all_phases_complete(self):
         """所有阶段完成 - 收集所有道具"""
