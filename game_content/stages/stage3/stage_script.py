@@ -22,8 +22,8 @@ class Stage3(StageScript):
     name = "Stage 3"
     title = "成府路的周口店荒野~地壳应力焦虑"
     subtitle = "Geological Report of Senior Celestial and Junior Fairy"
-    bgm = "04.wav"
-    boss_bgm = "05.wav"
+    bgm = "05.wav"
+    boss_bgm = "06.wav"
     background = "luastg_stage3bg"
     DEBUG_BOOKMARK = False
 
@@ -32,10 +32,10 @@ class Stage3(StageScript):
         name="Star Sapphire",
         texture="star",
         phases=[
-            spellcard(StarSpell1, "门符「23:00 准时关闭的东北门」",       hp=2000, time=60),
-            spellcard(StarSpell2, "幻符「十二人间里的癔症狂想曲」",   hp=2400, time=65),
-            spellcard(StarSpell3, "华丽星地「周口店：星辰坠落的沉积层」", hp=2800, time=70),
-            spellcard(StarSpell4, "地质纪元「永不退色的群星频率」",   hp=3200, time=75),
+            spellcard(StarSpell1, "门符「23:00 准时关闭的东北门」",       hp=6000, time=60),
+            spellcard(StarSpell2, "幻符「十二人间里的癔症狂想曲」",   hp=6800, time=65),
+            spellcard(StarSpell3, "华丽星地「周口店：星辰坠落的沉积层」", hp=7600, time=70),
+            spellcard(StarSpell4, "地质纪元「永不退色的群星频率」",   hp=8400, time=75),
         ]
     )
 
@@ -57,6 +57,7 @@ class Stage3(StageScript):
 
         # Boss 出现：切到星星们的背景，和道中地质/地毯感背景拉开。
         await self.set_background("luastg_temple2")
+        await self.wait(180)
 
         # Boss 战前对话
         await self.play_dialogue([
@@ -72,6 +73,9 @@ class Stage3(StageScript):
             {"character": "Star_Sapphire",   "name": "斯塔", "position": "right", "text": "原来是老资历？！", "portrait": "Happy"},
             {"character": "Hinanawi_Tenshi", "name": "天子", "position": "left",  "text": "亓官刚建群那阵我就在了。", "portrait": "Happy"},
         ])
+
+        # 等待 3 秒（180 帧），让道中残余子弹飞离屏幕后再进入 Boss 战
+        await self.wait(180)
 
         # Boss 战
         await self.run_boss(self.boss)

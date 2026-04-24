@@ -102,15 +102,21 @@ class SpellDeclaration:
     def active(self) -> bool:
         return self._active
 
+    @property
+    def blocks_spell_update(self) -> bool:
+        """True while the opening declaration should pause spellcard logic."""
+        return self._active and self.time < TOTAL_DURATION
+
+    def finish(self) -> None:
+        """Stop rendering this declaration. BossBase calls this when the spell ends."""
+        self._active = False
+
     def update(self, dt: float) -> bool:
-        """推进时间。返回是否仍在播放（True = 继续播放，False = 已结束）。"""
+        """Advance time. The badge stays active until the owning spell ends."""
         if not self._active:
             return False
         self.time += max(0.0, dt)
-        if self.time >= TOTAL_DURATION:
-            self._active = False
-            return False
-        return True
+        return self._active
 
     def get_state(self,
                   game_viewport_px: Tuple[int, int, int, int],
@@ -138,7 +144,7 @@ class SpellDeclaration:
 
         # 右上角 —— 与右下角保持同一 x，竖直上移
         tr_cx = right_anchor_x
-        tr_cy = gy + 25
+        tr_cy = gy + 38
 
         def _underline_placeholder(cx: float, cy: float, scale: float):
             y = cy + 23.0 * scale
@@ -187,15 +193,14 @@ class SpellDeclaration:
             line_p0, line_p3 = _underline_placeholder(name_cx, name_cy, name_scale)
 
         else:
-            # 锁定
-            k = (t - PHASE_TO_TR_END) / (PHASE_LOCK_END - PHASE_TO_TR_END)
+            # 锁定在右上角，直到符卡结束时由 BossBase 清掉
             name_scale = 0.85
-            name_alpha = max(0.0, 1.0 - k * 0.15)
+            name_alpha = 1.0
             name_cx = tr_cx
             name_cy = tr_cy
             name_anchor_right = 1.0
             line_visible = True
-            line_alpha = max(0.0, 1.0 - k)
+            line_alpha = 1.0
             line_reveal = 1.0
             line_p0, line_p3 = _underline_placeholder(name_cx, name_cy, name_scale)
 
@@ -456,6 +461,11 @@ class SpellDeclarationRenderer:
 
     # ----- 带状文字 -----
     def _render_bands(self, state: DeclarationRenderState, game_viewport_win):
+        """
+        所有行使用同一倾斜方向（右上 → 左下，视觉上是 "/" ）。
+        每行沿着这条对角线方向整体平移；相邻行沿对角线方向相反（奇偶交替），
+        产生"上/下两股文字相向而行"的效果。
+        """
         gx, gy, gw, gh = game_viewport_win
         win_h = self.window_size[1]
         # OpenGL scissor 的 y 从窗口底部
@@ -464,46 +474,67 @@ class SpellDeclarationRenderer:
         self.ctx.scissor = (gx, sc_y, gw, gh)
 
         bw, bh = self._band_tex_size
-        # 尺寸按游戏区域宽度放大，使文字足够显眼但不占满全宽
-        target_half_w = gw * 0.85   # 带条半宽 ≈ 0.85 * gw
-        target_half_h = bh * 0.9    # 略缩高度
-        # 如果带条按比例比原贴图窄，就用缩放控制
+
+        # 尺寸
+        target_half_w = gw * 0.85
+        target_half_h = bh * 0.9
         scale_x = target_half_w / (bw / 2.0)
         scale_y = target_half_h / (bh / 2.0)
-        # 不希望文字被拉伸得太变形：按比例取最小/平均
-        scale = min(scale_x, scale_y) * 0.8  # 保守缩放
+        scale = min(scale_x, scale_y) * 0.8
         hw = (bw / 2.0) * scale
         hh = (bh / 2.0) * scale
 
-        # 用 "游戏视口中线 x" 作为带条中心 x（略偏左以产生"右下向左上"视觉）
-        cx = gx + gw * 0.5
+        # 所有行采用统一倾斜角度：负角度 = 绕 y-down 空间逆时针 = "/" 方向
+        # （在屏幕上看文字自左下抬升到右上；整条带子从右上延伸到左下）
+        angle_rad = math.radians(-self.BAND_ANGLE_MAIN)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
 
-        # 垂直方向布置若干行；滚动偏移
-        # 带条间距
+        # 对角线方向（沿带子"长轴"）；在 y-down 空间
+        dir_x = cos_a
+        dir_y = sin_a
+        # 垂直于带子（用于行间距）
+        perp_x = -sin_a
+        perp_y = cos_a
+
+        # 中心
+        cx0 = gx + gw * 0.5
+        cy0 = gy + gh * 0.5
+
+        # 行间距：沿垂直于带子的方向展开
         row_gap = gh / (self.BAND_ROWS + 1)
-        # 滚动：自上而下，起始在屏幕上方，终点到达屏幕下方
-        scroll_offset = (state.band_scroll * row_gap)
+
+        # 总平移距离（沿对角线方向，0 → scroll_total）
+        scroll_total = gh * 1.15
+        along_base = state.band_scroll * scroll_total
 
         self._band_texture.use(0)
         self._quad_prog['u_tint'].value = (1.0, 0.95, 0.98, state.band_alpha)
 
         mgl = self._moderngl
         for i in range(self.BAND_ROWS):
-            # 交替方向
-            sign = 1.0 if (i % 2 == 0) else -1.0
-            angle_deg = self.BAND_ANGLE_MAIN * sign
-            angle_rad = math.radians(angle_deg)
+            # 相邻行沿对角线方向相反（奇偶交替）
+            along_sign = 1.0 if (i % 2 == 0) else -1.0
+            # 每行初始相位错开，让两组交错出现
+            phase = (i * 0.37) * row_gap
+            along = along_sign * along_base + phase - scroll_total * 0.5
 
-            # 行 y 位置 —— 从视口顶部向下排列，随 band_scroll 下移
-            row_y = gy + row_gap * (i + 0.5) + scroll_offset
-            # 如果出了视口就不画（scissor 会裁剪但省一次绘制）
-            if row_y < gy - hh * 1.5 or row_y > gy + gh + hh * 1.5:
+            # 行基准位置：沿垂直方向排布
+            row_offset = (i - (self.BAND_ROWS - 1) * 0.5) * row_gap
+            base_x = cx0 + perp_x * row_offset
+            base_y = cy0 + perp_y * row_offset
+
+            # 加上沿对角线方向的平移
+            cx_row = base_x + dir_x * along
+            cy_row = base_y + dir_y * along
+
+            # 粗略视锥剔除（scissor 会二次裁剪，但省一次 draw 更好）
+            pad = max(hw, hh) * 1.2
+            if (cx_row < gx - pad or cx_row > gx + gw + pad or
+                cy_row < gy - pad or cy_row > gy + gh + pad):
                 continue
 
-            # 再加一点 x 抖动，让方向看起来"某些从左上向右下"
-            cx_row = cx + math.cos(angle_rad) * (-hw * 0.05) * sign
-
-            self._quad_prog['u_center'].value = (float(cx_row), float(row_y))
+            self._quad_prog['u_center'].value = (float(cx_row), float(cy_row))
             self._quad_prog['u_half_size'].value = (float(hw), float(hh))
             self._quad_prog['u_angle'].value = float(angle_rad)
             self._quad_vao.render(mgl.TRIANGLES, vertices=6)

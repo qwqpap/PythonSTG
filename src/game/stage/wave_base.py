@@ -30,6 +30,8 @@ import types
 from abc import ABC, abstractmethod
 from typing import Optional, List, TYPE_CHECKING
 
+from .danmaku_audio import resolve_fire_sound
+
 if TYPE_CHECKING:
     from .spellcard import SpellCardContext
 
@@ -55,6 +57,7 @@ class Wave(ABC):
     def __init__(self):
         self.ctx: Optional['SpellCardContext'] = None
         self._time: int = 0
+        self._next_danmaku_se_frame: int = 0
     
     def bind(self, ctx: 'SpellCardContext'):
         """绑定上下文（由引擎调用）"""
@@ -77,6 +80,8 @@ class Wave(ABC):
         这个方法将 async def run() 转换为 yield 风格的生成器，
         让 StageScript 可以用 yield from 来驱动。
         """
+        self._time = 0
+        self._next_danmaku_se_frame = 0
         coro = self.run()
         try:
             while True:
@@ -89,7 +94,8 @@ class Wave(ABC):
     # ==================== 弹幕 API ====================
     
     def fire(self, x: float, y: float, angle: float = -90, speed: float = 2.0,
-             bullet_type: str = "ball_m", color: str = "red", **kwargs):
+             bullet_type: str = "ball_m", color: str = "red",
+             play_sound: bool = False, **kwargs):
         """
         发射子弹
         
@@ -100,33 +106,49 @@ class Wave(ABC):
             bullet_type: 弹幕类型
             color: 颜色
         """
+        if play_sound:
+            self._play_danmaku_se(count=1, speed=speed, bullet_type=bullet_type)
+
         return self.ctx.create_bullet(
             x=x, y=y, angle=angle, speed=speed,
             bullet_type=bullet_type, color=color, **kwargs
         )
     
     def fire_circle(self, x: float, y: float, count: int = 16,
-                    speed: float = 2.0, start_angle: float = 0, **kwargs):
+                    speed: float = 2.0, start_angle: float = 0,
+                    play_sound: bool = True, **kwargs):
         """发射圆形弹幕"""
         bullets = []
+        if play_sound:
+            self._play_danmaku_se(
+                count=count,
+                speed=speed,
+                bullet_type=kwargs.get("bullet_type", "ball_m"),
+            )
         for i in range(count):
             angle = start_angle + (360.0 / count) * i
-            b = self.fire(x=x, y=y, angle=angle, speed=speed, **kwargs)
+            b = self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=False, **kwargs)
             bullets.append(b)
         return bullets
     
     def fire_arc(self, x: float, y: float, count: int = 5,
                  speed: float = 2.0, center_angle: float = -90,
-                 arc_angle: float = 60, **kwargs):
+                 arc_angle: float = 60, play_sound: bool = True, **kwargs):
         """发射扇形弹幕"""
         bullets = []
         if count == 1:
-            return [self.fire(x=x, y=y, angle=center_angle, speed=speed, **kwargs)]
+            return [self.fire(x=x, y=y, angle=center_angle, speed=speed, play_sound=play_sound, **kwargs)]
+        if play_sound:
+            self._play_danmaku_se(
+                count=count,
+                speed=speed,
+                bullet_type=kwargs.get("bullet_type", "ball_m"),
+            )
         start = center_angle - arc_angle / 2
         step = arc_angle / (count - 1)
         for i in range(count):
             angle = start + step * i
-            b = self.fire(x=x, y=y, angle=angle, speed=speed, **kwargs)
+            b = self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=False, **kwargs)
             bullets.append(b)
         return bullets
 
@@ -134,7 +156,7 @@ class Wave(ABC):
                    radial_speed: float = 0.0, angular_velocity: float = 0.0,
                    bullet_type: str = "ball_m", color: str = "red",
                    render_mode: str = "velocity", angle_offset: float = 0.0,
-                   collision_radius: float = 0.0, **kwargs):
+                   collision_radius: float = 0.0, play_sound: bool = False, **kwargs):
         """
         发射极坐标运动子弹。
 
@@ -143,6 +165,14 @@ class Wave(ABC):
             orbit_radius: 初始半径
             theta: 初始角度（度）
         """
+        if play_sound:
+            effective_speed = abs(radial_speed) + abs(angular_velocity) * max(0.2, orbit_radius)
+            self._play_danmaku_se(
+                count=1,
+                speed=effective_speed,
+                bullet_type=bullet_type,
+            )
+
         return self.ctx.create_polar_bullet(
             center=center,
             orbit_radius=orbit_radius,
@@ -162,7 +192,7 @@ class Wave(ABC):
         return self.fire_polar(*args, **kwargs)
     
     def fire_at_player(self, x: float, y: float, speed: float = 2.0,
-                       offset_angle: float = 0, **kwargs):
+                       offset_angle: float = 0, play_sound: bool = True, **kwargs):
         """发射自机狙"""
         player = self.ctx.get_player()
         if player:
@@ -171,7 +201,7 @@ class Wave(ABC):
             angle = math.degrees(math.atan2(dy, dx)) + offset_angle
         else:
             angle = -90 + offset_angle
-        return self.fire(x=x, y=y, angle=angle, speed=speed, **kwargs)
+        return self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=play_sound, **kwargs)
     
     # ==================== 等待 API ====================
     
@@ -188,11 +218,29 @@ class Wave(ABC):
     
     # ==================== 音频 API ====================
 
-    def play_se(self, name: str, volume: float = None) -> bool:
+    def play_se(self, name: str, volume: float = None, min_interval: float = 0.0) -> bool:
         """播放音效"""
         if self.ctx and hasattr(self.ctx, 'play_se'):
-            return self.ctx.play_se(name, volume)
+            return self.ctx.play_se(name, volume, min_interval=min_interval)
         return False
+
+    def _play_danmaku_se(self, count: int = 1, speed: float = 2.0,
+                         bullet_type: str = "ball_m") -> bool:
+        if self.time < self._next_danmaku_se_frame:
+            return False
+
+        sound_name, volume, min_interval, cooldown_frames = resolve_fire_sound(
+            count=count,
+            speed=speed,
+            bullet_type=bullet_type,
+        )
+        if self.ctx and hasattr(self.ctx, 'play_danmaku_se'):
+            played = self.ctx.play_danmaku_se(sound_name, volume=volume, min_interval=min_interval)
+        else:
+            played = self.play_se(sound_name, volume=volume, min_interval=min_interval)
+        if played:
+            self._next_danmaku_se_frame = self.time + cooldown_frames
+        return played
 
     # ==================== 敌人生成 API ====================
 

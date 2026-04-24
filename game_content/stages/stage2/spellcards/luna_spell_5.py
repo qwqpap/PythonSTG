@@ -49,7 +49,7 @@ class LunaSpell5(SpellCard):
                         angle=a,
                         speed=1.4,
                         bullet_type='butterfly',
-                        color='pink',
+                        color='purple',
                         render_angle=a,
                     )
                 petal_phase = (petal_phase + 9.0) % 360   # 每圈转 9°
@@ -111,7 +111,7 @@ class LunaSpell5(SpellCard):
                         angle=a,
                         speed=2.8 + random.uniform(-0.3, 0.3),
                         bullet_type='heart',
-                        color='pink',
+                        color='purple',
                         render_angle=a,
                     )
 

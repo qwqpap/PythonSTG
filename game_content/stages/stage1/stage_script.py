@@ -27,8 +27,8 @@ class Stage1(StageScript):
     name = "Stage 1"
     title = "错位的井盖与地下穿行者"
     subtitle = "The Misplaced Manhole Cover and the Subterranean Drifter"
-    bgm = "00.wav"
-    boss_bgm = "01.wav"
+    bgm = "01.wav"
+    boss_bgm = "02.wav"
     background = "luastg_hongmoguanB"
     DEBUG_BOOKMARK = False  # True 时跳过前置对话，从 Stage1Wave1 开始测
 
@@ -39,11 +39,11 @@ class Stage1(StageScript):
         name="Sunny Milk",
         texture="sunny",
         phases=[
-            spellcard(CoalInfernoSpell, "煤符「燃尽一切的巨大之煤」", hp=1500, time=55),
-            spellcard(GasExplosionSpell, "烈符「瓦斯爆炸」", hp=1800, time=60),
-            spellcard(MysteriousCreatureSpell, "生符「食堂的神秘小生物」", hp=2000, time=60),
-            spellcard(SunnySpell1, "光符「反射在井盖上的矿院幻影」", hp=1200, time=60),
-            spellcard(WanderingUniversitySpell, "润符「辗转全国的百年老校」", hp=1600, time=60),
+            spellcard(CoalInfernoSpell, "煤符「燃尽一切的巨大之煤」", hp=4400, time=55),
+            spellcard(GasExplosionSpell, "烈符「瓦斯爆炸」", hp=4800, time=60),
+            spellcard(MysteriousCreatureSpell, "生符「食堂的神秘小生物」", hp=5000, time=60),
+            spellcard(SunnySpell1, "光符「反射在井盖上的矿院幻影」", hp=4600, time=60),
+            spellcard(WanderingUniversitySpell, "润符「辗转全国的百年老校」", hp=5000, time=60),
         ]
     )
 
@@ -110,6 +110,7 @@ class Stage1(StageScript):
 
         # Boss 出现：从地底道中切到更像妖精恶作剧的魔法背景。
         await self.set_background("luastg_ball")
+        await self.wait(180)
 
         await self.play_dialogue([
             {"character": "Sunny_Milk",   "name": "桑尼", "position": "left",  "text": "让我们回避这个悲伤的话题。", "portrait": "Happy"},
@@ -121,7 +122,8 @@ class Stage1(StageScript):
             {"character": "Sunny_Milk",   "name": "桑尼", "position": "left",  "text": "我不怕你，因为我们矿大有巨大的煤。", "portrait": "Anger"},
         ])
 
-
+        # 等待 3 秒（180 帧），让道中残余子弹飞离屏幕后再进入 Boss 战
+        await self.wait(180)
 
         await self.run_boss(self.boss)
 

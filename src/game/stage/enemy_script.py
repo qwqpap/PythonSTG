@@ -42,6 +42,8 @@ import types
 from abc import ABC, abstractmethod
 from typing import Optional, Callable, List, Any, Tuple, TYPE_CHECKING
 
+from .danmaku_audio import resolve_fire_sound
+
 if TYPE_CHECKING:
     from .spellcard import SpellCardContext
     from .enemy_render import EnemyRenderObject
@@ -73,6 +75,7 @@ class EnemyScript(ABC):
         self._time: int = 0
         self._prev_x: float = 0.0
         self._render_obj: Optional['EnemyRenderObject'] = None
+        self._next_danmaku_se_frame: int = 0
 
         # 回调
         self.on_death: Optional[Callable] = None
@@ -102,6 +105,7 @@ class EnemyScript(ABC):
         """启动敌人（由引擎/波次调用）"""
         self._active = True
         self._time = 0
+        self._next_danmaku_se_frame = 0
         self._prev_x = self.x
         self._init_render_object()
         self._coroutine = self._run_wrapper()
@@ -214,7 +218,7 @@ class EnemyScript(ABC):
     
     def fire(self, angle: float = -90, speed: float = 2.0,
              bullet_type: str = "ball_m", color: str = "red",
-             x: float = None, y: float = None, **kwargs):
+             x: float = None, y: float = None, play_sound: bool = False, **kwargs):
         """
         发射子弹（默认从自身位置发射）
         
@@ -229,6 +233,8 @@ class EnemyScript(ABC):
             x = self.x
         if y is None:
             y = self.y
+        if play_sound:
+            self._play_danmaku_se(count=1, speed=speed, bullet_type=bullet_type)
         bullet = self.ctx.create_bullet(
             x=x, y=y, angle=angle, speed=speed,
             bullet_type=bullet_type, color=color, **kwargs
@@ -237,12 +243,18 @@ class EnemyScript(ABC):
         return bullet
     
     def fire_circle(self, count: int = 8, speed: float = 2.0,
-                    start_angle: float = 0, **kwargs):
+                    start_angle: float = 0, play_sound: bool = True, **kwargs):
         """发射圆形弹幕"""
         bullets = []
+        if play_sound:
+            self._play_danmaku_se(
+                count=count,
+                speed=speed,
+                bullet_type=kwargs.get("bullet_type", "ball_m"),
+            )
         for i in range(count):
             angle = start_angle + (360.0 / count) * i
-            b = self.fire(angle=angle, speed=speed, **kwargs)
+            b = self.fire(angle=angle, speed=speed, play_sound=False, **kwargs)
             bullets.append(b)
         return bullets
 
@@ -251,7 +263,7 @@ class EnemyScript(ABC):
                    bullet_type: str = "ball_m", color: str = "red",
                    center=None, render_mode: str = "velocity",
                    angle_offset: float = 0.0, collision_radius: float = 0.0,
-                   **kwargs):
+                   play_sound: bool = False, **kwargs):
         """
         发射极坐标运动子弹。
 
@@ -259,6 +271,14 @@ class EnemyScript(ABC):
         """
         if center is None:
             center = self
+
+        if play_sound:
+            effective_speed = abs(radial_speed) + abs(angular_velocity) * max(0.2, orbit_radius)
+            self._play_danmaku_se(
+                count=1,
+                speed=effective_speed,
+                bullet_type=bullet_type,
+            )
 
         bullet = self.ctx.create_polar_bullet(
             center=center,
@@ -281,20 +301,28 @@ class EnemyScript(ABC):
         return self.fire_polar(*args, **kwargs)
     
     def fire_arc(self, count: int = 5, speed: float = 2.0,
-                 center_angle: float = -90, arc_angle: float = 60, **kwargs):
+                 center_angle: float = -90, arc_angle: float = 60,
+                 play_sound: bool = True, **kwargs):
         """发射扇形弹幕"""
         bullets = []
         if count == 1:
-            return [self.fire(angle=center_angle, speed=speed, **kwargs)]
+            return [self.fire(angle=center_angle, speed=speed, play_sound=play_sound, **kwargs)]
+        if play_sound:
+            self._play_danmaku_se(
+                count=count,
+                speed=speed,
+                bullet_type=kwargs.get("bullet_type", "ball_m"),
+            )
         start = center_angle - arc_angle / 2
         step = arc_angle / (count - 1)
         for i in range(count):
             angle = start + step * i
-            b = self.fire(angle=angle, speed=speed, **kwargs)
+            b = self.fire(angle=angle, speed=speed, play_sound=False, **kwargs)
             bullets.append(b)
         return bullets
     
-    def fire_at_player(self, speed: float = 2.0, offset_angle: float = 0, **kwargs):
+    def fire_at_player(self, speed: float = 2.0, offset_angle: float = 0,
+                       play_sound: bool = True, **kwargs):
         """发射自机狙"""
         player = self.ctx.get_player()
         if player:
@@ -303,7 +331,7 @@ class EnemyScript(ABC):
             angle = math.degrees(math.atan2(dy, dx)) + offset_angle
         else:
             angle = -90 + offset_angle
-        return self.fire(angle=angle, speed=speed, **kwargs)
+        return self.fire(angle=angle, speed=speed, play_sound=play_sound, **kwargs)
     
     def angle_to_player(self) -> float:
         """计算到玩家的角度"""
@@ -357,11 +385,29 @@ class EnemyScript(ABC):
     
     # ==================== 音频 API ====================
     
-    def play_se(self, name: str, volume: float = None) -> bool:
+    def play_se(self, name: str, volume: float = None, min_interval: float = 0.0) -> bool:
         """播放音效"""
         if self.ctx and hasattr(self.ctx, 'play_se'):
-            return self.ctx.play_se(name, volume)
+            return self.ctx.play_se(name, volume, min_interval=min_interval)
         return False
+
+    def _play_danmaku_se(self, count: int = 1, speed: float = 2.0,
+                         bullet_type: str = "ball_m") -> bool:
+        if self.time < self._next_danmaku_se_frame:
+            return False
+
+        sound_name, volume, min_interval, cooldown_frames = resolve_fire_sound(
+            count=count,
+            speed=speed,
+            bullet_type=bullet_type,
+        )
+        if self.ctx and hasattr(self.ctx, 'play_danmaku_se'):
+            played = self.ctx.play_danmaku_se(sound_name, volume=volume, min_interval=min_interval)
+        else:
+            played = self.play_se(sound_name, volume=volume, min_interval=min_interval)
+        if played:
+            self._next_danmaku_se_frame = self.time + cooldown_frames
+        return played
     
     async def on_spawn(self):
         """出生回调（可覆盖）"""

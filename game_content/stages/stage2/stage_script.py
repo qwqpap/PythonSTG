@@ -25,8 +25,8 @@ class Stage2(StageScript):
     name = "Stage 2"
     title = "燃料与汗水的疾走 ～ 延伸至地平线外的昌平线"
     subtitle = "Terminal Station ~ The Subway to the Edge of the World."
-    bgm = "02.wav"
-    boss_bgm = "03.wav"
+    bgm = "03.wav"
+    boss_bgm = "04.wav"
     background = "bamboo"
     DEBUG_BOOKMARK = False
 
@@ -37,11 +37,11 @@ class Stage2(StageScript):
         name="Luna Child",
         texture="luna",
         phases=[
-            spellcard(LunaSpell1, "跑符「111真的吗？不跑校园跑要挂科？」", hp=1800, time=60),
-            spellcard(LunaSpell2, "线符「昌平列车」",                       hp=2200, time=60),
-            spellcard(LunaSpell3, "网符「交织的死亡菱形」",                   hp=2000, time=60),
-            spellcard(LunaSpell4, "月符「月光回廊」",                        hp=2400, time=65),
-            spellcard(LunaSpell5, "幻符「月归昌平」",                        hp=2800, time=70),
+            spellcard(LunaSpell1, "跑符「111真的吗？不跑校园跑要挂科？」", hp=5200, time=60),
+            spellcard(LunaSpell2, "线符「昌平列车」",                       hp=5600, time=60),
+            spellcard(LunaSpell3, "网符「交织的死亡菱形」",                   hp=5400, time=60),
+            spellcard(LunaSpell4, "月符「月光回廊」",                        hp=6200, time=65),
+            spellcard(LunaSpell5, "幻符「月归昌平」",                        hp=7000, time=70),
         ]
     )
 
@@ -61,6 +61,7 @@ class Stage2(StageScript):
 
         # Boss 出现：从路途道中切到更强烈的红色中国风舞台。
         await self.set_background("luastg_gzz_stage04bg")
+        await self.wait(180)
         if self.ctx and self.ctx.background_renderer:
             self.ctx.background_renderer.load_texture(
                 os.path.join("game_content", "stages", "stage2", "back", "cpline.png")
@@ -79,6 +80,9 @@ class Stage2(StageScript):
             {"character": "Luna_Child",   "name": "露娜", "position": "left",  "text": "我一百公里校园跑再不跑体育就要挂科了。拜拜！", "portrait": "Happy"},
             {"character": "Toutetu_Yuma", "name": "饕餮", "position": "right", "text": "你给我回来！", "portrait": "Anger"},
         ])
+
+        # 等待 3 秒（180 帧），让道中残余子弹飞离屏幕后再进入 Boss 战
+        await self.wait(180)
 
         # 开始激烈弹幕对战
         await self.run_boss(self.boss)

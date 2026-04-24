@@ -10,7 +10,8 @@ UI渲染器 - 使用ModernGL渲染UI元素
 import moderngl
 import numpy as np
 from typing import Dict, List, Optional
-from ..core.image_loader import SoftwareSurface, load_image_rgba
+import os
+from ..core.image_loader import SoftwareSurface, FontRenderer, load_image_rgba
 from .bitmap_font import BitmapFont, get_font_manager
 
 
@@ -35,6 +36,13 @@ class UIRenderer:
 
         # UI背景纹理缓存 {path: texture}
         self.bg_textures: Dict[str, moderngl.Texture] = {}
+        self._overlay_fonts: Dict[int, FontRenderer] = {}
+        self._overlay_textures: Dict[tuple, tuple] = {}
+        self._overlay_font_path = os.path.join("assets", "fonts", "SourceHanSansCN-Bold.otf")
+        if not os.path.exists(self._overlay_font_path):
+            self._overlay_font_path = os.path.join("assets", "fonts", "wqy-microhei-mono.ttf")
+        if not os.path.exists(self._overlay_font_path):
+            self._overlay_font_path = None
 
         # 初始化着色器
         self._init_text_shader()
@@ -248,6 +256,66 @@ class UIRenderer:
         self.textured_rect_vbo.write(vertices.tobytes())
         self.textured_rect_program['u_alpha'].value = alpha
         self.bg_textures[texture_path].use(0)
+        self.textured_rect_vao.render(moderngl.TRIANGLES, vertices=6)
+
+    def _get_overlay_font(self, size: int) -> FontRenderer:
+        size = max(1, int(size))
+        if size not in self._overlay_fonts:
+            self._overlay_fonts[size] = FontRenderer(self._overlay_font_path, size)
+        return self._overlay_fonts[size]
+
+    def render_ttf_text(self, text: str, x: float, y: float,
+                        size: int = 24, color: tuple = (255, 255, 255),
+                        alpha: float = 1.0, align: str = 'left',
+                        stroke_width: int = 2,
+                        stroke_color: tuple = (0, 0, 0)) -> None:
+        if not text:
+            return
+
+        key = (
+            text,
+            int(size),
+            tuple(color),
+            int(stroke_width),
+            tuple(stroke_color),
+        )
+        cached = self._overlay_textures.get(key)
+        if cached is None:
+            font = self._get_overlay_font(size)
+            surface = font.render(
+                text,
+                True,
+                color,
+                stroke_width=stroke_width,
+                stroke_color=stroke_color,
+            )
+            texture = self.ctx.texture(
+                surface.get_size(), 4,
+                surface.to_bytes("RGBA", flip_y=False)
+            )
+            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            cached = (texture, surface.get_width(), surface.get_height())
+            self._overlay_textures[key] = cached
+
+        texture, width, height = cached
+        draw_x = x
+        if align == 'center':
+            draw_x -= width / 2
+        elif align == 'right':
+            draw_x -= width
+
+        vertices = np.array([
+            draw_x,         y,          0.0, 0.0,
+            draw_x,         y + height, 0.0, 1.0,
+            draw_x + width, y,          1.0, 0.0,
+            draw_x + width, y,          1.0, 0.0,
+            draw_x,         y + height, 0.0, 1.0,
+            draw_x + width, y + height, 1.0, 1.0,
+        ], dtype='f4')
+
+        self.textured_rect_vbo.write(vertices.tobytes())
+        self.textured_rect_program['u_alpha'].value = alpha
+        texture.use(0)
         self.textured_rect_vao.render(moderngl.TRIANGLES, vertices=6)
 
     def load_font_texture(self, font_name: str) -> bool:
@@ -472,4 +540,23 @@ class UIRenderer:
     def cleanup(self) -> None:
         """清理资源"""
         # ModernGL会自动管理资源，但可以显式释放纹理
+        for texture in self.font_textures.values():
+            try:
+                texture.release()
+            except Exception:
+                pass
+        for texture in self.bg_textures.values():
+            try:
+                texture.release()
+            except Exception:
+                pass
+        for texture, _, _ in self._overlay_textures.values():
+            try:
+                texture.release()
+            except Exception:
+                pass
+
         self.font_textures.clear()
+        self.bg_textures.clear()
+        self._overlay_textures.clear()
+        self._overlay_fonts.clear()

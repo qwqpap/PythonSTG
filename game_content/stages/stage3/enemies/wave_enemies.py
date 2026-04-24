@@ -17,14 +17,14 @@ class SeismicFairy(EnemyScript):
 
     async def run(self):
         # 1. 入场
-        start_x = self.x
+        visible_x_margin = 0.98
         for i in range(120):
             # 基础向侧边飞行，带一点上下浮动
             self.x += self.side * 0.015
             self.y += math.sin(i * 0.1) * 0.005
 
-            if i % 25 == 0:
-                # 发射蛇形摆弹，模拟震波
+            if i % 25 == 0 and -visible_x_margin <= self.x <= visible_x_margin:
+                # 只在进入可见区域后开火，避免侧边场外弹先有判定后入屏。
                 for angle_offset in [-15, 0, 15]:
                     self.fire(
                         x=self.x, y=self.y,

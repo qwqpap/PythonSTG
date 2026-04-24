@@ -67,6 +67,8 @@ class AudioBackend:
         self._sample_rate = sample_rate
         self._nchannels = nchannels
         self._initialized = False
+        self._max_playing_sounds = 8
+        self._max_instances_per_sound = 1
 
         self._playing: list = []
         self._lock = threading.Lock()
@@ -208,6 +210,20 @@ class AudioBackend:
             return False
         ps = _PlayingSound(sound, loops)
         with self._lock:
+            active_count = 0
+            same_sound_count = 0
+            for playing in self._playing:
+                if not playing.active:
+                    continue
+                active_count += 1
+                if playing.sound is sound:
+                    same_sound_count += 1
+
+            if active_count >= self._max_playing_sounds:
+                return False
+            if same_sound_count >= self._max_instances_per_sound:
+                return False
+
             self._playing.append(ps)
         return True
 

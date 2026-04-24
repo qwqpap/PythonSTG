@@ -808,9 +808,9 @@ def _update_bullets_optimized(data, dt):
                 data[i]['angle'] = math.atan2(data[i]['vel'][1], data[i]['vel'][0])
 
         if flags & 2:  # BOUNCE_Y
-            if y < -1.0:
+            if y < -1.14:  # 真实屏幕底部 ≈ -1.167 (y_scale=384/448)
                 data[i]['vel'][1] = -data[i]['vel'][1]
-                data[i]['pos'][1] = -1.0
+                data[i]['pos'][1] = -1.14
                 data[i]['angle'] = math.atan2(data[i]['vel'][1], data[i]['vel'][0])
             elif y > 1.0:
                 data[i]['vel'][1] = -data[i]['vel'][1]

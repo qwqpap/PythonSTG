@@ -14,10 +14,28 @@
 import os
 import hashlib
 import shutil
+import time
 from typing import Optional, Dict
 from enum import Enum
 
 from ..core.audio_backend import get_audio_backend, init_audio_backend, Sound as BackendSound
+
+
+BGM_TITLE_MAP = {
+    "00": "分形 Cosmos",
+    "01": "学院通りへの突入 ~ 闯入学院之路",
+    "02": "野蔓草の天を衝く心 ~ 野蔓草的参天之心",
+    "03": "麦畑で待つ ~ 在麦田中等待",
+    "04": "粟々天雨 ~ 粟粟天雨",
+    "05": "失われた黄金時代 ~ 失却的黄金时代",
+    "06": "出発、地底世界へ！ ~ 出发，地底世界！",
+}
+
+
+def normalize_bgm_name(name: str) -> str:
+    if not name:
+        return ""
+    return os.path.splitext(str(name))[0]
 
 
 class AudioChannel(Enum):
@@ -246,7 +264,7 @@ class AudioBank:
     # ==================== BGM 播放 ====================
     
     def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0,
-                  start: float = 0.0) -> bool:
+                  start: float = 0.0, announce: bool = True) -> bool:
         """
         播放 BGM（停止当前 BGM 并切换）
         
@@ -380,6 +398,9 @@ class GameAudioBank(AudioBank):
     # 音效名 → 文件名映射（常用预设）
     DEFAULT_SE_MAP = {
         "shoot":    "se_plst00.wav",
+        "enemy_shot_soft": "se_tan02.wav",
+        "enemy_shot_mid": "se_tan01.wav",
+        "enemy_shot_heavy": "se_tan00.wav",
         "graze":    "se_graze.wav",
         "pldead":   "se_pldead00.wav",
         "extend":   "se_extend.wav",
@@ -496,6 +517,11 @@ class AudioManager:
     def __init__(self, game_bank: GameAudioBank):
         self._game_bank = game_bank
         self._stage_bank: Optional[StageAudioBank] = None
+        self._se_last_played_at: Dict[str, float] = {}
+        self._danmaku_se_next_time: float = 0.0
+        self._current_bgm_name: str = ""
+        self._bgm_notification_text: str = ""
+        self._bgm_notification_until: float = 0.0
     
     @property
     def game_bank(self) -> GameAudioBank:
@@ -520,7 +546,8 @@ class AudioManager:
     
     # ==================== SE ====================
     
-    def play_se(self, name: str, volume: Optional[float] = None, loops: int = 0) -> bool:
+    def play_se(self, name: str, volume: Optional[float] = None, loops: int = 0,
+                min_interval: float = 0.0) -> bool:
         """
         播放音效（Stage 私有优先，fallback 到全局）
         
@@ -529,17 +556,40 @@ class AudioManager:
             volume: 音量 (0.0~1.0)
             loops: 循环次数
         """
+        if min_interval > 0.0:
+            now = time.perf_counter()
+            last_played = self._se_last_played_at.get(name, 0.0)
+            if now - last_played < min_interval:
+                return False
+
         # 先查 stage bank
         if self._stage_bank and self._stage_bank.has_se(name):
-            return self._stage_bank.play_se(name, volume, loops)
-        # fallback 到 game bank
-        return self._game_bank.play_se(name, volume, loops)
+            played = self._stage_bank.play_se(name, volume, loops)
+        else:
+            # fallback 到 game bank
+            played = self._game_bank.play_se(name, volume, loops)
+
+        if played and min_interval > 0.0:
+            self._se_last_played_at[name] = time.perf_counter()
+        return played
     
     def stop_se(self, name: str):
         """停止音效"""
         if self._stage_bank and self._stage_bank.has_se(name):
             self._stage_bank.stop_se(name)
         self._game_bank.stop_se(name)
+
+    def play_danmaku_se(self, name: str, volume: Optional[float] = None,
+                        min_interval: float = 0.0, loops: int = 0) -> bool:
+        """播放受全局节流保护的弹幕音效。"""
+        now = time.perf_counter()
+        if now < self._danmaku_se_next_time:
+            return False
+
+        played = self.play_se(name, volume=volume, loops=loops, min_interval=min_interval)
+        if played:
+            self._danmaku_se_next_time = now + max(0.20, min_interval)
+        return played
     
     def has_se(self, name: str) -> bool:
         """是否有某个 SE（任一 bank 有即可）"""
@@ -550,7 +600,7 @@ class AudioManager:
     # ==================== BGM ====================
     
     def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0,
-                  start: float = 0.0) -> bool:
+                  start: float = 0.0, announce: bool = True) -> bool:
         """
         播放 BGM（Stage 私有优先）
         
@@ -560,9 +610,20 @@ class AudioManager:
             fade_ms: 淡入
             start: 起始位置
         """
+        normalized_name = normalize_bgm_name(name)
         if self._stage_bank and self._stage_bank.has_bgm(name):
-            return self._stage_bank.play_bgm(name, loops, fade_ms, start)
-        return self._game_bank.play_bgm(name, loops, fade_ms, start)
+            played = self._stage_bank.play_bgm(name, loops, fade_ms, start)
+        else:
+            played = self._game_bank.play_bgm(name, loops, fade_ms, start)
+
+        if played:
+            self._current_bgm_name = normalized_name
+            if announce:
+                title = self.get_bgm_title(normalized_name)
+                self._bgm_notification_text = f"BGM: {title}"
+                self._bgm_notification_until = time.perf_counter() + 5.0
+
+        return played
     
     def pause_bgm(self):
         """暂停 BGM"""
@@ -579,6 +640,19 @@ class AudioManager:
     def is_bgm_playing(self) -> bool:
         """BGM 是否在播放"""
         return self._game_bank.is_bgm_playing()
+
+    def get_bgm_title(self, name: str) -> str:
+        normalized_name = normalize_bgm_name(name)
+        return BGM_TITLE_MAP.get(normalized_name, normalized_name or "")
+
+    def get_bgm_notification_text(self) -> str:
+        if not self._bgm_notification_text:
+            return ""
+        if time.perf_counter() >= self._bgm_notification_until:
+            self._bgm_notification_text = ""
+            self._bgm_notification_until = 0.0
+            return ""
+        return self._bgm_notification_text
     
     # ==================== 全局音量 ====================
     

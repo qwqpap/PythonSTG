@@ -216,10 +216,11 @@ class BossBase:
             self._render_obj.update(vx=vx, dt=1 / 60.0)
         self._prev_x = self.x
 
-        # 符卡宣言播放期间暂停符卡推进（60fps → dt≈1/60s）
+        # 符卡宣言开场期间暂停符卡推进；到位后继续显示，但不再挡住符卡逻辑。
         if self._declaration is not None and self._declaration.active:
             self._declaration.update(1.0 / 60.0)
-            return
+            if getattr(self._declaration, 'blocks_spell_update', False):
+                return
 
         if self.current_spellcard:
             # 逐帧衰减符卡 bonus（从 max 线性衰减到 base = max/2）
@@ -308,12 +309,18 @@ class BossBase:
     def _on_spellcard_end(self, phase: BossPhase):
         """符卡结束（可覆盖）"""
         print(f"符卡结束: {phase.name}")
-        # 清除任何残留的宣言状态（通常动画早已播放完毕）
+        # 清除宣言名牌；它会在右上角保持到符卡真正结束。
+        if self._declaration is not None:
+            try:
+                self._declaration.finish()
+            except Exception:
+                pass
         self._declaration = None
     
     def _on_all_phases_complete(self):
         """所有阶段完成 - 收集所有道具"""
         self._active = False
+        self._declaration = None
         # Boss 击破时，吸收场上所有道具
         if self.ctx and hasattr(self.ctx, '_item_pool') and self.ctx._item_pool:
             px = self.ctx.get_player().x if self.ctx.get_player() else 0
@@ -341,6 +348,27 @@ class BossBase:
         """当前符卡（兼容 HUD 系统）"""
         return self.current_spellcard
     
+    @property
+    def total_spellcards(self) -> int:
+        total = 0
+        for phase in self.phases:
+            if phase.phase_type == BossPhaseType.SPELLCARD:
+                total += 1
+        return total
+
+    @property
+    def current_spellcard_number(self) -> int:
+        if not (0 <= self.current_phase_index < len(self.phases)):
+            return 0
+        phase = self.phases[self.current_phase_index]
+        if phase.phase_type != BossPhaseType.SPELLCARD:
+            return 0
+        number = 0
+        for idx in range(self.current_phase_index + 1):
+            if self.phases[idx].phase_type == BossPhaseType.SPELLCARD:
+                number += 1
+        return number
+
     @property
     def current_hp(self) -> int:
         """当前 HP（兼容 HUD）"""
@@ -410,4 +438,3 @@ def spellcard(script_class: type, name: str, hp: int, time: float,
         bonus=bonus,
         practice_unlock=practice
     )
-

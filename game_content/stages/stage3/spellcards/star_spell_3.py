@@ -111,7 +111,7 @@ class StarSpell3(SpellCard):
                 else:
                     # 检查当前 y 坐标
                     cy = float(self.ctx.bullet_pool.data['pos'][idx][1])
-                    if cy < -0.92:
+                    if cy < -1.14:  # 真实屏幕底部 ≈ -1.167 (y_scale=384/448)
                         # 触底爆炸：取当前实际 x 位置
                         cx = float(self.ctx.bullet_pool.data['pos'][idx][0])
                         self.ctx.bullet_pool.data['alive'][idx] = 0
@@ -129,7 +129,7 @@ class StarSpell3(SpellCard):
                 for i in range(10):
                     angle = random.uniform(5, 175)
                     self.fire(
-                        x=ex, y=-0.92,
+                        x=ex, y=-1.14,
                         angle=angle,
                         speed=random.uniform(4.0, 9.0),
                         bullet_type="ball_m",
@@ -139,7 +139,7 @@ class StarSpell3(SpellCard):
                 for _ in range(4):
                     angle = random.uniform(40, 140)
                     self.fire(
-                        x=ex, y=-0.92,
+                        x=ex, y=-1.14,
                         angle=angle,
                         speed=random.uniform(12.0, 18.0),
                         bullet_type="grain_a",

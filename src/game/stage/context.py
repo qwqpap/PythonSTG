@@ -438,9 +438,16 @@ class StageContext(SpellCardContext):
     def audio(self) -> Optional[AudioManager]:
         return self._audio_manager
 
-    def play_se(self, name: str, volume: Optional[float] = None) -> bool:
+    def play_se(self, name: str, volume: Optional[float] = None,
+                min_interval: float = 0.0) -> bool:
         if self._audio_manager:
-            return self._audio_manager.play_se(name, volume)
+            return self._audio_manager.play_se(name, volume, min_interval=min_interval)
+        return False
+
+    def play_danmaku_se(self, name: str, volume: Optional[float] = None,
+                        min_interval: float = 0.0) -> bool:
+        if self._audio_manager:
+            return self._audio_manager.play_danmaku_se(name, volume, min_interval=min_interval)
         return False
 
     def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0) -> bool:
@@ -480,13 +487,36 @@ class StageContext(SpellCardContext):
 
     def _resolve_sprite_id(self, bullet_type: str, color: str) -> str:
         """将弹幕类型+颜色映射到精灵 ID"""
+        bullet_type = (bullet_type or "ball_m").strip().lower()
+        color = (color or "red").strip().lower()
+
+        legacy_type_aliases = {
+            "bullet_m": "ball_m",
+            "bullet_s": "ball_s",
+            "bullet_l": "ball_l",
+        }
+        color_aliases = {
+            "grey": "gray",
+            # 内容里偶尔会把偏紫色弹写成 pink，优先收敛到稳定存在的紫色资源。
+            "pink": "purple",
+        }
+
+        bullet_type = legacy_type_aliases.get(bullet_type, bullet_type)
+        normalized_color = color_aliases.get(color, color)
+
         type_entry = self.BULLET_ALIAS_TABLE.get(bullet_type)
         if type_entry:
-            sprite_id = type_entry.get(color)
-            if sprite_id:
-                return sprite_id
+            for candidate_color in (normalized_color, color):
+                sprite_id = type_entry.get(candidate_color)
+                if sprite_id:
+                    return sprite_id
+            for fallback_color in ("red", "darkred", "purple", "white"):
+                sprite_id = type_entry.get(fallback_color)
+                if sprite_id:
+                    return sprite_id
+            return next(iter(type_entry.values()))
         base = self.BULLET_TYPE_MAP.get(bullet_type, "ball_mid")
-        suffix = self.COLOR_MAP.get(color, "1")
+        suffix = self.COLOR_MAP.get(normalized_color, self.COLOR_MAP.get(color, "1"))
         return f"{base}{suffix}"
 
     def _resolve_laser_color_index(self, color: Any) -> int:

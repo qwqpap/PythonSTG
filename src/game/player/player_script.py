@@ -43,6 +43,19 @@ class PlayerScript:
     def options(self) -> list:
         return self.player.option_manager.options
 
+    def get_power_scale(self, min_scale: float = 0.4, max_scale: float = 1.0) -> float:
+        """Linear power-to-damage scale. power=1 -> min_scale, max_power -> max_scale."""
+        max_power = float(getattr(self.player, 'max_power', 4.0))
+        current_power = float(getattr(self.player, 'power', 1.0))
+        if max_power <= 1.0:
+            return max_scale
+        ratio = (current_power - 1.0) / (max_power - 1.0)
+        ratio = max(0.0, min(1.0, ratio))
+        return min_scale + (max_scale - min_scale) * ratio
+
+    def scale_damage(self, damage: float, min_scale: float = 0.4, max_scale: float = 1.0) -> float:
+        return float(damage) * self.get_power_scale(min_scale=min_scale, max_scale=max_scale)
+
     # ================================================================
     # 发射 API（类似 SpellCard.fire 风格）
     # ================================================================
@@ -52,7 +65,7 @@ class PlayerScript:
              x: float = None, y: float = None,
              homing: bool = False, homing_strength: float = 5.0,
              penetrate: int = 0, scale: float = 1.0,
-             sprite_id: str = '', **kwargs) -> int:
+             sprite_id: str = '', scale_with_power: bool = True, **kwargs) -> int:
         """
         发射一颗子弹。
         :param bullet_anim: 子弹动画名（在 bullet_anims 中注册的）
@@ -87,6 +100,8 @@ class PlayerScript:
             step = 8.0 / (multiplier - 1)
             offsets = [-4.0 + step * i for i in range(multiplier)]
 
+        actual_damage = self.scale_damage(damage) if scale_with_power else float(damage)
+
         first_idx = -1
         for offset in offsets:
             idx = self.bullet_pool.spawn(
@@ -94,7 +109,7 @@ class PlayerScript:
                 angle=math.radians(angle + offset),
                 speed=speed,
                 sprite_id=sprite_id,
-                damage=damage,
+                damage=actual_damage,
                 bullet_type=bullet_type,
                 homing_strength=homing_strength if homing else 0.0,
                 penetrate=penetrate,

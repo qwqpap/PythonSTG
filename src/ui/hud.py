@@ -34,6 +34,8 @@ class GameState:
     boss_name: str = ""
     spell_name: str = ""
     spell_time: float = 0.0
+    spell_card_index: int = 0
+    spell_card_total: int = 0
     spell_bonus: int = 0
     boss_hp_ratio: float = 0.0  # 0.0 ~ 1.0
     is_boss_fight: bool = False
@@ -163,7 +165,8 @@ class HUD:
             self.state.boss_name = getattr(boss, 'name', 'Boss')
             boss_hp = getattr(boss, 'current_hp', getattr(boss, 'hp', 0))
             boss_max_hp = getattr(boss, 'max_hp', 1)
-            self.state.boss_hp_ratio = boss_hp / boss_max_hp if boss_max_hp > 0 else 0
+            ratio = boss_hp / boss_max_hp if boss_max_hp > 0 else 0
+            self.state.boss_hp_ratio = max(0.0, min(1.0, ratio))
             # 符卡相关
             spell = getattr(boss, 'current_spell', getattr(boss, 'current_spellcard', None))
             # 宣言动画期间，符卡名由 SpellDeclarationRenderer 绘制，HUD 不再重复
@@ -179,9 +182,23 @@ class HUD:
                 else:
                     self.state.spell_name = getattr(spell, 'name', '')
                 self.state.spell_time = getattr(spell, 'time_remaining', getattr(spell, 'time_left', 0))
+                self.state.spell_card_index = int(getattr(boss, 'current_spellcard_number', 0))
+                self.state.spell_card_total = int(getattr(boss, 'total_spellcards', 0))
+                self.state.spell_bonus = 0
+            else:
+                self.state.spell_name = ''
+                self.state.spell_time = 0.0
+                self.state.spell_card_index = 0
+                self.state.spell_card_total = 0
                 self.state.spell_bonus = 0
         else:
             self.state.is_boss_fight = False
+            self.state.boss_name = ''
+            self.state.spell_name = ''
+            self.state.spell_time = 0.0
+            self.state.spell_card_index = 0
+            self.state.spell_card_total = 0
+            self.state.spell_bonus = 0
             self.state.boss_hp_ratio = 0
     
     def add_score(self, amount: int) -> None:
@@ -328,16 +345,15 @@ class HUD:
             'scale': self.small_font_scale,
             'color': COL_PLAYER
         })
-        # 生命图标：填充用 `*`，空槽用 `.`（视觉更干净）
-        life_text = '*' * self.state.lives + '.' * max(0, self.state.max_lives - self.state.lives)
+        # 不显示生命图标，改为显示固定文字
         elements.append({
             'type': 'text',
-            'text': life_text,
+            'text': '+1 life',
             'position': (self.panel_origin[0] + self.layout['player_icons'][0],
                          self.panel_origin[1] + self.layout['player_icons'][1]),
             'font': 'score',
-            'scale': self.font_scale,
-            'color': COL_PLAYER_IC
+            'scale': self.small_font_scale,
+            'color': (255, 220, 80)
         })
 
         # 炸弹数
@@ -499,18 +515,29 @@ class HUD:
                     'position': (self.game_origin[0] + self.layout['spell_name'][0],
                                  self.game_origin[1] + self.layout['spell_name'][1]),
                     'font': 'score',
-                    'scale': self.small_font_scale,
+                    'scale': self.small_font_scale * 0.84,
                     'color': (255, 255, 128),
                     'align': 'center'
                 })
             
             # 符卡时间
             if self.state.spell_time > 0:
+                if self.state.spell_card_index > 0 and self.state.spell_card_total > 0:
+                    elements.append({
+                        'type': 'text',
+                        'text': f'{self.state.spell_card_index}/{self.state.spell_card_total}',
+                        'position': (self.game_origin[0] + self.game_size[0] * 0.5 - 36,
+                                     self.game_origin[1] + 34),
+                        'font': 'score',
+                        'scale': self.small_font_scale * 0.9,
+                        'color': (255, 230, 170),
+                        'align': 'right'
+                    })
                 elements.append({
                     'type': 'text',
                     'text': f'{int(self.state.spell_time):02d}',
                     'position': (self.game_origin[0] + self.game_size[0] * 0.5,
-                                 self.game_origin[1] + 18),
+                                 self.game_origin[1] + 34),
                     'font': 'score',
                     'scale': self.font_scale,
                     'color': (255, 255, 255) if self.state.spell_time > 10 else (255, 64, 64),
@@ -520,7 +547,7 @@ class HUD:
         # FPS 显示（窗口右下角）
         elements.append({
             'type': 'text',
-            'text': f'FPS {self.state.fps:03d} ({self.state.max_fps})',
+            'text': f'FPS {self.state.fps:03d}',
             'position': (self.screen_width - 16, self.screen_height - 24),
             'font': 'score',
             'scale': self.small_font_scale,

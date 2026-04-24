@@ -916,7 +916,6 @@ class BackgroundRenderer:
         if use_post_process and has_post_effect:
             # 渲染到帧缓冲
             self.framebuffer.use()
-            self.framebuffer.clear(0.0, 0.0, 0.0, 1.0)
             self._render_scene()
             
             # 应用后处理并输出到屏幕
@@ -928,8 +927,8 @@ class BackgroundRenderer:
     
     def _render_scene(self):
         """渲染场景 (2D图层 + 3D对象 + 程序化背景)"""
-        # 清除深度缓冲 (背景在最底层)
-        self.ctx.clear(depth=1.0)
+        clear_color = self._get_scene_clear_color()
+        self.ctx.clear(*clear_color, depth=1.0)
         
         # 优先使用数据驱动背景
         if self.data_background and self.data_background.data:
@@ -949,6 +948,30 @@ class BackgroundRenderer:
         # 渲染3D对象
         if self.objects_3d:
             self._render_3d_objects()
+
+    def _get_scene_clear_color(self) -> Tuple[float, float, float, float]:
+        """Match the editor preview: start from fog color, otherwise clear to black.
+
+        编辑器 (background_editor.py) 先用纯黑填充缓冲 (QColor(0,0,0,255)),
+        仅当 fog.enabled 为真时改用 fog.color 填充。这里完整复现该逻辑:
+          - 数据驱动背景 + fog.enabled=True  → 雾色
+          - 数据驱动背景 + fog.enabled=False → 黑色 (忽略 self.camera.fog_*)
+          - 无数据驱动背景时才回退到旧的 self.camera.fog_enabled 分支。
+        """
+        if self.data_background and self.data_background.data:
+            fog = self.data_background.data.fog
+            if fog.enabled and fog.color:
+                alpha = fog.color[3] / 255.0 if len(fog.color) > 3 else 1.0
+                return (
+                    fog.color[0] / 255.0,
+                    fog.color[1] / 255.0,
+                    fog.color[2] / 255.0,
+                    alpha,
+                )
+            return (0.0, 0.0, 0.0, 1.0)
+        if self.camera.fog_enabled:
+            return self.camera.fog_color
+        return (0.0, 0.0, 0.0, 1.0)
     
     def _render_data_driven_background(self):
         """渲染数据驱动背景"""
@@ -968,7 +991,7 @@ class BackgroundRenderer:
         mvp = np.dot(proj, view)
         
         self.program_3d['u_mvp'].write(mvp.tobytes())
-        self.program_3d['u_fog_enabled'].value = self.camera.fog_enabled
+        self.program_3d['u_fog_enabled'].value = False
         self.program_3d['u_fog_start'].value = self.camera.fog_start
         self.program_3d['u_fog_end'].value = self.camera.fog_end
         self.program_3d['u_fog_color'].value = self.camera.fog_color

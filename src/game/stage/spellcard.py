@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 import math
 import types
 
+from .danmaku_audio import resolve_fire_sound
+
 if TYPE_CHECKING:
     from .boss_base import BossBase
 
@@ -59,6 +61,7 @@ class SpellCard(ABC):
         self._active: bool = False
         self._bullets: List[Any] = []            # 此符卡创建的子弹
         self._pending_waits: List[Callable] = [] # 等待中的协程
+        self._next_danmaku_se_frame: int = 0
     
     @property
     def time(self) -> int:
@@ -84,6 +87,7 @@ class SpellCard(ABC):
         """启动符卡"""
         self._active = True
         self._time = 0
+        self._next_danmaku_se_frame = 0
         self._coroutine = self._run_wrapper()
     
     async def _run_wrapper(self):
@@ -172,6 +176,7 @@ class SpellCard(ABC):
              angle: float = 0, speed: float = 2.0,
              bullet_type: str = "ball_m", color: str = "red",
              accel: float = 0, angle_accel: float = 0,
+             play_sound: bool = False,
              **kwargs):
         """
         发射单发子弹
@@ -189,6 +194,9 @@ class SpellCard(ABC):
             x = self.boss.x if self.boss else 0
         if y is None:
             y = self.boss.y if self.boss else 0
+
+        if play_sound:
+            self._play_danmaku_se(count=1, speed=speed, bullet_type=bullet_type)
         
         bullet = self.ctx.create_bullet(
             x=x, y=y,
@@ -205,6 +213,7 @@ class SpellCard(ABC):
                        x: float = None, y: float = None,
                        speed: float = 2.0,
                        offset_angle: float = 0,
+                       play_sound: bool = True,
                        **kwargs):
         """发射自机狙"""
         if x is None:
@@ -220,19 +229,26 @@ class SpellCard(ABC):
         else:
             angle = -90 + offset_angle  # 默认向下
         
-        return self.fire(x=x, y=y, angle=angle, speed=speed, **kwargs)
+        return self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=play_sound, **kwargs)
     
     def fire_circle(self,
                     x: float = None, y: float = None,
                     count: int = 36,
                     speed: float = 2.0,
                     start_angle: float = 0,
+                    play_sound: bool = True,
                     **kwargs):
         """发射圆形弹幕"""
         bullets = []
+        if play_sound:
+            self._play_danmaku_se(
+                count=count,
+                speed=speed,
+                bullet_type=kwargs.get("bullet_type", "ball_m"),
+            )
         for i in range(count):
             angle = start_angle + (360.0 / count) * i
-            b = self.fire(x=x, y=y, angle=angle, speed=speed, **kwargs)
+            b = self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=False, **kwargs)
             bullets.append(b)
         return bullets
 
@@ -247,6 +263,7 @@ class SpellCard(ABC):
                    render_mode: str = "velocity",
                    angle_offset: float = 0.0,
                    collision_radius: float = 0.0,
+                   play_sound: bool = False,
                    **kwargs):
         """
         发射极坐标运动子弹。
@@ -255,6 +272,14 @@ class SpellCard(ABC):
         """
         if center is None:
             center = self.boss
+
+        if play_sound:
+            effective_speed = abs(radial_speed) + abs(angular_velocity) * max(0.2, orbit_radius)
+            self._play_danmaku_se(
+                count=1,
+                speed=effective_speed,
+                bullet_type=bullet_type,
+            )
 
         bullet = self.ctx.create_polar_bullet(
             center=center,
@@ -283,17 +308,24 @@ class SpellCard(ABC):
                  speed: float = 2.0,
                  center_angle: float = -90,
                  arc_angle: float = 60,
+                 play_sound: bool = True,
                  **kwargs):
         """发射扇形弹幕"""
         bullets = []
         if count == 1:
-            return [self.fire(x=x, y=y, angle=center_angle, speed=speed, **kwargs)]
+            return [self.fire(x=x, y=y, angle=center_angle, speed=speed, play_sound=play_sound, **kwargs)]
         
+        if play_sound:
+            self._play_danmaku_se(
+                count=count,
+                speed=speed,
+                bullet_type=kwargs.get("bullet_type", "ball_m"),
+            )
         start = center_angle - arc_angle / 2
         step = arc_angle / (count - 1)
         for i in range(count):
             angle = start + step * i
-            b = self.fire(x=x, y=y, angle=angle, speed=speed, **kwargs)
+            b = self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=False, **kwargs)
             bullets.append(b)
         return bullets
     
@@ -316,7 +348,7 @@ class SpellCard(ABC):
     
     # ==================== 音频 API ====================
     
-    def play_se(self, name: str, volume: float = None) -> bool:
+    def play_se(self, name: str, volume: float = None, min_interval: float = 0.0) -> bool:
         """
         播放音效
         
@@ -325,8 +357,26 @@ class SpellCard(ABC):
             volume: 音量覆盖 (0.0~1.0)
         """
         if self.ctx and hasattr(self.ctx, 'play_se'):
-            return self.ctx.play_se(name, volume)
+            return self.ctx.play_se(name, volume, min_interval=min_interval)
         return False
+
+    def _play_danmaku_se(self, count: int = 1, speed: float = 2.0,
+                         bullet_type: str = "ball_m") -> bool:
+        if self.time < self._next_danmaku_se_frame:
+            return False
+
+        sound_name, volume, min_interval, cooldown_frames = resolve_fire_sound(
+            count=count,
+            speed=speed,
+            bullet_type=bullet_type,
+        )
+        if self.ctx and hasattr(self.ctx, 'play_danmaku_se'):
+            played = self.ctx.play_danmaku_se(sound_name, volume=volume, min_interval=min_interval)
+        else:
+            played = self.play_se(sound_name, volume=volume, min_interval=min_interval)
+        if played:
+            self._next_danmaku_se_frame = self.time + cooldown_frames
+        return played
     
     # ==================== 等待 API ====================
     

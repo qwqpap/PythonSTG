@@ -439,7 +439,7 @@ def initialize_game_objects(stage_class, audio_manager=None, background_renderer
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
 
-def run_main_menu(window, ctx, screen_size) -> bool:
+def run_main_menu(window, ctx, screen_size, audio_manager) -> bool:
     """
     显示主菜单，处理用户输入。
     Returns:
@@ -452,11 +452,14 @@ def run_main_menu(window, ctx, screen_size) -> bool:
     selected_index = 0
     clock = FrameClock()
 
+    audio_manager.play_bgm("00", announce=False)
+
     while True:
         dt = clock.tick(60)
 
         for event in window.poll_events():
             if event['type'] == EVENT_QUIT:
+                audio_manager.stop_bgm(fade_ms=300)
                 main_menu_renderer.cleanup()
                 return False
             if event['type'] == EVENT_KEYDOWN:
@@ -465,9 +468,11 @@ def run_main_menu(window, ctx, screen_size) -> bool:
                 elif event['key'] == KEY_DOWN:
                     selected_index = (selected_index + 1) % num_options
                 elif event['key'] == KEY_z:
+                    audio_manager.stop_bgm(fade_ms=300)
                     main_menu_renderer.cleanup()
                     return selected_index == 0
                 elif event['key'] == KEY_ESCAPE:
+                    audio_manager.stop_bgm(fade_ms=300)
                     main_menu_renderer.cleanup()
                     return False
 
@@ -481,9 +486,15 @@ def main():
     """游戏主函数"""
     window, ctx, base_size, screen_size, game_viewport = initialize_window_and_context()
     selected_stage_class = resolve_stage_class()
+    game_audio = GameAudioBank()
+    game_audio.load_defaults()
+    audio_manager = AudioManager(game_audio)
 
     while True:
-        if not run_main_menu(window, ctx, screen_size):
+        if not run_main_menu(window, ctx, screen_size, audio_manager):
+            audio_manager.stop_bgm(fade_ms=0)
+            audio_manager.set_stage_bank(None)
+            audio_manager.cleanup()
             window.destroy()
             sys.exit(0)
         
@@ -597,9 +608,6 @@ def main():
             renderer.set_window_bg_texture('assets/ui/ui_bg.png')
 
             _show_loading("Loading audio...", 0.88)
-            game_audio = GameAudioBank()
-            game_audio.load_defaults()
-            audio_manager = AudioManager(game_audio)
 
             # ===== Debug: 关卡选择 + 书签菜单（在初始化关卡之前） =====
             debug_target = None
@@ -866,6 +874,7 @@ def main():
                         if bullet_result.occurred:
                             if player.take_damage():
                                 print(f"Player hit by bullet! Lives left: {player.lives}")
+                                item_pool.stats.bombs = 3
                                 bullet_pool.data['alive'][bullet_result.index] = 0
                                 # Notify boss scoring system
                                 _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
@@ -876,6 +885,7 @@ def main():
                         if emoji_sys.check_player_collision(player):
                             if player.take_damage():
                                 print(f"Player hit by emoji bullet! Lives left: {player.lives}")
+                                item_pool.stats.bombs = 3
 
                     if player.invincible_timer <= 0:
                         laser_result = collision_mgr.check_player_vs_lasers(
@@ -884,6 +894,7 @@ def main():
                         if laser_result.occurred:
                             if player.take_damage():
                                 print(f"Player hit by laser! Lives left: {player.lives}")
+                                item_pool.stats.bombs = 3
                                 # Notify boss scoring system
                                 _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
                                 if _ab and _ab._active:
@@ -907,7 +918,7 @@ def main():
                             if 0 <= hit.target_idx < len(active_targets):
                                 target = active_targets[hit.target_idx]
                                 damage_mul = player.get_bomb_damage_multiplier() if hasattr(player, 'get_bomb_damage_multiplier') else 1.0
-                                target.damage(int(hit.damage * damage_mul))
+                                target.damage(hit.damage * damage_mul)
                                 # +10 per bullet hit (matches LuaSTG)
                                 item_pool.stats.score += 10
                                 if player.script and hasattr(player.script, 'on_bullet_hit_enemy'):
@@ -942,7 +953,7 @@ def main():
                                     hit_r = getattr(target, 'hitbox_radius', getattr(target, 'hit_radius', 0.05))
                                     if abs(tx - lx) < beam_hw + hit_r and ty > ly:
                                         damage_mul = player.get_bomb_damage_multiplier() if hasattr(player, 'get_bomb_damage_multiplier') else 1.0
-                                        target.damage(int(laser_dmg * damage_mul))
+                                        target.damage(laser_dmg * damage_mul)
                                         item_pool.stats.score += 10
 
                     # === Graze detection ===
@@ -961,8 +972,7 @@ def main():
                 hud.state.bombs = item_pool.stats.bombs
                 hud.state.point_value = item_pool.stats.point_rate
                 active_boss = _get_active_boss()
-                if active_boss:
-                    hud.update_from_boss(active_boss)
+                hud.update_from_boss(active_boss)
                 
                 enemy_scripts = None
                 if hasattr(stage_manager, 'current_context') and stage_manager.current_context:
@@ -988,6 +998,19 @@ def main():
                 ui_renderer.render_hud(hud)
                 # 热度条 + 抽奖动画叠加在 HUD 上
                 emoji_sys.render_ui(ui_renderer)
+                bgm_notification_text = audio_manager.get_bgm_notification_text()
+                if bgm_notification_text:
+                    ui_renderer.render_ttf_text(
+                        text=bgm_notification_text,
+                        x=screen_size[0] - 24,
+                        y=screen_size[1] - 56,
+                        size=26,
+                        color=(255, 255, 255),
+                        alpha=1.0,
+                        align='right',
+                        stroke_width=2,
+                        stroke_color=(0, 0, 0),
+                    )
                 if PROFILE_MODE:
                     profile_acc["render_ui"] += time.perf_counter() - ui_start
 
@@ -1027,7 +1050,8 @@ def main():
             item_pool.stats.save_hiscore()
 
             emoji_sys.stop()
-            audio_manager.cleanup()
+            audio_manager.stop_bgm(fade_ms=0)
+            audio_manager.set_stage_bank(None)
             renderer.cleanup()
             item_renderer.cleanup()
             ui_renderer.cleanup()
@@ -1044,6 +1068,7 @@ def main():
             elif game_result_state == "RESTART":
                 pass   # Just continue inner loop, re-initializing everything except Main Menu
             else:
+                audio_manager.cleanup()
                 window.destroy()
                 sys.exit()
 

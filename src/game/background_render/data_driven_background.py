@@ -9,6 +9,7 @@
 """
 
 import json
+import math
 import os
 from typing import Dict, List, Tuple, Optional, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
@@ -143,20 +144,41 @@ class DataDrivenBackground:
                 config = json.load(f)
             
             self.config_path = json_path
-            self.data = self._parse_config(config, os.path.dirname(json_path))
+            return self.load_from_dict(config, os.path.dirname(json_path))
+            
+        except Exception as e:
+            print(f"[Background] 加载失败 {json_path}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def load_from_dict(self, config: dict, base_dir: str = "", announce: bool = True) -> bool:
+        """
+        从配置字典加载背景定义。
+        
+        Args:
+            config: 已解析的背景配置字典
+            base_dir: 纹理相对路径的基准目录
+        
+        Returns:
+            是否加载成功
+        """
+        try:
+            self.data = self._parse_config(config, base_dir)
             
             # 加载所有纹理
             for tex in self.data.textures.values():
                 if not self.renderer.load_texture(tex.full_path):
                     print(f"[Background] 警告: 纹理加载失败 {tex.full_path}")
             
-            print(f"[Background] 已加载背景: {self.data.name} ({len(self.data.layers)} 图层)")
+            if announce:
+                print(f"[Background] 已加载背景: {self.data.name} ({len(self.data.layers)} 图层)")
             return True
-            
         except Exception as e:
-            print(f"[Background] 加载失败 {json_path}: {e}")
+            print(f"[Background] 从字典加载失败: {e}")
             import traceback
             traceback.print_exc()
+            self.data = None
             return False
     
     def load_by_name(self, name: str) -> bool:
@@ -264,7 +286,10 @@ class DataDrivenBackground:
             return
         
         self.data.time += dt
-        self.data.scroll_offset += self.data.scroll.base_speed * dt
+        # Runtime projection/texture coordinates make positive offsets appear
+        # opposite to the Qt editor preview, so advance with the preview's
+        # visual direction here.
+        self.data.scroll_offset -= self.data.scroll.base_speed * dt
     
     def render(self):
         """渲染背景"""
@@ -286,15 +311,16 @@ class DataDrivenBackground:
                 continue
             
             # 计算滚动偏移
+            effective_alpha = self._get_effective_layer_alpha(layer)
             scroll_y = self.data.scroll_offset * layer.scroll_multiplier
             
             # 渲染主要 tiles
-            self._render_layer_tiles(layer, tex_info, scroll_y, (0, 0))
+            self._render_layer_tiles(layer, tex_info, scroll_y, (0, 0), effective_alpha)
             
             # 渲染变体
             for variant in layer.variants:
                 var_scroll = self.data.scroll_offset * variant.scroll_multiplier
-                self._render_layer_tiles(layer, tex_info, var_scroll, variant.offset)
+                self._render_layer_tiles(layer, tex_info, var_scroll, variant.offset, effective_alpha)
     
     def _apply_camera(self):
         """应用摄像机和雾效设置"""
@@ -317,8 +343,36 @@ class DataDrivenBackground:
         )
         self.renderer.set_fog(fog_color, fog.start, fog.end, fog.enabled)
     
+    def _get_effective_layer_alpha(self, layer: LayerConfig) -> float:
+        """Match the editor preview: fog attenuates the layer alpha instead of mixing in shader."""
+        alpha = layer.alpha
+        fog = self.data.fog
+        if not fog.enabled or fog.end <= fog.start:
+            return alpha
+
+        eye = self.data.camera.eye
+        at = self.data.camera.at
+        fx = at[0] - eye[0]
+        fy = at[1] - eye[1]
+        fz = at[2] - eye[2]
+        fl = math.sqrt(fx * fx + fy * fy + fz * fz)
+        if fl <= 1e-6:
+            return alpha
+
+        fx /= fl
+        fy /= fl
+        fz /= fl
+
+        dx = -eye[0]
+        dy = -eye[1]
+        dz = layer.z_depth - eye[2]
+        depth = abs(dx * fx + dy * fy + dz * fz)
+        fog_factor = max(0.0, min(1.0, (depth - fog.start) / (fog.end - fog.start)))
+        return alpha * (1.0 - fog_factor * 0.8)
+
     def _render_layer_tiles(self, layer: LayerConfig, tex_info: TextureInfo, 
-                           scroll_y: float, offset: Tuple[float, float]):
+                           scroll_y: float, offset: Tuple[float, float],
+                           alpha: Optional[float] = None):
         """渲染图层的所有 tiles"""
         tile = layer.tile
         y_scroll = scroll_y % tile.size
@@ -340,7 +394,7 @@ class DataDrivenBackground:
                     'v1': (x0, y1, z),
                     'v2': (x1, y1, z),
                     'v3': (x1, y0, z),
-                    'alpha': layer.alpha,
+                    'alpha': layer.alpha if alpha is None else alpha,
                     'blend_mode': layer.blend_mode
                 })
     
