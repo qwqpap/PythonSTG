@@ -7,7 +7,7 @@ from src.game.stage.enemy_script import EnemyScript
 class WallBigFairy(EnemyScript):
     """Large side fairy for the narrow-lane wall pattern."""
 
-    hp = 800
+    hp = 280
     sprite = "enemy2"
     score = 1500
     hitbox_radius = 0.04
@@ -42,7 +42,7 @@ class WallBigFairy(EnemyScript):
 class LaneSmallFairy(EnemyScript):
     """Small lane fairy that drifts down and leaves before the next wave."""
 
-    hp = 80
+    hp = 45
     sprite = "enemy1"
     score = 200
 

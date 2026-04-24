@@ -40,7 +40,7 @@
     "boss_hp_bar_width": 344,
     "boss_hp_bar_height": 8,
     "spell_name":  [192, 25],
-    "spell_time":  [350, 25],
+    "spell_time":  [18, 22],
     "spell_bonus": [192, 45]
   }
 }
