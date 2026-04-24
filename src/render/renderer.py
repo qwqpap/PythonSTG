@@ -19,6 +19,7 @@ import moderngl
 import numpy as np
 import math
 import time
+import os
 from .laser_renderer import LaserRenderer
 from .optimized_bullet_renderer import OptimizedBulletRenderer
 
@@ -111,6 +112,11 @@ class Renderer:
         self._init_player_shader()
         self._init_circle_shader()
         self._init_viewport_border_shader()
+
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        self.hitbox_texture_path = os.path.join(root_dir, 'assets', 'misc.png')
+        self.hitbox_texture = None
+        self.hitbox_texture_size = None
         
         # 初始化激光渲染器
         self.laser_renderer = LaserRenderer(ctx, base_size)
@@ -1472,19 +1478,60 @@ class Renderer:
     def _render_hitbox(self, player):
         """渲染玩家判定点"""
         hx, hy = player.get_hit_position()
-        circle_radius = player.hit_radius
-        circle_vertices = []
-        for i in range(self.circle_segments + 1):
-            a = 2 * math.pi * i / self.circle_segments
-            x = hx + math.cos(a) * circle_radius
-            y = hy + math.sin(a) * circle_radius
-            circle_vertices.extend([x, y])
-        circle_vertices = np.array(circle_vertices, dtype='f4')
-        self.circle_vbo.write(circle_vertices.tobytes())
-        self.circle_vao.render(moderngl.LINE_STRIP)
+        if not self._ensure_hitbox_texture():
+            return
+
+        visual_size = max(player.hit_radius * 5.0, 0.055)
+        angle = time.perf_counter() * 3.0
+
+        self.hitbox_texture.use(0)
+        if 'u_alpha' in self.player_tex_program:
+            self.player_tex_program['u_alpha'].value = 0.82
+        self._render_hitbox_layer(hx, hy, visual_size, angle)
+        self._render_hitbox_layer(hx, hy, visual_size, -angle)
+        if 'u_alpha' in self.player_tex_program:
+            self.player_tex_program['u_alpha'].value = 1.0
+
+    def _ensure_hitbox_texture(self):
+        if self.hitbox_texture is not None:
+            return True
+
+        if not os.path.exists(self.hitbox_texture_path):
+            return False
+
+        from PIL import Image
+        img = Image.open(self.hitbox_texture_path).convert('RGBA')
+        self.hitbox_texture = self.ctx.texture(img.size, 4, img.tobytes())
+        self.hitbox_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self.hitbox_texture_size = img.size
+        return True
+
+    def _render_hitbox_layer(self, hx, hy, size, angle):
+        half = size * 0.5
+        ca = math.cos(angle)
+        sa = math.sin(angle)
+        corners = (
+            (-half, -half, 0.0, 1.0),
+            ( half, -half, 1.0, 1.0),
+            ( half,  half, 1.0, 0.0),
+            (-half, -half, 0.0, 1.0),
+            ( half,  half, 1.0, 0.0),
+            (-half,  half, 0.0, 0.0),
+        )
+        vertices = []
+        for ox, oy, u, v in corners:
+            x = hx + ox * ca - oy * sa
+            y = hy + ox * sa + oy * ca
+            vertices.extend([x, y, u, v])
+
+        self.player_tex_vbo.write(np.array(vertices, dtype='f4').tobytes())
+        self.player_tex_vao.render(moderngl.TRIANGLES)
     
     def cleanup(self):
         """清理渲染资源"""
         # ModernGL的资源会自动释放，但可以显式释放
         if hasattr(self, 'optimized_bullet_renderer') and self.optimized_bullet_renderer:
             self.optimized_bullet_renderer.cleanup()
+        if self.hitbox_texture is not None:
+            self.hitbox_texture.release()
+            self.hitbox_texture = None
