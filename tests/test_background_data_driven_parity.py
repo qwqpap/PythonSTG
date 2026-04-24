@@ -109,7 +109,7 @@ def test_fog_disabled_keeps_original_alpha():
 
 
 @pytest.mark.parametrize("background_name", STAGE_BACKGROUND_NAMES)
-def test_stage_background_scroll_advances_in_editor_visual_direction(background_name):
+def test_stage_background_scroll_offset_matches_editor(background_name):
     config_path = Path(f"assets/images/background/{background_name}.json")
     config = json.loads(config_path.read_text(encoding="utf-8"))
 
@@ -118,6 +118,29 @@ def test_stage_background_scroll_advances_in_editor_visual_direction(background_
 
     bg.update(1.0)
 
-    assert bg.data.scroll_offset == pytest.approx(
-        -config["scroll"]["base_speed"]
-    )
+    assert bg.data.scroll_offset == pytest.approx(config["scroll"]["base_speed"])
+
+
+@pytest.mark.parametrize("background_name", STAGE_BACKGROUND_NAMES)
+def test_stage_background_tile_corners_match_editor(background_name):
+    config_path = Path(f"assets/images/background/{background_name}.json")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    bg = DataDrivenBackground(_DummyRenderer())
+    assert bg.load_from_dict(config, str(config_path.parent), announce=False)
+
+    bg.render()
+    quad = bg.get_render_quads()[0]
+    layer = config["layers"][0]
+    tile = layer["tile"]
+    tile_size = tile["size"]
+    x0 = tile["x_range"][0] * tile_size
+    x1 = (tile["x_range"][0] + 1) * tile_size
+    y0 = tile["y_range"][0] * tile_size
+    y1 = (tile["y_range"][0] + 1) * tile_size
+    z = layer["z_depth"]
+
+    assert quad["v0"] == pytest.approx((x0, y0, z))
+    assert quad["v1"] == pytest.approx((x1, y0, z))
+    assert quad["v2"] == pytest.approx((x1, y1, z))
+    assert quad["v3"] == pytest.approx((x0, y1, z))

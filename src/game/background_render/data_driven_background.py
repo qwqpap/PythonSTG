@@ -286,10 +286,7 @@ class DataDrivenBackground:
             return
         
         self.data.time += dt
-        # Runtime projection/texture coordinates make positive offsets appear
-        # opposite to the Qt editor preview, so advance with the preview's
-        # visual direction here.
-        self.data.scroll_offset -= self.data.scroll.base_speed * dt
+        self.data.scroll_offset += self.data.scroll.base_speed * dt
     
     def render(self):
         """渲染背景"""
@@ -391,9 +388,9 @@ class DataDrivenBackground:
                 self.quads.append({
                     'texture': tex_info.full_path,
                     'v0': (x0, y0, z),
-                    'v1': (x0, y1, z),
+                    'v1': (x1, y0, z),
                     'v2': (x1, y1, z),
-                    'v3': (x1, y0, z),
+                    'v3': (x0, y1, z),
                     'alpha': layer.alpha if alpha is None else alpha,
                     'blend_mode': layer.blend_mode
                 })
