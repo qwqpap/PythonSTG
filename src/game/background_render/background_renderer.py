@@ -990,7 +990,7 @@ class BackgroundRenderer:
         proj = self.camera.get_projection_matrix(self.aspect)
         mvp = np.dot(proj, view)
         
-        self.program_3d['u_mvp'].write(mvp.tobytes())
+        self._write_mvp(mvp)
         self.program_3d['u_fog_enabled'].value = False
         self.program_3d['u_fog_start'].value = self.camera.fog_start
         self.program_3d['u_fog_end'].value = self.camera.fog_end
@@ -1035,6 +1035,10 @@ class BackgroundRenderer:
         # 渲染3D对象
         if self.objects_3d:
             self._render_3d_objects()
+
+    def _write_mvp(self, mvp: np.ndarray):
+        """Upload row-major numpy matrices in the column-major layout GLSL expects."""
+        self.program_3d['u_mvp'].write(np.ascontiguousarray(mvp.T).tobytes())
     
     def _render_procedural_background(self):
         """渲染程序化背景"""
@@ -1053,7 +1057,7 @@ class BackgroundRenderer:
         proj = self.camera.get_projection_matrix(self.aspect)
         mvp = np.dot(proj, view)
         
-        self.program_3d['u_mvp'].write(mvp.tobytes())
+        self._write_mvp(mvp)
         self.program_3d['u_fog_enabled'].value = self.camera.fog_enabled
         self.program_3d['u_fog_start'].value = self.camera.fog_start
         self.program_3d['u_fog_end'].value = self.camera.fog_end
@@ -1152,7 +1156,7 @@ class BackgroundRenderer:
         texture.use(0)
         
         self.program_3d['u_texture'].value = 0
-        self.program_3d['u_mvp'].write(mvp.tobytes())
+        self._write_mvp(mvp)
         self.program_3d['u_color_tint'].value = layer.color_tint
         self.program_3d['u_alpha'].value = layer.alpha
         self.program_3d['u_fog_enabled'].value = self.camera.fog_enabled
@@ -1203,7 +1207,7 @@ class BackgroundRenderer:
             texture.use(0)
             
             self.program_3d['u_texture'].value = 0
-            self.program_3d['u_mvp'].write(mvp.tobytes())
+            self._write_mvp(mvp)
             self.program_3d['u_color_tint'].value = obj.color_tint
             self.program_3d['u_alpha'].value = obj.alpha
             self.program_3d['u_fog_enabled'].value = self.camera.fog_enabled

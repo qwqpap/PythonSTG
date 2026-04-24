@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from src.game.background_render.background_renderer import BackgroundRenderer
 from src.game.background_render.data_driven_background import DataDrivenBackground
 
 
@@ -44,6 +45,36 @@ class _DummyRenderer:
         self.camera.fog_start = start
         self.camera.fog_end = end
         self.camera.fog_enabled = enabled
+
+
+class _DummyUniform:
+    def __init__(self):
+        self.data = None
+
+    def write(self, data: bytes):
+        self.data = data
+
+
+def test_background_renderer_uploads_mvp_as_glsl_column_major():
+    renderer = BackgroundRenderer.__new__(BackgroundRenderer)
+    uniform = _DummyUniform()
+    renderer.program_3d = {"u_mvp": uniform}
+
+    matrix = pytest.importorskip("numpy").array(
+        [
+            [1.0, 2.0, 3.0, 4.0],
+            [5.0, 6.0, 7.0, 8.0],
+            [9.0, 10.0, 11.0, 12.0],
+            [13.0, 14.0, 15.0, 16.0],
+        ],
+        dtype="f4",
+    )
+
+    renderer._write_mvp(matrix)
+
+    assert uniform.data == pytest.importorskip("numpy").ascontiguousarray(
+        matrix.T
+    ).tobytes()
 
 
 def test_stage3_background_fog_matches_editor_alpha_style():
