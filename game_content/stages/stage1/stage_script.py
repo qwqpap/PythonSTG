@@ -120,7 +120,7 @@ class Stage1(StageScript):
             {"character": "Sunny_Milk",   "name": "桑尼", "position": "left",  "text": "哦对了，这是我们校歌。", "portrait": "Happy"},
             {"character": "Kaenbyou_Rin", "name": "猫", "position": "right", "text": "？我真求你了。看来必须得让你冷静一下了。", "portrait": "Anger"},
             {"character": "Sunny_Milk",   "name": "桑尼", "position": "left",  "text": "我不怕你，因为我们矿大有巨大的煤。", "portrait": "Anger"},
-        ])
+        ], initial_delay_frames=180)
 
         # 等待 3 秒（180 帧），让道中残余子弹飞离屏幕后再进入 Boss 战
         await self.wait(180)

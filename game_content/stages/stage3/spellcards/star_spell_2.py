@@ -28,7 +28,7 @@ _ROOM_POSITIONS = [
 # 模式: "circle" / "aimed" / "arc" / "random_burst" / "wave"
 _ROOMMATES = [
     # 0号 - 红色圆圈慢弹（"我不管，我要开音响"）
-    dict(interval=70, btype="ball_m",   color="red",     mode="circle",       count=10, speed=5.0),
+    dict(interval=70, btype="ball_m",   color="red",     mode="circle",       count=10, speed=7.0),
     # 1号 - 蓝色自机狙（"谁进我床头区域谁死"）
     dict(interval=45, btype="knife",    color="blue",    mode="aimed",        count=3,  speed=14.0),
     # 2号 - 绿色米弹连射（"午夜12点开灯打游戏"）
@@ -44,11 +44,11 @@ _ROOMMATES = [
     # 7号 - 青色风筝弹扇形（"夜里不停换歌"）
     dict(interval=60, btype="kite",     color="cyan",    mode="arc",          count=6,  speed=10.0),
     # 8号 - 深红霉弹（"泡脚水味能穿墙"）
-    dict(interval=25, btype="mildew",   color="darkred", mode="random_burst", count=4,  speed=6.0),
+    dict(interval=25, btype="mildew",   color="darkred", mode="random_burst", count=4,  speed=8.0),
     # 9号 - 深蓝子弹随机扫射（"凌晨3点出去又回来"）
     dict(interval=22, btype="bullet",   color="darkblue", mode="random_burst", count=3, speed=13.0),
     # 10号 - 白色米弹旋臂（"天亮就睡着了"）
-    dict(interval=90, btype="grain_a",  color="white",   mode="circle",       count=16, speed=4.5),
+    dict(interval=90, btype="grain_a",  color="white",   mode="circle",       count=16, speed=6.5),
     # 11号 - 全随机（"神秘的大哥，从没见过正脸"）
     dict(interval=40, btype="star_m",   color="purple",  mode="chaos",        count=5,  speed=12.0),
 ]
@@ -94,7 +94,7 @@ class StarSpell2(SpellCard):
                 mode = cfg["mode"]
                 btype = cfg["btype"]
                 color = cfg["color"]
-                spd = cfg["speed"] + random.uniform(-1.5, 1.5)
+                spd = max(6.0, cfg["speed"] + random.uniform(-1.5, 1.5))
                 count = cfg["count"]
 
                 if mode == "circle":

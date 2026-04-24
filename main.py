@@ -46,6 +46,7 @@ from game_content.stages.stage1.stage_script import Stage1
 from game_content.stages.stage1.stage_asset_preview import Stage1AssetPreview
 from game_content.stages.stage2.stage_script import Stage2
 from game_content.stages.stage3.stage_script import Stage3
+from game_content.stages.stage_test.stage_script import StageTest
 
 # 所有正式关卡（按通关顺序），debug 菜单和关卡选择器用此列表
 ALL_STAGES = [Stage1, Stage2, Stage3]
@@ -439,16 +440,26 @@ def initialize_game_objects(stage_class, audio_manager=None, background_renderer
     return player, bullet_pool, laser_pool, item_pool, stage_manager
 
 
-def run_main_menu(window, ctx, screen_size, audio_manager) -> bool:
+def run_main_menu(window, ctx, screen_size, audio_manager) -> int:
     """
     显示主菜单，处理用户输入。
     Returns:
-        True: 用户选择开始游戏
-        False: 用户选择退出
+        选中的菜单项索引（Z 确认）；-1 表示退出（ESC 或关窗口）。
+        约定：选项顺序由 main_menu_layout.json 决定：
+          0 = 开始游戏
+          1 = 测试关卡
+          2 = 退出
     """
     main_menu_renderer = MainMenuRenderer(ctx, screen_size[0], screen_size[1])
     main_menu_layout = load_main_menu_layout("assets/ui/main_menu_layout.json")
-    num_options = max(1, len(main_menu_layout.get("options", [])))
+    options = main_menu_layout.get("options", [])
+    num_options = max(1, len(options))
+    # 找到"退出"选项的索引，用于 Z 确认时判断
+    quit_index = next(
+        (i for i, o in enumerate(options)
+         if (o.get("text", "") if isinstance(o, dict) else str(o)) in ("退出", "Quit", "Exit")),
+        num_options - 1,
+    )
     selected_index = 0
     clock = FrameClock()
 
@@ -461,7 +472,7 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> bool:
             if event['type'] == EVENT_QUIT:
                 audio_manager.stop_bgm(fade_ms=300)
                 main_menu_renderer.cleanup()
-                return False
+                return -1
             if event['type'] == EVENT_KEYDOWN:
                 if event['key'] == KEY_UP:
                     selected_index = (selected_index - 1) % num_options
@@ -470,11 +481,13 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> bool:
                 elif event['key'] == KEY_z:
                     audio_manager.stop_bgm(fade_ms=300)
                     main_menu_renderer.cleanup()
-                    return selected_index == 0
+                    if selected_index == quit_index:
+                        return -1
+                    return selected_index
                 elif event['key'] == KEY_ESCAPE:
                     audio_manager.stop_bgm(fade_ms=300)
                     main_menu_renderer.cleanup()
-                    return False
+                    return -1
 
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])
         ctx.clear(0.0, 0.0, 0.0)
@@ -491,13 +504,24 @@ def main():
     audio_manager = AudioManager(game_audio)
 
     while True:
-        if not run_main_menu(window, ctx, screen_size, audio_manager):
+        menu_choice = run_main_menu(window, ctx, screen_size, audio_manager)
+        if menu_choice < 0:
+            # 退出
             audio_manager.stop_bgm(fade_ms=0)
             audio_manager.set_stage_bank(None)
             audio_manager.cleanup()
             window.destroy()
             sys.exit(0)
-        
+
+        # 根据菜单选项决定起始关卡
+        # 0=开始游戏(stage1)  1=测试关卡  其余保持 selected_stage_class
+        if menu_choice == 0:
+            active_stage_class = selected_stage_class
+        elif menu_choice == 1:
+            active_stage_class = StageTest
+        else:
+            active_stage_class = selected_stage_class
+
         while True:
             # ===== 先创建加载画面渲染器（不依赖任何纹理资源） =====
             loading_renderer = LoadingScreenRenderer(ctx, screen_size[0], screen_size[1])
@@ -614,11 +638,12 @@ def main():
             if DEBUG_MODE:
                 selected_stage_class = run_stage_select_menu(
                     window, ctx, screen_size, ALL_STAGES, selected_stage_class)
-                debug_target = run_debug_menu(window, ctx, screen_size, selected_stage_class)
+                active_stage_class = selected_stage_class
+                debug_target = run_debug_menu(window, ctx, screen_size, active_stage_class)
 
             _show_loading("Initializing stage...", 0.95)
             player, bullet_pool, laser_pool, item_pool, stage_manager = initialize_game_objects(
-                stage_class=selected_stage_class,
+                stage_class=active_stage_class,
                 audio_manager=audio_manager,
                 background_renderer=background_renderer
             )

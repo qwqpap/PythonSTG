@@ -98,7 +98,7 @@ class StarSpell4(SpellCard):
                 x=self.boss.x,
                 y=self.boss.y,
                 count=3,
-                speed=3.0,
+                speed=20.0,
                 start_angle=angle,
                 bullet_type="star_s",
                 color="yellow",

@@ -243,7 +243,7 @@ class StageScript:
             self._play_bgm(self.bgm)
 
     @types.coroutine
-    def play_dialogue(self, dialogue_list):
+    def play_dialogue(self, dialogue_list, initial_delay_frames: int = 0):
         """
         播放对话序列
 
@@ -318,6 +318,9 @@ class StageScript:
 
         # 启动对话
         manager.start()
+        initial_delay_frames = max(0, int(initial_delay_frames))
+        for _ in range(initial_delay_frames):
+            yield
 
         # 等待对话完成
         while manager.update():

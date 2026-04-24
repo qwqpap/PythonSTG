@@ -62,11 +62,11 @@ class LunaSpell3(SpellCard):
                         x=self.boss.x + random.uniform(-0.15, 0.15),
                         y=self.boss.y - 0.1,
                         angle=random.uniform(-110, -70), # 垂直向下展开一些偏差
-                        speed=1.0,      # 高点抛下时的初速极低
+                        speed=2.8,      # 提高初速，避免长时间悬在上半区
                         bullet_type="ball_m", 
                         color="red",    # 与青色交叉网格产生绝对的区别
                         curve_type=CURVE_LINEAR_SPEED,
-                        curve_params=(0.12, 0.0, 0.0, 1.0) # 每帧沿射线加速 0.12
+                        curve_params=(0.16, 0.0, 0.0, 2.8) # 更快压向玩家区
                     )
 
             # 4. Boss 附加压迫判定：低频自机狙，逼迫玩家产生位移

@@ -23,7 +23,7 @@ class LunaSpell4(SpellCard):
     # ── 旋臂参数 ───────────────────────
     ARM_COUNT     = 3          # 螺旋臂数量
     ARM_INTERVAL  = 6          # 每几帧打一排旋臂子弹
-    ARM_SPEED     = 2.6        # 旋臂子弹速度
+    ARM_SPEED     = 4.2        # 提高旋臂压迫感，减少慢速悬空层
     # ── 压制参数 ───────────────────────
     AIM_INTERVAL  = 55         # 每几帧打一次三连刀
     AIM_SPREAD    = 16         # 三连刀扩散角度
@@ -87,7 +87,7 @@ class LunaSpell4(SpellCard):
                 tang_angle = orbit_angle + 90   # 切线方向
                 self.fire(
                     angle=tang_angle + 180,     # 向后
-                    speed=random.uniform(0.4, 0.9),
+                    speed=random.uniform(1.8, 2.8),
                     bullet_type='ball_m',
                     color='purple',
                 )

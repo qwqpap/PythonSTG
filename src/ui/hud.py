@@ -134,7 +134,7 @@ class HUD:
             'boss_hp_bar_width': 344,
             'boss_hp_bar_height': 8,
             'spell_name': (192, 25),  # 居中（相对于game）
-            'spell_time': (350, 25),
+            'spell_time': (18, 22),
             'spell_bonus': (192, 45),
         }
         
@@ -536,12 +536,12 @@ class HUD:
                 elements.append({
                     'type': 'text',
                     'text': f'{int(self.state.spell_time):02d}',
-                    'position': (self.game_origin[0] + self.game_size[0] * 0.5,
-                                 self.game_origin[1] + 34),
+                    'position': (self.game_origin[0] + self.layout['spell_time'][0],
+                                 self.game_origin[1] + self.layout['spell_time'][1]),
                     'font': 'score',
                     'scale': self.font_scale,
                     'color': (255, 255, 255) if self.state.spell_time > 10 else (255, 64, 64),
-                    'align': 'center'
+                    'align': 'left'
                 })
 
         # FPS 显示（窗口右下角）

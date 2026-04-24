@@ -72,7 +72,7 @@ class Stage3(StageScript):
             {"character": "Hinanawi_Tenshi", "name": "天子", "position": "left",  "text": "住几天八人间就老实了。去周口店出趟野就老实了。", "portrait": "Happy"},
             {"character": "Star_Sapphire",   "name": "斯塔", "position": "right", "text": "原来是老资历？！", "portrait": "Happy"},
             {"character": "Hinanawi_Tenshi", "name": "天子", "position": "left",  "text": "亓官刚建群那阵我就在了。", "portrait": "Happy"},
-        ])
+        ], initial_delay_frames=180)
 
         # 等待 3 秒（180 帧），让道中残余子弹飞离屏幕后再进入 Boss 战
         await self.wait(180)

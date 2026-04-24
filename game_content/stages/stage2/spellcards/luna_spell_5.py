@@ -47,7 +47,7 @@ class LunaSpell5(SpellCard):
                     a = petal_phase + (360.0 / PETAL_N) * i
                     self.fire(
                         angle=a,
-                        speed=1.4,
+                        speed=3.2,
                         bullet_type='butterfly',
                         color='purple',
                         render_angle=a,
@@ -61,7 +61,7 @@ class LunaSpell5(SpellCard):
                     a = petal_phase + (360.0 / PETAL_N2) * i + 11
                     self.fire(
                         angle=a,
-                        speed=1.1,
+                        speed=2.6,
                         bullet_type='ball_s',
                         color='white',
                     )
@@ -109,7 +109,7 @@ class LunaSpell5(SpellCard):
                     a = (360.0 / 32) * i
                     self.fire(
                         angle=a,
-                        speed=2.8 + random.uniform(-0.3, 0.3),
+                        speed=4.2 + random.uniform(-0.4, 0.4),
                         bullet_type='heart',
                         color='purple',
                         render_angle=a,

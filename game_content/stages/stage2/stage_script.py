@@ -79,7 +79,7 @@ class Stage2(StageScript):
             {"character": "Toutetu_Yuma", "name": "饕餮", "position": "right", "text": "我不在红魔馆打工。不是，你在跑什么？", "portrait": "Happy"},
             {"character": "Luna_Child",   "name": "露娜", "position": "left",  "text": "我一百公里校园跑再不跑体育就要挂科了。拜拜！", "portrait": "Happy"},
             {"character": "Toutetu_Yuma", "name": "饕餮", "position": "right", "text": "你给我回来！", "portrait": "Anger"},
-        ])
+        ], initial_delay_frames=180)
 
         # 等待 3 秒（180 帧），让道中残余子弹飞离屏幕后再进入 Boss 战
         await self.wait(180)
