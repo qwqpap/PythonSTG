@@ -2,90 +2,105 @@
 
 ## 环境要求
 
-- Python 3.10+
-- 支持 OpenGL 3.3+ 的显卡
+- **Python 3.10+**（推荐 3.12，CI 测过的版本）
+- 支持 **OpenGL 3.3+** 的显卡（基本所有 2010 年后的核显都行）
+- 操作系统：Windows / Linux（macOS 未测试）
 
 ## 安装依赖
 
 ```bash
+git clone https://github.com/qwqpap/PythonSTG.git
+cd PythonSTG
 pip install -r requirements.txt
 ```
 
-如果遇到 `Numba needs NumPy 2.0 or less` 之类的报错，说明当前环境里的 `NumPy` 版本过高。  
-在当前项目状态下，建议优先使用与 `Numba` 兼容的 `numpy<2` 环境。
+`requirements.txt` 已锁定一组互相兼容的版本（包括 `numpy==2.2.4` 和 `numba==0.63.1`）。
+如果要升级 NumPy / Numba，请同步升级两者，否则会报 `Numba needs NumPy x.x or less`。
 
-编辑器工具额外需要：
+如果还要用编辑器工具或跑测试：
 
 ```bash
+pip install -r requirements-dev.txt
 pip install PyQt5
 ```
 
 ## 运行游戏
 
 ```bash
-python main.py
+python main.py                    # 默认 Stage 1
+python main.py --stage=stage2     # 指定关卡
+python main.py --stage=asset_preview  # 资产预览（浏览所有弹型/敌人）
+python main.py --debug            # Debug 模式：菜单可跳转任意 Wave / Boss / 符卡
+python main.py --profile          # 性能分析
 ```
+
+`--debug` 是开发期最有用的开关：标记了 `DEBUG_BOOKMARK = True` 的 Wave / SpellCard 会出现在跳转菜单里，省去每次从头打到 Boss 的时间。
 
 ## 项目结构
 
 ```
-pystg/
+PythonSTG/
 ├── main.py                  # 游戏入口
 │
-├── src/                     # 引擎代码（不要动，除非你在改引擎）
-│   ├── core/                # 配置、碰撞检测、接口定义
-│   ├── game/                # 游戏逻辑
-│   │   ├── bullet/          # 子弹池（Numba 加速）
-│   │   ├── player/          # 玩家系统
-│   │   ├── stage/           # 关卡系统核心（StageScript / Wave / SpellCard）
+├── src/                     # 引擎代码（除非你在改引擎，否则不要动）
+│   ├── core/                # 配置、碰撞检测、接口定义、窗口、输入
+│   ├── game/
+│   │   ├── bullet/          # 子弹池（Numba JIT 加速）
+│   │   ├── stage/           # 关卡系统核心（StageScript / Wave / SpellCard / Context）
+│   │   ├── player/          # 玩家系统（移动、射击、Option）
 │   │   ├── boss/            # Boss 管理
 │   │   ├── laser.py         # 激光系统
 │   │   ├── item.py          # 道具系统
 │   │   └── audio.py         # 音频系统
 │   ├── render/              # 渲染管线
 │   ├── resource/            # 纹理和精灵管理
-│   └── ui/                  # HUD、菜单、对话框渲染
+│   └── ui/                  # HUD、菜单、对话框
 │
 ├── game_content/            # 关卡内容（写弹幕在这里）
 │   └── stages/
-│       ├── stage1/          # 第 1 面（当前默认入口）
+│       ├── stage1/          # 第 1 面（最完整的参考）
 │       ├── stage2/          # 第 2 面（骨架）
-│       └── stage3/          # 第 3 面（骨架）
+│       ├── stage3/          # 第 3 面（骨架）
+│       └── stage_test/      # 测试关
 │
-├── assets/                  # 游戏资源
-│   ├── images/              # 纹理图集（子弹、激光、敌人、道具等）
-│   ├── audio/               # 全局音效和 BGM
+├── assets/                  # 全局游戏资源
+│   ├── images/              # 纹理图集
+│   ├── audio/               # 全局 SE 与 BGM
 │   ├── fonts/               # 字体
 │   ├── players/             # 自机配置
-│   ├── configs/             # 敌人预设等配置
-│   └── bullet_aliases.json  # 弹幕类型→精灵映射表
+│   ├── configs/             # 敌人预设等 JSON
+│   └── bullet_aliases.json  # 弹幕类型 + 颜色 → 精灵 映射表
 │
 ├── tools/                   # PyQt5 编辑器工具
 │   ├── editor_launcher.py   # 统一启动器
-│   ├── bullet/              # 弹幕别名管理器
-│   ├── asset/               # 纹理资产编辑器
-│   ├── player/              # 自机编辑器
-│   └── ...
+│   ├── bullet_alias_manager.py
+│   ├── asset_manager_qt.py
+│   └── player_editor.py
 │
-└── levels/                  # 历史遗留目录（当前主流程不依赖）
+├── docs/                    # 文档
+└── tests/                   # pytest 测试
 ```
 
-## 核心概念
+## 引擎与内容的边界
 
-pystg 把**引擎**和**内容**彻底分开：
+PySTG 把**引擎**和**内容**彻底分开：
 
-- `src/` 是引擎，提供子弹池、渲染、碰撞等底层能力
+- `src/` 是引擎，提供子弹池、渲染、碰撞、激光、音频等底层能力
 - `game_content/` 是内容，只描述「发生什么」——弹幕怎么飞、敌人怎么动、Boss 出什么招
 
-你写弹幕脚本时，只需要和几个基类打交道：
+写弹幕脚本时，你只需要 import 几个基类：
 
 ```python
 from src.game.stage.spellcard import SpellCard, NonSpell   # 符卡 / 非符
 from src.game.stage.wave_base import Wave                   # 道中波次
 from src.game.stage.enemy_script import EnemyScript         # 敌人脚本
+from src.game.stage.stage_base import StageScript, BossDef  # 整面流程
+from src.game.stage.boss_base import nonspell, spellcard    # Boss 阶段组合
 ```
 
-当前主流程使用 Python 协程（`async/await`）编写，`await self.wait(N)` 暂停 N 帧：
+所有这些类都通过 `self.fire()` / `self.wait(N)` / `self.ctx.xxx` 调用引擎，不直接 import 引擎内部模块。
+
+## 第一份脚本
 
 ```python
 class MySpell(SpellCard):
@@ -98,31 +113,30 @@ class MySpell(SpellCard):
         while True:
             self.fire_circle(count=12, speed=2.0, start_angle=angle, color="red")
             angle += 10
-            await self.wait(15)
+            await self.wait(15)   # 暂停 15 帧（≈0.25 秒）
 ```
 
-详细的脚本编写方法见 [弹幕脚本开发指南](STAGE_SCRIPTING_GUIDE.md)。
+`await self.wait(N)` 让协程暂停 N 帧，引擎每帧推进一步。这就是 PySTG 弹幕脚本的核心模式。
+
+完整 API 见 [弹幕脚本开发指南](STAGE_SCRIPTING_GUIDE.md)。
 
 ## 一个关卡长什么样
 
-每个关卡是 `game_content/stages/` 下的一个文件夹，当前推荐入口是 `stage_script.py`：
-
 ```
-stage1/
+game_content/stages/stage1/
 ├── __init__.py
-├── stage_script.py          # 关卡主脚本（定义流程）
+├── stage_script.py          # 整面流程（必需）
 ├── waves/                   # 道中波次
 │   ├── opening_wave.py
 │   └── fairy_wave.py
 ├── spellcards/              # Boss 符卡
 │   ├── nonspell_1.py
-│   ├── spell_1.py
-│   └── spell_2.py
+│   └── spell_1.py
 ├── enemies/                 # 敌人定义
 │   └── fairy.py
 ├── dialogue/                # 对话脚本
 │   └── boss_dialogue.py
-└── audio/                   # 关卡私有音频（可选）
+└── audio/                   # 关卡私有音频（可选，覆盖全局同名音效）
     ├── se/
     └── music/
 ```
@@ -137,24 +151,28 @@ class Stage1(StageScript):
     boss_bgm = "01.wav"
 
     async def run(self):
-        await self.run_wave(OpeningWave)     # 道中波次
+        await self.run_wave(OpeningWave)           # 道中波次
         await self.run_wave(FairyWave)
 
-        await self.play_dialogue([           # Boss 前对话
+        await self.play_dialogue([                  # Boss 前对话
             ("Hinanawi_Tenshi", "left", "准备好了吗？"),
             ("Reiuji_Utsuho", "right", "来吧！"),
         ])
 
-        await self.run_boss(self.boss)       # Boss 战
+        await self.run_boss(self.boss)              # Boss 战
 ```
 
-对话立绘渲染参数位于 `assets/ui/dialog_portrait_layout.json`，可用 `python tools/dialog/dialog_portrait_editor.py` 进行可视化调节（左右槽位锚点、说话者上移、非说话者透明度/饱和度）。
+对话立绘渲染参数位于 `assets/ui/dialog_portrait_layout.json`，可用编辑器调整：
+
+```bash
+python tools/dialog/dialog_portrait_editor.py
+```
 
 ## 下一步
 
 - **写弹幕** → [弹幕脚本开发指南](STAGE_SCRIPTING_GUIDE.md)
-- **用预设快速出杂兵** → [敌人预设系统](ENEMY_PRESET_SYSTEM.md)
-- **用编辑器管理资源** → [编辑器工具](EDITOR_TOOLS_GUIDE.md)
+- **快速出杂兵** → [敌人预设系统](ENEMY_PRESET_SYSTEM.md)
+- **管理资产** → [编辑器工具](EDITOR_TOOLS_GUIDE.md)
 - **了解引擎内部** → [架构概览](architecture.md)
 
-写内容时请优先参考 `game_content/stages/stage1/` 下的现有脚本，而不是旧版 `stage.json` / `boss.json` 工作流。
+写内容时优先参考 `game_content/stages/stage1/` 下的现有脚本——这是当前最完整的实现样例。

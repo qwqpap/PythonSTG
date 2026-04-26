@@ -18,3 +18,11 @@ docs/project_assessment_*.md
 docs/project_assessment_*.html
 docs/project_assessment_*.pdf
 tools/render_markdown_pdf.py
+
+# Editor / IDE local config
+imgui.ini
+
+# Local recordings / large media
+*.mp4
+*.mov
+*.avi
