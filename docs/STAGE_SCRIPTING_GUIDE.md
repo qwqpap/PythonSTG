@@ -17,11 +17,13 @@
 8. [SpellCard / NonSpell：Boss 攻击](#8-spellcard--nonspellboss-攻击)
 9. [BossDef：Boss 阶段组织](#9-bossdef-boss-阶段组织)
 10. [弹幕 API 完整参考（v2）](#10-弹幕-api-完整参考v2)
-11. [v2 新机制详解](#11-v2-新机制详解)
-12. [高级模式示例](#12-高级模式示例)
-13. [坐标与角度](#13-坐标与角度)
-14. [可用弹型与颜色](#14-可用弹型与颜色)
-15. [常见问题](#15-常见问题)
+11. [激光 API](#11-激光-api)
+12. [道具 / 得分 / 玩家访问](#12-道具--得分--玩家访问)
+13. [v2 新机制详解](#13-v2-新机制详解)
+14. [高级模式示例](#14-高级模式示例)
+15. [坐标与角度](#15-坐标与角度)
+16. [可用弹型与颜色](#16-可用弹型与颜色)
+17. [常见问题](#17-常见问题)
 
 ---
 
@@ -212,6 +214,33 @@ async def run(self):
 - `self.boss` — Boss 对象（可访问 `.x`, `.y`）
 - `self.ctx` — StageContext（底层 API）
 
+### 生命周期回调
+
+```python
+class MySpell(SpellCard):
+    async def setup(self):
+        """符卡开始前调用，常用于布阵或 Boss 移动到位"""
+        await self.boss.move_to(0, 0.5, duration=30)
+
+    async def run(self):
+        """主弹幕循环"""
+        ...
+
+    def on_defeated(self):
+        """玩家击破符卡时调用，可用于触发结算特效或散花弹"""
+        self.play_se("cardget")
+
+    def on_timeout(self):
+        """符卡超时未被击破时调用"""
+        self.clear_bullets()
+```
+
+`on_defeated` / `on_timeout` 默认是空实现，重写时不需要 `async`。
+若要在结算时发送弹幕或道具，直接在里面调用 `self.fire(...)` / `self.ctx.spawn_drop(...)` 即可。
+
+> **注意**：`wait_until(condition)` 仅在 SpellCard 上可用；
+> Wave / EnemyScript 内请用 `await self.wait(N)` 配合手动条件判断实现等价效果。
+
 ---
 
 ## 9. BossDef：Boss 阶段组织
@@ -373,7 +402,127 @@ player = self.ctx.get_player()    # 获取玩家代理 (.x, .y)
 
 ---
 
-## 11. v2 新机制详解
+## 11. 激光 API
+
+激光由 `LaserPool` 统一管理，通过 `self.ctx.create_laser()` / `self.ctx.create_bent_laser()` 创建。两种类型：
+
+| 类型 | 说明 |
+|---|---|
+| 直线激光 | 三段式（头/身/尾），有展开→持续→收缩动画 |
+| 曲线激光 | 沿路径弯曲，每帧通过 `update_head(x, y)` 推进头部 |
+
+### 11.1 直线激光
+
+```python
+laser = self.ctx.create_laser(
+    x=0.0, y=0.6,             # 起点（归一化坐标）
+    angle=-90,                 # 角度（度）
+    l1=0.05,                   # 头部长度
+    l2=1.5,                    # 身体长度
+    l3=0.05,                   # 尾部长度
+    width=0.04,                # 宽度
+    texture_id="laser1",       # 纹理 ID（laser1 ~ laser4）
+    color="red",               # 颜色名 或 1~16 索引
+    on_time=30,                # 展开时间（帧）
+    node=0.0,                  # 起点装饰大小
+    head=0.0,                  # 终点装饰大小
+)
+
+# 一段时间后关闭（淡出 30 帧）
+await self.wait(180)
+self.ctx.remove_laser(laser, off_time=30)
+```
+
+### 11.2 曲线激光
+
+```python
+laser = self.ctx.create_bent_laser(
+    x=self.boss.x, y=self.boss.y,
+    length=80,                 # 历史采样点上限（决定可见尾巴长度）
+    width=0.03,
+    color="blue",
+    on_time=20,
+    sample_rate=4,             # 每多少帧记录一次头部位置
+)
+
+# 后续每帧驱动头部，激光会自动连成曲线
+import math
+for t in range(180):
+    nx = self.boss.x + 0.3 * math.sin(t * 0.1)
+    ny = self.boss.y - 0.005 * t
+    laser.update_head(nx, ny)
+    await self.wait(1)
+
+self.ctx.remove_laser(laser, off_time=15)
+```
+
+### 11.3 清屏
+
+```python
+self.ctx.clear_all_lasers()      # 一次性移除所有激光
+```
+
+### 11.4 颜色与纹理
+
+- `color` 接受 16 个索引（1~16）或颜色名 `red / blue / green / purple / orange / darkblue / white / yellow / cyan / pink / ...`
+- `texture_id` 对应 `assets/images/laser/` 下的纹理（默认 `laser1`，另有 `laser2/3/4`）
+
+---
+
+## 12. 道具 / 得分 / 玩家访问
+
+### 12.1 手动掉落道具
+
+```python
+# 在 (x, y) 处生成一个掉落物
+self.ctx.spawn_drop(self.boss.x, self.boss.y, type="power_small")
+```
+
+道具类型由 `ItemPool` 决定，常见值：`power_small`, `power_big`, `point`, `life`, `bomb`, `full_power`。
+
+### 12.2 直接加分
+
+```python
+self.ctx.add_score(100000)     # 普通用法：杂兵击破奖励
+```
+
+> 设计建议：常规掉落由敌人击破自动触发；`spawn_drop` / `add_score` 用于符卡结算特效或自定义事件奖励。
+
+### 12.3 访问玩家与敌人
+
+```python
+player = self.ctx.get_player()      # 只读代理：player.x, player.y
+enemies = self.ctx.get_enemies()    # 当前活跃敌人列表
+```
+
+```python
+# 自机狙的便捷写法（已封装）
+self.fire_at_player(speed=2.5, color="red")
+
+# 等价于
+import math
+angle = self.angle_to_player()
+self.fire(angle=angle, speed=2.5, color="red")
+```
+
+### 12.4 完整 ctx 公共方法清单
+
+`StageContext` 上的所有公共方法（写复杂逻辑时可能用到）：
+
+| 类别 | 方法 |
+|------|------|
+| 弹幕 | `create_bullet`, `create_polar_bullet`, `create_orbit_bullet`, `create_emitter` |
+| 消弹 | `remove_bullet(s)`, `bullet(s)_to_item(s)`, `clear_all_bullets`, `clear_bullets_by_tag`, `bullets_by_tag_to_item` |
+| 时停 | `set_time_scale(scale, tag=None)` |
+| 激光 | `create_laser`, `create_bent_laser`, `remove_laser`, `clear_all_lasers` |
+| 道具 / 分数 | `spawn_drop`, `add_score` |
+| 玩家 / 敌人 | `get_player`, `get_enemies`, `add_enemy_script`, `get_enemy_scripts` |
+| 音频 | `play_se`, `play_danmaku_se`, `play_bgm`, `stop_bgm`, `pause_bgm`, `unpause_bgm` |
+| 背景 | `set_background(name)` |
+
+---
+
+## 13. v2 新机制详解
 
 ### 11.1 摩擦力 / 阻尼 (friction)
 
@@ -524,7 +673,7 @@ self.ctx.create_emitter(
 
 ---
 
-## 12. 高级模式示例
+## 14. 高级模式示例
 
 ### 12.1 急停→散花弹
 
@@ -666,7 +815,7 @@ async def run(self):
 
 ---
 
-## 13. 坐标与角度
+## 15. 坐标与角度
 
 坐标系是归一化坐标：
 
@@ -682,7 +831,7 @@ async def run(self):
 
 ---
 
-## 14. 可用弹型与颜色
+## 16. 可用弹型与颜色
 
 ### 弹型别名
 
@@ -714,7 +863,7 @@ async def run(self):
 
 ---
 
-## 15. 常见问题
+## 17. 常见问题
 
 ### Q: `await` 和 `yield` 用哪个？
 
@@ -797,9 +946,13 @@ self.ctx.bullet_pool.data['sprite_idx'][idx] = new_idx     # 优化版池
 | `self.fire_at_player(...)` | 自机狙 | `self.fire_at_player(speed=3)` |
 | `self.fire_polar(...)` | 极坐标 | `self.fire_polar(orbit_radius=0.1, theta=0, angular_velocity=120)` |
 | `ctx.create_emitter(...)` | 发射器 | `ctx.create_emitter(x, y, angle, speed, callback)` |
+| `ctx.create_laser(...)` | 直线激光 | `ctx.create_laser(x, y, angle, l1, l2, l3, width, color="red")` |
+| `ctx.create_bent_laser(...)` | 曲线激光 | `ctx.create_bent_laser(x, y, length=80, width=0.03)` |
 | `ctx.set_time_scale(s, tag)` | 时停 | `ctx.set_time_scale(0.0, tag=1)` |
 | `ctx.clear_bullets_by_tag(t)` | 标签消弹 | `ctx.clear_bullets_by_tag(1)` |
 | `ctx.bullets_by_tag_to_item(t)` | 标签转道具 | `ctx.bullets_by_tag_to_item(1)` |
+| `ctx.spawn_drop(x, y, type=...)` | 掉落道具 | `ctx.spawn_drop(0, 0.5, type="power_small")` |
+| `ctx.add_score(n)` | 加分 | `ctx.add_score(100000)` |
 | `await self.wait(N)` | 等 N 帧 | `await self.wait(30)` |
 | `self.angle_to_player()` | 自机方向 | `angle = self.angle_to_player()` |
 | `self.play_se(name)` | 播放音效 | `self.play_se("kira")` |
