@@ -48,11 +48,11 @@ class CenterSniper(EnemyScript):
     """
     突发刷出的炮塔，瞬间降临后发射一轮高初速的 5-Way 自机狙，封死玩家退路
     """
-    hp = 100
+    hp = 60
     sprite = "enemy3"
     score = 800
     drops = {"power": 2}
-    
+
     target_x: float = 0.0
     target_y: float = 0.4
 

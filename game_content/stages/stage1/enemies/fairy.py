@@ -111,7 +111,7 @@ class Stage1Wave2Leader(PresetEnemy):
     """
     preset_id = "enemy9"
     drops = {"power": 2, "point": 2}
-    tough_hp: int = 260
+    tough_hp: int = 200
 
     def __init__(self):
         super().__init__()
@@ -361,7 +361,7 @@ class Stage1Wave4FlowerEnemy14(EnemyScript):
     Stage_1_wave_4 两侧 enemy14：
     发射不连续开花圈（gun_bullet14），并持续改变缺口相位。
     """
-    hp = 360
+    hp = 150
     sprite = "enemy14"
     score = 320
     hitbox_radius = 0.03
