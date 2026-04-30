@@ -54,7 +54,7 @@ class VaultLeader(EnemyScript):
     """
     def __init__(self):
         super().__init__()
-        self.hp = 260
+        self.hp = 160
         self.score = 5000
         self.sprite = "enemy3"
         self._angle_acc = 0.0

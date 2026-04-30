@@ -33,7 +33,7 @@ class Stage3Wave1(Wave):
         for x_pos in [-0.9, -0.4, 0.4, 0.9]:
             enemy = self.spawn_enemy_class(StressYinYang, x=x_pos, y=1.3)
             if enemy:
-                enemy.hp = 70
+                enemy.hp = 50
                 enemy.score = 3000
                 enemy.sprite = "enemy2"
         
