@@ -290,81 +290,144 @@ def run_replay_select_menu(window, ctx, screen_size):
 
 
 def run_settings_menu(window, ctx, screen_size, audio_manager):
-    """简易设置菜单：调整 SE/BGM 音量。Z/← → 调，ESC 保存返回。"""
-    from src.ui.main_menu_renderer import MainMenuRenderer
+    """
+    设置菜单：分类卡片 + 滑块/开关/循环 + 实时预览。
+    控制：↑↓ 选项；←→ 调节（滑块/循环）；Z 触发动作或切换；ESC 保存返回。
+    """
+    from src.ui.settings_menu_renderer import SettingsMenuRenderer
     from src.core.window import FrameClock, EVENT_QUIT, EVENT_KEYDOWN
-    from src.core.input_manager import KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_z, KEY_ESCAPE
+    from src.core.input_manager import (
+        KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_z, KEY_ESCAPE,
+    )
 
     settings = get_settings()
-    se = settings.se_volume
-    bgm = settings.bgm_volume
 
-    def make_layout(idx):
-        bar_se = "[" + "#" * int(se * 20) + "-" * (20 - int(se * 20)) + f"] {int(se * 100):3d}%"
-        bar_bgm = "[" + "#" * int(bgm * 20) + "-" * (20 - int(bgm * 20)) + f"] {int(bgm * 100):3d}%"
-        return {
-            "bg_gradient": {"top": [10, 10, 30], "bottom": [25, 25, 55]},
-            "title": {"text": "设置", "font_size": 36, "color": [200, 220, 255], "y_ratio": 0.15},
-            "options": [
-                {"text": f"SE 音量  {bar_se}"},
-                {"text": f"BGM 音量 {bar_bgm}"},
-                {"text": "返回 (保存)"},
-            ],
-            "option_spacing": 40,
-            "option_font_size": 22,
-            "option_colors": {"normal": [180, 180, 200], "selected": [255, 255, 120]},
-            "hint": {
-                "text": "↑↓ 选项   ←→ 调节   Z/ESC 保存返回",
-                "font_size": 18,
-                "color": [140, 140, 140],
-                "y_offset": -30,
-            },
-        }
+    # 缓冲区：在菜单中编辑，统一 commit
+    state = {
+        "se_volume": settings.se_volume,
+        "bgm_volume": settings.bgm_volume,
+        "fullscreen": settings.fullscreen,
+        "last_character": settings.last_character,
+    }
+    char_options = ["tao", "orin", "tenshi"]
+    char_display = {"tao": "桃 (Tao)", "orin": "燐 (Orin)", "tenshi": "天子 (Tenshi)"}
 
-    selected = 0
-    renderer = MainMenuRenderer(ctx, screen_size[0], screen_size[1])
-    clock = FrameClock()
+    # 项目列表：每项指向 state 的某个键 + 控件类型
+    # idx -> dict
+    def build_items() -> list:
+        return [
+            {"section": "音频", "key": "se_volume",     "label": "SE 音量",  "type": "slider",
+             "value": state["se_volume"]},
+            {"section": "音频", "key": "bgm_volume",    "label": "BGM 音量", "type": "slider",
+             "value": state["bgm_volume"]},
+            {"section": "显示", "key": "fullscreen",    "label": "全屏 (重启生效)", "type": "toggle",
+             "value": state["fullscreen"]},
+            {"section": "游戏", "key": "last_character","label": "默认自机", "type": "cycle",
+             "value": state["last_character"],
+             "display": char_display.get(state["last_character"], state["last_character"]),
+             "options": char_options},
+            {"section": "其它", "label": "重置为默认值", "type": "action", "key": "_reset"},
+            {"label": "返回（自动保存）", "type": "action", "key": "_back"},
+        ]
 
-    def commit_and_apply():
-        settings.se_volume = se
-        settings.bgm_volume = bgm
+    def apply_audio_live():
+        settings.se_volume = state["se_volume"]
+        settings.bgm_volume = state["bgm_volume"]
+        settings.apply_audio(audio_manager)
+
+    def commit_and_save():
+        settings.se_volume = state["se_volume"]
+        settings.bgm_volume = state["bgm_volume"]
+        settings.fullscreen = state["fullscreen"]
+        settings.last_character = state["last_character"]
         settings.apply_audio(audio_manager)
         settings.save()
 
+    def reset_defaults():
+        state["se_volume"] = 0.7
+        state["bgm_volume"] = 0.6
+        state["fullscreen"] = False
+        state["last_character"] = "tao"
+        apply_audio_live()
+
+    selected = 0
+    renderer = SettingsMenuRenderer(ctx, screen_size[0], screen_size[1])
+    clock = FrameClock()
+
     while True:
         clock.tick(60)
+
+        items = build_items()
+        n = len(items)
+
         for event in window.poll_events():
             if event['type'] == EVENT_QUIT:
-                commit_and_apply()
+                commit_and_save()
                 renderer.cleanup()
                 return
-            if event['type'] == EVENT_KEYDOWN:
-                if event['key'] == KEY_UP:
-                    selected = (selected - 1) % 3
-                elif event['key'] == KEY_DOWN:
-                    selected = (selected + 1) % 3
-                elif event['key'] in (KEY_LEFT, KEY_RIGHT):
-                    delta = 0.05 if event['key'] == KEY_RIGHT else -0.05
-                    if selected == 0:
-                        se = max(0.0, min(1.0, se + delta))
-                    elif selected == 1:
-                        bgm = max(0.0, min(1.0, bgm + delta))
-                    # 实时预览
-                    settings.se_volume = se
-                    settings.bgm_volume = bgm
-                    settings.apply_audio(audio_manager)
-                elif event['key'] == KEY_z and selected == 2:
-                    commit_and_apply()
-                    renderer.cleanup()
-                    return
-                elif event['key'] == KEY_ESCAPE:
-                    commit_and_apply()
-                    renderer.cleanup()
-                    return
+            if event['type'] != EVENT_KEYDOWN:
+                continue
+
+            key = event['key']
+            cur = items[selected]
+            kind = cur["type"]
+            ckey = cur.get("key")
+
+            if key == KEY_UP:
+                selected = (selected - 1) % n
+            elif key == KEY_DOWN:
+                selected = (selected + 1) % n
+            elif key in (KEY_LEFT, KEY_RIGHT):
+                delta = 1 if key == KEY_RIGHT else -1
+                if kind == "slider" and ckey:
+                    step = 0.05
+                    state[ckey] = max(0.0, min(1.0, state[ckey] + delta * step))
+                    apply_audio_live()
+                elif kind == "toggle" and ckey:
+                    state[ckey] = not state[ckey]
+                elif kind == "cycle" and ckey:
+                    options = cur.get("options", [])
+                    if options:
+                        try:
+                            idx = options.index(state[ckey])
+                        except ValueError:
+                            idx = 0
+                        state[ckey] = options[(idx + delta) % len(options)]
+            elif key == KEY_z:
+                if kind == "toggle" and ckey:
+                    state[ckey] = not state[ckey]
+                elif kind == "cycle" and ckey:
+                    options = cur.get("options", [])
+                    if options:
+                        try:
+                            idx = options.index(state[ckey])
+                        except ValueError:
+                            idx = 0
+                        state[ckey] = options[(idx + 1) % len(options)]
+                elif kind == "action":
+                    if ckey == "_back":
+                        commit_and_save()
+                        renderer.cleanup()
+                        return
+                    elif ckey == "_reset":
+                        reset_defaults()
+            elif key == KEY_ESCAPE:
+                commit_and_save()
+                renderer.cleanup()
+                return
+
+        # 重新构建以反映 state 变化
+        items = build_items()
+        model = {
+            "title": "设置",
+            "items": items,
+            "selected": selected,
+            "hint": "↑↓ 选项    ←→ 调节    Z 切换/确认    ESC 保存返回",
+        }
 
         ctx.viewport = (0, 0, screen_size[0], screen_size[1])
         ctx.clear(0.0, 0.0, 0.0)
-        renderer.render(selected, layout=make_layout(selected))
+        renderer.render(model)
         window.swap_buffers()
 
 
