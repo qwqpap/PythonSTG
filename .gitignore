@@ -26,3 +26,8 @@ imgui.ini
 *.mp4
 *.mov
 *.avi
+
+# 用户本地存档（settings/progress/replays），与机器/玩家强耦合，不入库
+/userdata/settings.json
+/userdata/progress.json
+/userdata/replays/
