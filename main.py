@@ -23,6 +23,14 @@ from src.game.boss import BossManager
 from src.game.laser import LaserPool, get_laser_texture_data
 from src.game.item import ItemPool, ItemConfig
 from src.game.audio import GameAudioBank, AudioManager
+from src.game.userdata import (
+    get_settings,
+    get_progress,
+    ReplayRecorder,
+    ReplayPlayback,
+    list_replays,
+    load_replay,
+)
 from src.resource.sprite import SpriteManager
 from src.core import (
     GameConfig, get_config, init_config,
@@ -50,6 +58,17 @@ from game_content.stages.stage_test.stage_script import StageTest
 
 # 所有正式关卡（按通关顺序），debug 菜单和关卡选择器用此列表
 ALL_STAGES = [Stage1, Stage2, Stage3]
+
+
+def _stage_class_by_id(stage_id: str):
+    """根据 stage.id（或类名）查找对应的关卡类，回退 Stage1。"""
+    sid = (stage_id or "").lower()
+    for cls in ALL_STAGES + [StageTest]:
+        if getattr(cls, "id", "").lower() == sid:
+            return cls
+        if cls.__name__.lower() == sid:
+            return cls
+    return Stage1
 
 # ===== Debug 模式 =====
 DEBUG_MODE = "--debug" in sys.argv
@@ -201,6 +220,152 @@ def build_debug_menu(stage_class):
             })
 
     return entries
+
+
+def run_replay_select_menu(window, ctx, screen_size):
+    """列出 userdata/replays/ 中的重放文件，让玩家选一个。返回 path 或 None。"""
+    from src.ui.main_menu_renderer import MainMenuRenderer
+    from src.core.window import FrameClock, EVENT_QUIT, EVENT_KEYDOWN
+    from src.core.input_manager import KEY_UP, KEY_DOWN, KEY_z, KEY_ESCAPE
+
+    replays = list_replays()
+    if not replays:
+        # 没有重放：弹一个空菜单提示
+        labels = ["（暂无重放，按 ESC 返回）"]
+        entries = [None]
+    else:
+        labels = [
+            f"{r['stage']:<8} | {r['character']:<6} | {r['frame_count']:>5}帧 | {r['created_at']}"
+            for r in replays
+        ]
+        entries = [r["path"] for r in replays]
+
+    layout = {
+        "bg_gradient": {"top": [10, 25, 25], "bottom": [20, 40, 50]},
+        "title": {
+            "text": "选择重放",
+            "font_size": 36,
+            "color": [180, 220, 255],
+            "y_ratio": 0.08,
+        },
+        "options": [{"text": lbl} for lbl in labels],
+        "option_spacing": 28,
+        "option_font_size": 20,
+        "option_colors": {"normal": [180, 200, 200], "selected": [255, 255, 120]},
+        "hint": {
+            "text": "↑↓ 选择   Z 播放   ESC 返回",
+            "font_size": 18,
+            "color": [140, 140, 140],
+            "y_offset": -30,
+        },
+    }
+
+    selected_index = 0
+    renderer = MainMenuRenderer(ctx, screen_size[0], screen_size[1])
+    clock = FrameClock()
+    n = len(entries)
+
+    while True:
+        clock.tick(60)
+        for event in window.poll_events():
+            if event['type'] == EVENT_QUIT:
+                renderer.cleanup()
+                return None
+            if event['type'] == EVENT_KEYDOWN:
+                if event['key'] == KEY_UP:
+                    selected_index = (selected_index - 1) % n
+                elif event['key'] == KEY_DOWN:
+                    selected_index = (selected_index + 1) % n
+                elif event['key'] == KEY_z:
+                    renderer.cleanup()
+                    return entries[selected_index]
+                elif event['key'] == KEY_ESCAPE:
+                    renderer.cleanup()
+                    return None
+
+        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.clear(0.0, 0.0, 0.0)
+        renderer.render(selected_index, layout=layout)
+        window.swap_buffers()
+
+
+def run_settings_menu(window, ctx, screen_size, audio_manager):
+    """简易设置菜单：调整 SE/BGM 音量。Z/← → 调，ESC 保存返回。"""
+    from src.ui.main_menu_renderer import MainMenuRenderer
+    from src.core.window import FrameClock, EVENT_QUIT, EVENT_KEYDOWN
+    from src.core.input_manager import KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_z, KEY_ESCAPE
+
+    settings = get_settings()
+    se = settings.se_volume
+    bgm = settings.bgm_volume
+
+    def make_layout(idx):
+        bar_se = "[" + "#" * int(se * 20) + "-" * (20 - int(se * 20)) + f"] {int(se * 100):3d}%"
+        bar_bgm = "[" + "#" * int(bgm * 20) + "-" * (20 - int(bgm * 20)) + f"] {int(bgm * 100):3d}%"
+        return {
+            "bg_gradient": {"top": [10, 10, 30], "bottom": [25, 25, 55]},
+            "title": {"text": "设置", "font_size": 36, "color": [200, 220, 255], "y_ratio": 0.15},
+            "options": [
+                {"text": f"SE 音量  {bar_se}"},
+                {"text": f"BGM 音量 {bar_bgm}"},
+                {"text": "返回 (保存)"},
+            ],
+            "option_spacing": 40,
+            "option_font_size": 22,
+            "option_colors": {"normal": [180, 180, 200], "selected": [255, 255, 120]},
+            "hint": {
+                "text": "↑↓ 选项   ←→ 调节   Z/ESC 保存返回",
+                "font_size": 18,
+                "color": [140, 140, 140],
+                "y_offset": -30,
+            },
+        }
+
+    selected = 0
+    renderer = MainMenuRenderer(ctx, screen_size[0], screen_size[1])
+    clock = FrameClock()
+
+    def commit_and_apply():
+        settings.se_volume = se
+        settings.bgm_volume = bgm
+        settings.apply_audio(audio_manager)
+        settings.save()
+
+    while True:
+        clock.tick(60)
+        for event in window.poll_events():
+            if event['type'] == EVENT_QUIT:
+                commit_and_apply()
+                renderer.cleanup()
+                return
+            if event['type'] == EVENT_KEYDOWN:
+                if event['key'] == KEY_UP:
+                    selected = (selected - 1) % 3
+                elif event['key'] == KEY_DOWN:
+                    selected = (selected + 1) % 3
+                elif event['key'] in (KEY_LEFT, KEY_RIGHT):
+                    delta = 0.05 if event['key'] == KEY_RIGHT else -0.05
+                    if selected == 0:
+                        se = max(0.0, min(1.0, se + delta))
+                    elif selected == 1:
+                        bgm = max(0.0, min(1.0, bgm + delta))
+                    # 实时预览
+                    settings.se_volume = se
+                    settings.bgm_volume = bgm
+                    settings.apply_audio(audio_manager)
+                elif event['key'] == KEY_z and selected == 2:
+                    commit_and_apply()
+                    renderer.cleanup()
+                    return
+                elif event['key'] == KEY_ESCAPE:
+                    commit_and_apply()
+                    renderer.cleanup()
+                    return
+
+        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.clear(0.0, 0.0, 0.0)
+        renderer.render(selected, layout=make_layout(selected))
+        window.swap_buffers()
 
 
 def run_stage_select_menu(window, ctx, screen_size, stage_classes, current_class):
@@ -413,9 +578,14 @@ def initialize_sprite_registry_from_assets(sprite_manager: SpriteManager, textur
     print(f"SpriteRegistry 已重建: {registry.count} sprites")
 
 
-def initialize_game_objects(stage_class, audio_manager=None, background_renderer=None):
+def initialize_game_objects(stage_class, audio_manager=None, background_renderer=None,
+                            character: str = "tao"):
     """初始化游戏对象（玩家、子弹池、关卡管理器等）"""
-    player = load_player("tao")
+    try:
+        player = load_player(character)
+    except Exception:
+        print(f"[main] 加载玩家 '{character}' 失败，回退 tao")
+        player = load_player("tao")
     print(f"已加载玩家: {player.name}")
     # 使用优化版子弹池（整数 sprite 索引 + 向量化渲染数据准备）
     bullet_pool = OptimizedBulletPool(max_bullets=50000)
@@ -503,24 +673,63 @@ def main():
     game_audio.load_defaults()
     audio_manager = AudioManager(game_audio)
 
-    while True:
-        menu_choice = run_main_menu(window, ctx, screen_size, audio_manager)
-        if menu_choice < 0:
-            # 退出
-            audio_manager.stop_bgm(fade_ms=0)
-            audio_manager.set_stage_bank(None)
-            audio_manager.cleanup()
-            window.destroy()
-            sys.exit(0)
+    # ===== 加载玩家设置并应用音量 =====
+    settings = get_settings()
+    settings.apply_audio(audio_manager)
+    progress = get_progress()  # 触发加载
 
-        # 根据菜单选项决定起始关卡
-        # 0=开始游戏(stage1)  1=测试关卡  其余保持 selected_stage_class
-        if menu_choice == 0:
-            active_stage_class = selected_stage_class
-        elif menu_choice == 1:
-            active_stage_class = StageTest
+    # ===== CLI: --replay=path 直接进入回放 =====
+    cli_replay_path = _get_cli_option("--replay=")
+    pending_replay_playback = None
+    if cli_replay_path:
+        rep = load_replay(cli_replay_path)
+        if rep is None:
+            print(f"[main] 重放文件加载失败: {cli_replay_path}")
         else:
-            active_stage_class = selected_stage_class
+            pending_replay_playback = ReplayPlayback(rep)
+            print(f"[main] 准备回放: {rep}")
+
+    while True:
+        # 选定模式：正常 / 回放
+        replay_playback = pending_replay_playback
+        pending_replay_playback = None  # 只触发一次
+
+        if replay_playback is None:
+            menu_choice = run_main_menu(window, ctx, screen_size, audio_manager)
+            if menu_choice < 0:
+                # 退出
+                settings.save()
+                audio_manager.stop_bgm(fade_ms=0)
+                audio_manager.set_stage_bank(None)
+                audio_manager.cleanup()
+                window.destroy()
+                sys.exit(0)
+
+            # 根据菜单选项决定起始关卡
+            # 0=开始游戏  1=测试关卡  2=查看重放  3=设置  4=退出
+            if menu_choice == 0:
+                active_stage_class = selected_stage_class
+            elif menu_choice == 1:
+                active_stage_class = StageTest
+            elif menu_choice == 2:
+                # 查看重放
+                path = run_replay_select_menu(window, ctx, screen_size)
+                if path:
+                    rep = load_replay(path)
+                    if rep is not None:
+                        replay_playback = ReplayPlayback(rep)
+                if replay_playback is None:
+                    continue  # 返回主菜单
+                active_stage_class = _stage_class_by_id(replay_playback.stage_id)
+            elif menu_choice == 3:
+                # 设置
+                run_settings_menu(window, ctx, screen_size, audio_manager)
+                continue
+            else:
+                active_stage_class = selected_stage_class
+        else:
+            # 来自 CLI --replay
+            active_stage_class = _stage_class_by_id(replay_playback.stage_id)
 
         while True:
             # ===== 先创建加载画面渲染器（不依赖任何纹理资源） =====
@@ -642,11 +851,39 @@ def main():
                 debug_target = run_debug_menu(window, ctx, screen_size, active_stage_class)
 
             _show_loading("Initializing stage...", 0.95)
+
+            # ===== 决定本局自机与 RNG 种子 =====
+            if replay_playback is not None:
+                run_character = replay_playback.character or settings.last_character
+                run_seed = int(replay_playback.rng_seed)
+            else:
+                run_character = settings.last_character
+                run_seed = int(time.time() * 1000) & 0x7FFFFFFF
+
+            # 全局 RNG 播种，保证录制/回放确定性
+            import random as _rnd
+            try:
+                import numpy as _np
+                _np.random.seed(run_seed & 0xFFFFFFFF)
+            except Exception:
+                pass
+            _rnd.seed(run_seed)
+
             player, bullet_pool, laser_pool, item_pool, stage_manager = initialize_game_objects(
                 stage_class=active_stage_class,
                 audio_manager=audio_manager,
-                background_renderer=background_renderer
+                background_renderer=background_renderer,
+                character=run_character,
             )
+
+            # ===== 录制器 =====
+            replay_recorder = None
+            if replay_playback is None:
+                replay_recorder = ReplayRecorder(
+                    stage_id=getattr(active_stage_class, "id", active_stage_class.__name__),
+                    character=run_character,
+                    rng_seed=run_seed,
+                )
 
             _show_loading("Ready.", 1.0)
 
@@ -777,7 +1014,8 @@ def main():
                                     game_result_state = "MAIN_MENU"
                                     running = False
                         else:
-                            if event['key'] == KEY_c:
+                            if event['key'] == KEY_c and replay_playback is None:
+                                # 回放期间禁用切换自机，否则破坏确定性
                                 dialog_active = False
                                 if stage_manager.current_stage:
                                     dialog_state = stage_manager.current_stage.get_dialog_renderer()
@@ -786,6 +1024,8 @@ def main():
                                 if not dialog_active and not stage_manager.loading_info:
                                     _player_cycle = {"tao": "orin", "orin": "tenshi", "tenshi": "tao"}
                                     new_name = _player_cycle.get(player.name, "tao")
+                                    # 持久化"上次使用的自机"
+                                    settings.last_character = new_name
                                     old_pos = list(player.pos)
                                     old_lives = player.lives
                                     old_power = player.power
@@ -812,8 +1052,22 @@ def main():
                                         stage_manager.current_context.player = player
                 if PROFILE_MODE:
                     profile_acc["events"] += time.perf_counter() - events_start
-                
-                keys = KeyboardState(window.get_key_states())
+
+                # ===== 输入注入：回放替换、录制采样 =====
+                if replay_playback is not None and not paused:
+                    if replay_playback.is_finished:
+                        # 重放结束后回到主菜单
+                        game_result_state = "MAIN_MENU"
+                        running = False
+                        keys = KeyboardState({})
+                    else:
+                        keys = replay_playback.next_keys()
+                        # 回放使用固定 dt 保证 dt 相关逻辑可复现
+                        dt = 1.0 / 60.0
+                else:
+                    keys = KeyboardState(window.get_key_states())
+                    if replay_recorder is not None and not paused:
+                        replay_recorder.capture(keys)
 
                 # ===== 加载画面模式 =====
                 if stage_manager.loading_info:
@@ -1073,6 +1327,40 @@ def main():
             
             # 保存高分记录
             item_pool.stats.save_hiscore()
+
+            # ===== 保存重放（仅录制模式）=====
+            if replay_recorder is not None and replay_recorder.frame_count > 0:
+                stage_id = getattr(active_stage_class, "id", active_stage_class.__name__)
+                cleared = bool(getattr(stage_manager, "is_finished", False)) or \
+                          (getattr(stage_manager, "current_stage", None) is not None and
+                           getattr(stage_manager.current_stage, "_finished", False))
+                result = {
+                    "score": int(item_pool.stats.score),
+                    "cleared": cleared,
+                    "exit": game_result_state or "QUIT",
+                }
+                saved_path = replay_recorder.save(result=result)
+                if saved_path:
+                    print(f"[main] 重放已保存: {saved_path} ({replay_recorder.frame_count} 帧)")
+
+                # 进度记录：通关解锁下一关 + 提交最佳分
+                try:
+                    progress.submit_score(stage_id, run_character, int(item_pool.stats.score))
+                    if cleared:
+                        progress.record_clear(stage_id, run_character)
+                        # 解锁下一关
+                        ids = [getattr(c, "id", c.__name__) for c in ALL_STAGES]
+                        if stage_id in ids:
+                            i = ids.index(stage_id)
+                            if i + 1 < len(ids):
+                                if progress.unlock(ids[i + 1]):
+                                    print(f"[main] 解锁新关卡: {ids[i + 1]}")
+                    progress.save()
+                except Exception as e:
+                    print(f"[main] 保存进度失败: {e}")
+
+            # 始终保存设置（如音量/上次自机）
+            settings.save()
 
             emoji_sys.stop()
             audio_manager.stop_bgm(fade_ms=0)
