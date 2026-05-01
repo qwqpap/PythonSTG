@@ -19,6 +19,9 @@ class StageManager:
         self.current_context = None  # 当前 StageContext 实例
         self.loading_info = None  # dict or None → 控制加载画面显示
         self.debug_skip_to = None  # Debug 跳转目标, e.g. {"type": "boss", "phase": 2}
+        # True 表示已经走完整个关卡链（最后一个 stage._next_stage_class 为 None）
+        # main.py 用这个判断"全通关 → 回主菜单"
+        self.is_finished = False
 
         # 引擎对象引用（由 bind_engine 设置）
         self._engine_refs = None
@@ -64,6 +67,8 @@ class StageManager:
             raise RuntimeError(
                 "必须先调用 bind_engine() 绑定引擎对象，才能使用 load_stage()"
             )
+        # 加载新关卡 → 不算"全通关结束"
+        self.is_finished = False
         self.add_coroutine(lambda: self._run_stage(stage_class))
 
     def _run_stage(self, stage_class):
@@ -174,6 +179,10 @@ class StageManager:
         if next_stage_cls is not None:
             print(f"[StageManager] 自动加载下一关: {next_stage_cls.__name__}")
             self.load_stage(next_stage_cls)
+        else:
+            # 没有下一关 → 全通关。main.py 据此回主菜单。
+            self.is_finished = True
+            print("[StageManager] 关卡链结束 → is_finished=True")
 
     @staticmethod
     def _find_stage_directory(stage_class):
@@ -275,6 +284,7 @@ class StageManager:
         """
         self.coroutines.clear()
         self.frame_count = 0
+        self.is_finished = False
         if self.boss_manager:
             self.boss_manager.clear()
         if self.enemy_manager:

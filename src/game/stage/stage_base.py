@@ -329,6 +329,67 @@ class StageScript:
             yield
 
     @types.coroutine
+    def run_staff_roll(
+        self,
+        entries,
+        scroll_speed_px: float = 1.2,
+        bottom_hold_frames: int = 180,
+        end_hold_frames: int = 240,
+    ):
+        """
+        播放滚动 Staff Roll（结局名单）。
+
+        Args:
+            entries: list[dict]，见 src/game/stage/staff_roll.py:StaffRollState
+            scroll_speed_px: 每帧上滚的像素数（≈60 帧 1 秒）
+            bottom_hold_frames: 滚动到末行后再继续滚动一段，保证内容滚出屏顶
+            end_hold_frames: 全部滚出后保持黑屏的帧数（让玩家平静一下）
+
+        与 play_dialogue 一样，渲染器引用挂在 self._current_dialog_renderer，
+        main.py 通过 isinstance(StaffRollState) 决定走哪个 GL 渲染器。
+        """
+        if self._debug_skip_target:
+            return
+        if not entries:
+            return
+
+        from .staff_roll import StaffRollState
+
+        state = StaffRollState(entries)
+        self._current_dialog_renderer = state
+
+        try:
+            # 阶段 1：滚动，直到内容总高度全部滚出屏幕
+            #   total_height 由 StaffRollRenderer 在第一帧渲染后写回
+            extra_screens = bottom_hold_frames  # 内容滚完后多滚一段
+            scroll_speed = max(0.05, float(scroll_speed_px))
+
+            # 第一帧：让渲染器跑一遍写回 total_height
+            yield
+
+            # 持续滚到 scroll_y 超过 total_height + 一个屏高
+            target_scroll = state.total_height + extra_screens
+            while state.scroll_y < target_scroll:
+                if state._fast_forward:
+                    break
+                state.scroll_y += scroll_speed
+                # total_height 可能还没稳定（首帧），重新读
+                target_scroll = state.total_height + extra_screens
+                yield
+
+            # 阶段 2：黑屏停留
+            for _ in range(max(0, int(end_hold_frames))):
+                if state._fast_forward:
+                    break
+                yield
+
+            state.is_finished = True
+        finally:
+            # 不立即清空 _current_dialog_renderer：让 main.py 看到 is_finished
+            # 由调用方决定后续；这里把指针留着，外层 stage 结束时会被清理。
+            pass
+
+    @types.coroutine
     def play_image_sequence(
         self,
         image_paths,
