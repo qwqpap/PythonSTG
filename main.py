@@ -1096,7 +1096,7 @@ def main():
                                     item_pool.stats.power = 100  # power 字段是 0..max_power 的整数（100 = 1.00）
                                     player.power = 1.0
                                     player.invincible_timer = 3.0
-                                    player.pos = np.array([0.0, -0.8], dtype='f4')
+                                    player.pos = [0.0, -0.8]
                                     # 清场：清掉残余敌弹/激光/表情弹，避免一复活就再死
                                     bullet_pool.clear_all()
                                     laser_pool.clear()
