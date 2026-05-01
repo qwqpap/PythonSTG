@@ -11,7 +11,7 @@ import moderngl
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.core.window import GameWindow, FrameClock, EVENT_QUIT, EVENT_KEYDOWN
-from src.core.input_manager import KeyboardState, KEY_UP, KEY_DOWN, KEY_z, KEY_ESCAPE, KEY_c
+from src.core.input_manager import KeyboardState, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_z, KEY_ESCAPE, KEY_c
 from src.core.audio_backend import init_audio_backend
 from src.render import Renderer
 from src.game.bullet import BulletPool
@@ -48,6 +48,7 @@ from src.ui.loading_renderer import LoadingScreenRenderer
 from src.ui.main_menu_renderer import MainMenuRenderer
 from src.ui.pause_menu_renderer import PauseMenuRenderer
 from src.ui.staff_roll_renderer import StaffRollRenderer
+from src.ui.continue_menu_renderer import ContinueMenuRenderer
 from src.ui.main_menu_layout import load_layout as load_main_menu_layout
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
@@ -870,6 +871,7 @@ def main():
             dialog_gl_renderer = DialogGLRenderer(ctx, screen_size[0], screen_size[1], game_viewport)
             pause_menu_renderer = PauseMenuRenderer(ctx, screen_size[0], screen_size[1])
             staff_roll_renderer = StaffRollRenderer(ctx, screen_size[0], screen_size[1])
+            continue_menu_renderer = ContinueMenuRenderer(ctx, screen_size[0], screen_size[1])
 
             # 符卡宣言渲染器（共享资源，服务所有 Boss 符卡）
             # 需要窗口坐标下的游戏视口（y 从上），game_viewport 是 OpenGL 坐标（y 从下），
@@ -965,6 +967,14 @@ def main():
                 trigger_player_bomb(player, bullet_pool, item_pool, stage_manager)
             player.on_bomb_callback = _on_player_bomb
 
+            # 连接 death 回调：触发 Continue 流程
+            # 用 list 装可变 flag 是因为闭包内不能直接 reassign 外层变量；
+            # 真正的状态切换由主循环每帧检查 player.is_dead 完成。
+            def _on_player_death():
+                # 仅打印日志，状态切换交给主循环（避免在 update 里同步 mutate UI 状态）
+                print(f"[main] player died (continues_left={continues_left})")
+            player.on_death = _on_player_death
+
             def _get_active_boss():
                 if stage_manager.current_stage:
                     boss = getattr(stage_manager.current_stage, '_current_boss', None)
@@ -978,6 +988,19 @@ def main():
             paused = False
             pause_menu_index = 0
             game_result_state = None
+
+            # ===== Continue / Game Over 状态机 =====
+            # continue_state ∈ { "none", "asking", "game_over" }
+            #   "none"      : 正常游戏中
+            #   "asking"    : 玩家死亡，正在弹 Continue? 菜单
+            #   "game_over" : NO 或 continues 用尽，黑屏淡出后回主菜单
+            MAX_CONTINUES = 3
+            continue_state = "none"
+            continue_menu_index = 0       # 0=YES, 1=NO
+            continues_left = MAX_CONTINUES
+            game_over_timer = 0           # game_over 阶段帧计数
+            GAME_OVER_HOLD_FRAMES = 150   # ~2.5s 黑屏停留
+            run_continued = False         # 一旦使用过 continue，本局不再上传分数 / 解锁下一关
             profile_acc = {
                 "events": 0.0,
                 "update": 0.0,
@@ -1052,6 +1075,47 @@ def main():
                     if event['type'] == EVENT_QUIT:
                         running = False
                     elif event['type'] == EVENT_KEYDOWN:
+                        # ===== Continue / Game Over 优先拦截 =====
+                        # 在 asking / game_over 状态下，吃掉所有键，不允许 ESC 触发 pause、
+                        # 也不允许 C 切换自机、Z 触发其它逻辑。
+                        if continue_state == "asking":
+                            yes_disabled = continues_left <= 0
+                            if event['key'] in (KEY_LEFT, KEY_RIGHT):
+                                continue_menu_index = 1 - continue_menu_index
+                            elif event['key'] == KEY_z:
+                                if continue_menu_index == 0 and not yes_disabled:
+                                    # YES：消耗一个 continue，把玩家原地复活
+                                    continues_left -= 1
+                                    run_continued = True
+                                    player.is_dead = False
+                                    player.lives = 2
+                                    player.bombs = 3
+                                    # 复活时重置 power 到 1.00（标准弹幕游戏惯例）
+                                    item_pool.stats.lives = 2
+                                    item_pool.stats.bombs = 3
+                                    item_pool.stats.power = 100  # power 字段是 0..max_power 的整数（100 = 1.00）
+                                    player.power = 1.0
+                                    player.invincible_timer = 3.0
+                                    player.pos = np.array([0.0, -0.8], dtype='f4')
+                                    # 清场：清掉残余敌弹/激光/表情弹，避免一复活就再死
+                                    bullet_pool.clear_all()
+                                    laser_pool.clear()
+                                    emoji_sys.clear()
+                                    print(f"[main] CONTINUE used (continues_left={continues_left}, run_continued=True)")
+                                    continue_state = "none"
+                                else:
+                                    # NO（或 YES 已禁用）：进入 game_over
+                                    continue_state = "game_over"
+                                    game_over_timer = 0
+                            elif event['key'] == KEY_ESCAPE:
+                                # ESC = NO
+                                continue_state = "game_over"
+                                game_over_timer = 0
+                            continue  # 不再走下面的 ESC/C/Z 普通逻辑
+                        elif continue_state == "game_over":
+                            # GAME OVER 阶段：完全不响应输入，等 timer 跑完
+                            continue
+
                         if event['key'] == KEY_ESCAPE:
                             paused = not paused
                             if paused:
@@ -1059,7 +1123,7 @@ def main():
                                 pause_menu_index = 0
                             else:
                                 audio_manager.unpause_bgm()
-                        
+
                         if paused:
                             if event['key'] == KEY_UP:
                                 pause_menu_index = (pause_menu_index - 1) % 3
@@ -1172,8 +1236,11 @@ def main():
                     if dialog_state and hasattr(dialog_state, 'is_active') and dialog_state.is_active():
                         dialog_active = True
 
+                # Continue 菜单弹出时 / Game Over 黑屏期间，世界完全冻结
+                world_frozen = paused or (continue_state != "none")
+
                 update_start = time.perf_counter() if PROFILE_MODE else 0.0
-                if not paused:
+                if not world_frozen:
                     if not dialog_active:
                         # 收集敌人列表用于追踪弹
                         _enemies_for_homing = []
@@ -1214,10 +1281,37 @@ def main():
                 player.lives = item_pool.stats.lives
                 player.bombs = item_pool.stats.bombs
 
+                # ===== Continue / Game Over：拦截在伤害判定之前 =====
+                # 玩家上一帧被打到 0 命，进入 asking 状态（凍 frame 不再 update）
+                if continue_state == "none" and player.is_dead:
+                    if continues_left > 0:
+                        continue_state = "asking"
+                        continue_menu_index = 0  # 默认指向 YES
+                        # Continue 弹窗期间静音 BGM，气氛先冷下来
+                        try:
+                            audio_manager.pause_bgm()
+                        except Exception:
+                            pass
+                    else:
+                        continue_state = "game_over"
+                        game_over_timer = 0
+                        try:
+                            audio_manager.stop_bgm(fade_ms=300)
+                        except Exception:
+                            pass
+
+                # GAME OVER：黑屏停留 → 回主菜单
+                if continue_state == "game_over":
+                    game_over_timer += 1
+                    if game_over_timer >= GAME_OVER_HOLD_FRAMES:
+                        print(f"[main] GAME OVER → 回主菜单 (run_continued={run_continued})")
+                        game_result_state = "MAIN_MENU"
+                        running = False
+
                 collision_mgr = get_collision_manager()
 
                 collision_start = time.perf_counter() if PROFILE_MODE else 0.0
-                if not paused and not dialog_active:
+                if not world_frozen and not dialog_active:
                     hit_x, hit_y = player.get_hit_position()
                     if player.invincible_timer <= 0:
                         bullet_result = collision_mgr.check_player_vs_bullets(
@@ -1227,6 +1321,9 @@ def main():
                             if player.take_damage():
                                 print(f"Player hit by bullet! Lives left: {player.lives}")
                                 item_pool.stats.bombs = 3
+                                # 把 player.lives 的减扣同步回 stats，否则下一帧
+                                # `player.lives = item_pool.stats.lives` 又把命数撑回去
+                                item_pool.stats.lives = player.lives
                                 bullet_pool.data['alive'][bullet_result.index] = 0
                                 # Notify boss scoring system
                                 _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
@@ -1238,6 +1335,7 @@ def main():
                             if player.take_damage():
                                 print(f"Player hit by emoji bullet! Lives left: {player.lives}")
                                 item_pool.stats.bombs = 3
+                                item_pool.stats.lives = player.lives
 
                     if player.invincible_timer <= 0:
                         laser_result = collision_mgr.check_player_vs_lasers(
@@ -1247,6 +1345,7 @@ def main():
                             if player.take_damage():
                                 print(f"Player hit by laser! Lives left: {player.lives}")
                                 item_pool.stats.bombs = 3
+                                item_pool.stats.lives = player.lives
                                 # Notify boss scoring system
                                 _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
                                 if _ab and _ab._active:
@@ -1388,6 +1487,20 @@ def main():
                 if paused:
                     pause_menu_renderer.render(pause_menu_index)
 
+                # ===== Continue / Game Over 覆盖层 =====
+                if continue_state == "asking":
+                    continue_menu_renderer.render({
+                        "mode": "continue",
+                        "selected": continue_menu_index,
+                        "continues_left": continues_left,
+                    })
+                elif continue_state == "game_over":
+                    _go_progress = min(1.0, game_over_timer / float(max(1, GAME_OVER_HOLD_FRAMES)))
+                    continue_menu_renderer.render({
+                        "mode": "game_over",
+                        "game_over_progress": _go_progress,
+                    })
+
                 hud.state.fps = round(clock.get_fps())
                 hud.state.max_fps = round(clock.get_max_fps())
 
@@ -1403,8 +1516,11 @@ def main():
                     profile_frames += 1
                     _profile_maybe_report()
             
-            # 保存高分记录
-            item_pool.stats.save_hiscore()
+            # 保存高分记录（用过 Continue 的本局不计入高分榜）
+            if not run_continued:
+                item_pool.stats.save_hiscore()
+            else:
+                print("[main] 本局使用过 Continue → 不写入 hiscore")
 
             # ===== 保存重放（仅录制模式）=====
             if replay_recorder is not None and replay_recorder.frame_count > 0:
@@ -1422,20 +1538,24 @@ def main():
                     print(f"[main] 重放已保存: {saved_path} ({replay_recorder.frame_count} 帧)")
 
                 # 进度记录：通关解锁下一关 + 提交最佳分
-                try:
-                    progress.submit_score(stage_id, run_character, int(item_pool.stats.score))
-                    if cleared:
-                        progress.record_clear(stage_id, run_character)
-                        # 解锁下一关
-                        ids = [getattr(c, "id", c.__name__) for c in ALL_STAGES]
-                        if stage_id in ids:
-                            i = ids.index(stage_id)
-                            if i + 1 < len(ids):
-                                if progress.unlock(ids[i + 1]):
-                                    print(f"[main] 解锁新关卡: {ids[i + 1]}")
-                    progress.save()
-                except Exception as e:
-                    print(f"[main] 保存进度失败: {e}")
+                # 用过 continue 的本局不计分、不解锁（标准弹幕游戏惯例）
+                if run_continued:
+                    print("[main] 本局使用过 Continue → 不上传分数 / 不解锁下一关")
+                else:
+                    try:
+                        progress.submit_score(stage_id, run_character, int(item_pool.stats.score))
+                        if cleared:
+                            progress.record_clear(stage_id, run_character)
+                            # 解锁下一关
+                            ids = [getattr(c, "id", c.__name__) for c in ALL_STAGES]
+                            if stage_id in ids:
+                                i = ids.index(stage_id)
+                                if i + 1 < len(ids):
+                                    if progress.unlock(ids[i + 1]):
+                                        print(f"[main] 解锁新关卡: {ids[i + 1]}")
+                        progress.save()
+                    except Exception as e:
+                        print(f"[main] 保存进度失败: {e}")
 
             # 始终保存设置（如音量/上次自机）
             settings.save()
@@ -1449,6 +1569,7 @@ def main():
             dialog_gl_renderer.cleanup()
             loading_renderer.cleanup()
             pause_menu_renderer.cleanup()
+            continue_menu_renderer.cleanup()
             staff_roll_renderer.cleanup()
             spell_declaration_renderer.cleanup()
             if background_renderer:
