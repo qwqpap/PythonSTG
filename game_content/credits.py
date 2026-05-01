@@ -34,37 +34,37 @@ STAFF_ROLL: list = [
 
     {"type": "section", "text": "Game Design"},
     {"type": "role", "text": "Director / Scenario"},
-    {"type": "name", "text": ""},  # TODO
+    {"type": "name", "text": "上海龙教练"},
 
     {"type": "spacer", "height": 40},
 
     {"type": "section", "text": "Programming"},
     {"type": "role", "text": "Engine"},
-    {"type": "name", "text": ""},  # TODO
+    {"type": "name", "text": "上海龙教练"},  # TODO
     {"type": "role", "text": "Stage Scripts"},
-    {"type": "name", "text": ""},  # TODO
+    {"type": "name", "text": "上海龙教练"},  # TODO
 
     {"type": "spacer", "height": 40},
 
     {"type": "section", "text": "Art"},
     {"type": "role", "text": "Character Portraits"},
-    {"type": "name", "text": ""},  # TODO
+    {"type": "name", "text": "skir,so3,NaOH"},  # TODO
     {"type": "role", "text": "Backgrounds"},
-    {"type": "name", "text": ""},  # TODO
+    {"type": "name", "text": "上海龙教练"},  # TODO
 
     {"type": "spacer", "height": 40},
 
     {"type": "section", "text": "Music"},
     {"type": "role", "text": "BGM"},
-    {"type": "name", "text": ""},  # TODO
+    {"type": "name", "text": "小椰雀"},  # TODO
     {"type": "role", "text": "Sound Effects"},
-    {"type": "name", "text": ""},  # TODO
+    {"type": "name", "text": "上海龙教练"},  # TODO
 
     {"type": "spacer", "height": 80},
 
     {"type": "title", "text": "Special Thanks"},
     {"type": "spacer", "height": 20},
-    {"type": "text", "text": ""},  # TODO
+    {"type": "text", "text": "Luastg"},  # TODO
 
     {"type": "spacer", "height": 200},
 
