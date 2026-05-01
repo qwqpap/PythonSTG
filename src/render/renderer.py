@@ -1481,14 +1481,16 @@ class Renderer:
         if not self._ensure_hitbox_texture():
             return
 
-        visual_size = max(player.hit_radius * 5.0, 0.055)
+        tex_w, tex_h = self.hitbox_texture_size
+        visual_w = tex_w / 192.0
+        visual_h = tex_h / 192.0
         angle = time.perf_counter() * 3.0
 
         self.hitbox_texture.use(0)
         if 'u_alpha' in self.player_tex_program:
             self.player_tex_program['u_alpha'].value = 0.82
-        self._render_hitbox_layer(hx, hy, visual_size, angle)
-        self._render_hitbox_layer(hx, hy, visual_size, -angle)
+        self._render_hitbox_layer(hx, hy, visual_w, visual_h, angle)
+        self._render_hitbox_layer(hx, hy, visual_w, visual_h, -angle)
         if 'u_alpha' in self.player_tex_program:
             self.player_tex_program['u_alpha'].value = 1.0
 
@@ -1506,17 +1508,18 @@ class Renderer:
         self.hitbox_texture_size = img.size
         return True
 
-    def _render_hitbox_layer(self, hx, hy, size, angle):
-        half = size * 0.5
+    def _render_hitbox_layer(self, hx, hy, width, height, angle):
+        half_w = width * 0.5
+        half_h = height * 0.5
         ca = math.cos(angle)
         sa = math.sin(angle)
         corners = (
-            (-half, -half, 0.0, 1.0),
-            ( half, -half, 1.0, 1.0),
-            ( half,  half, 1.0, 0.0),
-            (-half, -half, 0.0, 1.0),
-            ( half,  half, 1.0, 0.0),
-            (-half,  half, 0.0, 0.0),
+            (-half_w, -half_h, 0.0, 1.0),
+            ( half_w, -half_h, 1.0, 1.0),
+            ( half_w,  half_h, 1.0, 0.0),
+            (-half_w, -half_h, 0.0, 1.0),
+            ( half_w,  half_h, 1.0, 0.0),
+            (-half_w,  half_h, 0.0, 0.0),
         )
         vertices = []
         for ox, oy, u, v in corners:

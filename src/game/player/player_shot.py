@@ -250,6 +250,17 @@ class PlayerShotSystem:
         return result
 
 
+def _normalize_fire_rate(value) -> float:
+    """Accept seconds for small values and frame counts for legacy configs."""
+    try:
+        fire_rate = float(value)
+    except (TypeError, ValueError):
+        return 0.05
+    if fire_rate > 1.0:
+        return fire_rate / 60.0
+    return max(0.0, fire_rate)
+
+
 def _create_shot_type_from_compact_config(config: dict) -> ShotType:
     """
     从 compact 格式创建 ShotType（Orin/Tenshi 等）
@@ -297,7 +308,7 @@ def create_shot_type_from_config(config: dict) -> ShotType:
     
     shot_type = ShotType(
         name=config.get('name', ''),
-        fire_rate=config.get('fire_rate', 0.05)
+        fire_rate=_normalize_fire_rate(config.get('fire_rate', 0.05))
     )
     
     # 解析基础pattern（如果是列表格式）

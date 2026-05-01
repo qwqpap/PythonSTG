@@ -103,5 +103,5 @@ class StarSpell4(SpellCard):
                 bullet_type="star_s",
                 color="yellow",
             )
-            angle += 5.0
+            angle += 2.0
             await self.wait(10)

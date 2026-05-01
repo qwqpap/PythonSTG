@@ -28,7 +28,7 @@ class LunaSpell3(SpellCard):
                 # 左侧发射源：(-1.4, 1.4)，向右下方 (-45度)
                 self.fire_arc(
                     x=-1.5, y=1.4,
-                    count=6, speed=24.5,
+                    count=6, speed=14.5,
                     center_angle=-45, arc_angle=60,
                     bullet_type="knife", color="cyan",
                     tag=TAG_BOMB_PROTECTED_GRID,
@@ -37,7 +37,7 @@ class LunaSpell3(SpellCard):
                 # 右侧发射源：(1.4, 1.4)，向左下方 (-135度)
                 self.fire_arc(
                     x=1.5, y=1.4,
-                    count=6, speed=24.5,
+                    count=6, speed=14.5,
                     center_angle=-135, arc_angle=60,
                     bullet_type="knife", color="cyan",
                     tag=TAG_BOMB_PROTECTED_GRID,
@@ -77,7 +77,7 @@ class LunaSpell3(SpellCard):
                     x=self.boss.x,
                     y=self.boss.y,
                     count=3,
-                    speed=15.5,
+                    speed=12.5,
                     center_angle=self.angle_to_player(),
                     arc_angle=20, 
                     bullet_type="arrow_m",

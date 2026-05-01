@@ -31,3 +31,6 @@ imgui.ini
 /userdata/settings.json
 /userdata/progress.json
 /userdata/replays/
+
+# 本地 Claude Code 项目说明（不分发）
+/CLAUDE.md

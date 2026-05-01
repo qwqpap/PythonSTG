@@ -17,6 +17,8 @@ EVENT_KEYUP = 'keyup'
 class GameWindow:
     """GLFW-based game window with OpenGL context"""
 
+    _SYNCABLE_KEYS = tuple(range(glfw.KEY_SPACE, glfw.KEY_LAST + 1))
+
     def __init__(self, width: int, height: int, title: str = "Game"):
         if not glfw.init():
             raise RuntimeError("Failed to initialize GLFW")
@@ -58,10 +60,31 @@ class GameWindow:
         self._should_close = True
         self._events.append({'type': EVENT_QUIT})
 
+    def _sync_key_states(self):
+        """Reconcile cached key states with GLFW's live keyboard snapshot.
+
+        Scene/menu transitions can span multiple loops, and relying only on
+        callback-delivered PRESS/RELEASE events can leave held keys stale if an
+        edge is missed during the handoff. Syncing the authoritative state here
+        keeps gameplay input and menu input consistent after transitions.
+        """
+        for key in self._SYNCABLE_KEYS:
+            actual = glfw.get_key(self._window, key)
+            pressed = actual in (glfw.PRESS, glfw.REPEAT)
+            cached = self._key_states.get(key, False)
+            if pressed == cached:
+                continue
+            self._key_states[key] = pressed
+            self._events.append({
+                'type': EVENT_KEYDOWN if pressed else EVENT_KEYUP,
+                'key': key,
+            })
+
     def poll_events(self) -> list:
         """Poll window events, returns list of event dicts."""
         self._events.clear()
         glfw.poll_events()
+        self._sync_key_states()
         return list(self._events)
 
     def swap_buffers(self):
