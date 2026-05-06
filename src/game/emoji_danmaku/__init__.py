@@ -127,6 +127,13 @@ class EmojiDanmakuSystem:
         self._receiver.stop()
         self._gl.cleanup()
 
+    def clear(self) -> None:
+        """清空所有飘落 emoji 和发射弹（不清空热度状态）。
+        Continue 复活时调用，避免一复活就被残余 emoji 弹打死。
+        """
+        self._pool.falling.clear()
+        self._pool.projectiles.clear()
+
     # ── 主循环接口 ────────────────────────────────────────────────────────────
 
     def update(self, dt: float, player) -> None:
