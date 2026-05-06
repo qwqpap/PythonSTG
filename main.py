@@ -1079,32 +1079,47 @@ def main():
                         # 在 asking / game_over 状态下，吃掉所有键，不允许 ESC 触发 pause、
                         # 也不允许 C 切换自机、Z 触发其它逻辑。
                         if continue_state == "asking":
-                            yes_disabled = continues_left <= 0
                             if event['key'] in (KEY_LEFT, KEY_RIGHT):
                                 continue_menu_index = 1 - continue_menu_index
                             elif event['key'] == KEY_z:
-                                if continue_menu_index == 0 and not yes_disabled:
+                                if continue_menu_index == 0:
                                     # YES：消耗一个 continue，把玩家原地复活
                                     continues_left -= 1
                                     run_continued = True
+                                    # ── 玩家死亡状态完整复位 ────────────────────
+                                    # 仅置 is_dead=False 不够：take_damage 还启动了
+                                    # death_timer 累加 + DEATH 动画。这两样不复位
+                                    # 玩家就会以"死亡造型 + 时间不停积累"的状态复活。
                                     player.is_dead = False
+                                    player.is_respawning = False
+                                    player.death_timer = 0.0
+                                    if hasattr(player, "animation") and player.animation:
+                                        try:
+                                            player.animation.play_spawn_animation()
+                                        except Exception:
+                                            pass
+                                    # 资源（先 power 后 stats，避免 setter 副作用拿到旧值）
+                                    player.power = 1.0
                                     player.lives = 2
                                     player.bombs = 3
-                                    # 复活时重置 power 到 1.00（标准弹幕游戏惯例）
+                                    item_pool.stats.power = 100  # 0..max_power 的整数（100 = 1.00）
                                     item_pool.stats.lives = 2
                                     item_pool.stats.bombs = 3
-                                    item_pool.stats.power = 100  # power 字段是 0..max_power 的整数（100 = 1.00）
-                                    player.power = 1.0
                                     player.invincible_timer = 3.0
                                     player.pos = [0.0, -0.8]
                                     # 清场：清掉残余敌弹/激光/表情弹，避免一复活就再死
                                     bullet_pool.clear_all()
                                     laser_pool.clear()
                                     emoji_sys.clear()
+                                    # 恢复 BGM（asking 进入时被 pause_bgm 暂停）
+                                    try:
+                                        audio_manager.unpause_bgm()
+                                    except Exception:
+                                        pass
                                     print(f"[main] CONTINUE used (continues_left={continues_left}, run_continued=True)")
                                     continue_state = "none"
                                 else:
-                                    # NO（或 YES 已禁用）：进入 game_over
+                                    # NO：进入 game_over
                                     continue_state = "game_over"
                                     game_over_timer = 0
                             elif event['key'] == KEY_ESCAPE:
@@ -1523,7 +1538,12 @@ def main():
                 print("[main] 本局使用过 Continue → 不写入 hiscore")
 
             # ===== 保存重放（仅录制模式）=====
-            if replay_recorder is not None and replay_recorder.frame_count > 0:
+            # 用过 Continue 的本局不能可靠回放：续关菜单的输入走 window.poll_events()
+            # 而非 KeyboardState 录制流，且 asking 期间帧被冻结（recorder 也跟着冻），
+            # 回放时无法重现暂停-续关那一段。直接跳过保存避免产出会跑偏的 .replay 文件。
+            if run_continued and replay_recorder is not None and replay_recorder.frame_count > 0:
+                print("[main] 本局使用过 Continue → 不保存重放（无法保证回放确定性）")
+            elif replay_recorder is not None and replay_recorder.frame_count > 0:
                 stage_id = getattr(active_stage_class, "id", active_stage_class.__name__)
                 cleared = bool(getattr(stage_manager, "is_finished", False)) or \
                           (getattr(stage_manager, "current_stage", None) is not None and
