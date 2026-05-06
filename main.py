@@ -285,7 +285,7 @@ def run_replay_select_menu(window, ctx, screen_size):
                     renderer.cleanup()
                     return None
 
-        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.viewport = window.viewport
         ctx.clear(0.0, 0.0, 0.0)
         renderer.render(selected_index, layout=layout)
         window.swap_buffers()
@@ -427,7 +427,7 @@ def run_settings_menu(window, ctx, screen_size, audio_manager):
             "hint": "↑↓ 选项    ←→ 调节    Z 切换/确认    ESC 保存返回",
         }
 
-        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.viewport = window.viewport
         ctx.clear(0.0, 0.0, 0.0)
         renderer.render(model)
         window.swap_buffers()
@@ -490,7 +490,7 @@ def run_stage_select_menu(window, ctx, screen_size, stage_classes, current_class
                     renderer.cleanup()
                     return current_class
 
-        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.viewport = window.viewport
         ctx.clear(0.0, 0.0, 0.0)
         renderer.render(selected_index, layout=layout)
         window.swap_buffers()
@@ -571,7 +571,7 @@ def run_debug_menu(window, ctx, screen_size, stage_class):
                         num_options = len(entries)
                         selected_index = min(selected_index, num_options - 1)
 
-        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.viewport = window.viewport
         ctx.clear(0.0, 0.0, 0.0)
         renderer.render(selected_index, layout=layout)
         window.swap_buffers()
@@ -580,21 +580,45 @@ def run_debug_menu(window, ctx, screen_size, stage_class):
 def initialize_window_and_context():
     """初始化GLFW窗口和ModernGL上下文"""
     init_audio_backend()
-    
+
     config = init_config()
-    
+
     base_size = (config.base_width, config.base_height)
     screen_size = (config.window_width, config.window_height)
     game_viewport = config.game_viewport
-    
-    window = GameWindow(screen_size[0], screen_size[1], "东方做题狙特别版")
-    
+
+    # 读取持久化的 fullscreen 偏好（设置菜单里的 "全屏 (重启生效)"）
+    settings = get_settings()
+    fullscreen = bool(settings.fullscreen)
+
+    window = GameWindow(
+        screen_size[0], screen_size[1],
+        "东方做题狙特别版",
+        fullscreen=fullscreen,
+    )
+    if fullscreen:
+        print(f"[main] Fullscreen ON: framebuffer={window.framebuffer_size}, "
+              f"viewport={window.viewport}")
+
     ctx = moderngl.create_context()
-    
+
     ctx.enable(moderngl.BLEND)
     ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
-    
-    return window, ctx, base_size, screen_size, game_viewport
+
+    # game_viewport 是 logical 坐标 (UI/对话/emoji 的着色器需要)。
+    # 但 renderer.render_frame 通过 ctx.viewport 设置 GL viewport，
+    # 必须用 framebuffer 像素坐标，否则全屏时游戏只渲染到左下角小块。
+    fb_w, fb_h = window.framebuffer_size
+    scale_x = fb_w / screen_size[0]
+    scale_y = fb_h / screen_size[1]
+    game_viewport_fb = (
+        int(round(game_viewport[0] * scale_x)),
+        int(round(game_viewport[1] * scale_y)),
+        int(round(game_viewport[2] * scale_x)),
+        int(round(game_viewport[3] * scale_y)),
+    )
+
+    return window, ctx, base_size, screen_size, game_viewport, game_viewport_fb
 
 
 def load_resources(ctx, texture_asset_manager: TextureAssetManager):
@@ -724,7 +748,7 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> int:
                     main_menu_renderer.cleanup()
                     return -1
 
-        ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+        ctx.viewport = window.viewport
         ctx.clear(0.0, 0.0, 0.0)
         main_menu_renderer.render(selected_index, layout=main_menu_layout)
         window.swap_buffers()
@@ -732,7 +756,7 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> int:
 
 def main():
     """游戏主函数"""
-    window, ctx, base_size, screen_size, game_viewport = initialize_window_and_context()
+    window, ctx, base_size, screen_size, game_viewport, game_viewport_fb = initialize_window_and_context()
     selected_stage_class = resolve_stage_class()
     game_audio = GameAudioBank()
     game_audio.load_defaults()
@@ -806,7 +830,7 @@ def main():
                 if progress is not None:
                     info["progress"] = progress
                 window.poll_events()
-                ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+                ctx.viewport = window.viewport
                 ctx.clear(0.0, 0.0, 0.0)
                 loading_renderer.render(info)
                 window.swap_buffers()
@@ -1224,7 +1248,7 @@ def main():
                 # ===== 加载画面模式 =====
                 if stage_manager.loading_info:
                     loading_render_start = time.perf_counter() if PROFILE_MODE else 0.0
-                    ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+                    ctx.viewport = window.viewport
                     ctx.clear(0.0, 0.0, 0.0)
                     loading_renderer.render(stage_manager.loading_info)
                     hud.state.fps = round(clock.get_fps())
@@ -1278,7 +1302,7 @@ def main():
 
                 if stage_manager.loading_info:
                     loading_render_start = time.perf_counter() if PROFILE_MODE else 0.0
-                    ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+                    ctx.viewport = window.viewport
                     ctx.clear(0.0, 0.0, 0.0)
                     loading_renderer.render(stage_manager.loading_info)
                     hud.state.fps = round(clock.get_fps())
@@ -1448,7 +1472,7 @@ def main():
                 render_segments = {} if PROFILE_MODE else None
                 renderer.render_frame(
                     bullet_pool, player, stage_manager, laser_pool,
-                    viewport_rect=game_viewport,
+                    viewport_rect=game_viewport_fb,
                     item_renderer=item_renderer,
                     item_pool=item_pool,
                     dt=0 if paused else dt,
@@ -1456,7 +1480,7 @@ def main():
                     profile_segments=render_segments,
                 )
                 
-                ctx.viewport = (0, 0, screen_size[0], screen_size[1])
+                ctx.viewport = window.viewport
                 # 飘落 emoji 叠加在游戏画面上（在 HUD 之前，使其被 UI 覆盖）
                 emoji_sys.render_game()
 

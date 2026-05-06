@@ -19,7 +19,8 @@ class GameWindow:
 
     _SYNCABLE_KEYS = tuple(range(glfw.KEY_SPACE, glfw.KEY_LAST + 1))
 
-    def __init__(self, width: int, height: int, title: str = "Game"):
+    def __init__(self, width: int, height: int, title: str = "Game",
+                 fullscreen: bool = False):
         if not glfw.init():
             raise RuntimeError("Failed to initialize GLFW")
 
@@ -29,7 +30,27 @@ class GameWindow:
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
         glfw.window_hint(glfw.RESIZABLE, False)
 
-        self._window = glfw.create_window(width, height, title, None, None)
+        # logical_size 是渲染器/着色器认为的"屏幕"尺寸（永远是 width×height）。
+        # framebuffer_size 是实际的后台缓冲区（窗口模式 == logical；全屏模式
+        # == 显示器原生分辨率）。viewport 是带信箱模式（letterbox）的居中
+        # 矩形，用来在保持 4:3 长宽比的前提下铺满全屏，多出的边变成黑边。
+        self._logical_size = (width, height)
+        self._fullscreen = bool(fullscreen)
+
+        if self._fullscreen:
+            monitor = glfw.get_primary_monitor()
+            video_mode = glfw.get_video_mode(monitor)
+            mw = video_mode.size.width
+            mh = video_mode.size.height
+            # 用显示器原生模式打开 fullscreen 窗口（避免切换分辨率的卡顿/闪屏）
+            glfw.window_hint(glfw.RED_BITS, video_mode.bits.red)
+            glfw.window_hint(glfw.GREEN_BITS, video_mode.bits.green)
+            glfw.window_hint(glfw.BLUE_BITS, video_mode.bits.blue)
+            glfw.window_hint(glfw.REFRESH_RATE, video_mode.refresh_rate)
+            self._window = glfw.create_window(mw, mh, title, monitor, None)
+        else:
+            self._window = glfw.create_window(width, height, title, None, None)
+
         if not self._window:
             glfw.terminate()
             raise RuntimeError("Failed to create GLFW window")
@@ -37,6 +58,15 @@ class GameWindow:
         glfw.make_context_current(self._window)
         glfw.swap_interval(0)
 
+        # 查询真实 framebuffer 尺寸（HiDPI 下可能 ≠ 请求的窗口尺寸）
+        fb_w, fb_h = glfw.get_framebuffer_size(self._window)
+        self._framebuffer_size = (fb_w, fb_h)
+        # v1: 全屏直接铺满 framebuffer（在 16:9 显示器上看 4:3 的游戏会被
+        # 稍微横向拉伸——可接受，标准东方游戏的全屏行为同样如此）
+        # 未来若想加 letterbox：调用 _compute_letterbox 替代下行
+        self._viewport = (0, 0, fb_w, fb_h)
+
+        # _width/_height 兼容旧字段，仍然返回 logical 尺寸（renderer 用）
         self._width = width
         self._height = height
         self._should_close = False
@@ -45,6 +75,30 @@ class GameWindow:
 
         glfw.set_key_callback(self._window, self._key_callback)
         glfw.set_window_close_callback(self._window, self._close_callback)
+
+    @staticmethod
+    def _compute_letterbox(fb_w: int, fb_h: int, logical_w: int, logical_h: int):
+        """计算保持 logical 长宽比的居中 viewport。
+
+        framebuffer 比游戏宽 → 左右黑边；比游戏高 → 上下黑边。
+        """
+        target_aspect = logical_w / logical_h
+        actual_aspect = fb_w / fb_h
+        if abs(actual_aspect - target_aspect) < 1e-4:
+            return (0, 0, fb_w, fb_h)
+        if actual_aspect > target_aspect:
+            # 比游戏宽 → 左右加边
+            scaled_w = int(round(fb_h * target_aspect))
+            scaled_h = fb_h
+            x = (fb_w - scaled_w) // 2
+            y = 0
+        else:
+            # 比游戏高 → 上下加边
+            scaled_w = fb_w
+            scaled_h = int(round(fb_w / target_aspect))
+            x = 0
+            y = (fb_h - scaled_h) // 2
+        return (x, y, scaled_w, scaled_h)
 
     def _key_callback(self, window, key, scancode, action, mods):
         if action == glfw.PRESS:
@@ -105,7 +159,25 @@ class GameWindow:
 
     @property
     def size(self):
+        """Logical size (width, height) — what renderers/shaders use."""
         return (self._width, self._height)
+
+    @property
+    def framebuffer_size(self):
+        """Real backbuffer size (在全屏模式下 = 显示器原生分辨率)。"""
+        return self._framebuffer_size
+
+    @property
+    def viewport(self):
+        """带信箱模式 (letterbox) 的居中 viewport 矩形 (x, y, w, h)。
+        全屏模式下确保游戏区域保持 logical 长宽比，多出部分变黑边；
+        窗口模式下 == (0, 0, width, height)。
+        """
+        return self._viewport
+
+    @property
+    def is_fullscreen(self) -> bool:
+        return self._fullscreen
 
 
 class FrameClock:
