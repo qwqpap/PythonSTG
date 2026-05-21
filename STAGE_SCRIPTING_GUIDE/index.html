@@ -1,0 +1,3212 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://qwqpap.github.io/PythonSTG/STAGE_SCRIPTING_GUIDE/">
+      
+      
+        <link rel="prev" href="../getting-started/">
+      
+      
+        <link rel="next" href="../architecture/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>弹幕脚本开发指南 - pystg Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#pystg-v2" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="pystg Docs" class="md-header__button md-logo" aria-label="pystg Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pystg Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              弹幕脚本开发指南
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/qwqpap/PythonSTG" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="pystg Docs" class="md-nav__button md-logo" aria-label="pystg Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    pystg Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/qwqpap/PythonSTG" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首页
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    快速开始
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    弹幕脚本开发指南
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    弹幕脚本开发指南
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        目录
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 当前工作流
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 推荐目录结构
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 快速开始
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 快速开始">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 新建一张符卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 把它挂到 Boss 上
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 四层分工
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-stagescript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. StageScript：整面流程
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Wave：波次编排
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. EnemyScript：小怪行为
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-spellcard-nonspellboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. SpellCard / NonSpell：Boss 攻击
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. SpellCard / NonSpell：Boss 攻击">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        基本生命周期
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        并行动作（边移动边发弹）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        符卡内常用属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        生命周期回调
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-bossdefboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. BossDef：Boss 阶段组织
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-api-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 弹幕 API 完整参考（v2）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 弹幕 API 完整参考（v2）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-selffire" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 self.fire(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-selffire_circle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 self.fire_circle(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-selffire_arc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 self.fire_arc(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-selffire_at_player" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 self.fire_at_player(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105-selffire_polar-selffire_orbit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 self.fire_polar(...) / self.fire_orbit(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#106" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.6 消弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#107" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.7 时间缩放（时停 / 慢动作）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#108-emitter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.8 发射器节点（Emitter）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#109" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.9 辅助方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 激光 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. 激光 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 直线激光
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 曲线激光
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 清屏
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#114" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.4 颜色与纹理
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 道具 / 得分 / 玩家访问
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. 道具 / 得分 / 玩家访问">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 手动掉落道具
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 直接加分
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 访问玩家与敌人
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124-ctx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 完整 ctx 公共方法清单
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. v2 新机制详解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. v2 新机制详解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-friction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 摩擦力 / 阻尼 (friction)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-bounce_x-bounce_y" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 反弹 (bounce_x / bounce_y)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-spin-render_angle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 自转 (spin / render_angle)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#114-tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.4 标签 (tag) + 按组操作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#115-time_scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.5 时间缩放 (time_scale)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#116-curve_type-curve_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.6 内置数学曲线 (curve_type + curve_params)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11.6 内置数学曲线 (curve_type + curve_params)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        常量导入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#curve_params-amplitude-frequency-phase-base_value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        curve_params = (amplitude, frequency, phase, base_value)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#117-emitter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.7 发射器节点 (Emitter)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. 高级模式示例
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14. 高级模式示例">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 急停→散花弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 弹球弹幕
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 咲夜时停
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 旋转星弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#125" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.5 流星雨发射器（魔理沙风格）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#126" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.6 正弦蛇行弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#127" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.7 极坐标莲花弹（扩散→收缩→散开）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. 坐标与角度
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. 可用弹型与颜色
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="16. 可用弹型与颜色">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        弹型别名
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        颜色别名
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. 常见问题
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17. 常见问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#q-await-yield" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: await 和 yield 用哪个？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么清掉自己发过的弹？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么用 tag 做解谜弹幕？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么做时停？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-emitter-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: Emitter 回调里怎么用高层 API？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-curve_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: curve_params 四个参数是什么含义？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 如何让子弹出生后中途变色/变型？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 我新增了 Stage，怎么切过去？
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API 速查表
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    架构概览
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ENEMY_PRESET_SYSTEM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    敌人预设系统
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TEXTURE_ASSET_SYSTEM/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    纹理资产系统
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../EDITOR_TOOLS_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    编辑器工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        目录
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 当前工作流
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 推荐目录结构
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 快速开始
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 快速开始">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 新建一张符卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-boss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 把它挂到 Boss 上
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 四层分工
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-stagescript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. StageScript：整面流程
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Wave：波次编排
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-enemyscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. EnemyScript：小怪行为
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-spellcard-nonspellboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. SpellCard / NonSpell：Boss 攻击
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. SpellCard / NonSpell：Boss 攻击">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        基本生命周期
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        并行动作（边移动边发弹）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        符卡内常用属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        生命周期回调
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-bossdefboss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. BossDef：Boss 阶段组织
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-api-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 弹幕 API 完整参考（v2）
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 弹幕 API 完整参考（v2）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-selffire" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 self.fire(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-selffire_circle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 self.fire_circle(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-selffire_arc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 self.fire_arc(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-selffire_at_player" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 self.fire_at_player(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105-selffire_polar-selffire_orbit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 self.fire_polar(...) / self.fire_orbit(...)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#106" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.6 消弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#107" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.7 时间缩放（时停 / 慢动作）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#108-emitter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.8 发射器节点（Emitter）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#109" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.9 辅助方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 激光 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. 激光 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 直线激光
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 曲线激光
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 清屏
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#114" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.4 颜色与纹理
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 道具 / 得分 / 玩家访问
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. 道具 / 得分 / 玩家访问">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 手动掉落道具
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 直接加分
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 访问玩家与敌人
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124-ctx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 完整 ctx 公共方法清单
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. v2 新机制详解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. v2 新机制详解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-friction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 摩擦力 / 阻尼 (friction)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-bounce_x-bounce_y" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 反弹 (bounce_x / bounce_y)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-spin-render_angle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 自转 (spin / render_angle)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#114-tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.4 标签 (tag) + 按组操作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#115-time_scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.5 时间缩放 (time_scale)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#116-curve_type-curve_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.6 内置数学曲线 (curve_type + curve_params)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11.6 内置数学曲线 (curve_type + curve_params)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        常量导入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#curve_params-amplitude-frequency-phase-base_value" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        curve_params = (amplitude, frequency, phase, base_value)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#117-emitter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.7 发射器节点 (Emitter)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. 高级模式示例
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="14. 高级模式示例">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 急停→散花弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 弹球弹幕
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 咲夜时停
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 旋转星弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#125" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.5 流星雨发射器（魔理沙风格）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#126" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.6 正弦蛇行弹
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#127" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.7 极坐标莲花弹（扩散→收缩→散开）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. 坐标与角度
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. 可用弹型与颜色
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="16. 可用弹型与颜色">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        弹型别名
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        颜色别名
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. 常见问题
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17. 常见问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#q-await-yield" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: await 和 yield 用哪个？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么清掉自己发过的弹？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么用 tag 做解谜弹幕？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 怎么做时停？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-emitter-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: Emitter 回调里怎么用高层 API？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-curve_params" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: curve_params 四个参数是什么含义？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 如何让子弹出生后中途变色/变型？
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#q-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Q: 我新增了 Stage，怎么切过去？
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API 速查表
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="pystg-v2">pystg 弹幕脚本开发指南 (v2)<a class="headerlink" href="#pystg-v2" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>本文档以<strong>当前仓库实际可运行的 API</strong> 为准。<br />
+最近更新：2026-04-12，弹幕系统 v2 大改造后。</p>
+</blockquote>
+<hr />
+<h2 id="_1">目录<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-当前工作流">当前工作流</a></li>
+<li><a href="#2-推荐目录结构">推荐目录结构</a></li>
+<li><a href="#3-快速开始">快速开始</a></li>
+<li><a href="#4-四层分工">四层分工</a></li>
+<li><a href="#5-stagescript整面流程">StageScript：整面流程</a></li>
+<li><a href="#6-wave波次编排">Wave：波次编排</a></li>
+<li><a href="#7-enemyscript小怪行为">EnemyScript：小怪行为</a></li>
+<li><a href="#8-spellcard--nonspellboss-攻击">SpellCard / NonSpell：Boss 攻击</a></li>
+<li><a href="#9-bossdef-boss-阶段组织">BossDef：Boss 阶段组织</a></li>
+<li><a href="#10-弹幕-api-完整参考v2">弹幕 API 完整参考（v2）</a></li>
+<li><a href="#11-激光-api">激光 API</a></li>
+<li><a href="#12-道具--得分--玩家访问">道具 / 得分 / 玩家访问</a></li>
+<li><a href="#13-v2-新机制详解">v2 新机制详解</a></li>
+<li><a href="#14-高级模式示例">高级模式示例</a></li>
+<li><a href="#15-坐标与角度">坐标与角度</a></li>
+<li><a href="#16-可用弹型与颜色">可用弹型与颜色</a></li>
+<li><a href="#17-常见问题">常见问题</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 当前工作流<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>当前仓库使用的是<strong>程序化关卡脚本</strong>流程：</p>
+<ul>
+<li>整面关卡：继承 <code>StageScript</code></li>
+<li>道中一段：继承 <code>Wave</code></li>
+<li>单个小怪行为：继承 <code>EnemyScript</code></li>
+<li>Boss 单张攻击：继承 <code>SpellCard</code> 或 <code>NonSpell</code></li>
+<li>Boss 阶段列表：在 <code>StageScript</code> 里用 <code>BossDef</code> + <code>nonspell()</code> / <code>spellcard()</code> 组织</li>
+</ul>
+<hr />
+<h2 id="2">2. 推荐目录结构<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code>game_content/stages/stage1/
+├── __init__.py
+├── stage_script.py          # 整面流程
+├── waves/                   # 道中波次
+│   └── *.py
+├── enemies/                 # 可复用小怪
+│   └── *.py
+├── spellcards/              # Boss 攻击
+│   └── *.py
+├── bosses/                  # Boss 定义（可选）
+├── dialogue/                # 对话
+└── audio/                   # 关卡私有音频
+</code></pre></div>
+
+<hr />
+<h2 id="3">3. 快速开始<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<h3 id="31">3.1 新建一张符卡<a class="headerlink" href="#31" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.spellcard</span><span class="w"> </span><span class="kn">import</span> <span class="n">SpellCard</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MySpell</span><span class="p">(</span><span class="n">SpellCard</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;火符「Example」&quot;</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">1000</span>
+    <span class="n">time_limit</span> <span class="o">=</span> <span class="mi">45</span>
+    <span class="n">bonus</span> <span class="o">=</span> <span class="mi">500000</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">angle</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span>
+                <span class="n">count</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span>
+                <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                <span class="n">start_angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span>
+                <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span>
+                <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">angle</span> <span class="o">+=</span> <span class="mi">10</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">15</span><span class="p">)</span>
+
+
+<span class="n">spellcard</span> <span class="o">=</span> <span class="n">MySpell</span>
+</code></pre></div>
+
+<h3 id="32-boss">3.2 把它挂到 Boss 上<a class="headerlink" href="#32-boss" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.stage_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">StageScript</span><span class="p">,</span> <span class="n">BossDef</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">src.game.stage.boss_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">nonspell</span><span class="p">,</span> <span class="n">spellcard</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">game_content.stages.stage1.spellcards.my_spell</span><span class="w"> </span><span class="kn">import</span> <span class="n">MySpell</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Stage1</span><span class="p">(</span><span class="n">StageScript</span><span class="p">):</span>
+    <span class="n">boss</span> <span class="o">=</span> <span class="n">BossDef</span><span class="p">(</span>
+        <span class="nb">id</span><span class="o">=</span><span class="s2">&quot;boss1&quot;</span><span class="p">,</span>
+        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Boss Name&quot;</span><span class="p">,</span>
+        <span class="n">texture</span><span class="o">=</span><span class="s2">&quot;enemy_boss&quot;</span><span class="p">,</span>
+        <span class="n">phases</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">nonspell</span><span class="p">(</span><span class="n">NonSpell1</span><span class="p">,</span> <span class="n">hp</span><span class="o">=</span><span class="mi">800</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">bonus</span><span class="o">=</span><span class="mi">100000</span><span class="p">),</span>
+            <span class="n">spellcard</span><span class="p">(</span><span class="n">MySpell</span><span class="p">,</span> <span class="s2">&quot;火符「Example」&quot;</span><span class="p">,</span> <span class="n">hp</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="mi">45</span><span class="p">),</span>
+        <span class="p">],</span>
+    <span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_boss</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="4">4. 四层分工<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>基类</th>
+<th>职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>StageScript</strong></td>
+<td><code>StageScript</code></td>
+<td>整面时间线：等待、波次、midboss、对话、boss</td>
+</tr>
+<tr>
+<td><strong>Wave</strong></td>
+<td><code>Wave</code></td>
+<td>一段时间内刷什么敌人、间隔多久</td>
+</tr>
+<tr>
+<td><strong>EnemyScript</strong></td>
+<td><code>EnemyScript</code></td>
+<td>单个小怪从出生到退场的完整行为</td>
+</tr>
+<tr>
+<td><strong>SpellCard / NonSpell</strong></td>
+<td><code>SpellCard</code> / <code>NonSpell</code></td>
+<td>Boss 某一段攻击</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-stagescript">5. StageScript：整面流程<a class="headerlink" href="#5-stagescript" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Stage1</span><span class="p">(</span><span class="n">StageScript</span><span class="p">):</span>
+    <span class="nb">id</span> <span class="o">=</span> <span class="s2">&quot;stage1&quot;</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;Stage 1&quot;</span>
+    <span class="n">title</span> <span class="o">=</span> <span class="s2">&quot;标题&quot;</span>
+    <span class="n">bgm</span> <span class="o">=</span> <span class="s2">&quot;00.wav&quot;</span>
+    <span class="n">boss_bgm</span> <span class="o">=</span> <span class="s2">&quot;01.wav&quot;</span>
+    <span class="n">background</span> <span class="o">=</span> <span class="s2">&quot;stage1_bg&quot;</span>
+
+    <span class="n">boss</span> <span class="o">=</span> <span class="n">BossDef</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_wave</span><span class="p">(</span><span class="n">OpeningWave</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_boss</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">midboss</span><span class="p">,</span> <span class="n">is_midboss</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">play_dialogue</span><span class="p">([</span><span class="o">...</span><span class="p">])</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">run_boss</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="p">)</span>
+</code></pre></div>
+
+<p>常用 API：<code>wait()</code>, <code>wait_seconds()</code>, <code>run_wave()</code>, <code>run_boss()</code>, <code>play_dialogue()</code>, <code>play_bgm()</code>.</p>
+<hr />
+<h2 id="6-wave">6. Wave：波次编排<a class="headerlink" href="#6-wave" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">FairyWave</span><span class="p">(</span><span class="n">Wave</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">spawn_enemy_class</span><span class="p">(</span><span class="n">SideFlyFairy</span><span class="p">,</span> <span class="n">x</span><span class="o">=-</span><span class="mf">0.8</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="mf">0.2</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">180</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="7-enemyscript">7. EnemyScript：小怪行为<a class="headerlink" href="#7-enemyscript" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SideFlyFairy</span><span class="p">(</span><span class="n">EnemyScript</span><span class="p">):</span>
+    <span class="n">hp</span> <span class="o">=</span> <span class="mi">30</span>
+    <span class="n">sprite</span> <span class="o">=</span> <span class="s2">&quot;enemy_fairy&quot;</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span><span class="n">speed</span><span class="o">=</span><span class="mf">2.2</span><span class="p">,</span> <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_s&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">move_linear</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.8</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">80</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="8-spellcard-nonspellboss">8. SpellCard / NonSpell：Boss 攻击<a class="headerlink" href="#8-spellcard-nonspellboss" title="Permanent link">&para;</a></h2>
+<h3 id="_2">基本生命周期<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>setup() → run() → (被击败 或 超时) → on_defeated() / on_timeout()
+</code></pre></div>
+
+<h3 id="_3">并行动作（边移动边发弹）<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">move_coro</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mf">0.4</span><span class="p">,</span> <span class="mf">0.6</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">90</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">90</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span> <span class="nb">next</span><span class="p">(</span><span class="n">move_coro</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span> <span class="k">pass</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">time</span> <span class="o">%</span> <span class="mi">6</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span><span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+            <span class="k">yield</span>
+</code></pre></div>
+
+<h3 id="_4">符卡内常用属性<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>self.time</code> — 当前帧数</li>
+<li><code>self.time_seconds</code> — 当前时间（秒）</li>
+<li><code>self.time_remaining</code> — 剩余时间（秒）</li>
+<li><code>self.boss</code> — Boss 对象（可访问 <code>.x</code>, <code>.y</code>）</li>
+<li><code>self.ctx</code> — StageContext（底层 API）</li>
+</ul>
+<h3 id="_5">生命周期回调<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySpell</span><span class="p">(</span><span class="n">SpellCard</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;符卡开始前调用，常用于布阵或 Boss 移动到位&quot;&quot;&quot;</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">move_to</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;主弹幕循环&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_defeated</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;玩家击破符卡时调用，可用于触发结算特效或散花弹&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;cardget&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_timeout</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;符卡超时未被击破时调用&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">clear_bullets</span><span class="p">()</span>
+</code></pre></div>
+
+<p><code>on_defeated</code> / <code>on_timeout</code> 默认是空实现，重写时不需要 <code>async</code>。
+若要在结算时发送弹幕或道具，直接在里面调用 <code>self.fire(...)</code> / <code>self.ctx.spawn_drop(...)</code> 即可。</p>
+<blockquote>
+<p><strong>注意</strong>：<code>wait_until(condition)</code> 仅在 SpellCard 上可用；
+Wave / EnemyScript 内请用 <code>await self.wait(N)</code> 配合手动条件判断实现等价效果。</p>
+</blockquote>
+<hr />
+<h2 id="9-bossdefboss">9. BossDef：Boss 阶段组织<a class="headerlink" href="#9-bossdefboss" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code><span class="n">boss</span> <span class="o">=</span> <span class="n">BossDef</span><span class="p">(</span>
+    <span class="nb">id</span><span class="o">=</span><span class="s2">&quot;rumia_boss&quot;</span><span class="p">,</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;ルーミア&quot;</span><span class="p">,</span>
+    <span class="n">texture</span><span class="o">=</span><span class="s2">&quot;enemy_rumia&quot;</span><span class="p">,</span>
+    <span class="n">phases</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">nonspell</span><span class="p">(</span><span class="n">NonSpell1</span><span class="p">,</span> <span class="n">hp</span><span class="o">=</span><span class="mi">800</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">bonus</span><span class="o">=</span><span class="mi">100000</span><span class="p">),</span>
+        <span class="n">spellcard</span><span class="p">(</span><span class="n">MoonlightRay</span><span class="p">,</span> <span class="s2">&quot;月符「Moonlight Ray」&quot;</span><span class="p">,</span> <span class="n">hp</span><span class="o">=</span><span class="mi">1200</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="mi">60</span><span class="p">),</span>
+        <span class="n">spellcard</span><span class="p">(</span><span class="n">NightBird</span><span class="p">,</span> <span class="s2">&quot;夜符「Night Bird」&quot;</span><span class="p">,</span> <span class="n">hp</span><span class="o">=</span><span class="mi">1500</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span> <span class="n">bonus</span><span class="o">=</span><span class="mi">1500000</span><span class="p">),</span>
+    <span class="p">],</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="10-api-v2">10. 弹幕 API 完整参考（v2）<a class="headerlink" href="#10-api-v2" title="Permanent link">&para;</a></h2>
+<p>以下所有方法在 <code>SpellCard</code>、<code>NonSpell</code>、<code>EnemyScript</code>、<code>Wave</code> 中均可使用。</p>
+<h3 id="101-selffire">10.1 self.fire(...)<a class="headerlink" href="#101-selffire" title="Permanent link">&para;</a></h3>
+<p>发射单发子弹。</p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+    <span class="n">x</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>         <span class="c1"># 位置（默认为 Boss/Enemy 位置）</span>
+    <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span>             <span class="c1"># 角度（度）</span>
+    <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>             <span class="c1"># 速度</span>
+
+    <span class="c1"># 弹型</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span>  <span class="c1"># 弹型别名</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">,</span>           <span class="c1"># 颜色别名</span>
+
+    <span class="c1"># ===== v2 新参数 =====</span>
+    <span class="n">tag</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>                 <span class="c1"># 分组标签（整数，用于按组消弹/时停等）</span>
+    <span class="n">friction</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>          <span class="c1"># 摩擦/阻尼系数（&gt;0 时子弹逐渐减速）</span>
+    <span class="n">time_scale</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>        <span class="c1"># 时间缩放（0=冻结, 0.5=半速, 1.0=正常, 2.0=加速）</span>
+    <span class="n">bounce_x</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>        <span class="c1"># 碰到左右边界反弹</span>
+    <span class="n">bounce_y</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>        <span class="c1"># 碰到上下边界反弹</span>
+    <span class="n">spin</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>              <span class="c1"># 贴图自转角速度（度/秒）</span>
+    <span class="n">render_angle</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>     <span class="c1"># 初始贴图朝向（度，None=跟随运动方向）</span>
+    <span class="n">curve_type</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>          <span class="c1"># 内置数学曲线（见下方常量表）</span>
+    <span class="n">curve_params</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>     <span class="c1"># 曲线参数元组 (amplitude, frequency, phase, base_value)</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="102-selffire_circle">10.2 self.fire_circle(...)<a class="headerlink" href="#102-selffire_circle" title="Permanent link">&para;</a></h3>
+<p>圆形均匀扩散。</p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span>
+    <span class="n">count</span><span class="o">=</span><span class="mi">36</span><span class="p">,</span>              <span class="c1"># 弹数</span>
+    <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+    <span class="n">start_angle</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>         <span class="c1"># 起始角度</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">,</span>
+    <span class="c1"># 也支持所有 v2 参数：tag, friction, bounce_x, ...</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="103-selffire_arc">10.3 self.fire_arc(...)<a class="headerlink" href="#103-selffire_arc" title="Permanent link">&para;</a></h3>
+<p>扇形弹幕。</p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire_arc</span><span class="p">(</span>
+    <span class="n">count</span><span class="o">=</span><span class="mi">7</span><span class="p">,</span>
+    <span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span>
+    <span class="n">center_angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span>      <span class="c1"># 扇形中心角度</span>
+    <span class="n">arc_angle</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>          <span class="c1"># 扇形张角</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;rice&quot;</span><span class="p">,</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="104-selffire_at_player">10.4 self.fire_at_player(...)<a class="headerlink" href="#104-selffire_at_player" title="Permanent link">&para;</a></h3>
+<p>自机狙。</p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span>
+    <span class="n">speed</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>
+    <span class="n">offset_angle</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>        <span class="c1"># 偏移角度（度）</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;arrow_m&quot;</span><span class="p">,</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="105-selffire_polar-selffire_orbit">10.5 self.fire_polar(...) / self.fire_orbit(...)<a class="headerlink" href="#105-selffire_polar-selffire_orbit" title="Permanent link">&para;</a></h3>
+<p>极坐标运动子弹（围绕中心公转/螺旋）。</p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire_polar</span><span class="p">(</span>
+    <span class="n">orbit_radius</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>         <span class="c1"># 初始半径</span>
+    <span class="n">theta</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>                   <span class="c1"># 初始角度（度）</span>
+    <span class="n">radial_speed</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>         <span class="c1"># 半径变化速率</span>
+    <span class="n">angular_velocity</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span>      <span class="c1"># 角速度（度/秒）</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_s&quot;</span><span class="p">,</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">,</span>
+    <span class="n">center</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>               <span class="c1"># 默认为 Boss；可传 (x,y) / 对象 / callable</span>
+    <span class="n">render_mode</span><span class="o">=</span><span class="s2">&quot;velocity&quot;</span><span class="p">,</span>    <span class="c1"># velocity / radial / inward / fixed</span>
+    <span class="n">angle_offset</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>            <span class="c1"># 贴图朝向偏移（度）</span>
+    <span class="n">collision_radius</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>      <span class="c1"># 碰撞半径</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="106">10.6 消弹<a class="headerlink" href="#106" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">clear_bullets</span><span class="p">()</span>                      <span class="c1"># 清除本符卡/本敌人创建的子弹</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">clear_bullets</span><span class="p">(</span><span class="n">to_items</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>         <span class="c1"># 转为道具</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">clear_all_bullets</span><span class="p">()</span>              <span class="c1"># 清屏</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">clear_bullets_by_tag</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>          <span class="c1"># 按标签消弹</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">bullets_by_tag_to_item</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>        <span class="c1"># 按标签转道具</span>
+</code></pre></div>
+
+<h3 id="107">10.7 时间缩放（时停 / 慢动作）<a class="headerlink" href="#107" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>              <span class="c1"># 全部冻结</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>       <span class="c1"># 只冻结 tag=1 的子弹</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span>              <span class="c1"># 恢复正常</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.3</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>       <span class="c1"># tag=2 减速到 0.3 倍</span>
+</code></pre></div>
+
+<h3 id="108-emitter">10.8 发射器节点（Emitter）<a class="headerlink" href="#108-emitter" title="Permanent link">&para;</a></h3>
+<p>不渲染、不碰撞的隐形移动节点，一边运动一边发弹。</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">emitter_logic</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">idx</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">lifetime</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;每帧回调&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">lifetime</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span> <span class="o">%</span> <span class="mi">6</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">spawn_bullet</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">angle</span><span class="o">=-</span><span class="mf">1.57</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">0.03</span><span class="p">,</span> <span class="n">sprite_id</span><span class="o">=</span><span class="s2">&quot;ball_mid1&quot;</span><span class="p">)</span>
+
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">create_emitter</span><span class="p">(</span>
+    <span class="n">x</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.8</span><span class="p">,</span>
+    <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>          <span class="c1"># 发射器从上往下飞</span>
+    <span class="n">callback</span><span class="o">=</span><span class="n">emitter_logic</span><span class="p">,</span>
+    <span class="n">tag</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>                        <span class="c1"># 可以给发射器也打标签</span>
+    <span class="n">max_lifetime</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>              <span class="c1"># 3 秒后自动消失</span>
+    <span class="n">friction</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>                  <span class="c1"># 发射器可以减速</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="109">10.9 辅助方法<a class="headerlink" href="#109" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">angle_to_player</span><span class="p">()</span>            <span class="c1"># 返回到自机的角度（度）</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">play_se</span><span class="p">(</span><span class="s2">&quot;kira&quot;</span><span class="p">)</span>              <span class="c1"># 播放音效</span>
+<span class="n">player</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">get_player</span><span class="p">()</span>    <span class="c1"># 获取玩家代理 (.x, .y)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="11-api">11. 激光 API<a class="headerlink" href="#11-api" title="Permanent link">&para;</a></h2>
+<p>激光由 <code>LaserPool</code> 统一管理，通过 <code>self.ctx.create_laser()</code> / <code>self.ctx.create_bent_laser()</code> 创建。两种类型：</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>直线激光</td>
+<td>三段式（头/身/尾），有展开→持续→收缩动画</td>
+</tr>
+<tr>
+<td>曲线激光</td>
+<td>沿路径弯曲，每帧通过 <code>update_head(x, y)</code> 推进头部</td>
+</tr>
+</tbody>
+</table>
+<h3 id="111">11.1 直线激光<a class="headerlink" href="#111" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="n">laser</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">create_laser</span><span class="p">(</span>
+    <span class="n">x</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.6</span><span class="p">,</span>             <span class="c1"># 起点（归一化坐标）</span>
+    <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span>                 <span class="c1"># 角度（度）</span>
+    <span class="n">l1</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>                   <span class="c1"># 头部长度</span>
+    <span class="n">l2</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span>                    <span class="c1"># 身体长度</span>
+    <span class="n">l3</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>                   <span class="c1"># 尾部长度</span>
+    <span class="n">width</span><span class="o">=</span><span class="mf">0.04</span><span class="p">,</span>                <span class="c1"># 宽度</span>
+    <span class="n">texture_id</span><span class="o">=</span><span class="s2">&quot;laser1&quot;</span><span class="p">,</span>       <span class="c1"># 纹理 ID（laser1 ~ laser4）</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">,</span>               <span class="c1"># 颜色名 或 1~16 索引</span>
+    <span class="n">on_time</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>                <span class="c1"># 展开时间（帧）</span>
+    <span class="n">node</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>                  <span class="c1"># 起点装饰大小</span>
+    <span class="n">head</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>                  <span class="c1"># 终点装饰大小</span>
+<span class="p">)</span>
+
+<span class="c1"># 一段时间后关闭（淡出 30 帧）</span>
+<span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">180</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">remove_laser</span><span class="p">(</span><span class="n">laser</span><span class="p">,</span> <span class="n">off_time</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="112">11.2 曲线激光<a class="headerlink" href="#112" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="n">laser</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">create_bent_laser</span><span class="p">(</span>
+    <span class="n">x</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">y</span><span class="p">,</span>
+    <span class="n">length</span><span class="o">=</span><span class="mi">80</span><span class="p">,</span>                 <span class="c1"># 历史采样点上限（决定可见尾巴长度）</span>
+    <span class="n">width</span><span class="o">=</span><span class="mf">0.03</span><span class="p">,</span>
+    <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">,</span>
+    <span class="n">on_time</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">sample_rate</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>             <span class="c1"># 每多少帧记录一次头部位置</span>
+<span class="p">)</span>
+
+<span class="c1"># 后续每帧驱动头部，激光会自动连成曲线</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">180</span><span class="p">):</span>
+    <span class="n">nx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">x</span> <span class="o">+</span> <span class="mf">0.3</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">t</span> <span class="o">*</span> <span class="mf">0.1</span><span class="p">)</span>
+    <span class="n">ny</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">y</span> <span class="o">-</span> <span class="mf">0.005</span> <span class="o">*</span> <span class="n">t</span>
+    <span class="n">laser</span><span class="o">.</span><span class="n">update_head</span><span class="p">(</span><span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">)</span>
+    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">remove_laser</span><span class="p">(</span><span class="n">laser</span><span class="p">,</span> <span class="n">off_time</span><span class="o">=</span><span class="mi">15</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="113">11.3 清屏<a class="headerlink" href="#113" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">clear_all_lasers</span><span class="p">()</span>      <span class="c1"># 一次性移除所有激光</span>
+</code></pre></div>
+
+<h3 id="114">11.4 颜色与纹理<a class="headerlink" href="#114" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>color</code> 接受 16 个索引（1~16）或颜色名 <code>red / blue / green / purple / orange / darkblue / white / yellow / cyan / pink / ...</code></li>
+<li><code>texture_id</code> 对应 <code>assets/images/laser/</code> 下的纹理（默认 <code>laser1</code>，另有 <code>laser2/3/4</code>）</li>
+</ul>
+<hr />
+<h2 id="12">12. 道具 / 得分 / 玩家访问<a class="headerlink" href="#12" title="Permanent link">&para;</a></h2>
+<h3 id="121">12.1 手动掉落道具<a class="headerlink" href="#121" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 在 (x, y) 处生成一个掉落物</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">spawn_drop</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">y</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;power_small&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p>道具类型由 <code>ItemPool</code> 决定，常见值：<code>power_small</code>, <code>power_big</code>, <code>point</code>, <code>life</code>, <code>bomb</code>, <code>full_power</code>。</p>
+<h3 id="122">12.2 直接加分<a class="headerlink" href="#122" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">add_score</span><span class="p">(</span><span class="mi">100000</span><span class="p">)</span>     <span class="c1"># 普通用法：杂兵击破奖励</span>
+</code></pre></div>
+
+<blockquote>
+<p>设计建议：常规掉落由敌人击破自动触发；<code>spawn_drop</code> / <code>add_score</code> 用于符卡结算特效或自定义事件奖励。</p>
+</blockquote>
+<h3 id="123">12.3 访问玩家与敌人<a class="headerlink" href="#123" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="n">player</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">get_player</span><span class="p">()</span>      <span class="c1"># 只读代理：player.x, player.y</span>
+<span class="n">enemies</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">get_enemies</span><span class="p">()</span>    <span class="c1"># 当前活跃敌人列表</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 自机狙的便捷写法（已封装）</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire_at_player</span><span class="p">(</span><span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+
+<span class="c1"># 等价于</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="n">angle</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">angle_to_player</span><span class="p">()</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="124-ctx">12.4 完整 ctx 公共方法清单<a class="headerlink" href="#124-ctx" title="Permanent link">&para;</a></h3>
+<p><code>StageContext</code> 上的所有公共方法（写复杂逻辑时可能用到）：</p>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>弹幕</td>
+<td><code>create_bullet</code>, <code>create_polar_bullet</code>, <code>create_orbit_bullet</code>, <code>create_emitter</code></td>
+</tr>
+<tr>
+<td>消弹</td>
+<td><code>remove_bullet(s)</code>, <code>bullet(s)_to_item(s)</code>, <code>clear_all_bullets</code>, <code>clear_bullets_by_tag</code>, <code>bullets_by_tag_to_item</code></td>
+</tr>
+<tr>
+<td>时停</td>
+<td><code>set_time_scale(scale, tag=None)</code></td>
+</tr>
+<tr>
+<td>激光</td>
+<td><code>create_laser</code>, <code>create_bent_laser</code>, <code>remove_laser</code>, <code>clear_all_lasers</code></td>
+</tr>
+<tr>
+<td>道具 / 分数</td>
+<td><code>spawn_drop</code>, <code>add_score</code></td>
+</tr>
+<tr>
+<td>玩家 / 敌人</td>
+<td><code>get_player</code>, <code>get_enemies</code>, <code>add_enemy_script</code>, <code>get_enemy_scripts</code></td>
+</tr>
+<tr>
+<td>音频</td>
+<td><code>play_se</code>, <code>play_danmaku_se</code>, <code>play_bgm</code>, <code>stop_bgm</code>, <code>pause_bgm</code>, <code>unpause_bgm</code></td>
+</tr>
+<tr>
+<td>背景</td>
+<td><code>set_background(name)</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="13-v2">13. v2 新机制详解<a class="headerlink" href="#13-v2" title="Permanent link">&para;</a></h2>
+<h3 id="111-friction">11.1 摩擦力 / 阻尼 (friction)<a class="headerlink" href="#111-friction" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">friction</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p>效果：子弹每帧速度乘以 <code>(1 - friction * dt)</code>，逐渐减速直到停止。</p>
+<table>
+<thead>
+<tr>
+<th>friction 值</th>
+<th>效果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>无摩擦（默认行为）</td>
+</tr>
+<tr>
+<td>1.0</td>
+<td>约 1 秒减速到接近 0</td>
+</tr>
+<tr>
+<td>3.0</td>
+<td>极快减速（急停弹）</td>
+</tr>
+<tr>
+<td>0.3</td>
+<td>缓慢减速</td>
+</tr>
+</tbody>
+</table>
+<p><strong>用途</strong>：减速 → 停顿 → 配合 <code>on_death</code> 做散花、制造"粘滞感"弹幕。</p>
+<h3 id="112-bounce_x-bounce_y">11.2 反弹 (bounce_x / bounce_y)<a class="headerlink" href="#112-bounce_x-bounce_y" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">bounce_x</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">bounce_y</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+          <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p>子弹碰到 <code>x ∈ [-1, 1]</code> 或 <code>y ∈ [-1, 1]</code> 的边界时速度分量取反。<br />
+反弹弹不会因为飞出屏幕而死亡（普通弹在 ±1.5 时自动消亡）。</p>
+<p><strong>用途</strong>：弹球弹幕、墙壁反射。</p>
+<h3 id="113-spin-render_angle">11.3 自转 (spin / render_angle)<a class="headerlink" href="#113-spin-render_angle" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 弹边飞边自转</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">spin</span><span class="o">=</span><span class="mi">360</span><span class="p">,</span> <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;star_m&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;yellow&quot;</span><span class="p">)</span>
+
+<span class="c1"># 固定贴图朝上，不跟运动方向</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">render_angle</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;knife&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<ul>
+<li><code>spin=N</code>：贴图每秒转 N 度（运动方向不变）</li>
+<li><code>render_angle=X</code>：初始贴图朝向为 X 度（且不再锁定到运动方向）</li>
+</ul>
+<p><strong>用途</strong>：旋转星弹、固定朝向刀弹。</p>
+<h3 id="114-tag">11.4 标签 (tag) + 按组操作<a class="headerlink" href="#114-tag" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 发弹时打标签</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+
+<span class="c1"># 后续操作</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">clear_bullets_by_tag</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>         <span class="c1"># 只消蓝弹</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">bullets_by_tag_to_item</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>       <span class="c1"># 红弹变道具</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>      <span class="c1"># 冻结蓝弹</span>
+</code></pre></div>
+
+<p><strong>用途</strong>：解谜弹幕（打中开关消特定弹）、分色管理、选择性时停。</p>
+<h3 id="115-time_scale">11.5 时间缩放 (time_scale)<a class="headerlink" href="#115-time_scale" title="Permanent link">&para;</a></h3>
+<p>每颗子弹拥有独立的 time_scale 乘数，影响：
+- 位置更新速度
+- 生命周期推进
+- 摩擦力衰减
+- 曲线演算
+- 自转速度</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 发射一颗慢动作弹</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span> <span class="n">time_scale</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span> <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_l&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;white&quot;</span><span class="p">)</span>
+
+<span class="c1"># 全局冻结（咲夜时停）</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>
+<span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">120</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="116-curve_type-curve_params">11.6 内置数学曲线 (curve_type + curve_params)<a class="headerlink" href="#116-curve_type-curve_params" title="Permanent link">&para;</a></h3>
+<p>在 JIT 内核内执行的高性能参数化运动。</p>
+<h4 id="_6">常量导入<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.bullet</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">CURVE_NONE</span><span class="p">,</span> <span class="n">CURVE_SIN_SPEED</span><span class="p">,</span> <span class="n">CURVE_SIN_ANGLE</span><span class="p">,</span>
+    <span class="n">CURVE_COS_SPEED</span><span class="p">,</span> <span class="n">CURVE_LINEAR_SPEED</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h4 id="curve_params-amplitude-frequency-phase-base_value">curve_params = (amplitude, frequency, phase, base_value)<a class="headerlink" href="#curve_params-amplitude-frequency-phase-base_value" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>curve_type</th>
+<th>效果公式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CURVE_SIN_SPEED</code> (1)</td>
+<td><code>speed = base + amp * sin(freq * t + phase)</code></td>
+</tr>
+<tr>
+<td><code>CURVE_SIN_ANGLE</code> (2)</td>
+<td><code>angle += amp * sin(freq * t + phase) * dt</code></td>
+</tr>
+<tr>
+<td><code>CURVE_COS_SPEED</code> (3)</td>
+<td><code>speed = base + amp * cos(freq * t + phase)</code></td>
+</tr>
+<tr>
+<td><code>CURVE_LINEAR_SPEED</code> (4)</td>
+<td><code>speed = base + amp * t</code></td>
+</tr>
+</tbody>
+</table>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.bullet</span><span class="w"> </span><span class="kn">import</span> <span class="n">CURVE_SIN_SPEED</span>
+
+<span class="c1"># 波动速度弹：速度在 1.0 ~ 3.0 之间正弦波动</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+    <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;grain_a&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;cyan&quot;</span><span class="p">,</span>
+    <span class="n">curve_type</span><span class="o">=</span><span class="n">CURVE_SIN_SPEED</span><span class="p">,</span>
+    <span class="n">curve_params</span><span class="o">=</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">3.14</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">),</span>  <span class="c1"># amp=1, freq=π, phase=0, base=2</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.bullet</span><span class="w"> </span><span class="kn">import</span> <span class="n">CURVE_SIN_ANGLE</span>
+
+<span class="c1"># 蛇行弹：运动角度正弦摆动</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+    <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+    <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;kite&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+    <span class="n">curve_type</span><span class="o">=</span><span class="n">CURVE_SIN_ANGLE</span><span class="p">,</span>
+    <span class="n">curve_params</span><span class="o">=</span><span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>  <span class="c1"># amp=2 rad/s, freq=5</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="117-emitter">11.7 发射器节点 (Emitter)<a class="headerlink" href="#117-emitter" title="Permanent link">&para;</a></h3>
+<p>隐形、不碰撞的移动节点，每帧执行回调函数发射子弹。</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">spiral_emitter</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">idx</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">lifetime</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;发射器回调：一边飞一边旋转发弹&quot;&quot;&quot;</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">lifetime</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">frame</span> <span class="o">%</span> <span class="mi">4</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">angle</span> <span class="o">=</span> <span class="n">lifetime</span> <span class="o">*</span> <span class="mf">6.28</span>  <span class="c1"># 旋转</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">spawn_bullet</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">sprite_id</span><span class="o">=</span><span class="s2">&quot;ball_mid1&quot;</span><span class="p">)</span>
+
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">create_emitter</span><span class="p">(</span>
+    <span class="n">x</span><span class="o">=-</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">0.8</span><span class="p">,</span>
+    <span class="n">angle</span><span class="o">=-</span><span class="mi">60</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span>
+    <span class="n">callback</span><span class="o">=</span><span class="n">spiral_emitter</span><span class="p">,</span>
+    <span class="n">max_lifetime</span><span class="o">=</span><span class="mf">4.0</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<blockquote>
+<p><strong>注意</strong>：Emitter 回调中的 <code>pool.spawn_bullet()</code> 是底层 API，angle 用弧度，speed 用归一化/帧。<br />
+如果想用度和每秒单位，需要自行转换：<code>angle=math.radians(deg)</code>, <code>speed=spd/60</code>.</p>
+</blockquote>
+<hr />
+<h2 id="14">14. 高级模式示例<a class="headerlink" href="#14" title="Permanent link">&para;</a></h2>
+<h3 id="121_1">12.1 急停→散花弹<a class="headerlink" href="#121_1" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">12</span><span class="p">):</span>
+            <span class="n">angle</span> <span class="o">=</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">30</span>
+            <span class="c1"># 大弹急停</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+                <span class="n">angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">4.0</span><span class="p">,</span>
+                <span class="n">friction</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>              <span class="c1"># 快速减速</span>
+                <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_l&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">,</span>
+                <span class="n">tag</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">40</span><span class="p">)</span>
+
+        <span class="c1"># 检查急停弹的生命周期，在停住后爆散 —— 用 on_death 回调更好</span>
+        <span class="c1"># （这里用清弹 + 重新发射的简化写法）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">clear_bullets_by_tag</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+        <span class="c1"># 替换为散花</span>
+        <span class="n">bx</span><span class="p">,</span> <span class="n">by</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">boss</span><span class="o">.</span><span class="n">y</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">36</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=</span><span class="n">i</span> <span class="o">*</span> <span class="mi">10</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                      <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_s&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="122_1">12.2 弹球弹幕<a class="headerlink" href="#122_1" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">360</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+                <span class="n">angle</span><span class="o">=</span><span class="n">a</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span>
+                <span class="n">bounce_x</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">bounce_y</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;ball_m&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="123_1">12.3 咲夜时停<a class="headerlink" href="#123_1" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="c1"># 发一波高速弹</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">24</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="n">angle</span><span class="o">=</span><span class="n">i</span> <span class="o">*</span> <span class="mi">15</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">4.0</span><span class="p">,</span>
+                      <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;knife&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">,</span>
+                      <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">30</span><span class="p">)</span>
+
+        <span class="c1"># 时停</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+
+        <span class="c1"># 解冻 + 追加</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">60</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="124">12.4 旋转星弹<a class="headerlink" href="#124" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="n">angle</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fire_circle</span><span class="p">(</span>
+            <span class="n">count</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span>
+            <span class="n">start_angle</span><span class="o">=</span><span class="n">angle</span><span class="p">,</span>
+            <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;star_l&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;yellow&quot;</span><span class="p">,</span>
+            <span class="n">spin</span><span class="o">=</span><span class="mi">720</span><span class="p">,</span>  <span class="c1"># 每秒自转 2 圈</span>
+        <span class="p">)</span>
+        <span class="n">angle</span> <span class="o">+=</span> <span class="mi">15</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="125">12.5 流星雨发射器（魔理沙风格）<a class="headerlink" href="#125" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">math</span><span class="o">,</span><span class="w"> </span><span class="nn">random</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">meteor_emitter</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">idx</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">lifetime</span><span class="p">):</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">lifetime</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">frame</span> <span class="o">%</span> <span class="mi">3</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">a</span> <span class="o">=</span> <span class="o">-</span><span class="n">math</span><span class="o">.</span><span class="n">pi</span><span class="o">/</span><span class="mi">2</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.3</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">)</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">spawn_bullet</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">angle</span><span class="o">=</span><span class="n">a</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">0.04</span><span class="p">,</span> <span class="n">sprite_id</span><span class="o">=</span><span class="s2">&quot;star_small3&quot;</span><span class="p">)</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">create_emitter</span><span class="p">(</span>
+                <span class="n">x</span><span class="o">=-</span><span class="mf">0.8</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="mf">0.4</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+                <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+                <span class="n">callback</span><span class="o">=</span><span class="n">meteor_emitter</span><span class="p">,</span>
+                <span class="n">max_lifetime</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">180</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="126">12.6 正弦蛇行弹<a class="headerlink" href="#126" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.game.bullet</span><span class="w"> </span><span class="kn">import</span> <span class="n">CURVE_SIN_ANGLE</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">12</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span>
+                <span class="n">angle</span><span class="o">=-</span><span class="mi">90</span><span class="p">,</span> <span class="n">speed</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;grain_a&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;cyan&quot;</span><span class="p">,</span>
+                <span class="n">curve_type</span><span class="o">=</span><span class="n">CURVE_SIN_ANGLE</span><span class="p">,</span>
+                <span class="n">curve_params</span><span class="o">=</span><span class="p">(</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">,</span> <span class="n">i</span> <span class="o">*</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span>  <span class="c1"># 每条蛇相位偏移</span>
+            <span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="127">12.7 极坐标莲花弹（扩散→收缩→散开）<a class="headerlink" href="#127" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">12</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fire_polar</span><span class="p">(</span>
+                <span class="n">orbit_radius</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>
+                <span class="n">theta</span><span class="o">=</span><span class="n">i</span> <span class="o">*</span> <span class="mi">30</span><span class="p">,</span>
+                <span class="n">radial_speed</span><span class="o">=</span><span class="mf">0.15</span><span class="p">,</span>
+                <span class="n">angular_velocity</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>
+                <span class="n">bullet_type</span><span class="o">=</span><span class="s2">&quot;kite&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;purple&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="mi">120</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="15">15. 坐标与角度<a class="headerlink" href="#15" title="Permanent link">&para;</a></h2>
+<p>坐标系是归一化坐标：</p>
+<ul>
+<li><code>x ≈ -1.0 ~ 1.0</code>，<code>y ≈ -1.0 ~ 1.0</code></li>
+<li><code>(0, 0)</code> 为屏幕中心</li>
+</ul>
+<p>角度（所有脚本层 API 统一用度）：</p>
+<ul>
+<li><code>0°</code> → 向右</li>
+<li><code>90°</code> → 向上</li>
+<li><code>-90°</code> → 向下</li>
+<li><code>180°</code> / <code>-180°</code> → 向左</li>
+</ul>
+<hr />
+<h2 id="16">16. 可用弹型与颜色<a class="headerlink" href="#16" title="Permanent link">&para;</a></h2>
+<h3 id="_7">弹型别名<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>别名</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ball_s</code></td>
+<td>小弹</td>
+</tr>
+<tr>
+<td><code>ball_m</code></td>
+<td>中弹</td>
+</tr>
+<tr>
+<td><code>ball_l</code></td>
+<td>大弹</td>
+</tr>
+<tr>
+<td><code>ball_light</code></td>
+<td>光晕弹 / 发光玉</td>
+</tr>
+<tr>
+<td><code>grain_a</code> / <code>b</code> / <code>c</code></td>
+<td>米弹 / 谷物弹</td>
+</tr>
+<tr>
+<td><code>kite</code></td>
+<td>鳞弹 / 菱形弹</td>
+</tr>
+<tr>
+<td><code>arrow_s</code> / <code>m</code> / <code>l</code></td>
+<td>箭头弹 / 札弹</td>
+</tr>
+<tr>
+<td><code>knife</code></td>
+<td>刀弹</td>
+</tr>
+<tr>
+<td><code>star_s</code></td>
+<td>小星弹</td>
+</tr>
+<tr>
+<td><code>star_l</code></td>
+<td>大星弹</td>
+</tr>
+<tr>
+<td><code>gun</code></td>
+<td>直弹 / 子弹</td>
+</tr>
+<tr>
+<td><code>ellipse</code></td>
+<td>椭圆弹</td>
+</tr>
+<tr>
+<td><code>square</code></td>
+<td>方弹</td>
+</tr>
+<tr>
+<td><code>butterfly</code></td>
+<td>蝶星弹</td>
+</tr>
+<tr>
+<td><code>heart</code></td>
+<td>心形弹</td>
+</tr>
+<tr>
+<td><code>mildew</code></td>
+<td>霉菌弹 / 细菌形弹</td>
+</tr>
+<tr>
+<td><code>silence</code></td>
+<td>寂静弹 / 轮廓弹</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_8">颜色别名<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<p><code>red</code>, <code>blue</code>, <code>green</code>, <code>yellow</code>, <code>purple</code>, <code>white</code>, <code>darkblue</code>, <code>orange</code>, <code>cyan</code>, <code>pink</code></p>
+<p>实际映射由 <code>assets/bullet_aliases.json</code> 定义。</p>
+<hr />
+<h2 id="17">17. 常见问题<a class="headerlink" href="#17" title="Permanent link">&para;</a></h2>
+<h3 id="q-await-yield">Q: <code>await</code> 和 <code>yield</code> 用哪个？<a class="headerlink" href="#q-await-yield" title="Permanent link">&para;</a></h3>
+<p>默认用 <code>await</code>。只有同一帧并行推进多个动作时用 <code>yield</code>。</p>
+<h3 id="q">Q: 怎么清掉自己发过的弹？<a class="headerlink" href="#q" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">clear_bullets</span><span class="p">()</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">clear_bullets</span><span class="p">(</span><span class="n">to_items</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="q-tag">Q: 怎么用 tag 做解谜弹幕？<a class="headerlink" href="#q-tag" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;blue&quot;</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;red&quot;</span><span class="p">)</span>
+
+<span class="c1"># 玩家达成条件后</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">bullets_by_tag_to_item</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>    <span class="c1"># 蓝弹变道具</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">clear_bullets_by_tag</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>      <span class="c1"># 红弹消除</span>
+</code></pre></div>
+
+<h3 id="q_1">Q: 怎么做时停？<a class="headerlink" href="#q_1" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>          <span class="c1"># 全局冻结</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>   <span class="c1"># 只冻 tag=1</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">set_time_scale</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span>          <span class="c1"># 恢复</span>
+</code></pre></div>
+
+<h3 id="q-emitter-api">Q: Emitter 回调里怎么用高层 API？<a class="headerlink" href="#q-emitter-api" title="Permanent link">&para;</a></h3>
+<p>Emitter 回调直接操作底层 pool，参数用弧度和归一化速度。如果想用友好单位：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="n">pool</span><span class="o">.</span><span class="n">spawn_bullet</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span>
+    <span class="n">angle</span><span class="o">=</span><span class="n">math</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="o">-</span><span class="mi">90</span><span class="p">),</span>     <span class="c1"># 角度转弧度</span>
+    <span class="n">speed</span><span class="o">=</span><span class="mf">2.5</span> <span class="o">/</span> <span class="mf">60.0</span><span class="p">,</span>           <span class="c1"># 每秒速度转每帧</span>
+    <span class="n">sprite_id</span><span class="o">=</span><span class="s2">&quot;ball_mid1&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="q-curve_params">Q: curve_params 四个参数是什么含义？<a class="headerlink" href="#q-curve_params" title="Permanent link">&para;</a></h3>
+<p><code>(amplitude, frequency, phase, base_value)</code></p>
+<ul>
+<li><code>amplitude</code>：振幅</li>
+<li><code>frequency</code>：角频率（弧度/秒）</li>
+<li><code>phase</code>：初始相位</li>
+<li><code>base_value</code>：基础值</li>
+</ul>
+<p>例如 <code>(1.0, 6.28, 0.0, 2.0)</code> 表示"速度 = 2.0 + 1.0 * sin(2π * t)"，即速度在 1.0~3.0 之间每秒一个周期。</p>
+<h3 id="q_2">Q: 如何让子弹出生后中途变色/变型？<a class="headerlink" href="#q_2" title="Permanent link">&para;</a></h3>
+<p>直接修改底层数据：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fire</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">bullet_pool</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;sprite_id&#39;</span><span class="p">][</span><span class="n">idx</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;ball_mid5&quot;</span>  <span class="c1"># 旧版池</span>
+<span class="c1"># 或</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">ctx</span><span class="o">.</span><span class="n">bullet_pool</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;sprite_idx&#39;</span><span class="p">][</span><span class="n">idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_idx</span>     <span class="c1"># 优化版池</span>
+</code></pre></div>
+
+<h3 id="q-stage">Q: 我新增了 Stage，怎么切过去？<a class="headerlink" href="#q-stage" title="Permanent link">&para;</a></h3>
+<p>在 <code>main.py</code> 里改为加载你的新 Stage 类。</p>
+<hr />
+<h2 id="api">API 速查表<a class="headerlink" href="#api" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>self.fire(...)</code></td>
+<td>单发</td>
+<td><code>self.fire(angle=-90, speed=2)</code></td>
+</tr>
+<tr>
+<td><code>self.fire_circle(...)</code></td>
+<td>圆形</td>
+<td><code>self.fire_circle(count=24, speed=2)</code></td>
+</tr>
+<tr>
+<td><code>self.fire_arc(...)</code></td>
+<td>扇形</td>
+<td><code>self.fire_arc(count=5, arc_angle=60)</code></td>
+</tr>
+<tr>
+<td><code>self.fire_at_player(...)</code></td>
+<td>自机狙</td>
+<td><code>self.fire_at_player(speed=3)</code></td>
+</tr>
+<tr>
+<td><code>self.fire_polar(...)</code></td>
+<td>极坐标</td>
+<td><code>self.fire_polar(orbit_radius=0.1, theta=0, angular_velocity=120)</code></td>
+</tr>
+<tr>
+<td><code>ctx.create_emitter(...)</code></td>
+<td>发射器</td>
+<td><code>ctx.create_emitter(x, y, angle, speed, callback)</code></td>
+</tr>
+<tr>
+<td><code>ctx.create_laser(...)</code></td>
+<td>直线激光</td>
+<td><code>ctx.create_laser(x, y, angle, l1, l2, l3, width, color="red")</code></td>
+</tr>
+<tr>
+<td><code>ctx.create_bent_laser(...)</code></td>
+<td>曲线激光</td>
+<td><code>ctx.create_bent_laser(x, y, length=80, width=0.03)</code></td>
+</tr>
+<tr>
+<td><code>ctx.set_time_scale(s, tag)</code></td>
+<td>时停</td>
+<td><code>ctx.set_time_scale(0.0, tag=1)</code></td>
+</tr>
+<tr>
+<td><code>ctx.clear_bullets_by_tag(t)</code></td>
+<td>标签消弹</td>
+<td><code>ctx.clear_bullets_by_tag(1)</code></td>
+</tr>
+<tr>
+<td><code>ctx.bullets_by_tag_to_item(t)</code></td>
+<td>标签转道具</td>
+<td><code>ctx.bullets_by_tag_to_item(1)</code></td>
+</tr>
+<tr>
+<td><code>ctx.spawn_drop(x, y, type=...)</code></td>
+<td>掉落道具</td>
+<td><code>ctx.spawn_drop(0, 0.5, type="power_small")</code></td>
+</tr>
+<tr>
+<td><code>ctx.add_score(n)</code></td>
+<td>加分</td>
+<td><code>ctx.add_score(100000)</code></td>
+</tr>
+<tr>
+<td><code>await self.wait(N)</code></td>
+<td>等 N 帧</td>
+<td><code>await self.wait(30)</code></td>
+</tr>
+<tr>
+<td><code>self.angle_to_player()</code></td>
+<td>自机方向</td>
+<td><code>angle = self.angle_to_player()</code></td>
+</tr>
+<tr>
+<td><code>self.play_se(name)</code></td>
+<td>播放音效</td>
+<td><code>self.play_se("kira")</code></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
