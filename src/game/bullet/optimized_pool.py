@@ -158,11 +158,27 @@ class OptimizedBulletPool:
         self._render_scales = np.zeros((max_bullets, 2), dtype='f4')
         self._render_tex_indices = np.zeros(max_bullets, dtype='u2')
         self._render_categories = np.zeros(max_bullets, dtype='u1')
+        self._render_bucket_counts = np.zeros(0, dtype=np.int32)
+        self._render_bucket_write_offsets = np.zeros(0, dtype=np.int32)
+        self._render_batch_starts = np.zeros(0, dtype=np.int32)
+        self._render_batch_counts = np.zeros(0, dtype=np.int32)
+        self._render_batch_tex = np.zeros(0, dtype=np.int32)
+        self._render_batch_cat = np.zeros(0, dtype=np.int32)
 
         config = get_config()
         self._scale_factor = config.pixel_to_ndc_scale
 
         self._sprite_id_to_idx: Dict[str, int] = {}
+
+    def _ensure_render_bucket_buffers(self, key_count: int):
+        if self._render_bucket_counts.size >= key_count:
+            return
+        self._render_bucket_counts = np.zeros(key_count, dtype=np.int32)
+        self._render_bucket_write_offsets = np.zeros(key_count, dtype=np.int32)
+        self._render_batch_starts = np.zeros(key_count, dtype=np.int32)
+        self._render_batch_counts = np.zeros(key_count, dtype=np.int32)
+        self._render_batch_tex = np.zeros(key_count, dtype=np.int32)
+        self._render_batch_cat = np.zeros(key_count, dtype=np.int32)
 
     # ===== 精灵注册 =====
 
@@ -541,26 +557,61 @@ class OptimizedBulletPool:
         return result
 
     def prepare_render_data_sorted(self) -> List[Dict]:
-        """准备按大小分类排序的渲染数据"""
-        grouped = self.prepare_render_data()
+        """准备按大小/纹理分组的渲染数据。
+
+        旧实现先按纹理分组，再对每个纹理按 category 二次 boolean mask。
+        弹量上来后，这会制造很多临时数组。这里用 Numba 做计数分桶，把渲染数据
+        写入预分配的连续数组，再用切片描述 batch。
+        """
+        uv_array = self.sprite_registry._uv_array
+        size_array = self.sprite_registry._size_array
+        category_array = self.sprite_registry._category_array
+        tex_idx_array = self.sprite_registry._texture_idx_array
+
+        texture_count = max(1, len(self.sprite_registry._texture_paths))
+        key_count = texture_count * 6
+        self._ensure_render_bucket_buffers(key_count)
+
+        batch_count, total_count = _prepare_render_data_sorted_numba(
+            self.data,
+            uv_array,
+            size_array,
+            category_array,
+            tex_idx_array,
+            float(self._scale_factor),
+            int(texture_count),
+            int(FLAG_IS_EMITTER),
+            self._render_positions,
+            self._render_angles,
+            self._render_uvs,
+            self._render_scales,
+            self._render_bucket_counts,
+            self._render_bucket_write_offsets,
+            self._render_batch_starts,
+            self._render_batch_counts,
+            self._render_batch_tex,
+            self._render_batch_cat,
+        )
+        if total_count == 0:
+            return []
 
         result = []
-        for category in range(6):
-            for tex_idx, data in grouped.items():
-                cat_mask = data['categories'] == category
-                count = np.sum(cat_mask)
-
-                if count > 0:
-                    result.append({
-                        'texture_idx': tex_idx,
-                        'texture_path': self.sprite_registry.get_texture_path(tex_idx),
-                        'positions': data['positions'][cat_mask],
-                        'angles': data['angles'][cat_mask],
-                        'uvs': data['uvs'][cat_mask],
-                        'scales': data['scales'][cat_mask],
-                        'count': count,
-                        'category': category,
-                    })
+        for i in range(int(batch_count)):
+            start = int(self._render_batch_starts[i])
+            count = int(self._render_batch_counts[i])
+            end = start + count
+            tex_idx = int(self._render_batch_tex[i])
+            category = int(self._render_batch_cat[i])
+            result.append({
+                'texture_idx': tex_idx,
+                'texture_path': self.sprite_registry.get_texture_path(tex_idx),
+                'positions': self._render_positions[start:end],
+                'angles': self._render_angles[start:end],
+                'uvs': self._render_uvs[start:end],
+                'scales': self._render_scales[start:end],
+                'count': count,
+                'category': category,
+            })
 
         return result
 
@@ -707,6 +758,84 @@ class OptimizedBulletPool:
 
 
 # ============= Numba JIT 优化函数 =============
+
+@njit(cache=True)
+def _prepare_render_data_sorted_numba(
+    data,
+    uv_array,
+    size_array,
+    category_array,
+    tex_idx_array,
+    scale_factor,
+    texture_count,
+    emitter_flag,
+    positions_out,
+    angles_out,
+    uvs_out,
+    scales_out,
+    bucket_counts,
+    bucket_write_offsets,
+    batch_starts,
+    batch_counts,
+    batch_tex,
+    batch_cat,
+):
+    key_count = texture_count * 6
+    for i in range(key_count):
+        bucket_counts[i] = 0
+
+    for i in range(data.shape[0]):
+        if data[i]['alive'] == 0:
+            continue
+        if (data[i]['flags'] & emitter_flag) != 0:
+            continue
+        sprite_idx = int(data[i]['sprite_idx'])
+        cat = int(category_array[sprite_idx])
+        tex = int(tex_idx_array[sprite_idx])
+        key = cat * texture_count + tex
+        if 0 <= key < key_count:
+            bucket_counts[key] += 1
+
+    write_pos = 0
+    batch_count = 0
+    for cat in range(6):
+        for tex in range(texture_count):
+            key = cat * texture_count + tex
+            count = bucket_counts[key]
+            bucket_write_offsets[key] = write_pos
+            if count > 0:
+                batch_starts[batch_count] = write_pos
+                batch_counts[batch_count] = count
+                batch_tex[batch_count] = tex
+                batch_cat[batch_count] = cat
+                batch_count += 1
+                write_pos += count
+
+    for i in range(data.shape[0]):
+        if data[i]['alive'] == 0:
+            continue
+        if (data[i]['flags'] & emitter_flag) != 0:
+            continue
+        sprite_idx = int(data[i]['sprite_idx'])
+        cat = int(category_array[sprite_idx])
+        tex = int(tex_idx_array[sprite_idx])
+        key = cat * texture_count + tex
+        if key < 0 or key >= key_count:
+            continue
+        dst = bucket_write_offsets[key]
+        positions_out[dst, 0] = data[i]['pos'][0]
+        positions_out[dst, 1] = data[i]['pos'][1]
+        angles_out[dst] = data[i]['render_angle']
+        uvs_out[dst, 0] = uv_array[sprite_idx, 0]
+        uvs_out[dst, 1] = uv_array[sprite_idx, 1]
+        uvs_out[dst, 2] = uv_array[sprite_idx, 2]
+        uvs_out[dst, 3] = uv_array[sprite_idx, 3]
+        scales_out[dst, 0] = size_array[sprite_idx, 0] * scale_factor
+        scales_out[dst, 1] = size_array[sprite_idx, 1] * scale_factor
+        bucket_write_offsets[key] = dst + 1
+
+    return batch_count, write_pos
+
 
 @njit(cache=True)
 def _update_bullets_optimized(data, dt):

@@ -1040,7 +1040,10 @@ def main():
                 "render_laser": 0.0,
                 "render_hitbox": 0.0,
                 "render_ui": 0.0,
+                "render_emoji_game": 0.0,
+                "render_spell_decl": 0.0,
                 "render_dialog": 0.0,
+                "render_overlay": 0.0,
                 "swap": 0.0,
             }
             profile_frames = 0
@@ -1081,7 +1084,10 @@ def main():
                     f"rlaser={avg_ms['render_laser']:.3f} "
                     f"rhit={avg_ms['render_hitbox']:.3f} "
                     f"rui={avg_ms['render_ui']:.3f} "
+                    f"remoji={avg_ms['render_emoji_game']:.3f} "
+                    f"rdecl={avg_ms['render_spell_decl']:.3f} "
                     f"rdialog={avg_ms['render_dialog']:.3f} "
+                    f"roverlay={avg_ms['render_overlay']:.3f} "
                     f"swap={avg_ms['swap']:.3f} "
                     f"fps={clock.get_fps():.1f} maxfps={clock.get_max_fps():.1f} "
                     f"bullets={bullets_alive} targets={enemy_count}"
@@ -1253,9 +1259,11 @@ def main():
                     loading_renderer.render(stage_manager.loading_info)
                     hud.state.fps = round(clock.get_fps())
                     hud.state.max_fps = round(clock.get_max_fps())
+                    loading_swap_start = time.perf_counter() if PROFILE_MODE else 0.0
                     window.swap_buffers()
                     if PROFILE_MODE:
-                        profile_acc["render"] += time.perf_counter() - loading_render_start
+                        profile_acc["render"] += loading_swap_start - loading_render_start
+                        profile_acc["swap"] += time.perf_counter() - loading_swap_start
 
                     if not paused:
                         loading_update_start = time.perf_counter() if PROFILE_MODE else 0.0
@@ -1307,9 +1315,11 @@ def main():
                     loading_renderer.render(stage_manager.loading_info)
                     hud.state.fps = round(clock.get_fps())
                     hud.state.max_fps = round(clock.get_max_fps())
+                    loading_swap_start = time.perf_counter() if PROFILE_MODE else 0.0
                     window.swap_buffers()
                     if PROFILE_MODE:
-                        profile_acc["render"] += time.perf_counter() - loading_render_start
+                        profile_acc["render"] += loading_swap_start - loading_render_start
+                        profile_acc["swap"] += time.perf_counter() - loading_swap_start
                         profile_acc["frame"] += time.perf_counter() - frame_start
                         profile_frames += 1
                         _profile_maybe_report()
@@ -1482,7 +1492,10 @@ def main():
                 
                 ctx.viewport = window.viewport
                 # 飘落 emoji 叠加在游戏画面上（在 HUD 之前，使其被 UI 覆盖）
+                emoji_game_start = time.perf_counter() if PROFILE_MODE else 0.0
                 emoji_sys.render_game()
+                if PROFILE_MODE:
+                    profile_acc["render_emoji_game"] += time.perf_counter() - emoji_game_start
 
                 ui_start = time.perf_counter() if PROFILE_MODE else 0.0
                 ui_renderer.render_hud(hud)
@@ -1508,7 +1521,10 @@ def main():
                 if active_boss is not None:
                     _decl = getattr(active_boss, 'declaration', None)
                     if _decl is not None:
+                        spell_decl_start = time.perf_counter() if PROFILE_MODE else 0.0
                         spell_declaration_renderer.render(_decl)
+                        if PROFILE_MODE:
+                            profile_acc["render_spell_decl"] += time.perf_counter() - spell_decl_start
 
                 if stage_manager.current_stage:
                     dialog_state = stage_manager.current_stage.get_dialog_renderer()
@@ -1523,6 +1539,7 @@ def main():
                         if PROFILE_MODE:
                             profile_acc["render_dialog"] += time.perf_counter() - dialog_start
 
+                overlay_start = time.perf_counter() if PROFILE_MODE else 0.0
                 if paused:
                     pause_menu_renderer.render(pause_menu_index)
 
@@ -1539,18 +1556,21 @@ def main():
                         "mode": "game_over",
                         "game_over_progress": _go_progress,
                     })
+                if PROFILE_MODE:
+                    profile_acc["render_overlay"] += time.perf_counter() - overlay_start
 
                 hud.state.fps = round(clock.get_fps())
                 hud.state.max_fps = round(clock.get_max_fps())
 
                 swap_start = time.perf_counter() if PROFILE_MODE else 0.0
+                if PROFILE_MODE:
+                    profile_acc["render"] += swap_start - render_start
                 window.swap_buffers()
                 if PROFILE_MODE:
                     profile_acc["swap"] += time.perf_counter() - swap_start
                     if render_segments:
                         for k, v in render_segments.items():
                             profile_acc[k] += v
-                    profile_acc["render"] += time.perf_counter() - render_start
                     profile_acc["frame"] += time.perf_counter() - frame_start
                     profile_frames += 1
                     _profile_maybe_report()
