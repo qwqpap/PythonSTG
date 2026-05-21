@@ -631,8 +631,8 @@ class Renderer:
         seg_start = time.perf_counter() if do_profile else 0.0
         if self.background_renderer:
             self.background_renderer.update(dt)
-            self.background_renderer.render()
-            # 背景渲染器内部会 ctx.screen.use() 把 viewport 重置为整个窗口，
+            self.background_renderer.render(target_viewport=viewport_rect)
+            # 背景渲染器可能在后处理路径里切换 framebuffer/screen。
             # 这里把 viewport 重新设回游戏视口，保证后续敌人/子弹/激光/玩家
             # 的 NDC 映射仍然落在正确的游戏区域。
             if viewport_rect:
@@ -695,12 +695,6 @@ class Renderer:
 
         # 还原视口
         self.ctx.viewport = prev_viewport
-
-        # 重新把 ui_bg 贴到游戏视口以外的 4 条边框区域
-        # （背景渲染器内部会 ctx.screen.use() 把 viewport 改回整窗口，
-        #  顺带把 HUD / 边框区域的 ui_bg 也刷掉——此处补回来）
-        if viewport_rect:
-            self._repaint_window_bg_outside_viewport(viewport_rect, (win_w, win_h))
 
         # 绘制游戏视口边框（在窗口坐标空间）
         if viewport_rect:

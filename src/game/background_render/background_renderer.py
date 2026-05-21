@@ -899,12 +899,14 @@ class BackgroundRenderer:
             if obj.position[2] > cam_z - 1.0  # 保留摄像机后方1单位内的对象
         ]
     
-    def render(self, use_post_process: bool = True):
+    def render(self, use_post_process: bool = True, target_viewport=None):
         """
         渲染背景
-        
+
         Args:
             use_post_process: 是否应用后处理效果
+            target_viewport: 可选 OpenGL viewport/scissor 矩形。传入时，直接渲染路径只会
+                清理/绘制该区域；后处理路径只把最终结果输出到该区域。
         """
         has_post_effect = (
             self.post_effect.invert_color or
@@ -912,18 +914,32 @@ class BackgroundRenderer:
             self.post_effect.hue_shift_enabled or
             self.post_effect.spellcard_bg_enabled
         )
-        
+
+        prev_viewport = self.ctx.viewport
+        prev_scissor = self.ctx.scissor
+
         if use_post_process and has_post_effect:
             # 渲染到帧缓冲
             self.framebuffer.use()
+            self.ctx.viewport = (0, 0, self.base_size[0], self.base_size[1])
+            self.ctx.scissor = None
             self._render_scene()
-            
+
             # 应用后处理并输出到屏幕
             self.ctx.screen.use()
+            if target_viewport is not None:
+                self.ctx.viewport = target_viewport
+                self.ctx.scissor = target_viewport
             self._apply_post_process()
         else:
             # 直接渲染到屏幕
+            if target_viewport is not None:
+                self.ctx.viewport = target_viewport
+                self.ctx.scissor = target_viewport
             self._render_scene()
+
+        self.ctx.scissor = prev_scissor
+        self.ctx.viewport = prev_viewport
     
     def _render_scene(self):
         """渲染场景 (2D图层 + 3D对象 + 程序化背景)"""
