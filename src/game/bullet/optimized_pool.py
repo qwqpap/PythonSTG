@@ -70,6 +70,7 @@ class SpawnRequest:
     flags: int = FLAG_RENDER_ANGLE_LOCKED  # 默认锁定
     angular_vel: float = 0.0
     render_angle: float = 0.0
+    render_scale: float = 1.0
     curve_type: int = 0
     curve_param: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
 
@@ -121,6 +122,7 @@ class OptimizedBulletPool:
             ('angle', 'f4'),            # 运动方向角（弧度，由 vel 重算）
             ('render_angle', 'f4'),     # 渲染朝向角（可自转）
             ('angular_vel', 'f4'),      # render_angle 的角速度（弧度/秒）
+            ('render_scale', 'f4'),     # per-bullet render size multiplier
             ('speed', 'f4'),            # 标量速度
             ('alive', 'i4'),            # 存活标记
             ('sprite_idx', 'u2'),       # 精灵索引
@@ -139,6 +141,7 @@ class OptimizedBulletPool:
         # 默认值
         self.data['time_scale'] = 1.0
         self.data['flags'] = FLAG_RENDER_ANGLE_LOCKED
+        self.data['render_scale'] = 1.0
 
         self.free_indices = list(range(max_bullets))
 
@@ -212,6 +215,7 @@ class OptimizedBulletPool:
         flags: int = FLAG_RENDER_ANGLE_LOCKED,
         angular_vel: float = 0.0,
         render_angle: float = None,
+        render_scale: float = 1.0,
         curve_type: int = 0,
         curve_param: Tuple[float, float, float, float] = None,
         **kwargs  # 忽略未知参数
@@ -245,6 +249,7 @@ class OptimizedBulletPool:
                 init=init, on_death=on_death,
                 friction=friction, tag=tag, time_scale=time_scale,
                 flags=flags, angular_vel=angular_vel, render_angle=render_angle,
+                render_scale=render_scale,
                 curve_type=curve_type, curve_param=curve_param,
             ))
             return -1
@@ -255,7 +260,8 @@ class OptimizedBulletPool:
         idx = self.free_indices.pop()
         self._write_bullet(idx, x, y, angle, speed, acc, sprite_idx, radius,
                            max_lifetime, friction, tag, time_scale, flags,
-                           angular_vel, render_angle, curve_type, curve_param)
+                           angular_vel, render_angle, render_scale,
+                           curve_type, curve_param)
 
         if on_death:
             self.death_handlers[idx] = on_death
@@ -269,7 +275,7 @@ class OptimizedBulletPool:
 
     def _write_bullet(self, idx, x, y, angle, speed, acc, sprite_idx, radius,
                       max_lifetime, friction, tag, time_scale, flags,
-                      angular_vel, render_angle, curve_type, curve_param):
+                      angular_vel, render_angle, render_scale, curve_type, curve_param):
         """写入子弹数据到指定 slot"""
         vx = math.cos(angle) * speed
         vy = math.sin(angle) * speed
@@ -281,6 +287,7 @@ class OptimizedBulletPool:
         d['angle'][idx] = angle
         d['render_angle'][idx] = render_angle
         d['angular_vel'][idx] = angular_vel
+        d['render_scale'][idx] = render_scale
         d['speed'][idx] = speed
         d['sprite_idx'][idx] = sprite_idx
         d['radius'][idx] = radius
@@ -347,6 +354,7 @@ class OptimizedBulletPool:
         d['angle'][use_indices] = angles[:n]
         d['render_angle'][use_indices] = angles[:n]
         d['angular_vel'][use_indices] = 0.0
+        d['render_scale'][use_indices] = 1.0
         d['speed'][use_indices] = speed
         d['sprite_idx'][use_indices] = sprite_idx
         d['radius'][use_indices] = radius
@@ -504,7 +512,7 @@ class OptimizedBulletPool:
         self._write_bullet(idx, req.x, req.y, req.angle, req.speed, req.acc,
                            req.sprite_idx, req.radius, req.max_lifetime,
                            req.friction, req.tag, req.time_scale, req.flags,
-                           req.angular_vel, req.render_angle,
+                           req.angular_vel, req.render_angle, req.render_scale,
                            req.curve_type, req.curve_param)
 
         if req.on_death:
@@ -535,7 +543,7 @@ class OptimizedBulletPool:
         tex_idx_array = self.sprite_registry._texture_idx_array
 
         uvs = uv_array[sprite_indices]
-        scales = size_array[sprite_indices] * self._scale_factor
+        scales = size_array[sprite_indices] * active_data['render_scale'][:, None] * self._scale_factor
         categories = category_array[sprite_indices]
         tex_indices = tex_idx_array[sprite_indices]
 
@@ -648,6 +656,7 @@ class OptimizedBulletPool:
         # 还原默认值
         self.data['time_scale'] = 1.0
         self.data['flags'] = FLAG_RENDER_ANGLE_LOCKED
+        self.data['render_scale'] = 1.0
 
     # ===== 极坐标运动 API =====
 
@@ -830,8 +839,9 @@ def _prepare_render_data_sorted_numba(
         uvs_out[dst, 1] = uv_array[sprite_idx, 1]
         uvs_out[dst, 2] = uv_array[sprite_idx, 2]
         uvs_out[dst, 3] = uv_array[sprite_idx, 3]
-        scales_out[dst, 0] = size_array[sprite_idx, 0] * scale_factor
-        scales_out[dst, 1] = size_array[sprite_idx, 1] * scale_factor
+        render_scale = data[i]['render_scale']
+        scales_out[dst, 0] = size_array[sprite_idx, 0] * render_scale * scale_factor
+        scales_out[dst, 1] = size_array[sprite_idx, 1] * render_scale * scale_factor
         bucket_write_offsets[key] = dst + 1
 
     return batch_count, write_pos

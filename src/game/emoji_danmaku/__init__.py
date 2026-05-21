@@ -31,6 +31,14 @@ from typing import TYPE_CHECKING
 # emoji_gl_renderer 依赖 moderngl，延迟到运行时导入（主进程有 GL 上下文）
 from .emoji_pool import BASE_RENDER_PX_SIZE, EMOJI_LIST, EmojiObjectPool
 from .heat_system import HeatSystem
+from .main_pool_bridge import (
+    TAG_EXTERNAL_DANMAKU,
+    register_emoji_bullet_assets,
+    spawn_aimed_emoji_bullets,
+    spawn_bloom_emoji_bullets,
+    spawn_falling_emoji_bullet,
+    spawn_scatter_emoji_bullets,
+)
 from .udp_receiver import UDPReceiver
 
 if TYPE_CHECKING:
@@ -102,12 +110,14 @@ class EmojiDanmakuSystem:
         panel_origin: tuple[int, int],
         udp_host: str = "127.0.0.1",
         udp_port: int = 9999,
+        bullet_pool=None,
     ) -> None:
         self.ctx = ctx
         self.screen_size = screen_size
         self.game_viewport = game_viewport
         self.gvx, self.gvy, self.gvw, self.gvh = game_viewport
         self.panel_origin = panel_origin
+        self._bullet_pool = bullet_pool
 
         self._receiver = UDPReceiver(host=udp_host, port=udp_port)
         self._pool = EmojiObjectPool(game_viewport)
@@ -133,6 +143,8 @@ class EmojiDanmakuSystem:
         """
         self._pool.falling.clear()
         self._pool.projectiles.clear()
+        if self._bullet_pool is not None and hasattr(self._bullet_pool, "clear_by_tag"):
+            self._bullet_pool.clear_by_tag(TAG_EXTERNAL_DANMAKU)
 
     # ── 主循环接口 ────────────────────────────────────────────────────────────
 
@@ -146,10 +158,14 @@ class EmojiDanmakuSystem:
         for ev in self._receiver.poll():
             emoji = ev["emoji"]
             self._heat.add_heat(emoji)
-            self._pool.spawn_falling(emoji)
+            if self._bullet_pool is not None:
+                spawn_falling_emoji_bullet(self._bullet_pool, self.game_viewport, emoji)
+            else:
+                self._pool.spawn_falling(emoji)
 
         # 2. 更新池（飘落 + 发射弹）
-        self._pool.update(dt)
+        if self._bullet_pool is None:
+            self._pool.update(dt)
 
         # 3. 推进热度状态机
         self._heat.update(dt)
@@ -163,6 +179,8 @@ class EmojiDanmakuSystem:
         import moderngl as mgl
         self.ctx.enable(mgl.BLEND)
         self.ctx.blend_func = mgl.SRC_ALPHA, mgl.ONE_MINUS_SRC_ALPHA
+        if self._bullet_pool is not None:
+            return
         all_objs = self._pool.falling + self._pool.projectiles
         self._gl.render_list(all_objs, clip_rect=self.game_viewport)
 
@@ -240,6 +258,9 @@ class EmojiDanmakuSystem:
           emoji 弹储存的是屏幕像素坐标，先逆变换到游戏坐标再比较，
           避免 Y_SCALE 带来的误差。
         """
+        if getattr(self, "_bullet_pool", None) is not None:
+            return False
+
         collidable = self._pool.falling + self._pool.projectiles
         if not collidable:
             return False
@@ -291,11 +312,20 @@ class EmojiDanmakuSystem:
         )
 
         if pattern == "开花":
-            self._pool.spawn_bloom(emoji, ox, oy, count=16)
+            if self._bullet_pool is not None:
+                spawn_bloom_emoji_bullets(self._bullet_pool, self.game_viewport, emoji, ox, oy, count=16)
+            else:
+                self._pool.spawn_bloom(emoji, ox, oy, count=16)
         elif pattern == "自机狙":
-            self._pool.spawn_aimed(emoji, ox, oy, player_sx, player_sy)
+            if self._bullet_pool is not None:
+                spawn_aimed_emoji_bullets(self._bullet_pool, self.game_viewport, emoji, ox, oy, player_sx, player_sy)
+            else:
+                self._pool.spawn_aimed(emoji, ox, oy, player_sx, player_sy)
         elif pattern == "散射弹":
-            self._pool.spawn_scatter(emoji, ox, oy)
+            if self._bullet_pool is not None:
+                spawn_scatter_emoji_bullets(self._bullet_pool, self.game_viewport, emoji, ox, oy)
+            else:
+                self._pool.spawn_scatter(emoji, ox, oy)
 
     def _render_draw_overlay(self, ui_renderer: "UIRenderer") -> None:
         """在游戏区域中央渲染抽奖动画文字覆盖层。"""
