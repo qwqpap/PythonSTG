@@ -23,3 +23,7 @@ BOMB_PROTECTED_TAGS = np.array(
     ],
     dtype=np.int32,
 )
+
+# Enemy bullets created from external danmaku input such as the QQBot UDP bridge.
+# They are intentionally bomb-clearable, so this tag is not part of BOMB_PROTECTED_TAGS.
+TAG_EXTERNAL_DANMAKU = -2001

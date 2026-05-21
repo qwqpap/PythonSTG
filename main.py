@@ -850,6 +850,8 @@ def main():
             _show_loading("Registering sprites...", 0.50)
             sprite_manager._sync_from_asset_manager()
             initialize_sprite_registry_from_assets(sprite_manager, textures)
+            from src.game.emoji_danmaku import register_emoji_bullet_assets
+            register_emoji_bullet_assets(ctx, textures)
 
             renderer = Renderer(ctx, base_size, sprite_manager, textures, sprite_uv_map)
 
@@ -880,16 +882,6 @@ def main():
                       bg_color=bg_color, bg_alpha=bg_alpha,
                       layout_override=layout_override)
             ui_renderer = UIRenderer(ctx, screen_width=screen_size[0], screen_height=screen_size[1])
-
-            # ── QQ 群弹幕 emoji 子系统 ────────────────────────────────────────
-            from src.game.emoji_danmaku import EmojiDanmakuSystem
-            emoji_sys = EmojiDanmakuSystem(
-                ctx=ctx,
-                screen_size=screen_size,
-                game_viewport=game_viewport,
-                panel_origin=(panel_origin_x, panel_origin_y),
-            )
-            emoji_sys.start()
 
             _show_loading("Initializing UI...", 0.68)
             dialog_gl_renderer = DialogGLRenderer(ctx, screen_size[0], screen_size[1], game_viewport)
@@ -966,6 +958,17 @@ def main():
                 background_renderer=background_renderer,
                 character=run_character,
             )
+
+            # QQBot UDP emoji bullets are spawned into the main enemy bullet pool.
+            from src.game.emoji_danmaku import EmojiDanmakuSystem
+            emoji_sys = EmojiDanmakuSystem(
+                ctx=ctx,
+                screen_size=screen_size,
+                game_viewport=game_viewport,
+                panel_origin=(panel_origin_x, panel_origin_y),
+                bullet_pool=bullet_pool,
+            )
+            emoji_sys.start()
 
             # ===== 录制器 =====
             replay_recorder = None
