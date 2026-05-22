@@ -1,0 +1,15 @@
+.vp-mermaid {
+  margin: 24px 0;
+  overflow-x: auto;
+  padding: 18px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+}
+
+.vp-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}

@@ -11,6 +11,11 @@
 *.nbi
 tmpclaude-*-cwd
 
+# Node / VitePress docs build output
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
 # Local report/export artifacts
 .edge-headless/
 .edge-headless-pdf/
@@ -21,6 +26,11 @@ tools/render_markdown_pdf.py
 
 # Editor / IDE local config
 imgui.ini
+.claude/worktrees/
+
+# Local scratch tests
+tests/test_player_shot_fire_rate.py
+tests/test_window_key_sync.py
 
 # Local recordings / large media
 *.mp4

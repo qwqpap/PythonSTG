@@ -73,8 +73,9 @@ python tools/editor_launcher.py
 
 每个编辑器在独立进程中运行，关闭启动器不会影响已打开的编辑器。
 
-!!! tip "直接启动"
-    你也可以跳过启动器，直接运行各编辑器的 Python 脚本。
+::: tip 直接启动
+你也可以跳过启动器，直接运行各编辑器的 Python 脚本。
+:::
 
 ---
 
@@ -219,9 +220,10 @@ class StageContext:
         ...
 ```
 
-!!! note "兼容性"
-    即使 `bullet_aliases.json` 不存在，引擎也会回退到内置的 `BULLET_TYPE_MAP` / `COLOR_MAP` 硬编码映射。
-    新增的弹幕类型（如 `arrow_s`, `grain_a`, `kite` 等）只能通过 JSON 别名表使用。
+::: info 兼容性
+即使 `bullet_aliases.json` 不存在，引擎也会回退到内置的 `BULLET_TYPE_MAP` / `COLOR_MAP` 硬编码映射。
+新增的弹幕类型（如 `arrow_s`, `grain_a`, `kite` 等）只能通过 JSON 别名表使用。
+:::
 
 ### 为什么不同类型的颜色数不同？
 
@@ -287,8 +289,9 @@ python tools/asset_manager_qt.py
 }
 ```
 
-!!! warning "修改立即生效"
-    纹理编辑器的保存直接写入引擎使用的 JSON 配置文件，修改后重启游戏即可看到效果。
+::: warning 修改立即生效
+纹理编辑器的保存直接写入引擎使用的 JSON 配置文件，修改后重启游戏即可看到效果。
+:::
 
 ---
 

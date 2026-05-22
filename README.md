@@ -86,7 +86,7 @@ flowchart TB
     content["game_content/stages/<br/>关卡内容"]
     assets["assets/<br/>纹理、音频、字体、自机配置"]
     tools["tools/<br/>PyQt5 编辑器工具"]
-    docs["docs/<br/>mkdocs 文档"]
+    docs["docs/<br/>VitePress 文档"]
     tests["tests/<br/>单元测试"]
 
     root --> main
@@ -126,11 +126,11 @@ flowchart TB
 | [架构概览](docs/architecture.md) | 引擎分层、模块依赖、数据流 |
 | [纹理资产系统](docs/TEXTURE_ASSET_SYSTEM.md) | 图集加载、精灵定义、动画配置 |
 
-也可以本地启 mkdocs 站点：
+也可以本地启动 VitePress 文档站点：
 
 ```bash
-pip install mkdocs mkdocs-material
-mkdocs serve
+npm install
+npm run docs:dev
 ```
 
 ---
