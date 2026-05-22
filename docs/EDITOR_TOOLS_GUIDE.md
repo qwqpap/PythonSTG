@@ -33,14 +33,13 @@ pystg 提供三个 PyQt5 可视化编辑器，用于管理游戏资产配置：
 
 ### 文件结构
 
-```
-tools/
-├── editor_launcher.py          # 统一启动器
-├── editor_common.py            # 共享模块（主题、缓存、数据加载）
-├── bullet_alias_manager.py     # 弹幕别名管理器
-├── asset_manager_qt.py         # 纹理资产编辑器
-└── player_editor.py            # 自机编辑器
-```
+| 文件 | 作用 |
+|------|------|
+| `tools/editor_launcher.py` | 统一启动器 |
+| `tools/editor_common.py` | 共享模块：主题、缓存、数据加载 |
+| `tools/bullet_alias_manager.py` | 弹幕别名管理器 |
+| `tools/asset_manager_qt.py` | 纹理资产编辑器 |
+| `tools/player_editor.py` | 自机编辑器 |
 
 ---
 
@@ -162,21 +161,7 @@ ctx.spawn_bullet(x, y, speed, angle, bullet_type="ball_m", color="red")
 
 弹出的精灵选取器提供所有可用精灵的可视化浏览：
 
-```
-┌─ 选择精灵 ──────────────────────────┐
-│                                      │
-│  🔍 [搜索框: ball_mid          ]     │
-│  📁 [图集过滤: 全部 ▼          ]     │
-│                                      │
-│  ┌────┬────┬────┬────┬────┬...       │
-│  │spr1│spr2│spr3│spr4│spr5│...       │
-│  ├────┼────┼────┼────┼────┤          │
-│  │spr6│spr7│spr8│spr9│ ...│          │
-│  └────┴────┴────┴────┴────┘          │
-│                                      │
-│        [  确定  ] [  取消  ]         │
-└──────────────────────────────────────┘
-```
+![精灵选取器界面示意图](assets/sprite-picker-mockup.svg)
 
 - 每行 10 个缩略图（64×64 像素）
 - 鼠标悬停显示精灵名称和所属图集
@@ -331,15 +316,12 @@ python tools/player_editor.py
 
 自机配置位于 `assets/players/<角色名>/config.json`：
 
-```
-assets/players/
-├── reimu/
-│   ├── config.json       # 角色配置（动画、射击、子机等）
-│   └── reimu.png         # 角色精灵图
-└── sakuya/
-    ├── config.json
-    └── sakuya.png
-```
+| 路径 | 内容 |
+|------|------|
+| `assets/players/reimu/config.json` | 角色配置：动画、射击、子机等 |
+| `assets/players/reimu/reimu.png` | 角色精灵图 |
+| `assets/players/sakuya/config.json` | 角色配置 |
+| `assets/players/sakuya/sakuya.png` | 角色精灵图 |
 
 ---
 

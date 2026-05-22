@@ -41,20 +41,16 @@
 
 ## 2. 推荐目录结构
 
-```text
-game_content/stages/stage1/
-├── __init__.py
-├── stage_script.py          # 整面流程
-├── waves/                   # 道中波次
-│   └── *.py
-├── enemies/                 # 可复用小怪
-│   └── *.py
-├── spellcards/              # Boss 攻击
-│   └── *.py
-├── bosses/                  # Boss 定义（可选）
-├── dialogue/                # 对话
-└── audio/                   # 关卡私有音频
-```
+| 路径 | 内容 |
+|------|------|
+| `game_content/stages/stage1/__init__.py` | 关卡包入口 |
+| `game_content/stages/stage1/stage_script.py` | 整面流程 |
+| `game_content/stages/stage1/waves/*.py` | 道中波次 |
+| `game_content/stages/stage1/enemies/*.py` | 可复用小怪 |
+| `game_content/stages/stage1/spellcards/*.py` | Boss 攻击 |
+| `game_content/stages/stage1/bosses/` | Boss 定义，可选 |
+| `game_content/stages/stage1/dialogue/` | 对话 |
+| `game_content/stages/stage1/audio/` | 关卡私有音频 |
 
 ---
 

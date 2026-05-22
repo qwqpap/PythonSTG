@@ -78,45 +78,30 @@ pip install PyQt5   # 编辑器工具
 
 ## 项目结构
 
-```
-PythonSTG/
-├── main.py                      # 入口、主循环、游戏状态机
-├── src/                         # 引擎代码
-│   ├── core/                    # 配置、碰撞、窗口、输入
-│   ├── game/
-│   │   ├── bullet/              # 子弹池（Numba JIT + NumPy 结构化数组）
-│   │   ├── stage/               # 关卡系统核心（StageScript / Wave / SpellCard / Context）
-│   │   ├── player/              # 玩家、射击、Option、动画状态机
-│   │   ├── boss/                # Boss 管理
-│   │   ├── laser.py             # 激光系统（直线 / 曲线，池化管理）
-│   │   ├── item.py              # 道具系统
-│   │   └── audio.py             # 双层音频
-│   ├── render/                  # OpenGL 渲染管线（实例化渲染）
-│   ├── resource/                # 纹理图集 / 精灵管理
-│   └── ui/                      # HUD、对话框、菜单
-│
-├── game_content/                # 关卡内容（写弹幕在这里，与引擎解耦）
-│   └── stages/
-│       ├── stage1/              # Stage 1（最完整的参考实现）
-│       ├── stage2/ stage3/      # 后续关卡（骨架）
-│       └── stage_test/          # 测试关卡
-│
-├── assets/                      # 全局游戏资源
-│   ├── images/                  # 子弹/敌人/玩家/道具/UI 图集
-│   ├── audio/                   # 全局 SE 与 BGM
-│   ├── fonts/                   # 位图字体
-│   ├── players/                 # 自机配置
-│   ├── configs/                 # 敌人预设等 JSON 配置
-│   └── bullet_aliases.json      # 弹幕类型 + 颜色 → 精灵 映射表
-│
-├── tools/                       # PyQt5 编辑器工具
-│   ├── editor_launcher.py       # 统一启动器
-│   ├── bullet_alias_manager.py  # 弹幕别名管理器
-│   ├── asset_manager_qt.py      # 纹理资产编辑器
-│   └── player_editor.py         # 自机编辑器
-│
-├── docs/                        # 文档（mkdocs）
-└── tests/                       # 单元测试
+```mermaid
+flowchart TB
+    root["PythonSTG"]
+    main["main.py<br/>入口、主循环、状态机"]
+    src["src/<br/>引擎代码"]
+    content["game_content/stages/<br/>关卡内容"]
+    assets["assets/<br/>纹理、音频、字体、自机配置"]
+    tools["tools/<br/>PyQt5 编辑器工具"]
+    docs["docs/<br/>mkdocs 文档"]
+    tests["tests/<br/>单元测试"]
+
+    root --> main
+    root --> src
+    root --> content
+    root --> assets
+    root --> tools
+    root --> docs
+    root --> tests
+
+    src --> core["core：配置 / 碰撞 / 窗口 / 输入"]
+    src --> game["game：子弹 / 关卡 / 玩家 / Boss / 激光 / 道具 / 音频"]
+    src --> render["render：OpenGL 渲染管线"]
+    src --> resource["resource：纹理图集 / 精灵管理"]
+    src --> ui["ui：HUD / 对话框 / 菜单"]
 ```
 
 ---

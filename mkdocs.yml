@@ -20,5 +20,6 @@ markdown_extensions:
   - codehilite
   - footnotes
   - tables
+  - pymdownx.superfences
 extra:
   logo: logo.png

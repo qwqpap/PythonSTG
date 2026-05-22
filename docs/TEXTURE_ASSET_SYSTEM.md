@@ -235,16 +235,11 @@ new_manager.load_legacy_config("images/bullet1.json")
 
 ## 文件结构示例
 
-```
-assets/
-├── images/
-│   ├── bullet/
-│   │   ├── bullet_atlas.png      # 纹理图集
-│   │   └── bullet_atlas.json     # 配置文件
-│   ├── enemy/
-│   │   ├── enemy_atlas.png
-│   │   └── enemy_atlas.json
-│   └── item/
-│       ├── item.png
-│       └── item.json
-```
+| 路径 | 用途 |
+|------|------|
+| `assets/images/bullet/bullet_atlas.png` | 子弹纹理图集 |
+| `assets/images/bullet/bullet_atlas.json` | 子弹精灵和动画配置 |
+| `assets/images/enemy/enemy_atlas.png` | 敌人纹理图集 |
+| `assets/images/enemy/enemy_atlas.json` | 敌人精灵配置 |
+| `assets/images/item/item.png` | 道具纹理 |
+| `assets/images/item/item.json` | 道具精灵配置 |

@@ -2,19 +2,26 @@
 
 ## 分层结构
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        入口 main.py                          │
-├──────────────┬──────────────┬──────────────┬────────────────┤
-│   src.core   │ src.resource │  src.game    │    src.ui      │
-│  配置 / 碰撞  │  纹理 / 精灵  │  游戏逻辑     │  HUD / 菜单    │
-├──────────────┴──────────────┴──────┬───────┴────────────────┤
-│                              src.render                      │
-│                             渲染管线                          │
-├──────────────────────────────────────────────────────────────┤
-│                        game_content/                          │
-│                    关卡内容（弹幕脚本）                         │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    main["main.py<br/>入口、主循环、状态机"]
+    core["src.core<br/>配置 / 碰撞 / 输入"]
+    resource["src.resource<br/>纹理 / 精灵 / 图集"]
+    game["src.game<br/>子弹 / 关卡 / 玩家 / Boss"]
+    ui["src.ui<br/>HUD / 菜单 / 对话"]
+    render["src.render<br/>OpenGL 渲染管线"]
+    content["game_content/<br/>关卡内容与弹幕脚本"]
+    ctx["StageContext<br/>内容和引擎之间的边界"]
+
+    main --> core
+    main --> resource
+    main --> game
+    main --> ui
+    core --> render
+    resource --> render
+    game --> render
+    ui --> render
+    content --> ctx --> game
 ```
 
 引擎和内容通过 `StageContext` 桥接——内容脚本只能通过 `ctx` 调用引擎能力，不能直接 import 引擎内部模块。
@@ -92,39 +99,47 @@
 
 ### 一帧的执行顺序
 
-```
-输入处理 → 玩家更新 → 关卡协程推进 → 子弹更新 → 激光更新 → 碰撞检测 → 道具更新 → 渲染
+```mermaid
+flowchart LR
+    input["输入处理"] --> player["玩家更新"]
+    player --> stage["关卡协程推进"]
+    stage --> bullet["子弹更新"]
+    bullet --> laser["激光更新"]
+    laser --> collision["碰撞检测"]
+    collision --> item["道具更新"]
+    item --> render["渲染"]
 ```
 
 ### 关卡系统内部
 
-```
-StageScript.run()
-  │
-  ├── run_wave(WaveClass)        → 实例化 Wave，执行其 run() 协程
-  │
-  ├── play_dialogue([...])       → 阻塞式对话，完成后继续
-  │
-  └── run_boss(BossDef)          → 进入 Boss 战
-        │
-        └── 按顺序执行 phases:
-              ├── NonSpell.run()   → 非符弹幕循环
-              └── SpellCard.run()  → 符卡弹幕循环
+```mermaid
+flowchart TB
+    stage["StageScript.run()"]
+    wave["run_wave(WaveClass)<br/>实例化 Wave 并执行 run()"]
+    dialogue["play_dialogue([...])<br/>阻塞式对话，完成后继续"]
+    boss["run_boss(BossDef)<br/>进入 Boss 战"]
+    phases["按顺序执行 phases"]
+    nonspell["NonSpell.run()<br/>非符弹幕循环"]
+    spell["SpellCard.run()<br/>符卡弹幕循环"]
+
+    stage --> wave --> dialogue --> boss --> phases
+    phases --> nonspell
+    phases --> spell
 ```
 
 每个协程（`run()`）内部通过 `await self.wait(N)` 控制时间，引擎每帧推进一步。
 
 ### 子弹生命周期
 
-```
-脚本调用 self.fire() → StageContext → BulletPool.spawn()
-                                          │
-                                    结构化 NumPy 数组
-                                    (x, y, speed, angle, ...)
-                                          │
-                              每帧 Numba JIT 批量更新位置
-                                          │
-                              出界 / 碰撞 → 标记为 dead → 回收槽位
+```mermaid
+flowchart LR
+    fire["脚本调用 self.fire()"] --> ctx["StageContext"]
+    ctx --> spawn["BulletPool.spawn()"]
+    spawn --> data["结构化 NumPy 数组<br/>x, y, speed, angle, ..."]
+    data --> jit["每帧 Numba JIT 批量更新位置"]
+    jit --> endstate{"出界或碰撞?"}
+    endstate -- 否 --> data
+    endstate -- 是 --> recycle["标记 dead<br/>回收槽位"]
 ```
 
 ## StageContext：引擎与内容的桥梁
@@ -132,14 +147,37 @@ StageScript.run()
 内容脚本（SpellCard、Wave、EnemyScript）不直接操作 BulletPool 或 Player。
 它们通过 `self.fire()` / `self.fire_circle()` 等方法，最终委托给 `StageContext`，由 Context 调用引擎内部 API。
 
-```
-内容脚本                    StageContext                     引擎
-──────────                 ────────────                    ──────
-self.fire(...)         →   ctx.create_bullet(...)      →   BulletPool.spawn()
-self.fire_circle(...)  →   ctx.create_bullet() × N     →   BulletPool.spawn() × N
-self.play_se(...)      →   ctx.audio_manager.play_se() →   AudioManager
-self.clear_bullets()   →   ctx.clear_bullets()         →   BulletPool.clear()
-self.boss.move_to(...) →   BossProxy.move_to()         →   协程驱动的平滑移动
+```mermaid
+flowchart LR
+    subgraph content["内容脚本"]
+        fire["self.fire(...)"]
+        circle["self.fire_circle(...)"]
+        se["self.play_se(...)"]
+        clear["self.clear_bullets()"]
+        move["self.boss.move_to(...)"]
+    end
+
+    subgraph context["StageContext"]
+        create["ctx.create_bullet(...)"]
+        createMany["ctx.create_bullet() x N"]
+        audio["ctx.audio_manager.play_se()"]
+        clearCtx["ctx.clear_bullets()"]
+        proxy["BossProxy.move_to()"]
+    end
+
+    subgraph engine["引擎"]
+        bullet["BulletPool.spawn()"]
+        bulletMany["BulletPool.spawn() x N"]
+        audioMgr["AudioManager"]
+        clearPool["BulletPool.clear()"]
+        coroutine["协程驱动的平滑移动"]
+    end
+
+    fire --> create --> bullet
+    circle --> createMany --> bulletMany
+    se --> audio --> audioMgr
+    clear --> clearCtx --> clearPool
+    move --> proxy --> coroutine
 ```
 
 这样做的好处：
@@ -152,8 +190,11 @@ self.boss.move_to(...) →   BossProxy.move_to()         →   协程驱动的�
 
 渲染按层级从后到前：
 
-```
-背景层 → 敌人层 → 敌弹层 → 激光层 → 自机弹层 → 自机层 → 道具层 → UI 层 → 对话层
+```mermaid
+flowchart LR
+    bg["背景层"] --> enemy["敌人层"] --> enemyBullet["敌弹层"] --> laser["激光层"]
+    laser --> playerShot["自机弹层"] --> player["自机层"] --> item["道具层"]
+    item --> ui["UI 层"] --> dialog["对话层"]
 ```
 
 子弹渲染使用 OpenGL 实例化绘制（instanced rendering），一次 draw call 绘制所有同类型子弹。
@@ -162,14 +203,13 @@ self.boss.move_to(...) →   BossProxy.move_to()         →   协程驱动的�
 
 双层查找机制：
 
-```
-play_se("shoot")
-    │
-    ├── 先找 StageAudioBank（关卡私有，可选）
-    │     └── game_content/stages/stageN/audio/se/
-    │
-    └── 再找 GameAudioBank（全局）
-          └── assets/audio/se/
+```mermaid
+flowchart TB
+    play["play_se('shoot')"] --> stageBank{"StageAudioBank<br/>有同名音效?"}
+    stageBank -- 是 --> stagePath["game_content/stages/stageN/audio/se/"]
+    stageBank -- 否 --> gameBank{"GameAudioBank<br/>有同名音效?"}
+    gameBank -- 是 --> globalPath["assets/audio/se/"]
+    gameBank -- 否 --> warn["记录缺失并跳过播放"]
 ```
 
 关卡私有音效可以覆盖全局同名音效。BGM 同理。

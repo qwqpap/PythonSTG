@@ -239,42 +239,16 @@ python tools/enemy/list_presets.py --usage fairy_red --behavior rush_in_shoot_le
 
 ### UI 组件设计
 
-```
-┌─────────────────────────────────┐
-│ 敌人创建器                      │
-├─────────────────────────────────┤
-│                                 │
-│ 敌人预设:  [fairy_red ▼]       │   ← 从 enemy_presets.json 加载
-│                                 │
-│ 行为预设:  [rush_in_shoot_leave│   ← 从 behavior_presets.json 加载
-│            ▼]                   │
-│                                 │
-│ ┌─ 覆盖属性 ──────────────────┐│
-│ │                             ││
-│ │ HP:    [30 ]  得分: [100 ] ││   ← 可选：覆盖默认值
-│ │                             ││
-│ │ 位置:  X [0.0] Y [1.0]     ││
-│ │                             ││
-│ └─────────────────────────────┘│
-│                                 │
-│      [预览]  [创建]  [取消]    │
-└─────────────────────────────────┘
-```
+![敌人创建器界面示意图](assets/enemy-creator-mockup.svg)
 
 ### 数据流
 
-```
-用户选择 → 加载预设 → 预览属性 → 生成代码 → 保存到文件
-   │           │          │          │          │
-   │           │          │          │          └→ game_content/stages/.../
-   │           │          │          │
-   │           │          │          └→ create_preset_enemy(...)
-   │           │          │
-   │           │          └→ 显示：HP=30, 速度=2.0, 颜色=red
-   │           │
-   │           └→ 读取 enemy_presets.json
-   │
-   └→ 下拉菜单: fairy_red
+```mermaid
+flowchart LR
+    choose["用户选择<br/>fairy_red"] --> load["加载预设<br/>enemy_presets.json"]
+    load --> preview["预览属性<br/>HP=30, 速度=2.0, 颜色=red"]
+    preview --> generate["生成代码<br/>create_preset_enemy(...)"]
+    generate --> save["保存到文件<br/>game_content/stages/..."]
 ```
 
 ## 性能和最佳实践

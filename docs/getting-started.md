@@ -38,47 +38,34 @@ python main.py --profile          # 性能分析
 
 ## 项目结构
 
-```
-PythonSTG/
-├── main.py                  # 游戏入口
-│
-├── src/                     # 引擎代码（除非你在改引擎，否则不要动）
-│   ├── core/                # 配置、碰撞检测、接口定义、窗口、输入
-│   ├── game/
-│   │   ├── bullet/          # 子弹池（Numba JIT 加速）
-│   │   ├── stage/           # 关卡系统核心（StageScript / Wave / SpellCard / Context）
-│   │   ├── player/          # 玩家系统（移动、射击、Option）
-│   │   ├── boss/            # Boss 管理
-│   │   ├── laser.py         # 激光系统
-│   │   ├── item.py          # 道具系统
-│   │   └── audio.py         # 音频系统
-│   ├── render/              # 渲染管线
-│   ├── resource/            # 纹理和精灵管理
-│   └── ui/                  # HUD、菜单、对话框
-│
-├── game_content/            # 关卡内容（写弹幕在这里）
-│   └── stages/
-│       ├── stage1/          # 第 1 面（最完整的参考）
-│       ├── stage2/          # 第 2 面（骨架）
-│       ├── stage3/          # 第 3 面（骨架）
-│       └── stage_test/      # 测试关
-│
-├── assets/                  # 全局游戏资源
-│   ├── images/              # 纹理图集
-│   ├── audio/               # 全局 SE 与 BGM
-│   ├── fonts/               # 字体
-│   ├── players/             # 自机配置
-│   ├── configs/             # 敌人预设等 JSON
-│   └── bullet_aliases.json  # 弹幕类型 + 颜色 → 精灵 映射表
-│
-├── tools/                   # PyQt5 编辑器工具
-│   ├── editor_launcher.py   # 统一启动器
-│   ├── bullet_alias_manager.py
-│   ├── asset_manager_qt.py
-│   └── player_editor.py
-│
-├── docs/                    # 文档
-└── tests/                   # pytest 测试
+```mermaid
+flowchart TB
+    root["PythonSTG"]
+    main["main.py<br/>游戏入口"]
+    src["src/<br/>引擎代码"]
+    gameContent["game_content/stages/<br/>关卡内容"]
+    assets["assets/<br/>全局资源"]
+    tools["tools/<br/>PyQt5 编辑器"]
+    docs["docs/<br/>文档"]
+    tests["tests/<br/>pytest 测试"]
+
+    root --> main
+    root --> src
+    root --> gameContent
+    root --> assets
+    root --> tools
+    root --> docs
+    root --> tests
+
+    src --> core["core：配置、碰撞、窗口、输入"]
+    src --> game["game：子弹、关卡、玩家、Boss、激光、道具、音频"]
+    src --> render["render：渲染管线"]
+    src --> resource["resource：纹理和精灵管理"]
+    src --> ui["ui：HUD、菜单、对话框"]
+
+    gameContent --> stage1["stage1：完整参考"]
+    gameContent --> stage23["stage2 / stage3：骨架"]
+    gameContent --> stageTest["stage_test：测试关"]
 ```
 
 ## 引擎与内容的边界
@@ -122,24 +109,15 @@ class MySpell(SpellCard):
 
 ## 一个关卡长什么样
 
-```
-game_content/stages/stage1/
-├── __init__.py
-├── stage_script.py          # 整面流程（必需）
-├── waves/                   # 道中波次
-│   ├── opening_wave.py
-│   └── fairy_wave.py
-├── spellcards/              # Boss 符卡
-│   ├── nonspell_1.py
-│   └── spell_1.py
-├── enemies/                 # 敌人定义
-│   └── fairy.py
-├── dialogue/                # 对话脚本
-│   └── boss_dialogue.py
-└── audio/                   # 关卡私有音频（可选，覆盖全局同名音效）
-    ├── se/
-    └── music/
-```
+| 路径 | 作用 |
+|------|------|
+| `game_content/stages/stage1/__init__.py` | 关卡包入口 |
+| `game_content/stages/stage1/stage_script.py` | 整面流程，必需 |
+| `game_content/stages/stage1/waves/` | 道中波次，如 `opening_wave.py`、`fairy_wave.py` |
+| `game_content/stages/stage1/spellcards/` | Boss 符卡，如 `nonspell_1.py`、`spell_1.py` |
+| `game_content/stages/stage1/enemies/` | 可复用敌人定义 |
+| `game_content/stages/stage1/dialogue/` | 对话脚本 |
+| `game_content/stages/stage1/audio/` | 关卡私有音频，可覆盖全局同名音效 |
 
 `stage_script.py` 控制整个关卡的流程：
 
