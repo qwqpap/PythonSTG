@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: PySTG
-  text: 弹幕射击引擎
-  tagline: Python + OpenGL 实现。协程写关卡，GPU 渲染高密度弹幕，并配套编辑器与 QQ 群互动。
+  text: Python + OpenGL 弹幕射击游戏引擎
+  tagline: 用 async/await 编写关卡脚本，用 ModernGL 与 Numba 驱动高密度弹幕，并配套编辑器、资产系统和 QQ 群弹幕互动。
   image:
     src: /logo.png
     alt: PySTG Logo
