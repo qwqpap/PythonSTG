@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="520" viewBox="0 0 880 520" role="img" aria-labelledby="title desc">
+  <title id="title">敌人创建器界面示意图</title>
+  <desc id="desc">展示敌人预设、行为预设、覆盖属性、预览和创建按钮如何组成一个编辑器面板。</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#202437"/>
+      <stop offset="1" stop-color="#171a28"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#080b12" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <rect width="880" height="520" rx="20" fill="#10131f"/>
+  <rect x="64" y="44" width="540" height="432" rx="14" fill="url(#panel)" stroke="#3b415a" filter="url(#shadow)"/>
+  <rect x="64" y="44" width="540" height="54" rx="14" fill="#272d44"/>
+  <text x="92" y="78" fill="#f5f7ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">敌人创建器</text>
+  <text x="92" y="137" fill="#bac2de" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="15">敌人预设</text>
+  <rect x="92" y="150" width="420" height="44" rx="8" fill="#121624" stroke="#4a5270"/>
+  <text x="114" y="179" fill="#f5f7ff" font-family="Consolas, monospace" font-size="16">fairy_red</text>
+  <text x="480" y="179" fill="#a6adc8" font-family="Segoe UI Symbol, sans-serif" font-size="16">▼</text>
+  <text x="92" y="226" fill="#bac2de" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="15">行为预设</text>
+  <rect x="92" y="239" width="420" height="44" rx="8" fill="#121624" stroke="#4a5270"/>
+  <text x="114" y="268" fill="#f5f7ff" font-family="Consolas, monospace" font-size="16">rush_in_shoot_leave</text>
+  <text x="480" y="268" fill="#a6adc8" font-family="Segoe UI Symbol, sans-serif" font-size="16">▼</text>
+  <rect x="92" y="318" width="420" height="88" rx="10" fill="#191f31" stroke="#59617f"/>
+  <text x="114" y="346" fill="#f5f7ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">覆盖属性</text>
+  <text x="114" y="380" fill="#bac2de" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="15">HP</text>
+  <rect x="148" y="360" width="76" height="32" rx="6" fill="#0e1220" stroke="#4a5270"/>
+  <text x="170" y="381" fill="#f5f7ff" font-family="Consolas, monospace" font-size="15">30</text>
+  <text x="250" y="380" fill="#bac2de" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="15">得分</text>
+  <rect x="296" y="360" width="86" height="32" rx="6" fill="#0e1220" stroke="#4a5270"/>
+  <text x="318" y="381" fill="#f5f7ff" font-family="Consolas, monospace" font-size="15">100</text>
+  <text x="408" y="380" fill="#bac2de" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="15">位置</text>
+  <text x="114" y="437" fill="#bac2de" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">X 0.0</text>
+  <text x="188" y="437" fill="#bac2de" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">Y 1.0</text>
+  <rect x="282" y="416" width="72" height="34" rx="7" fill="#2a3148"/>
+  <text x="305" y="438" fill="#f5f7ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">预览</text>
+  <rect x="366" y="416" width="72" height="34" rx="7" fill="#89b4fa"/>
+  <text x="389" y="438" fill="#111520" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14" font-weight="700">创建</text>
+  <rect x="450" y="416" width="62" height="34" rx="7" fill="#2a3148"/>
+  <text x="468" y="438" fill="#f5f7ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">取消</text>
+  <rect x="648" y="76" width="170" height="368" rx="14" fill="#171a28" stroke="#3b415a"/>
+  <text x="676" y="112" fill="#f5f7ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">来源与输出</text>
+  <circle cx="690" cy="164" r="6" fill="#a6e3a1"/>
+  <text x="710" y="170" fill="#cdd6f4" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">enemy_presets.json</text>
+  <circle cx="690" cy="224" r="6" fill="#f9e2af"/>
+  <text x="710" y="230" fill="#cdd6f4" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">behavior_presets.json</text>
+  <circle cx="690" cy="284" r="6" fill="#89b4fa"/>
+  <text x="710" y="290" fill="#cdd6f4" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">create_preset_enemy()</text>
+  <circle cx="690" cy="344" r="6" fill="#f38ba8"/>
+  <text x="710" y="350" fill="#cdd6f4" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">stage wave 文件</text>
+  <path d="M604 172 C626 172 626 164 648 164" fill="none" stroke="#a6e3a1" stroke-width="2"/>
+  <path d="M604 261 C626 261 626 224 648 224" fill="none" stroke="#f9e2af" stroke-width="2"/>
+  <path d="M512 433 C584 433 596 284 648 284" fill="none" stroke="#89b4fa" stroke-width="2"/>
+</svg>
