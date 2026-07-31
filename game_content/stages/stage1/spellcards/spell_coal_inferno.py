@@ -1,6 +1,6 @@
 import random
 
-from src.game.bullet.optimized_pool import CURVE_LINEAR_SPEED
+from src.content_api import CURVE_LINEAR_SPEED
 from src.game.stage.spellcard import SpellCard
 
 

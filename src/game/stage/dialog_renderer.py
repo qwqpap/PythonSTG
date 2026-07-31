@@ -277,7 +277,7 @@ class BalloonRenderer:
             "style": style,
             "position": position,
             "timer": 0,
-            "text_progress"​: 0,  # 打字机进度
+            "text_progress": 0,  # 打字机进度
         }
         self._active_balloons.append(balloon)
 

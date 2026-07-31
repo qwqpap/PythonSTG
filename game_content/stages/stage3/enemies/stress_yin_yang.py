@@ -1,7 +1,7 @@
 import math
 import random
 from src.game.stage.enemy_script import EnemyScript
-from src.game.bullet.optimized_pool import CURVE_LINEAR_SPEED
+from src.content_api import CURVE_LINEAR_SPEED
 
 
 class StressYinYang(EnemyScript):

@@ -5,10 +5,14 @@ import sys
 import os
 import json
 import time
+from pathlib import Path
 import moderngl
 
-# 添加src目录到Python路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Keep the historical ``src.*`` imports stable even when launched through an
+# installed console entry point or from a different working directory.
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.window import GameWindow, FrameClock, EVENT_QUIT, EVENT_KEYDOWN
 from src.core.input_manager import KeyboardState, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_z, KEY_ESCAPE, KEY_c
@@ -34,13 +38,11 @@ from src.game.userdata import (
 from src.resource.sprite import SpriteManager
 from src.core import (
     GameConfig, get_config, init_config,
-    CollisionManager, get_collision_manager, init_sprite_registry
+    CollisionManager, get_collision_manager, init_sprite_registry,
+    get_project_context, EngineSession, ProjectContextError,
 )
-from src.resource.texture_asset import (
-    TextureAssetManager, 
-    get_texture_asset_manager, 
-    init_texture_asset_manager
-)
+from src.resource.texture_asset import TextureAssetManager
+from src.resource.service import init_resource_service
 from src.render.item_renderer import ItemRenderer
 from src.ui import HUD, UIRenderer
 from src.ui.dialog_gl_renderer import DialogGLRenderer
@@ -52,6 +54,7 @@ from src.ui.continue_menu_renderer import ContinueMenuRenderer
 from src.ui.main_menu_layout import load_layout as load_main_menu_layout
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
+from src.devtools.hotreload import HotReloadManager
 from game_content.stages.stage1.stage_script import Stage1
 from game_content.stages.stage1.stage_asset_preview import Stage1AssetPreview
 from game_content.stages.stage2.stage_script import Stage2
@@ -75,6 +78,7 @@ def _stage_class_by_id(stage_id: str):
 # ===== Debug 模式 =====
 DEBUG_MODE = "--debug" in sys.argv
 PROFILE_MODE = "--profile" in sys.argv
+HOT_RELOAD_MODE = "--hot-reload" in sys.argv
 PROFILE_REPORT_FRAMES = 120
 
 
@@ -756,6 +760,15 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> int:
 
 def main():
     """游戏主函数"""
+    project_arg = _get_cli_option("--project=")
+    if project_arg:
+        project = get_project_context(project_arg)
+    else:
+        try:
+            project = get_project_context(Path.cwd())
+        except ProjectContextError:
+            project = get_project_context(PROJECT_ROOT)
+    project.activate()
     window, ctx, base_size, screen_size, game_viewport, game_viewport_fb = initialize_window_and_context()
     selected_stage_class = resolve_stage_class()
     game_audio = GameAudioBank()
@@ -836,7 +849,11 @@ def main():
                 window.swap_buffers()
 
             _show_loading("Loading textures...", 0.05)
-            texture_asset_manager = init_texture_asset_manager(asset_root="assets")
+            resource_service = init_resource_service(
+                project=get_project_context(),
+                asset_root="assets",
+            )
+            texture_asset_manager = resource_service.textures
 
             _show_loading("Loading laser config...", 0.15)
             laser_tex_data = get_laser_texture_data()
@@ -882,6 +899,49 @@ def main():
                       bg_color=bg_color, bg_alpha=bg_alpha,
                       layout_override=layout_override)
             ui_renderer = UIRenderer(ctx, screen_width=screen_size[0], screen_height=screen_size[1])
+            hot_reload = None
+            if HOT_RELOAD_MODE:
+                from src.game.stage.context import StageContext
+
+                hot_reload = HotReloadManager(os.getcwd(), debounce_seconds=0.25)
+
+                def _reload_bullet_aliases(path):
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    if not isinstance(data.get("mapping"), dict):
+                        raise ValueError("mapping must be an object")
+                    StageContext.BULLET_ALIAS_TABLE = {
+                        str(kind): {str(color): str(sprite) for color, sprite in colors.items()}
+                        for kind, colors in data["mapping"].items()
+                        if isinstance(colors, dict)
+                    }
+                    StageContext._aliases_loaded = True
+                    return f"{sum(len(v) for v in StageContext.BULLET_ALIAS_TABLE.values())} aliases"
+
+                def _reload_hud_layout(path):
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    layout = data.get("layout")
+                    if not isinstance(layout, dict):
+                        raise ValueError("layout must be an object")
+                    hud.layout = layout
+                    panel = data.get("panel", {})
+                    if isinstance(panel, dict):
+                        if "bg_color" in panel:
+                            hud.bg_color = tuple(panel["bg_color"])
+                        if "bg_alpha" in panel:
+                            hud.bg_alpha = float(panel["bg_alpha"])
+                    return f"{len(layout)} layout entries"
+
+                def _reload_laser_config(path):
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    if not isinstance(data.get("laser_textures"), dict):
+                        raise ValueError("laser_textures must be an object")
+                    laser_tex_data.load_config(str(path))
+                    return f"{len(data['laser_textures'])} laser textures"
+
+                hot_reload.watch_file("assets/bullet_aliases.json", _reload_bullet_aliases, "bullet aliases")
+                hot_reload.watch_file("assets/ui/hud_layout.json", _reload_hud_layout, "HUD layout")
+                hot_reload.watch_file("assets/images/laser/laser_config.json", _reload_laser_config, "laser config")
+                print("[HotReload] enabled: bullet aliases, HUD layout, laser config")
 
             _show_loading("Initializing UI...", 0.68)
             dialog_gl_renderer = DialogGLRenderer(ctx, screen_size[0], screen_size[1], game_viewport)
@@ -969,6 +1029,23 @@ def main():
                 bullet_pool=bullet_pool,
             )
             emoji_sys.start()
+
+            engine_session = EngineSession(
+                project=get_project_context(),
+                emoji_system=emoji_sys,
+                audio_manager=audio_manager,
+                renderer=renderer,
+                item_renderer=item_renderer,
+                ui_renderer=ui_renderer,
+                dialog_renderer=dialog_gl_renderer,
+                loading_renderer=loading_renderer,
+                pause_renderer=pause_menu_renderer,
+                continue_renderer=continue_menu_renderer,
+                staff_roll_renderer=staff_roll_renderer,
+                spell_declaration_renderer=spell_declaration_renderer,
+                texture_assets=texture_asset_manager,
+                background_renderer=background_renderer,
+            )
 
             # ===== 录制器 =====
             replay_recorder = None
@@ -1229,6 +1306,11 @@ def main():
                                         stage_manager.current_context.player = player
                 if PROFILE_MODE:
                     profile_acc["events"] += time.perf_counter() - events_start
+
+                if hot_reload is not None:
+                    for reload_event in hot_reload.poll():
+                        prefix = "[HotReload]" if reload_event.ok else "[HotReload:ERROR]"
+                        print(f"{prefix} {reload_event.message}")
 
                 # ===== 输入注入：回放替换、录制采样 =====
                 if replay_playback is not None and not paused:
@@ -1627,21 +1709,9 @@ def main():
             # 始终保存设置（如音量/上次自机）
             settings.save()
 
-            emoji_sys.stop()
-            audio_manager.stop_bgm(fade_ms=0)
-            audio_manager.set_stage_bank(None)
-            renderer.cleanup()
-            item_renderer.cleanup()
-            ui_renderer.cleanup()
-            dialog_gl_renderer.cleanup()
-            loading_renderer.cleanup()
-            pause_menu_renderer.cleanup()
-            continue_menu_renderer.cleanup()
-            staff_roll_renderer.cleanup()
-            spell_declaration_renderer.cleanup()
-            if background_renderer:
-                background_renderer.cleanup()
-            texture_asset_manager.clear_all()
+            cleanup_errors = engine_session.close()
+            for cleanup_error in cleanup_errors:
+                print(f"[EngineSession:ERROR] {cleanup_error}")
 
             if game_result_state == "MAIN_MENU":
                 break  # Break inner loop, go back to top `while True:` where `run_main_menu` is

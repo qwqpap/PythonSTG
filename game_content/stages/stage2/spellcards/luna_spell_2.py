@@ -20,7 +20,7 @@ import math
 import random
 import os
 from src.game.stage.spellcard import SpellCard
-from src.game.bullet.tags import TAG_BOMB_PROTECTED_TRAIN
+from src.content_api import TAG_BOMB_PROTECTED_TRAIN
 
 # ── 校正因子 ────────────────────────────────────────
 _Y_CORR = 448 / 384   # 1.1667：背景→子弹坐标系换算

@@ -10,7 +10,7 @@
 import random
 import math
 from src.game.stage.spellcard import SpellCard
-from src.game.bullet.optimized_pool import CURVE_LINEAR_SPEED
+from src.content_api import CURVE_LINEAR_SPEED
 
 
 # 沉积岩的颜色序列（模拟不同地质年代的岩层）

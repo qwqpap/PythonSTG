@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "type": "pystg.project",
+  "id": "7d62e2af-7a5d-5a18-a191-f19369c41967",
+  "name": "PySTG",
+  "paths": {
+    "assets": "assets",
+    "content": "game_content",
+    "userdata": "userdata"
+  }
+}

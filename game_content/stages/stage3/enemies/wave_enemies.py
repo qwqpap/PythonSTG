@@ -1,7 +1,7 @@
 import math
 import random
 from src.game.stage.enemy_script import EnemyScript
-from src.game.bullet.optimized_pool import CURVE_SIN_ANGLE
+from src.content_api import CURVE_SIN_ANGLE
 
 class SeismicFairy(EnemyScript):
     """

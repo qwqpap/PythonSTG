@@ -10,6 +10,9 @@ from .interfaces import (
 )
 from .collision import CollisionManager, get_collision_manager, CollisionResult, BulletCollisionResult
 from .sprite_registry import SpriteRegistry, SpriteInfo, get_sprite_registry, init_sprite_registry
+from .project_context import ProjectContext, ProjectContextError, get_project_context
+from .engine_session import EngineSession
+from .atomic_io import atomic_write_json, atomic_write_text
 
 __all__ = [
     # 配置
@@ -43,4 +46,12 @@ __all__ = [
     'SpriteInfo',
     'get_sprite_registry',
     'init_sprite_registry',
+
+    # 项目路径
+    'ProjectContext',
+    'ProjectContextError',
+    'get_project_context',
+    'EngineSession',
+    'atomic_write_json',
+    'atomic_write_text',
 ]

@@ -1,2 +1,5 @@
 -r requirements.txt
 pytest==8.4.1
+PyQt5==5.15.10
+pygame==2.6.1
+watchdog==4.0.1

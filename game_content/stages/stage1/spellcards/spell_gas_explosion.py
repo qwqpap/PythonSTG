@@ -1,7 +1,7 @@
 import random
 
 from src.game.stage.spellcard import SpellCard
-from src.game.bullet.tags import TAG_BOMB_PROTECTED_NODE
+from src.content_api import TAG_BOMB_PROTECTED_NODE
 
 
 class GasExplosionSpell(SpellCard):
