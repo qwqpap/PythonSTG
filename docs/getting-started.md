@@ -21,8 +21,15 @@ pip install -r requirements.txt
 
 ```bash
 pip install -r requirements-dev.txt
-pip install PyQt5
 ```
+
+统一场景编辑器可直接运行：
+
+```bash
+python tools/scene_editor.py
+```
+
+参见 [统一场景编辑器 MVP](SCENE_EDITOR_MVP.md)。
 
 ## 运行游戏
 

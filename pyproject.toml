@@ -30,6 +30,7 @@ dev = [
 
 [project.scripts]
 pystg = "main:main"
+pystg-editor = "src.editor.app:main"
 
 [tool.setuptools]
 py-modules = ["main"]

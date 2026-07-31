@@ -51,6 +51,7 @@ export default defineConfig({
         items: [
           { text: '弹幕脚本开发指南', link: '/STAGE_SCRIPTING_GUIDE' },
           { text: '敌人预设系统', link: '/ENEMY_PRESET_SYSTEM' },
+          { text: '统一场景编辑器', link: '/SCENE_EDITOR_MVP' },
           { text: '编辑器工具', link: '/EDITOR_TOOLS_GUIDE' }
         ]
       },
