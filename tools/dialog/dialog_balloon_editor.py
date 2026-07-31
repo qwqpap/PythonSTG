@@ -24,6 +24,7 @@ import json
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
+from src.core.atomic_io import atomic_write_json
 
 import pygame
 from pygame import Surface
@@ -557,8 +558,7 @@ class BalloonEditor:
             sc["body_tile_offset"] = int(self.slider_body_tile_offset.value)
 
         try:
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            atomic_write_json(CONFIG_PATH, self.config)
             self.status_msg = f"已保存到 {CONFIG_PATH}"
             self.status_timer = 180
             print(f"[BalloonEditor] Saved: {CONFIG_PATH}")

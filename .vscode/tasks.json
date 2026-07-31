@@ -1,0 +1,24 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "PythonSTG: Preview Current File",
+            "type": "shell",
+            "command": "python tools/preview.py ${file}",
+            "problemMatcher": []
+        },
+        {
+            "label": "PythonSTG: Preview Current Spell",
+            "type": "shell",
+            "command": "python tools/preview.py ${file} --spell ${input:spellClass}",
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "spellClass",
+            "type": "promptString",
+            "description": "SpellCard class name to preview"
+        }
+    ]
+}

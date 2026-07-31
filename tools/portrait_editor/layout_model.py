@@ -2,8 +2,13 @@
 
 import json
 import os
+import sys
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+from src.core.atomic_io import atomic_write_json
+
 LAYOUT_PATH = os.path.join(PROJECT_ROOT, "assets", "ui", "dialog_portrait_layout.json")
 CHAR_DIR = os.path.join(PROJECT_ROOT, "assets", "images", "character")
 
@@ -48,8 +53,7 @@ def load_layout():
 
 
 def save_layout(cfg):
-    with open(LAYOUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    atomic_write_json(LAYOUT_PATH, cfg)
 
 
 def load_characters():

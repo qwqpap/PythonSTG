@@ -42,6 +42,7 @@ from PyQt5.QtGui import (
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+from src.core.atomic_io import atomic_write_json
 
 ASSETS_ROOT = PROJECT_ROOT / "assets"
 BG_ROOT = ASSETS_ROOT / "images" / "background"
@@ -198,8 +199,7 @@ def generate_luastg_json_configs(overwrite: bool = False) -> Tuple[int, List[str
             "layers": layers,
         }
 
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        atomic_write_json(out_path, config)
         generated.append(out_path.name)
 
     return len(generated), generated
@@ -1706,8 +1706,7 @@ class BackgroundEditor(QMainWindow):
             watched = self._file_watcher.files()
             if path in (watched or []):
                 self._file_watcher.removePath(path)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=2, ensure_ascii=False)
+            atomic_write_json(path, self.config)
             self._file_watcher.addPath(path)
             self.statusBar().showMessage(f"已保存: {path}")
         except Exception as e:

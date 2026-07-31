@@ -40,6 +40,7 @@ from PyQt5.QtGui import (
 # 项目路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+from src.core.atomic_io import atomic_write_json
 
 ASSETS_ROOT = PROJECT_ROOT / "assets"
 PLAYERS_ROOT = ASSETS_ROOT / "players"
@@ -1859,8 +1860,7 @@ class PlayerEditor(QMainWindow):
             "shot_types": {},
             "options": []
         }
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        atomic_write_json(config_path, config)
 
         if texture_name:
             self._ensure_player_sheet_config(folder, texture_name)
@@ -1878,8 +1878,7 @@ class PlayerEditor(QMainWindow):
             "__image_filename": texture_name,
             "sprites": {}
         }
-        with open(sheet_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        atomic_write_json(sheet_path, data)
     
     def _collect_bullet_sprite_refs(self, data: dict) -> set:
         """从 shot_types/options/animations 收集子弹精灵引用（用于推断 source）"""
@@ -3212,8 +3211,7 @@ class PlayerEditor(QMainWindow):
                 ]
             })
             
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
+            atomic_write_json(path, config)
 
             # 生成供纹理管理器使用的精灵表 JSON
             self._ensure_player_sheet_config(Path(path).parent, self.player_data.texture)

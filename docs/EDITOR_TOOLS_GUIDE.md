@@ -1,6 +1,6 @@
 # pystg 编辑器工具指南
 
-> 本文档介绍 pystg 附带的三个可视化编辑器工具的安装、启动和使用方法。
+> 本文档介绍 pystg 附带的可视化编辑器工具及统一启动方式。
 
 ---
 
@@ -19,13 +19,13 @@
 
 ## 1. 概览
 
-pystg 提供三个 PyQt5 可视化编辑器，用于管理游戏资产配置：
+pystg 提供多套可视化工具，用于管理游戏资产配置：
 
 | 工具 | 文件 | 用途 |
 |------|------|------|
-| **弹幕别名管理器** | `tools/bullet_alias_manager.py` | 管理弹幕类型+颜色→精灵的映射 |
-| **纹理资产编辑器** | `tools/asset_manager_qt.py` | 编辑精灵图集裁切区域、动画帧、激光配置 |
-| **自机编辑器** | `tools/player_editor.py` | 编辑自机动画、射击类型、子机配置 |
+| **弹幕别名管理器** | `tools/bullet/bullet_alias_manager.py` | 管理弹幕类型+颜色→精灵的映射 |
+| **纹理资产编辑器** | `tools/asset/asset_manager_qt.py` | 编辑精灵图集裁切区域、动画帧、激光配置 |
+| **自机编辑器** | `tools/player/player_editor.py` | 编辑自机动画、射击类型、子机配置 |
 
 此外还有一个**统一启动器**（`tools/editor_launcher.py`），可以从一个窗口打开以上所有编辑器。
 
@@ -37,9 +37,9 @@ pystg 提供三个 PyQt5 可视化编辑器，用于管理游戏资产配置：
 |------|------|
 | `tools/editor_launcher.py` | 统一启动器 |
 | `tools/editor_common.py` | 共享模块：主题、缓存、数据加载 |
-| `tools/bullet_alias_manager.py` | 弹幕别名管理器 |
-| `tools/asset_manager_qt.py` | 纹理资产编辑器 |
-| `tools/player_editor.py` | 自机编辑器 |
+| `tools/bullet/bullet_alias_manager.py` | 弹幕别名管理器 |
+| `tools/asset/asset_manager_qt.py` | 纹理资产编辑器 |
+| `tools/player/player_editor.py` | 自机编辑器 |
 
 ---
 
@@ -65,7 +65,7 @@ python tools/editor_launcher.py
 
 ### 功能
 
-启动器提供三个工具卡片，点击即可启动对应编辑器：
+启动器提供弹幕、纹理、自机、敌人、立绘和背景工具卡片：
 
 - 🎯 **弹幕别名** — 打开弹幕别名管理器
 - 🖼️ **纹理编辑** — 打开纹理资产编辑器
@@ -84,7 +84,7 @@ python tools/editor_launcher.py
 ### 启动
 
 ```bash
-python tools/bullet_alias_manager.py
+python tools/bullet/bullet_alias_manager.py
 ```
 
 ### 是什么？
@@ -241,7 +241,7 @@ class StageContext:
 ### 启动
 
 ```bash
-python tools/asset_manager_qt.py
+python tools/asset/asset_manager_qt.py
 ```
 
 ### 功能概述
@@ -300,7 +300,7 @@ python tools/asset_manager_qt.py
 ### 启动
 
 ```bash
-python tools/player_editor.py
+python tools/player/player_editor.py
 ```
 
 ### 功能概述

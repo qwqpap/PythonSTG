@@ -1,0 +1,37 @@
+name: Python validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Test module and console pytest entry points
+        run: |
+          python -m pytest -q
+          pytest -q
+
+      - name: Compile Python sources
+        run: python -m compileall -q main.py src game_content tools
+
+      - name: Validate project assets
+        run: python tools/validate_assets.py

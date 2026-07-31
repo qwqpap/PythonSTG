@@ -39,6 +39,7 @@ from PyQt5.QtGui import (
 # 项目路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+from src.editor.spell_codegen import build_spellcard_code
 
 ASSETS_ROOT = PROJECT_ROOT / "assets"
 GAME_CONTENT_ROOT = PROJECT_ROOT / "game_content"
@@ -774,7 +775,10 @@ class CodePreviewPanel(QWidget):
 # ==================== 主窗口 ====================
 
 class DanmakuScriptEditor(QMainWindow):
-    """弹幕脚本编辑器主窗口"""
+    """实验性弹幕脚本生成器。
+
+    预览不是正式引擎渲染路径；真实效果请使用 tools/preview.py。
+    """
     
     def __init__(self):
         super().__init__()
@@ -786,7 +790,7 @@ class DanmakuScriptEditor(QMainWindow):
         self._setup_menu()
         self._apply_theme()
         
-        self.setWindowTitle("弹幕脚本编辑器 - PySTG")
+        self.setWindowTitle("实验性弹幕脚本生成器（导出后请用真实预览验证） - PySTG")
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         
@@ -1272,108 +1276,8 @@ class DanmakuScriptEditor(QMainWindow):
         self.code_panel.set_code(code)
     
     def _build_code(self) -> str:
-        """构建符卡代码"""
-        name = self.spellcard.name
-        class_name = ''.join(word.title() for word in name.replace('「', '_').replace('」', '').split())
-        class_name = ''.join(c for c in class_name if c.isalnum() or c == '_')
-        
-        if not class_name:
-            class_name = "CustomSpellCard"
-        
-        lines = [
-            '"""',
-            f'{name}',
-            '',
-            '自动生成的符卡脚本',
-            '"""',
-            '',
-            'from src.game.stage.spellcard import SpellCard',
-            'import math',
-            '',
-            '',
-            f'class {class_name}(SpellCard):',
-            f'    """{name}"""',
-            '',
-            f'    name = "{name}"',
-            f'    hp = {self.spellcard.hp}',
-            f'    time_limit = {self.spellcard.time_limit}',
-            f'    bonus = 1000000',
-            '',
-            '    def setup(self):',
-            f'        """Boss 移动到初始位置"""',
-            f'        yield from self.boss.move_to({self.spellcard.boss_x}, {self.spellcard.boss_y}, duration=60)',
-            '',
-            '    def run(self):',
-            '        """主弹幕逻辑"""',
-            '        angle_offset = 0',
-            '',
-            '        while True:',
-        ]
-        
-        # 为每个模式生成代码
-        for name, pattern in self.spellcard.patterns.items():
-            lines.append(f'            # === {pattern.name} ===')
-            
-            if pattern.pattern_type == "circle":
-                lines.append(f'            self.fire_circle(')
-                lines.append(f'                count={pattern.count},')
-                lines.append(f'                speed={pattern.speed},')
-                lines.append(f'                start_angle=angle_offset,')
-                lines.append(f'                bullet_type="{pattern.bullet_type}",')
-                lines.append(f'                color="{pattern.color}"')
-                lines.append(f'            )')
-                lines.append(f'            angle_offset += 10')
-            
-            elif pattern.pattern_type == "aimed":
-                lines.append(f'            for i in range({pattern.count}):')
-                lines.append(f'                self.fire_at_player(')
-                lines.append(f'                    speed={pattern.speed} + i * 0.2,')
-                lines.append(f'                    bullet_type="{pattern.bullet_type}",')
-                lines.append(f'                    color="{pattern.color}"')
-                lines.append(f'                )')
-                lines.append(f'                yield from self.wait({pattern.interval})')
-            
-            elif pattern.pattern_type == "spiral":
-                lines.append(f'            for i in range({pattern.count}):')
-                lines.append(f'                self.fire(')
-                lines.append(f'                    angle=angle_offset + i * ({pattern.angle_spread} / {pattern.count}),')
-                lines.append(f'                    speed={pattern.speed},')
-                lines.append(f'                    bullet_type="{pattern.bullet_type}",')
-                lines.append(f'                    color="{pattern.color}"')
-                lines.append(f'                )')
-                if pattern.interval > 0:
-                    lines.append(f'                yield from self.wait({pattern.interval})')
-            
-            elif pattern.pattern_type == "random":
-                lines.append(f'            import random')
-                lines.append(f'            for i in range({pattern.count}):')
-                lines.append(f'                angle = random.uniform(0, 360)')
-                lines.append(f'                speed = {pattern.speed} + random.uniform(-{pattern.speed_var}, {pattern.speed_var})')
-                lines.append(f'                self.fire(')
-                lines.append(f'                    angle=angle,')
-                lines.append(f'                    speed=speed,')
-                lines.append(f'                    bullet_type="{pattern.bullet_type}",')
-                lines.append(f'                    color="{pattern.color}"')
-                lines.append(f'                )')
-            
-            else:  # line or default
-                lines.append(f'            for i in range({pattern.count}):')
-                lines.append(f'                self.fire(')
-                lines.append(f'                    angle={pattern.angle},')
-                lines.append(f'                    speed={pattern.speed} + i * {pattern.speed_var},')
-                lines.append(f'                    bullet_type="{pattern.bullet_type}",')
-                lines.append(f'                    color="{pattern.color}"')
-                lines.append(f'                )')
-            
-            lines.append('')
-            lines.append(f'            yield from self.wait({max(30, pattern.interval * pattern.count)})')
-            lines.append('')
-        
-        lines.append('')
-        lines.append(f'# 注册符卡')
-        lines.append(f'spellcard = {class_name}')
-        
-        return '\n'.join(lines)
+        """构建与当前 async SpellCard API 兼容的符卡代码。"""
+        return build_spellcard_code(self.spellcard)
     
     # ==================== 文件操作 ====================
     
@@ -1390,15 +1294,13 @@ class DanmakuScriptEditor(QMainWindow):
         self.preview_view.clear_bullets()
     
     def _open_spellcard(self):
-        """打开符卡"""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "打开符卡脚本",
-            str(GAME_CONTENT_ROOT / "stages"),
-            "Python脚本 (*.py);;JSON文件 (*.json)"
+        """现有 Python 符卡不能无损反向转换为可视化模型。"""
+        QMessageBox.information(
+            self,
+            "不支持无损导入",
+            "现有 Python 符卡暂不支持反向导入。\n"
+            "本工具当前只负责生成代码；请使用 tools/preview.py 进行真实引擎预览。",
         )
-        if path:
-            # TODO: 解析现有脚本
-            self.statusBar().showMessage(f"打开: {path}")
     
     def _save_spellcard(self):
         """保存符卡"""
