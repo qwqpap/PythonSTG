@@ -31,6 +31,7 @@ class Stage1(StageScript):
     boss_bgm = "02.wav"
     background = "luastg_hongmoguanB"
     DEBUG_BOOKMARK = False  # True 时跳过前置对话，从 Stage1Wave1 开始测
+    ENABLE_OPENING_MEDIA = False  # 编辑器开发期间暂时跳过 start0-start7 和绑定音效
 
     # ===== Boss 定义 =====
 
@@ -49,28 +50,36 @@ class Stage1(StageScript):
 
     # ===== 关卡流程 =====
 
+    async def _play_opening_media(self):
+        if not self.ENABLE_OPENING_MEDIA:
+            return
+
+        intro_dir = os.path.join("game_content", "stages", "stage1", "images")
+        if not os.path.isdir(intro_dir):
+            return
+
+        intro_plan = [
+            ("start0.png", "大笑1"),
+            ("start1.png", "大笑1"),
+            ("start2.png", None),
+            ("start3.png", None),
+            ("start4.png", None),
+            ("start5.png", None),
+            ("start6.png", "大笑2"),
+            ("start7.png", None),
+        ]
+        for image_name, se_name in intro_plan:
+            image_path = os.path.join(intro_dir, image_name)
+            if not os.path.exists(image_path):
+                continue
+            if se_name:
+                self.ctx.play_se(se_name, volume=1.0)
+            await self.play_image_sequence([image_path], frame_duration=180)
+
     async def run(self):
         if not self.DEBUG_BOOKMARK:
             self.ctx.stop_bgm()
-            intro_dir = os.path.join("game_content", "stages", "stage1", "images")
-            if os.path.isdir(intro_dir):
-                intro_plan = [
-                    ("start0.png", "大笑1"),
-                    ("start1.png", "大笑1"),
-                    ("start2.png", None),
-                    ("start3.png", None),
-                    ("start4.png", None),
-                    ("start5.png", None),
-                    ("start6.png", "大笑2"),
-                    ("start7.png", None)
-                ]
-                for image_name, se_name in intro_plan:
-                    image_path = os.path.join(intro_dir, image_name)
-                    if not os.path.exists(image_path):
-                        continue
-                    if se_name:
-                        self.ctx.play_se(se_name, volume=1.0)
-                    await self.play_image_sequence([image_path], frame_duration=180)
+            await self._play_opening_media()
 
             await self.play_bgm(self.bgm)
 
