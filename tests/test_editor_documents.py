@@ -15,6 +15,7 @@ def test_scene_document_atomic_round_trip_and_migration(tmp_path):
     store = DocumentStore(project)
     scene = SceneDocument(
         name="Stage Test",
+        symbol_name="stage_test",
         root=EditorNode(
             type="Stage",
             name="Root",
@@ -27,6 +28,10 @@ def test_scene_document_atomic_round_trip_and_migration(tmp_path):
     loaded = store.load(path)
 
     assert loaded.to_dict() == scene.to_dict()
+    assert loaded.symbol_name == "stage_test"
+    assert loaded.coordinate_space.logical_width == 384
+    assert loaded.coordinate_space.logical_height == 448
+    assert loaded.timebase.tick_rate == 60
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
     legacy = SceneDocument.from_dict({

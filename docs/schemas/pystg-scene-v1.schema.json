@@ -9,6 +9,10 @@
     "type": {"const": "pystg.scene"},
     "id": {"type": "string", "format": "uuid"},
     "name": {"type": "string", "minLength": 1},
+    "symbol_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
     "metadata": {"type": "object"},
     "root": {"$ref": "#/$defs/node"},
     "timeline": {

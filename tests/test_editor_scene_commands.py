@@ -30,7 +30,7 @@ def test_scene_commands_round_trip_through_undo_redo(tmp_path):
     assert session.is_dirty
 
     assert session.undo()
-    assert sprite.properties["x"] == 384.0
+    assert sprite.properties["x"] == 192.0
     assert session.undo()
     assert sprite.name == "Player"
     assert session.undo()

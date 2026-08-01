@@ -146,6 +146,8 @@ flowchart TB
 | [纹理资产系统](docs/TEXTURE_ASSET_SYSTEM.md) | 图集加载、精灵定义、动画配置 |
 | [开发工具链](docs/DEVTOOLS_PHASE1.md) | 资源校验、热重载、Pattern Lab 和符卡预览 |
 | [编辑器架构边界](docs/EDITOR_ARCHITECTURE.md) | 编辑器、文档、运行时和资源服务的依赖约束 |
+| [作者资源契约](docs/AUTHORING_RESOURCE_CONTRACTS.md) | M0 资源头、引用、迁移、坐标、时间和注册表协议 |
+| [编辑器长期路线 TODO](docs/EDITOR_ROADMAP_TODO.md) | 分阶段任务、依赖、Gate 与完成证据 |
 
 也可以本地启动 VitePress 文档站点：
 

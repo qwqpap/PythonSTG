@@ -9,7 +9,16 @@ from .document import (
     TimelineEvent,
 )
 from .storage import DocumentStore
-from .node_types import NODE_TYPES, PropertySpec, make_default_root, make_node
+from .node_types import (
+    NODE_TYPES,
+    NODE_TYPE_REGISTRY,
+    NodeTypeRegistry,
+    NodeTypeSpec,
+    PropertySpec,
+    ViewportSpec,
+    make_default_root,
+    make_node,
+)
 from .scene_commands import (
     AddNodeCommand,
     MoveNodeCommand,
@@ -33,7 +42,11 @@ __all__ = [
     "SceneDocument",
     "TimelineEvent",
     "NODE_TYPES",
+    "NODE_TYPE_REGISTRY",
+    "NodeTypeRegistry",
+    "NodeTypeSpec",
     "PropertySpec",
+    "ViewportSpec",
     "make_default_root",
     "make_node",
     "AddNodeCommand",

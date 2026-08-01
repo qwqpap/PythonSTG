@@ -57,9 +57,13 @@ from PyQt5.QtWidgets import (
 )
 
 from src.core.project_context import ProjectContext
+from src.authoring.coordinates import CoordinateSpace
+from src.authoring.resources import ResourceDocumentError, ResourceReference
 
+from .asset_index import AssetRecord, load_subresource_preview
 from .document import DocumentError, EditorNode, SceneDocument
 from .node_types import NODE_TYPES, PropertySpec, make_node, property_specs
+from .resource_browser import RESOURCE_MIME_TYPE, ResourceBrowserPanel
 from .scene_commands import (
     AddNodeCommand,
     MoveNodeCommand,
@@ -72,6 +76,7 @@ from .scene_commands import (
 )
 from .session import SceneEditorSession
 from .storage import DocumentStore
+from .workbench import EditorPlugin, PluginRegistry, default_external_plugins
 
 
 APP_NAME = "PySTG Scene Editor"
@@ -87,8 +92,16 @@ def build_preview_command(
         script_value = str(node.properties.get("script", "")).strip()
         if not script_value:
             raise ValueError("Selected SpellCard needs a script path.")
-        script_path = project.resolve(script_value)
-        project.relative(script_path)
+        try:
+            reference = ResourceReference.parse(
+                script_value,
+                allow_legacy_project_path=True,
+            )
+            if reference.subresource is not None:
+                raise ResourceDocumentError("script references cannot use fragments")
+            script_path = reference.resolve(project)
+        except ResourceDocumentError as exc:
+            raise ValueError(str(exc)) from exc
         if not script_path.is_file():
             raise ValueError(f"SpellCard script does not exist: {script_path}")
         arguments = [
@@ -182,6 +195,7 @@ class NodeGraphicsItem(QGraphicsObject):
         self.node_name = node.name
         self.grid_size = max(1, grid_size)
         self._drag_start = QPointF()
+        self._spec = NODE_TYPES.get(node.type)
         self._pixmap = self._load_pixmap(node, project)
         self.setFlags(
             QGraphicsItem.ItemIsMovable
@@ -193,12 +207,16 @@ class NodeGraphicsItem(QGraphicsObject):
 
     @staticmethod
     def _load_pixmap(node: EditorNode, project: ProjectContext) -> QPixmap:
-        if node.type != "Sprite":
+        spec = NODE_TYPES.get(node.type)
+        preview_property = spec.viewport.preview_property if spec is not None else None
+        if preview_property is None:
             return QPixmap()
-        texture = str(node.properties.get("texture", "")).strip()
+        texture = str(node.properties.get(preview_property, "")).strip()
         if not texture:
             return QPixmap()
-        candidate = project.resolve(texture)
+        candidate, rect = load_subresource_preview(project, texture)
+        if candidate is None:
+            return QPixmap()
         try:
             project.relative(candidate)
         except Exception:
@@ -208,6 +226,12 @@ class NodeGraphicsItem(QGraphicsObject):
         pixmap = QPixmap(str(candidate))
         if pixmap.isNull():
             return QPixmap()
+        if rect is not None:
+            x, y, width, height = rect
+            clipped = pixmap.rect().intersected(QRectF(x, y, width, height).toRect())
+            if clipped.isEmpty():
+                return QPixmap()
+            pixmap = pixmap.copy(clipped)
         return pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
     def boundingRect(self) -> QRectF:
@@ -215,9 +239,10 @@ class NodeGraphicsItem(QGraphicsObject):
 
     def shape(self) -> QPainterPath:
         path = QPainterPath()
-        if self.node_type == "EnemySpawner":
+        shape = self._spec.viewport.shape if self._spec is not None else "box"
+        if shape == "circle":
             path.addEllipse(QRectF(-24, -24, 48, 48))
-        elif self.node_type == "SpellCard":
+        elif shape == "diamond":
             polygon = [
                 QPointF(0, -28),
                 QPointF(28, 0),
@@ -233,20 +258,21 @@ class NodeGraphicsItem(QGraphicsObject):
         return path
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
-        spec = NODE_TYPES.get(self.node_type)
+        spec = self._spec
         color = QColor(spec.color if spec else "#9aa4b2")
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QPen(QColor("#f5f7ff") if self.isSelected() else color, 3 if self.isSelected() else 2))
         painter.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 72)))
 
-        if self.node_type == "EnemySpawner":
+        shape = spec.viewport.shape if spec is not None else "box"
+        label = spec.viewport.label if spec is not None else "NODE"
+        if shape == "circle":
             painter.drawEllipse(QRectF(-24, -24, 48, 48))
-            painter.drawLine(-30, 0, 30, 0)
-            painter.drawLine(0, -30, 0, 30)
-        elif self.node_type == "SpellCard":
+            painter.drawText(QRectF(-21, -10, 42, 20), Qt.AlignCenter, label)
+        elif shape == "diamond":
             path = self.shape()
             painter.drawPath(path)
-            painter.drawText(QRectF(-25, -10, 50, 20), Qt.AlignCenter, "SC")
+            painter.drawText(QRectF(-25, -10, 50, 20), Qt.AlignCenter, label)
         else:
             painter.drawRoundedRect(QRectF(-28, -28, 56, 56), 5, 5)
             if not self._pixmap.isNull():
@@ -258,7 +284,7 @@ class NodeGraphicsItem(QGraphicsObject):
                 )
                 painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
             else:
-                painter.drawText(QRectF(-24, -10, 48, 20), Qt.AlignCenter, "SPR")
+                painter.drawText(QRectF(-24, -10, 48, 20), Qt.AlignCenter, label)
 
         painter.setPen(QColor("#e8ecf5"))
         painter.drawText(QRectF(-70, 34, 140, 22), Qt.AlignHCenter | Qt.AlignTop, self.node_name)
@@ -283,6 +309,7 @@ class NodeGraphicsItem(QGraphicsObject):
 class SceneViewport(QGraphicsView):
     nodeSelected = pyqtSignal(str)
     nodePositionRequested = pyqtSignal(str, float, float)
+    resourceDropped = pyqtSignal(object, float, float)
 
     def __init__(self, project: ProjectContext, parent=None):
         self.graphics_scene = QGraphicsScene(parent)
@@ -292,12 +319,15 @@ class SceneViewport(QGraphicsView):
         self._items: dict[str, NodeGraphicsItem] = {}
         self._grid_size = 16
         self._background = QColor("#171a24")
+        self.coordinate_space = CoordinateSpace()
         self._fit_on_next_resize = True
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setFrameShape(QFrame.NoFrame)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self.graphics_scene.selectionChanged.connect(self._selection_changed)
 
     def rebuild(self, document: SceneDocument) -> None:
@@ -306,8 +336,9 @@ class SceneViewport(QGraphicsView):
         self._items.clear()
 
         root = document.root
-        width = max(64, int(root.properties.get("width", 768)))
-        height = max(64, int(root.properties.get("height", 896)))
+        self.coordinate_space = document.coordinate_space
+        width = max(64, int(self.coordinate_space.logical_width))
+        height = max(64, int(self.coordinate_space.logical_height))
         self._grid_size = max(1, int(root.properties.get("grid_size", 16)))
         self._background = QColor(str(root.properties.get("background", "#171a24")))
         if not self._background.isValid():
@@ -340,6 +371,10 @@ class SceneViewport(QGraphicsView):
         for item_id, item in self._items.items():
             item.setSelected(item_id == node_id)
 
+    def runtime_position(self, x: float, y: float) -> tuple[float, float]:
+        """Convert a gizmo position through the formal authoring contract."""
+        return self.coordinate_space.authoring_to_runtime(x, y)
+
     def _selection_changed(self) -> None:
         selected = self.graphics_scene.selectedItems()
         if selected and isinstance(selected[0], NodeGraphicsItem):
@@ -369,6 +404,37 @@ class SceneViewport(QGraphicsView):
             event.accept()
             return
         super().wheelEvent(event)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(RESOURCE_MIME_TYPE):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(RESOURCE_MIME_TYPE):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(RESOURCE_MIME_TYPE):
+            super().dropEvent(event)
+            return
+        try:
+            payload = json.loads(
+                bytes(event.mimeData().data(RESOURCE_MIME_TYPE)).decode("utf-8")
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            event.ignore()
+            return
+        scene_position = self.mapToScene(event.pos())
+        self.resourceDropped.emit(
+            payload,
+            float(scene_position.x()),
+            float(scene_position.y()),
+        )
+        event.acceptProposedAction()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -517,12 +583,46 @@ class EditorMainWindow(QMainWindow):
         self._selected_id = self.session.document.root.id
         self._syncing_selection = False
         self._preview_process: QProcess | None = None
+        self._tool_processes: dict[str, QProcess] = {}
+        self._plugin_widgets: dict[str, QWidget] = {}
+        self.plugin_registry = PluginRegistry(project)
+        self._register_plugins()
         self._build_actions()
         self._build_ui()
         self._apply_theme()
         self._refresh()
         self.resize(1480, 920)
         self.setMinimumSize(960, 640)
+
+    def _register_plugins(self) -> None:
+        self.plugin_registry.register(
+            EditorPlugin(
+                id="resource_browser",
+                title="Assets",
+                description="Browse project files and JSON sprite/animation subresources.",
+                mode="bottom",
+                factory=lambda: ResourceBrowserPanel(self.project),
+            )
+        )
+        self.plugin_registry.register(
+            EditorPlugin(
+                id="bullet_aliases",
+                title="Bullet Aliases",
+                description="Edit bullet type and color to sprite mappings.",
+                mode="central",
+                factory=self._create_bullet_alias_editor,
+            )
+        )
+        for plugin in default_external_plugins(self.project):
+            self.plugin_registry.register(plugin)
+
+    @staticmethod
+    def _create_bullet_alias_editor() -> QWidget:
+        from tools.bullet.bullet_alias_manager import BulletAliasManager
+
+        editor = BulletAliasManager()
+        editor.setWindowFlags(Qt.Widget)
+        return editor
 
     def _build_actions(self) -> None:
         self.action_new = self._action("New Scene", QKeySequence.New, self.new_scene)
@@ -569,6 +669,16 @@ class EditorMainWindow(QMainWindow):
         ])
         run_menu = self.menuBar().addMenu("&Run")
         run_menu.addActions([self.action_run, self.action_fit])
+        tools_menu = self.menuBar().addMenu("&Tools")
+        for plugin in self.plugin_registry.all():
+            action = tools_menu.addAction(plugin.title)
+            action.setObjectName(f"pluginAction_{plugin.id}")
+            action.setToolTip(plugin.description)
+            if plugin.shortcut:
+                action.setShortcut(plugin.shortcut)
+            action.triggered.connect(
+                lambda checked=False, plugin_id=plugin.id: self.open_plugin(plugin_id)
+            )
 
         main_toolbar = QToolBar("Main", self)
         main_toolbar.setObjectName("mainToolbar")
@@ -587,7 +697,18 @@ class EditorMainWindow(QMainWindow):
         self.viewport = SceneViewport(self.project)
         self.viewport.nodeSelected.connect(self._select_from_viewport)
         self.viewport.nodePositionRequested.connect(self._set_node_position)
-        self.setCentralWidget(self.viewport)
+        self.viewport.resourceDropped.connect(self._resource_dropped)
+        self.central_tabs = QTabWidget()
+        self.central_tabs.setObjectName("centralWorkbench")
+        self.central_tabs.setTabsClosable(True)
+        self.central_tabs.tabCloseRequested.connect(self._close_central_tab)
+        self.central_tabs.addTab(self.viewport, "Scene")
+        self.central_tabs.tabBar().setTabButton(
+            0,
+            self.central_tabs.tabBar().RightSide,
+            None,
+        )
+        self.setCentralWidget(self.central_tabs)
 
         self.tree = SceneTreeWidget()
         self.tree.currentItemChanged.connect(self._select_from_tree)
@@ -653,16 +774,190 @@ class EditorMainWindow(QMainWindow):
         self.output.setReadOnly(True)
         self.output.document().setMaximumBlockCount(1000)
         self.timeline = TimelinePanel()
-        bottom_tabs = QTabWidget()
-        bottom_tabs.addTab(self.output, "Output")
-        bottom_tabs.addTab(self.timeline, "Timeline")
+        self.bottom_tabs = QTabWidget()
+        self.bottom_tabs.setObjectName("bottomWorkbench")
+        self.bottom_tabs.addTab(self.output, "Output")
+        self.bottom_tabs.addTab(self.timeline, "Timeline")
+        for plugin in self.plugin_registry.by_mode("bottom"):
+            widget = plugin.factory()
+            self._plugin_widgets[plugin.id] = widget
+            self.bottom_tabs.addTab(widget, plugin.title)
+            if plugin.id == "resource_browser":
+                self.resource_browser = widget
+                widget.resourceSelected.connect(self._resource_selected)
+                widget.resourceActivated.connect(self._resource_activated)
         bottom_dock = QDockWidget("Bottom Panel", self)
         bottom_dock.setObjectName("bottomDock")
-        bottom_dock.setWidget(bottom_tabs)
+        bottom_dock.setWidget(self.bottom_tabs)
         bottom_dock.setMinimumHeight(180)
         self.addDockWidget(Qt.BottomDockWidgetArea, bottom_dock)
 
         self.statusBar().showMessage(str(self.project.root))
+
+    def open_plugin(self, plugin_id: str) -> None:
+        plugin = self.plugin_registry.get(plugin_id)
+        if plugin.mode == "bottom":
+            widget = self._plugin_widgets.get(plugin.id)
+            if widget is not None:
+                self.bottom_tabs.setCurrentWidget(widget)
+            return
+        if plugin.mode == "central":
+            existing = self._plugin_widgets.get(plugin.id)
+            if existing is not None:
+                self.central_tabs.setCurrentWidget(existing)
+                return
+            widget = plugin.factory()
+            widget.setProperty("editorPluginId", plugin.id)
+            self._plugin_widgets[plugin.id] = widget
+            index = self.central_tabs.addTab(widget, plugin.title)
+            self.central_tabs.setCurrentIndex(index)
+            self._log(f"[tool] opened {plugin.title}")
+            return
+        self._start_external_plugin(plugin)
+
+    def _start_external_plugin(self, plugin: EditorPlugin) -> None:
+        running = self._tool_processes.get(plugin.id)
+        if running is not None and running.state() != QProcess.NotRunning:
+            self.statusBar().showMessage(f"{plugin.title} is already running", 3000)
+            return
+        if plugin.script is None or not plugin.script.is_file():
+            self._show_error(
+                "Tool unavailable",
+                ValueError(f"Tool script does not exist: {plugin.script}"),
+            )
+            return
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments([str(plugin.script)])
+        process.setWorkingDirectory(str(self.project.root))
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(
+            lambda plugin_id=plugin.id: self._read_tool_output(plugin_id)
+        )
+        process.finished.connect(
+            lambda exit_code, exit_status, plugin_id=plugin.id: (
+                self._tool_finished(plugin_id, exit_code, exit_status)
+            )
+        )
+        process.errorOccurred.connect(
+            lambda error, title=plugin.title: self._log(
+                f"[tool:error] {title}: process error {int(error)}"
+            )
+        )
+        self._tool_processes[plugin.id] = process
+        process.start()
+        if not process.waitForStarted(3000):
+            self._tool_processes.pop(plugin.id, None)
+            self._show_error("Tool failed", ValueError(process.errorString()))
+            return
+        self._log(f"[tool] started {plugin.title} (PID {process.processId()})")
+
+    def _read_tool_output(self, plugin_id: str) -> None:
+        process = self._tool_processes.get(plugin_id)
+        if process is None:
+            return
+        data = bytes(process.readAllStandardOutput())
+        output = data.decode("utf-8", errors="replace").rstrip()
+        if output:
+            self._log(output)
+
+    def _tool_finished(self, plugin_id: str, exit_code: int, exit_status) -> None:
+        del exit_status
+        self._read_tool_output(plugin_id)
+        plugin = self.plugin_registry.get(plugin_id)
+        self._log(f"[tool] {plugin.title} exited with code {exit_code}")
+        self._tool_processes.pop(plugin_id, None)
+
+    def _close_central_tab(self, index: int) -> None:
+        if index <= 0:
+            return
+        widget = self.central_tabs.widget(index)
+        if widget is None or not widget.close():
+            return
+        plugin_id = str(widget.property("editorPluginId") or "")
+        self.central_tabs.removeTab(index)
+        if plugin_id:
+            self._plugin_widgets.pop(plugin_id, None)
+        widget.deleteLater()
+
+    def _resource_selected(self, record: AssetRecord) -> None:
+        self.statusBar().showMessage(record.resource_value, 3000)
+
+    def _resource_activated(self, record: AssetRecord) -> None:
+        selected = self.session.node(self._selected_id)
+        if record.kind in {"image", "sprite"}:
+            if selected is not None and selected.type == "Sprite":
+                self.set_node_property(
+                    selected.id,
+                    "texture",
+                    record.resource_value,
+                )
+            else:
+                self._add_sprite_resource(
+                    record.resource_value,
+                    record.name,
+                )
+            return
+        if record.kind == "script":
+            if selected is not None and selected.type == "SpellCard":
+                self.set_node_property(
+                    selected.id,
+                    "script",
+                    record.resource_value,
+                )
+            else:
+                self._log(
+                    "[assets] Select a SpellCard before assigning a script."
+                )
+            return
+        if record.kind == "json":
+            if record.path.name == "bullet_aliases.json":
+                self.open_plugin("bullet_aliases")
+            elif record.project_path.startswith("assets/images/"):
+                self.open_plugin("texture_editor")
+
+    def _resource_dropped(self, payload: dict, x: float, y: float) -> None:
+        kind = str(payload.get("kind", ""))
+        value = str(payload.get("resource_value", "")).strip()
+        name = str(payload.get("name", "Sprite")).strip() or "Sprite"
+        if not value:
+            return
+        if kind in {"image", "sprite"}:
+            self._add_sprite_resource(value, name, x=x, y=y)
+            return
+        if kind == "script":
+            selected = self.session.node(self._selected_id)
+            if selected is not None and selected.type == "SpellCard":
+                self.set_node_property(selected.id, "script", value)
+            else:
+                self._log(
+                    "[assets] Drop scripts while a SpellCard is selected."
+                )
+
+    def _add_sprite_resource(
+        self,
+        resource_value: str,
+        name: str,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> None:
+        parent = self.session.node(self._selected_id) or self.session.document.root
+        node = make_node("Sprite", name=Path(name).stem or "Sprite")
+        node.properties["texture"] = resource_value
+        if x is not None:
+            node.properties["x"] = float(x)
+        if y is not None:
+            node.properties["y"] = float(y)
+        self._apply_command(
+            AddNodeCommand(
+                self.session.document.root,
+                parent.id,
+                node,
+                label=f"Add {node.name}",
+            ),
+            select_id=node.id,
+        )
 
     def _apply_theme(self) -> None:
         QApplication.instance().setStyle("Fusion")
@@ -682,8 +977,8 @@ class EditorMainWindow(QMainWindow):
                 padding: 7px;
                 font-weight: 600;
             }
-            QTreeWidget, QTextEdit, QTableWidget, QLineEdit,
-            QSpinBox, QDoubleSpinBox, QScrollArea {
+            QTreeWidget, QListView, QTextEdit, QTableWidget, QLineEdit,
+            QComboBox, QSpinBox, QDoubleSpinBox, QScrollArea {
                 background: #171a22;
                 color: #dce2ee;
                 border: 1px solid #353b49;
@@ -776,9 +1071,8 @@ class EditorMainWindow(QMainWindow):
 
     def _update_title(self) -> None:
         name = self.session.path.name if self.session.path else self.session.document.name
-        marker = "*" if self.session.is_dirty else ""
         self.setWindowModified(self.session.is_dirty)
-        self.setWindowTitle(f"{marker}{name} — {APP_NAME}")
+        self.setWindowTitle(f"{name}[*] — {APP_NAME}")
 
     def _log(self, message: str) -> None:
         self.output.append(message)
@@ -1148,10 +1442,21 @@ class EditorMainWindow(QMainWindow):
         if not self._confirm_discard():
             event.ignore()
             return
+        for index in range(self.central_tabs.count() - 1, 0, -1):
+            widget = self.central_tabs.widget(index)
+            if widget is not None and not widget.close():
+                event.ignore()
+                return
         if self._preview_process is not None and self._preview_process.state() != QProcess.NotRunning:
             self._preview_process.terminate()
             if not self._preview_process.waitForFinished(1500):
                 self._preview_process.kill()
+        for process in tuple(self._tool_processes.values()):
+            if process.state() == QProcess.NotRunning:
+                continue
+            process.terminate()
+            if not process.waitForFinished(1500):
+                process.kill()
         event.accept()
 
 

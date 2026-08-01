@@ -57,7 +57,7 @@ def test_editor_window_wires_tree_inspector_viewport_and_undo(tmp_path):
     assert window.session.node(sprite_id).properties["x"] == 128.0
     assert window.session.is_dirty
     window.undo()
-    assert window.session.node(sprite_id).properties["x"] == 384.0
+    assert window.session.node(sprite_id).properties["x"] == 192.0
     window.undo()
     assert window.tree.topLevelItem(0).childCount() == 0
     assert not window.session.is_dirty
