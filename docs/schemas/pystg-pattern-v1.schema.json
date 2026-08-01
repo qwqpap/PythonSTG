@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pythonstg.dev/schemas/pystg-pattern-v1.schema.json",
+  "title": "PySTG PatternDocument v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "type",
+    "id",
+    "name",
+    "seed",
+    "bullet",
+    "shape",
+    "aim",
+    "schedule",
+    "motion",
+    "modifiers"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "type": {"const": "pystg.pattern"},
+    "id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1},
+    "symbol_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "metadata": {"type": "object"},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "bullet": {"$ref": "#/$defs/bullet"},
+    "shape": {"$ref": "#/$defs/shape"},
+    "aim": {"$ref": "#/$defs/aim"},
+    "schedule": {"$ref": "#/$defs/schedule"},
+    "motion": {"$ref": "#/$defs/motion"},
+    "modifiers": {"$ref": "#/$defs/modifiers"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "bullet": {
+      "type": "object",
+      "required": ["bullet_type", "color", "resource"],
+      "properties": {
+        "bullet_type": {"type": "string", "minLength": 1},
+        "color": {"type": "string", "minLength": 1},
+        "resource": {"type": ["string", "null"], "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "shape": {
+      "type": "object",
+      "required": [
+        "kind",
+        "count",
+        "origin_x",
+        "origin_y",
+        "angle_span",
+        "line_length",
+        "line_angle"
+      ],
+      "properties": {
+        "kind": {
+          "enum": ["ring", "arc", "line", "spiral", "random", "flower"]
+        },
+        "count": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "origin_x": {"type": "number"},
+        "origin_y": {"type": "number"},
+        "angle_span": {"type": "number"},
+        "line_length": {"type": "number", "minimum": 0},
+        "line_angle": {"type": "number"}
+      },
+      "additionalProperties": false
+    },
+    "aim": {
+      "type": "object",
+      "required": ["mode", "angle"],
+      "properties": {
+        "mode": {"enum": ["fixed", "player"]},
+        "angle": {"type": "number"}
+      },
+      "additionalProperties": false
+    },
+    "schedule": {
+      "type": "object",
+      "required": ["delay_frames", "interval_frames", "burst_count", "loop_count"],
+      "properties": {
+        "delay_frames": {"type": "integer", "minimum": 0},
+        "interval_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "burst_count": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "loop_count": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 1000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "motion": {
+      "type": "object",
+      "required": [
+        "speed",
+        "friction",
+        "spin",
+        "time_scale",
+        "max_lifetime",
+        "render_scale",
+        "bounce_x",
+        "bounce_y"
+      ],
+      "properties": {
+        "speed": {"type": "number", "minimum": 0},
+        "friction": {"type": "number", "minimum": 0},
+        "spin": {"type": "number"},
+        "time_scale": {"type": "number", "minimum": 0},
+        "max_lifetime": {"type": "number", "minimum": 0},
+        "render_scale": {"type": "number", "exclusiveMinimum": 0},
+        "bounce_x": {"type": "boolean"},
+        "bounce_y": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "modifiers": {
+      "type": "object",
+      "required": [
+        "angle_offset_per_burst",
+        "speed_offset_per_burst",
+        "random_speed_variation"
+      ],
+      "properties": {
+        "angle_offset_per_burst": {"type": "number"},
+        "speed_offset_per_burst": {"type": "number"},
+        "random_speed_variation": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

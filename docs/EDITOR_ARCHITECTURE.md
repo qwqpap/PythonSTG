@@ -21,7 +21,10 @@ Runtime / renderer / resource service
 
 ## 文档
 
-- 新场景文件使用 `pystg.scene` 类型和整数 `schema_version`。
+- 所有作者资源使用 `*.pystg.json`，由文档内的 `type` 区分
+  `pystg.scene`、`pystg.pattern`、`pystg.ui` 和 `pystg.background`。
+- 公共资源头、引用、迁移、坐标和时间契约见
+  [`AUTHORING_RESOURCE_CONTRACTS.md`](AUTHORING_RESOURCE_CONTRACTS.md)。
 - 文档、节点和时间轴事件都有稳定 UUID。
 - `DocumentStore` 只允许读写项目目录内文件，并使用原子替换保存。
 - 新 schema 必须提供迁移函数和 round-trip 测试。
@@ -36,10 +39,20 @@ Runtime / renderer / resource service
 
 ## 资源
 
-- `ResourceService` 是运行时和编辑器创建资源模型的统一入口。
+- `ResourceTypeRegistry` 是版本化作者资源的 loader、validator、editor、compiler
+  和 preview contribution 入口；编辑器外壳不得按资源类型增加编译分支。
+- `ResourceService` 继续负责当前运行时纹理目录和富编辑纹理兼容模型。
 - `TextureAssetManager` 是当前正式运行时纹理目录。
 - `UnifiedTextureManager` 暂作为富编辑类型兼容模型，由 `ResourceService.editor` 管理。
 - 两种内部表示迁移完成前，关键资源必须通过契约测试证明解析结果一致。
+
+## 坐标与时间
+
+- 作者画布使用固定逻辑像素，基准尺寸为 `384x448`，原点在左上，Y 向下。
+- 正式运行时坐标以画面中心为原点，X/Y 范围均为 `[-1, 1]`，Y 向上。
+- 编辑器、文档编译器和预览只能通过 `CoordinateSpace` 做两者转换。
+- 文档时间存储为声明 tick rate 下的非负整数帧；第一版 tick rate 为 60Hz。
+- 秒和拍仅为显示/输入单位，通过 `Timebase` 转换，不以浮点秒作为时间轴主键。
 
 ## 编辑操作
 

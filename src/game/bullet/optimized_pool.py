@@ -153,6 +153,7 @@ class OptimizedBulletPool:
         self.spawn_queue: List[SpawnRequest] = []
         self.death_queue: List[DeathEvent] = []
         self.last_alive = np.zeros(max_bullets, dtype='i4')
+        self.batch_spawn_calls = 0
 
         # ===== 渲染优化相关 =====
         self._render_positions = np.zeros((max_bullets, 2), dtype='f4')
@@ -374,6 +375,108 @@ class OptimizedBulletPool:
 
     # ===== 发射器 (Emitter) =====
 
+    def spawn_bullets_batch(
+        self,
+        positions,
+        angles,
+        speeds,
+        *,
+        sprite_id: str = '',
+        sprite_idx: int = -1,
+        acc: Tuple[float, float] = (0.0, 0.0),
+        max_lifetime: float = 0.0,
+        radius: float = 0.0,
+        friction: float = 0.0,
+        tag: int = 0,
+        time_scale: float = 1.0,
+        flags: int = FLAG_RENDER_ANGLE_LOCKED,
+        angular_vel: float = 0.0,
+        render_angles=None,
+        render_scale: float = 1.0,
+        curve_type: int = CURVE_NONE,
+        curve_param: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    ) -> np.ndarray:
+        """Spawn heterogeneous bullets with one vectorized pool write.
+
+        Angles are radians and speeds are normalized units per frame, matching
+        :meth:`spawn_bullet`. Capacity exhaustion is explicit: the returned
+        array contains only the slots that were actually allocated.
+        """
+        position_array = np.asarray(positions, dtype=np.float32)
+        angle_array = np.asarray(angles, dtype=np.float32)
+        speed_array = np.asarray(speeds, dtype=np.float32)
+        if position_array.size == 0:
+            position_array = position_array.reshape((0, 2))
+        if position_array.ndim != 2 or position_array.shape[1] != 2:
+            raise ValueError("positions must have shape (count, 2)")
+        if angle_array.ndim != 1 or speed_array.ndim != 1:
+            raise ValueError("angles and speeds must be one-dimensional")
+        count = len(position_array)
+        if len(angle_array) != count or len(speed_array) != count:
+            raise ValueError("positions, angles, and speeds must have equal length")
+        if not (
+            np.all(np.isfinite(position_array))
+            and np.all(np.isfinite(angle_array))
+            and np.all(np.isfinite(speed_array))
+        ):
+            raise ValueError("batch positions, angles, and speeds must be finite")
+        if np.any(speed_array < 0):
+            raise ValueError("batch speeds must be non-negative")
+
+        if render_angles is None:
+            render_angle_array = angle_array
+        else:
+            render_angle_array = np.asarray(render_angles, dtype=np.float32)
+            if render_angle_array.ndim != 1 or len(render_angle_array) != count:
+                raise ValueError("render_angles must match the batch length")
+            if not np.all(np.isfinite(render_angle_array)):
+                raise ValueError("render_angles must be finite")
+
+        available = min(count, len(self.free_indices))
+        if available == 0:
+            return np.empty(0, dtype=np.intp)
+        if sprite_idx < 0:
+            sprite_idx = self.register_sprite(sprite_id) if sprite_id else 0
+
+        use_indices = np.fromiter(
+            (self.free_indices.pop() for _ in range(available)),
+            dtype=np.intp,
+            count=available,
+        )
+        batch_positions = position_array[:available]
+        batch_angles = angle_array[:available]
+        batch_speeds = speed_array[:available]
+        d = self.data
+        d['pos'][use_indices] = batch_positions
+        d['vel'][use_indices, 0] = np.cos(batch_angles) * batch_speeds
+        d['vel'][use_indices, 1] = np.sin(batch_angles) * batch_speeds
+        d['acc'][use_indices] = acc
+        d['angle'][use_indices] = batch_angles
+        d['render_angle'][use_indices] = render_angle_array[:available]
+        d['angular_vel'][use_indices] = angular_vel
+        d['render_scale'][use_indices] = render_scale
+        d['speed'][use_indices] = batch_speeds
+        d['sprite_idx'][use_indices] = sprite_idx
+        d['radius'][use_indices] = radius
+        d['lifetime'][use_indices] = 0.0
+        d['max_lifetime'][use_indices] = max_lifetime
+        d['friction'][use_indices] = friction
+        d['tag'][use_indices] = tag
+        d['time_scale'][use_indices] = time_scale
+        d['flags'][use_indices] = flags
+        d['curve_type'][use_indices] = curve_type
+        d['curve_param'][use_indices] = curve_param
+        d['alive'][use_indices] = 1
+        self.batch_spawn_calls += 1
+
+        # Formal pattern batches never install per-bullet callbacks. Clear any
+        # stale sparse state defensively if a legacy path reused these slots.
+        for idx in use_indices.tolist():
+            self.death_handlers.pop(int(idx), None)
+            self.polar_motions.pop(int(idx), None)
+            self.emitter_callbacks.pop(int(idx), None)
+        return use_indices
+
     def spawn_emitter(self, x: float, y: float, angle: float, speed: float,
                       callback: Callable, **kwargs) -> int:
         """
@@ -423,10 +526,23 @@ class OptimizedBulletPool:
 
         return positions
 
-    def clear_by_tag(self, tag: int):
+    def clear_by_tag(self, tag: int) -> int:
         """按标签消除所有子弹"""
         mask = (self.data['alive'] == 1) & (self.data['tag'] == tag)
+        count = int(np.count_nonzero(mask))
         self._clear_mask_now(mask)
+        return count
+
+    def translate_by_tag(self, tag: int, dx: float, dy: float) -> int:
+        """Translate alive bullets owned by ``tag`` with one vectorized write."""
+        if not math.isfinite(dx) or not math.isfinite(dy):
+            raise ValueError("translation must be finite")
+        mask = (self.data['alive'] == 1) & (self.data['tag'] == tag)
+        count = int(np.count_nonzero(mask))
+        if count:
+            self.data['pos'][mask, 0] += dx
+            self.data['pos'][mask, 1] += dy
+        return count
 
     def cancel_for_bomb(self, protected_tags=None) -> np.ndarray:
         """Cancel all bomb-clearable bullets and return canceled positions."""

@@ -7,9 +7,21 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from src.authoring.migrations import (
+    MigrationError,
+    build_default_migration_registry,
+)
+from src.authoring.coordinates import CoordinateSpace, Timebase
+from src.authoring.resources import (
+    RESOURCE_SCHEMA_VERSION,
+    SCENE_RESOURCE_TYPE,
+    ResourceDocumentError,
+    ResourceHeader,
+)
 
-CURRENT_SCHEMA_VERSION = 1
-SCENE_DOCUMENT_TYPE = "pystg.scene"
+
+CURRENT_SCHEMA_VERSION = RESOURCE_SCHEMA_VERSION
+SCENE_DOCUMENT_TYPE = SCENE_RESOURCE_TYPE
 
 
 class DocumentError(ValueError):
@@ -138,24 +150,49 @@ class SceneDocument:
     id: str = field(default_factory=new_document_id)
     schema_version: int = CURRENT_SCHEMA_VERSION
     type: str = SCENE_DOCUMENT_TYPE
+    symbol_name: str | None = None
     timeline: list[TimelineEvent] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def validate(self) -> None:
-        self.id = _valid_id(self.id, "document.id")
-        if self.schema_version != CURRENT_SCHEMA_VERSION:
-            raise DocumentError(
-                f"Unsupported schema_version {self.schema_version}; "
-                f"expected {CURRENT_SCHEMA_VERSION}"
+    @property
+    def coordinate_space(self) -> CoordinateSpace:
+        return CoordinateSpace(
+            logical_width=float(self.root.properties.get("width", 384)),
+            logical_height=float(self.root.properties.get("height", 448)),
+        )
+
+    @property
+    def timebase(self) -> Timebase:
+        return Timebase(
+            int(
+                self.root.properties.get(
+                    "tick_rate",
+                    self.metadata.get("tick_rate", 60),
+                )
             )
-        if self.type != SCENE_DOCUMENT_TYPE:
-            raise DocumentError(f"Unsupported document type: {self.type!r}")
-        if not isinstance(self.name, str) or not self.name.strip():
-            raise DocumentError("document.name must be a non-empty string")
+        )
+
+    def validate(self) -> None:
+        try:
+            header = ResourceHeader(
+                schema_version=self.schema_version,
+                type=self.type,
+                id=self.id,
+                name=self.name,
+                symbol_name=self.symbol_name,
+                metadata=self.metadata,
+            )
+            header.validate(
+                expected_type=SCENE_DOCUMENT_TYPE,
+                current_version=CURRENT_SCHEMA_VERSION,
+            )
+        except ResourceDocumentError as exc:
+            raise DocumentError(str(exc)) from exc
+        self.id = header.id
+        self.metadata = header.metadata
         if not isinstance(self.root, EditorNode):
             raise DocumentError("document.root must be an EditorNode")
         self.root.validate()
-        self.metadata = _json_object(self.metadata, "document.metadata")
 
         ids = {self.id}
         for node in self.root.walk():
@@ -172,7 +209,7 @@ class SceneDocument:
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "type": self.type,
             "id": self.id,
@@ -181,6 +218,9 @@ class SceneDocument:
             "root": self.root.to_dict(),
             "timeline": [event.to_dict() for event in self.timeline],
         }
+        if self.symbol_name is not None:
+            payload["symbol_name"] = self.symbol_name
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SceneDocument":
@@ -188,8 +228,9 @@ class SceneDocument:
         document = cls(
             schema_version=migrated["schema_version"],
             type=migrated["type"],
-            id=migrated["id"],
-            name=migrated["name"],
+            id=migrated.get("id", ""),
+            name=migrated.get("name", ""),
+            symbol_name=migrated.get("symbol_name"),
             metadata=_json_object(migrated.get("metadata", {}), "document.metadata"),
             root=EditorNode.from_dict(migrated["root"]),
             timeline=[
@@ -202,41 +243,10 @@ class SceneDocument:
 
 
 def migrate_document(data: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(data, dict):
-        raise DocumentError("document must be an object")
-    version = data.get("schema_version", 0)
-    if isinstance(version, bool) or not isinstance(version, int):
-        raise DocumentError("schema_version must be an integer")
-    if version > CURRENT_SCHEMA_VERSION:
-        raise DocumentError(
-            f"Document schema {version} is newer than supported "
-            f"{CURRENT_SCHEMA_VERSION}"
+    try:
+        return build_default_migration_registry().migrate(
+            data,
+            expected_type=SCENE_DOCUMENT_TYPE,
         )
-
-    migrated = dict(data)
-    if version == 0:
-        migrated = _migrate_v0_to_v1(migrated)
-        version = 1
-    if version != CURRENT_SCHEMA_VERSION:
-        raise DocumentError(f"No migration path from schema_version {version}")
-    return migrated
-
-
-def _migrate_v0_to_v1(data: dict[str, Any]) -> dict[str, Any]:
-    root = data.get("root")
-    if root is None:
-        root = {
-            "type": "Stage",
-            "name": data.get("name", "Scene"),
-            "properties": {},
-            "children": data.get("nodes", []),
-        }
-    return {
-        "schema_version": 1,
-        "type": SCENE_DOCUMENT_TYPE,
-        "id": data.get("id") or new_document_id(),
-        "name": data.get("name", "Scene"),
-        "metadata": data.get("metadata", {}),
-        "root": root,
-        "timeline": data.get("timeline", []),
-    }
+    except MigrationError as exc:
+        raise DocumentError(str(exc)) from exc
