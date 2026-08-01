@@ -23,12 +23,12 @@ Godot-style workbench
 
 ## Current focus
 
-**Milestone M3 — First no-code vertical slice**
+**Milestone M4 — Editable timeline and StageProgram**
 
 Phase 0 contracts are frozen. Keep later changes compatible with them or add
 explicit schema migrations and contract tests.
 
-Next recommended task: **E3.1 — Introduce multi-document editing and per-document savepoints.**
+Next recommended task: **E4.1 — Define the editable timeline document model.**
 
 ## Status and update rules
 
@@ -326,43 +326,43 @@ spell without writing Python.
 
 ### E3.1 Multi-document editing
 
-- [ ] Replace the single SceneEditorSession assumption with DocumentManager.
-- [ ] Give each open document its own savepoint and CommandStack.
-- [ ] Add close/save/revert behavior for multiple documents.
-- [ ] Preserve resource selections and editor context per document.
+- [x] Replace the single SceneEditorSession assumption with DocumentManager.
+- [x] Give each open document its own savepoint and CommandStack.
+- [x] Add close/save/revert behavior for multiple documents.
+- [x] Preserve resource selections and editor context per document.
 
 ### E3.2 Undo transactions
 
-- [ ] Add command transactions for multi-property operations.
-- [ ] Coalesce continuous slider/spinbox/gizmo drags into one undo step.
-- [ ] Add timeline and resource-assignment command types.
-- [ ] Verify Undo/Redo round-trips valid documents.
+- [x] Add command transactions for multi-property operations.
+- [x] Coalesce continuous slider/spinbox/gizmo drags into one undo step.
+- [x] Add timeline and resource-assignment command types.
+- [x] Verify Undo/Redo round-trips valid documents.
 
 ### E3.3 Contextual Pattern workspace
 
-- [ ] Add Pattern as a first-class central editor context.
-- [ ] Provide recipe Inspector controls with units and advanced sections.
-- [ ] Add Bullet resource picking and drag/drop.
-- [ ] Add emitter gizmo, player target gizmo, and optional trajectory guides.
-- [ ] Connect property changes to PreviewController.
-- [ ] Provide concise empty states and starter templates.
+- [x] Add Pattern as a first-class central editor context.
+- [x] Provide recipe Inspector controls with units and advanced sections.
+- [x] Add Bullet resource picking and drag/drop.
+- [x] Add emitter gizmo, player target gizmo, and optional trajectory guides.
+- [x] Connect property changes to PreviewController.
+- [x] Provide concise empty states and starter templates.
 
 ### E3.4 Scene integration
 
-- [ ] Add Stage -> Boss -> Spell -> Emitter/PatternInstance creation flow.
-- [ ] Support Pattern resource instancing rather than copying definitions.
-- [ ] Compile the selected simple Spell into a runnable preview program.
-- [ ] Provide structured Output messages that link to the failing node/property.
+- [x] Add Stage -> Boss -> Spell -> Emitter/PatternInstance creation flow.
+- [x] Support Pattern resource instancing rather than copying definitions.
+- [x] Compile the selected simple Spell into a runnable preview program.
+- [x] Provide structured Output messages that link to the failing node/property.
 
 ### Phase 3 gate — first product milestone
 
-- [ ] A clean user flow can create a ring pattern, adjust count/speed/interval,
+- [x] A clean user flow can create a ring pattern, adjust count/speed/interval,
   aim at the player, assign a bullet resource, save, reopen, and formally
   preview it without touching Python.
-- [ ] Undo/Redo covers creation, resource assignment, gizmo movement, and
+- [x] Undo/Redo covers creation, resource assignment, gizmo movement, and
   property editing.
-- [ ] Desktop interaction and representative narrow-layout behavior are checked.
-- [ ] Structural, runtime, and visual acceptance are recorded separately.
+- [x] Desktop interaction and representative narrow-layout behavior are checked.
+- [x] Structural, runtime, and visual acceptance are recorded separately.
 
 ---
 
@@ -716,3 +716,42 @@ Append entries; do not rewrite old evidence. Keep each entry concise.
 - Acceptance classification: M2 is structurally valid, runtime valid, process
   isolation checked, and visually/interaction accepted. M1 parity and
   performance evidence remain the formal-runtime baseline for this preview.
+
+### 2026-08-02 — M3 first no-code vertical slice complete
+
+- Added `DocumentManager` ownership for Scene and Pattern tabs with independent
+  paths, savepoints, command stacks, selections, editor context, duplicate-path
+  handling, save/save-as, revert, close, and dirty-document decisions.
+- Added command transactions, validation rollback, interaction coalescing,
+  Pattern/timeline property commands, and semantic resource assignment. The
+  no-code quick flow and standalone Pattern assignment both Undo/Redo as
+  independent interaction-sized operations.
+- Added the first-class Pattern workspace with grouped recipe Inspector fields,
+  units and advanced modifiers, bullet picking/drop, starter templates,
+  emitter/player gizmos, trajectory guides, responsive controls, and live
+  `PreviewController` updates from the authoring document.
+- Added the semantic Stage -> Boss -> Spell -> Emitter -> PatternInstance quick
+  flow. A selected simple Spell resolves one project-relative Pattern reference,
+  applies its Emitter transform, compiles through `PatternDocument ->
+  PatternProgram`, and launches the formal runtime. Multi-pattern/timeline
+  orchestration remains explicitly deferred to M4.
+- Structural evidence: 69 focused M3/editor/preview/runtime tests passed; the
+  full repository regression passed all 168 collected tests. `python -m
+  compileall -q main.py src game_content tools tests` and `git diff --check`
+  passed. Asset validation checked 72 JSON files, 745 sprites, and 142 images
+  with 0 errors and 0 warnings.
+- Runtime evidence: the clean no-code integration flow created, edited, assigned,
+  saved, closed, reopened, and formally previewed a ring resource without Python
+  codegen. Native external preview ran the optimized-pool path, reported
+  `600 / 50000` bullets and runtime timings, and changed from playing to paused
+  through the Space control.
+- Visual/interaction evidence: the final native editor was inspected at both
+  1480x920 and the supported 960x640 minimum. Pattern controls no longer overlap;
+  the canvas, wrapped Inspector, and core Preview controls remain usable, while
+  detailed preview diagnostics scroll inside the compact bottom dock. Opening a
+  Pattern through `Open Resource...` succeeded in the fresh process; the earlier
+  Scene-type mismatch was confirmed as a stale pre-M3 editor process.
+- Acceptance classification: M3 is structurally valid, runtime valid, and
+  visually/interaction accepted. Existing M1 performance evidence remains the
+  data-oriented runtime baseline; M3 adds no new per-bullet callback or scene-node
+  path.

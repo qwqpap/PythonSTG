@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -71,7 +72,10 @@ class PatternPreviewPanel(QWidget):
         controls.addStretch()
         root.addLayout(controls)
 
-        body = QGridLayout()
+        body_container = QWidget()
+        body_container.setObjectName("previewBody")
+        body = QGridLayout(body_container)
+        body.setContentsMargins(0, 0, 0, 0)
         stats_box = QGroupBox("Runtime")
         stats_form = QFormLayout(stats_box)
         self.stats_labels = {}
@@ -151,7 +155,13 @@ class PatternPreviewPanel(QWidget):
         body.setColumnStretch(0, 1)
         body.setColumnStretch(1, 2)
         body.setColumnStretch(2, 2)
-        root.addLayout(body)
+        body_scroll = QScrollArea()
+        body_scroll.setObjectName("previewBodyScroll")
+        body_scroll.setWidgetResizable(True)
+        body_scroll.setFrameShape(QScrollArea.NoFrame)
+        body_scroll.setMinimumHeight(72)
+        body_scroll.setWidget(body_container)
+        root.addWidget(body_scroll, 1)
 
         self.status_label = QLabel("Preview process is stopped")
         self.status_label.setObjectName("previewStatus")

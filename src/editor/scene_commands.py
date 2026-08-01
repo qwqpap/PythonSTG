@@ -138,6 +138,14 @@ class SetNodePropertyCommand:
         else:
             node.properties.pop(self.key, None)
 
+    def merge_with(self, other: object) -> bool:
+        if not isinstance(other, SetNodePropertyCommand):
+            return False
+        if self.root is not other.root or self.node_id != other.node_id or self.key != other.key:
+            return False
+        self.value = other.value
+        return True
+
 
 @dataclass
 class SetNodePropertiesCommand:
@@ -171,6 +179,23 @@ class SetNodePropertiesCommand:
                 node.properties[key] = value
             else:
                 node.properties.pop(key, None)
+
+    def merge_with(self, other: object) -> bool:
+        if not isinstance(other, SetNodePropertiesCommand):
+            return False
+        if self.root is not other.root or self.node_id != other.node_id:
+            return False
+        if set(self.values) != set(other.values):
+            return False
+        self.values = dict(other.values)
+        return True
+
+
+@dataclass
+class AssignResourceCommand(SetNodePropertyCommand):
+    """Semantic command used by resource pickers and drag/drop assignment."""
+
+    label: str = "Assign resource"
 
 
 @dataclass

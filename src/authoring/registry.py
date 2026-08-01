@@ -110,7 +110,30 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
         (UI_RESOURCE_TYPE, "UI", "ui"),
         (BACKGROUND_RESOURCE_TYPE, "Background", "background"),
     ):
-        if type_name == PATTERN_RESOURCE_TYPE:
+        if type_name == SCENE_RESOURCE_TYPE:
+            from src.editor.document import SceneDocument
+
+            def load_scene(payload):
+                # The common envelope contract also permits header-only/generic
+                # Scene resources in low-level tooling.  Only a payload with the
+                # formal Scene body is promoted to the editor SceneDocument.
+                if "root" in payload:
+                    return SceneDocument.from_dict(dict(payload))
+                return GenericResourceDocument.from_dict(
+                    payload,
+                    expected_type=SCENE_RESOURCE_TYPE,
+                    current_version=RESOURCE_SCHEMA_VERSION,
+                )
+
+            registry.register(
+                ResourceTypeSpec(
+                    type_name=type_name,
+                    display_name=display_name,
+                    asset_kind=asset_kind,
+                    loader=load_scene,
+                )
+            )
+        elif type_name == PATTERN_RESOURCE_TYPE:
             # Local import keeps the common registry independent of domain
             # modules while still providing typed loading and compilation.
             from src.pattern import PatternDocument, compile_pattern

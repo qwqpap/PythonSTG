@@ -55,8 +55,7 @@ class SceneEditorSession:
         return saved
 
     def apply(self, command: Command) -> None:
-        self.commands.push(command)
-        self.document.validate()
+        self.commands.push(command, validate=self.document.validate)
 
     def undo(self) -> bool:
         changed = self.commands.undo()

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import sys
 from pathlib import Path
 from typing import Callable
 
-from PyQt5.QtCore import QPointF, QProcess, QRectF, Qt, pyqtSignal
+from PyQt5.QtCore import QPointF, QProcess, QRectF, Qt, QUrl, pyqtSignal
 from PyQt5.QtGui import (
     QBrush,
     QColor,
@@ -24,6 +25,7 @@ from PyQt5.QtWidgets import (
     QAction,
     QApplication,
     QCheckBox,
+    QComboBox,
     QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
@@ -42,12 +44,13 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTextEdit,
+    QTextBrowser,
     QToolBar,
     QToolButton,
     QTreeWidget,
@@ -56,9 +59,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from src.core.project_context import ProjectContext, ProjectContextError
+from src.core.project_context import ProjectContext
 from src.authoring.coordinates import CoordinateSpace
-from src.authoring import ResourceStore
 from src.authoring.resources import ResourceDocumentError, ResourceReference
 from src.pattern import PatternDocument
 
@@ -67,9 +69,17 @@ from .document import DocumentError, EditorNode, SceneDocument
 from .node_types import NODE_TYPES, PropertySpec, make_node, property_specs
 from .preview_panel import PatternPreviewPanel
 from .preview_process import PatternPreviewProcess
+from .document_manager import (
+    DocumentManager,
+    DocumentManagerError,
+    ManagedDocument,
+)
+from .pattern_commands import SetPatternPropertyCommand
+from .pattern_workspace import PatternWorkspace
 from .resource_browser import RESOURCE_MIME_TYPE, ResourceBrowserPanel
 from .scene_commands import (
     AddNodeCommand,
+    AssignResourceCommand,
     MoveNodeCommand,
     RemoveNodeCommand,
     RenameNodeCommand,
@@ -78,13 +88,13 @@ from .scene_commands import (
     SetNodePropertyCommand,
     find_parent,
 )
-from .session import SceneEditorSession
-from .storage import DocumentStore
+from .scene_compile import SceneSpellCompileError, compile_simple_spell
 from .workbench import EditorPlugin, PluginRegistry, default_external_plugins
 
 
-APP_NAME = "PySTG Scene Editor"
-SCENE_FILTER = "PySTG Scene (*.pystg.json);;JSON (*.json)"
+APP_NAME = "PySTG Editor"
+RESOURCE_FILTER = "PySTG Resources (*.pystg.json);;JSON (*.json)"
+SCENE_FILTER = RESOURCE_FILTER
 
 
 def build_preview_command(
@@ -447,6 +457,43 @@ class SceneViewport(QGraphicsView):
             self._fit_on_next_resize = False
 
 
+class ResourceLineEdit(QLineEdit):
+    """Line edit that accepts typed resource drags from the Assets panel."""
+
+    def __init__(self, accepted_kinds: tuple[str, ...], parent=None):
+        super().__init__(parent)
+        self.accepted_kinds = accepted_kinds
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(RESOURCE_MIME_TYPE):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(RESOURCE_MIME_TYPE):
+            super().dropEvent(event)
+            return
+        try:
+            payload = json.loads(
+                bytes(event.mimeData().data(RESOURCE_MIME_TYPE)).decode("utf-8")
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            event.ignore()
+            return
+        if str(payload.get("kind")) not in self.accepted_kinds:
+            event.ignore()
+            return
+        value = str(payload.get("resource_value") or "").strip()
+        if not value:
+            event.ignore()
+            return
+        self.setText(value)
+        self.editingFinished.emit()
+        event.acceptProposedAction()
+
+
 class InspectorPanel(QScrollArea):
     renameRequested = pyqtSignal(str, str)
     propertyRequested = pyqtSignal(str, str, object)
@@ -459,7 +506,9 @@ class InspectorPanel(QScrollArea):
         self._content = QWidget()
         self._form = QFormLayout(self._content)
         self._form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self._form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         self._form.setContentsMargins(12, 12, 12, 12)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setWidget(self._content)
         self._node_id: str | None = None
         self._pattern_id: str | None = None
@@ -511,7 +560,7 @@ class InspectorPanel(QScrollArea):
             self._form.addRow("Other", extra_label)
 
     def set_pattern(self, document: PatternDocument) -> None:
-        """Show lightweight live Pattern properties before the M3 workspace."""
+        """Show grouped recipe controls for the active Pattern document."""
         self._clear_form()
         self._node_id = None
         self._pattern_id = document.id
@@ -519,18 +568,59 @@ class InspectorPanel(QScrollArea):
         title.setObjectName("inspectorPatternTitle")
         self._form.addRow(title)
         payload = document.to_dict()
-        fields = [("seed", payload["seed"])]
+        seed_editor = self._make_pattern_editor("seed", payload["seed"])
+        self._form.addRow(self._pattern_label("seed"), seed_editor)
         for section in ("bullet", "shape", "aim", "schedule", "motion", "modifiers"):
-            fields.extend(
+            section_title = QLabel(
+                ("Advanced · " if section == "modifiers" else "")
+                + section.replace("_", " ").title()
+            )
+            section_title.setObjectName(f"patternSection_{section}")
+            section_title.setStyleSheet(
+                "font-weight:600; color:#9fc5ff; margin-top:8px;"
+            )
+            self._form.addRow(section_title)
+            section_fields = [
                 (f"{section}.{key}", value)
                 for key, value in payload[section].items()
-            )
-        for path, value in fields:
-            editor = self._make_pattern_editor(path, value)
-            self._form.addRow(path, editor)
+            ]
+            for path, value in section_fields:
+                editor = self._make_pattern_editor(path, value)
+                self._form.addRow(self._pattern_label(path), editor)
+
+    @staticmethod
+    def _pattern_label(path: str) -> str:
+        units = {
+            "shape.origin_x": "runtime",
+            "shape.origin_y": "runtime",
+            "shape.angle_span": "deg",
+            "shape.line_length": "runtime",
+            "shape.line_angle": "deg",
+            "aim.angle": "deg",
+            "schedule.delay_frames": "frame",
+            "schedule.interval_frames": "frame",
+            "motion.speed": "unit/s",
+            "motion.spin": "deg/s",
+            "motion.max_lifetime": "s",
+            "modifiers.angle_offset_per_burst": "deg/burst",
+        }
+        label = path.split(".")[-1].replace("_", " ").title()
+        unit = units.get(path)
+        return f"{label} [{unit}]" if unit else label
 
     def _make_pattern_editor(self, path: str, value):
-        if isinstance(value, bool):
+        choices = {
+            "shape.kind": ("ring", "arc", "line", "spiral", "random", "flower"),
+            "aim.mode": ("fixed", "player"),
+        }
+        if path in choices:
+            editor = QComboBox()
+            editor.addItems(list(choices[path]))
+            editor.setCurrentText(str(value))
+            editor.currentTextChanged.connect(
+                lambda text, key=path: self.patternPropertyRequested.emit(key, text)
+            )
+        elif isinstance(value, bool):
             editor = QCheckBox()
             editor.setChecked(value)
             editor.toggled.connect(
@@ -547,7 +637,12 @@ class InspectorPanel(QScrollArea):
             )
         else:
             text = "" if value is None else str(value)
-            editor = QLineEdit(text)
+            if path == "bullet.resource":
+                editor = ResourceLineEdit(("sprite",))
+                editor.setPlaceholderText("Drop a sprite from Assets")
+                editor.setText(text)
+            else:
+                editor = QLineEdit(text)
 
             def commit(edit=editor, key=path, original=value):
                 raw = edit.text().strip()
@@ -609,7 +704,18 @@ class InspectorPanel(QScrollArea):
             )
             return editor
 
-        editor = QLineEdit(str(value))
+        if spec.resource_types:
+            kinds: list[str] = []
+            for resource_type in spec.resource_types:
+                if resource_type.startswith("pystg."):
+                    kinds.append(resource_type.split(".", 1)[1])
+                else:
+                    kinds.append(resource_type)
+            editor = ResourceLineEdit(tuple(kinds))
+            editor.setPlaceholderText("Drop a compatible resource from Assets")
+            editor.setText(str(value))
+        else:
+            editor = QLineEdit(str(value))
         editor.editingFinished.connect(
             lambda edit=editor, nid=node_id, key=spec.key: self.propertyRequested.emit(
                 nid,
@@ -645,16 +751,19 @@ class EditorMainWindow(QMainWindow):
     def __init__(self, project: ProjectContext):
         super().__init__()
         self.project = project
-        self.session = SceneEditorSession(DocumentStore(project))
+        self.document_manager = DocumentManager(project)
+        self._fallback_selected_id = ""
         self._selected_id = self.session.document.root.id
         self._syncing_selection = False
         self._preview_process: QProcess | None = None
         self._pattern_preview_client = PatternPreviewProcess(project, parent=self)
         self._active_pattern_document: PatternDocument | None = None
+        self._active_pattern_session: ManagedDocument | None = None
         self._active_pattern_resource = ""
         self._preview_pending_properties: dict[str, tuple[str, object]] = {}
         self._tool_processes: dict[str, QProcess] = {}
         self._plugin_widgets: dict[str, QWidget] = {}
+        self._document_widgets: dict[str, QWidget] = {}
         self.plugin_registry = PluginRegistry(project)
         self._register_plugins()
         self._build_actions()
@@ -664,6 +773,27 @@ class EditorMainWindow(QMainWindow):
         self._refresh()
         self.resize(1480, 920)
         self.setMinimumSize(960, 640)
+
+    @property
+    def session(self) -> ManagedDocument:
+        session = self.document_manager.active
+        if session is None:
+            raise DocumentManagerError("No active document")
+        return session
+
+    @property
+    def _selected_id(self) -> str:
+        session = self.document_manager.active
+        if session is None:
+            return self._fallback_selected_id
+        return session.selected_id or session.default_selection
+
+    @_selected_id.setter
+    def _selected_id(self, value: str) -> None:
+        self._fallback_selected_id = str(value)
+        session = self.document_manager.active
+        if session is not None:
+            session.selected_id = str(value)
 
     def _register_plugins(self) -> None:
         self.plugin_registry.register(
@@ -697,9 +827,12 @@ class EditorMainWindow(QMainWindow):
 
     def _build_actions(self) -> None:
         self.action_new = self._action("New Scene", QKeySequence.New, self.new_scene)
-        self.action_open = self._action("Open Scene…", QKeySequence.Open, self.open_scene)
+        self.action_new_pattern = self._action("New Pattern", "Ctrl+Shift+N", self.new_pattern)
+        self.action_open = self._action("Open Resource…", QKeySequence.Open, self.open_resource)
         self.action_save = self._action("Save", QKeySequence.Save, self.save_scene)
         self.action_save_as = self._action("Save As…", QKeySequence.SaveAs, self.save_scene_as)
+        self.action_revert = self._action("Revert", None, self.revert_document)
+        self.action_close_document = self._action("Close Document", QKeySequence.Close, self.close_active_document)
         self.action_undo = self._action("Undo", QKeySequence.Undo, self.undo)
         self.action_redo = self._action("Redo", QKeySequence.Redo, self.redo)
         self.action_delete = self._action("Delete Node", QKeySequence.Delete, self.delete_selected)
@@ -723,9 +856,12 @@ class EditorMainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("&File")
         file_menu.addActions([
             self.action_new,
+            self.action_new_pattern,
             self.action_open,
             self.action_save,
             self.action_save_as,
+            self.action_revert,
+            self.action_close_document,
         ])
         edit_menu = self.menuBar().addMenu("&Edit")
         edit_menu.addActions([
@@ -765,20 +901,13 @@ class EditorMainWindow(QMainWindow):
         main_toolbar.addAction(self.action_run)
         self.addToolBar(main_toolbar)
 
-        self.viewport = SceneViewport(self.project)
-        self.viewport.nodeSelected.connect(self._select_from_viewport)
-        self.viewport.nodePositionRequested.connect(self._set_node_position)
-        self.viewport.resourceDropped.connect(self._resource_dropped)
         self.central_tabs = QTabWidget()
         self.central_tabs.setObjectName("centralWorkbench")
         self.central_tabs.setTabsClosable(True)
         self.central_tabs.tabCloseRequested.connect(self._close_central_tab)
-        self.central_tabs.addTab(self.viewport, "Scene")
-        self.central_tabs.tabBar().setTabButton(
-            0,
-            self.central_tabs.tabBar().RightSide,
-            None,
-        )
+        self.central_tabs.currentChanged.connect(self._central_tab_changed)
+        initial_widget = self._add_document_tab(self.session)
+        self.viewport = initial_widget
         self.setCentralWidget(self.central_tabs)
 
         self.tree = SceneTreeWidget()
@@ -794,6 +923,10 @@ class EditorMainWindow(QMainWindow):
         add_button.setText("+ Add")
         add_button.setPopupMode(QToolButton.InstantPopup)
         add_menu = QMenu(add_button)
+        quick_flow = add_menu.addAction("Simple Spell Setup")
+        quick_flow.setObjectName("addSimpleSpellFlow")
+        quick_flow.triggered.connect(self.create_simple_spell_flow)
+        add_menu.addSeparator()
         for type_name, spec in NODE_TYPES.items():
             if type_name == "SceneRoot":
                 continue
@@ -817,6 +950,7 @@ class EditorMainWindow(QMainWindow):
         ):
             button = QToolButton()
             button.setText(text)
+            button.setFixedWidth(44)
             button.setToolTip(tooltip)
             button.clicked.connect(
                 lambda checked=False, target=action: target.trigger()
@@ -829,7 +963,7 @@ class EditorMainWindow(QMainWindow):
         tree_dock = QDockWidget("Scene", self)
         tree_dock.setObjectName("sceneDock")
         tree_dock.setWidget(tree_content)
-        tree_dock.setMinimumWidth(270)
+        tree_dock.setMinimumWidth(220)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
         self.inspector = InspectorPanel()
@@ -839,11 +973,13 @@ class EditorMainWindow(QMainWindow):
         inspector_dock = QDockWidget("Inspector", self)
         inspector_dock.setObjectName("inspectorDock")
         inspector_dock.setWidget(self.inspector)
-        inspector_dock.setMinimumWidth(300)
+        inspector_dock.setMinimumWidth(260)
         self.addDockWidget(Qt.RightDockWidgetArea, inspector_dock)
 
-        self.output = QTextEdit()
+        self.output = QTextBrowser()
         self.output.setReadOnly(True)
+        self.output.setOpenLinks(False)
+        self.output.anchorClicked.connect(self._diagnostic_link_clicked)
         self.output.document().setMaximumBlockCount(1000)
         self.timeline = TimelinePanel()
         self.bottom_tabs = QTabWidget()
@@ -851,6 +987,7 @@ class EditorMainWindow(QMainWindow):
         self.bottom_tabs.addTab(self.output, "Output")
         self.bottom_tabs.addTab(self.timeline, "Timeline")
         self.preview_panel = PatternPreviewPanel()
+        self.preview_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.preview_panel.launchRequested.connect(self._launch_active_pattern_preview)
         self.preview_panel.commandRequested.connect(self._send_pattern_preview_command)
         self.preview_panel.propertyRequested.connect(self._pattern_property_requested)
@@ -861,15 +998,88 @@ class EditorMainWindow(QMainWindow):
             self.bottom_tabs.addTab(widget, plugin.title)
             if plugin.id == "resource_browser":
                 self.resource_browser = widget
+                # Bottom pages must not impose their full content size hint on
+                # the entire dock.  They remain vertically resizable and their
+                # own scroll areas expose content at compact window sizes.
+                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
                 widget.resourceSelected.connect(self._resource_selected)
                 widget.resourceActivated.connect(self._resource_activated)
+        self.bottom_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         bottom_dock = QDockWidget("Bottom Panel", self)
+        self.bottom_dock = bottom_dock
         bottom_dock.setObjectName("bottomDock")
         bottom_dock.setWidget(self.bottom_tabs)
         bottom_dock.setMinimumHeight(180)
         self.addDockWidget(Qt.BottomDockWidgetArea, bottom_dock)
+        self.resizeDocks([bottom_dock], [220], Qt.Vertical)
 
         self.statusBar().showMessage(str(self.project.root))
+
+    def _add_document_tab(self, session: ManagedDocument) -> QWidget:
+        existing = self._document_widgets.get(session.document.id)
+        if existing is not None:
+            self.central_tabs.setCurrentWidget(existing)
+            return existing
+        if isinstance(session.document, SceneDocument):
+            widget: QWidget = SceneViewport(self.project)
+            widget.nodeSelected.connect(self._select_from_viewport)
+            widget.nodePositionRequested.connect(self._set_node_position)
+            widget.resourceDropped.connect(self._resource_dropped)
+        elif isinstance(session.document, PatternDocument):
+            widget = PatternWorkspace()
+            widget.previewRequested.connect(self._launch_active_pattern_preview)
+            widget.templateRequested.connect(self._apply_pattern_template)
+            widget.bulletResourceRequested.connect(
+                lambda value: self._apply_pattern_properties(
+                    {"bullet.resource": value},
+                    "Assign bullet resource",
+                )
+            )
+            widget.originPositionRequested.connect(self._pattern_origin_requested)
+            widget.playerPositionRequested.connect(self._pattern_player_requested)
+        else:
+            raise DocumentManagerError(
+                f"No editor workspace for {session.document.type!r}"
+            )
+        widget.setProperty("managedDocumentId", session.document.id)
+        self._document_widgets[session.document.id] = widget
+        index = self.central_tabs.addTab(widget, session.display_name)
+        self.central_tabs.setCurrentIndex(index)
+        return widget
+
+    def _managed_for_widget(self, widget: QWidget | None) -> ManagedDocument | None:
+        if widget is None:
+            return None
+        document_id = str(widget.property("managedDocumentId") or "")
+        return next(
+            (
+                session
+                for session in self.document_manager
+                if session.document.id == document_id
+            ),
+            None,
+        )
+
+    def _central_tab_changed(self, index: int) -> None:
+        session = self._managed_for_widget(self.central_tabs.widget(index))
+        if session is None:
+            return
+        self.document_manager.activate(session)
+        if isinstance(session.document, SceneDocument):
+            self.viewport = self.central_tabs.widget(index)
+        else:
+            self._active_pattern_session = session
+            self._active_pattern_document = session.document
+            self._active_pattern_resource = session.resource_uri or ""
+            self.preview_panel.set_resource(
+                self._active_pattern_resource or f"unsaved://{session.document.id}"
+            )
+            if hasattr(self, "bottom_dock"):
+                target_height = 210 if self.height() <= 700 else 250
+                self.resizeDocks([self.bottom_dock], [target_height], Qt.Vertical)
+        if not hasattr(self, "tree"):
+            return
+        self._refresh()
 
     def open_plugin(self, plugin_id: str) -> None:
         plugin = self.plugin_registry.get(plugin_id)
@@ -946,9 +1156,29 @@ class EditorMainWindow(QMainWindow):
         self._tool_processes.pop(plugin_id, None)
 
     def _close_central_tab(self, index: int) -> None:
-        if index <= 0:
-            return
         widget = self.central_tabs.widget(index)
+        session = self._managed_for_widget(widget)
+        if session is not None:
+            if not self._confirm_discard(session):
+                return
+            self.document_manager.close(session, discard=True)
+            if self._active_pattern_session is session:
+                self._active_pattern_session = None
+                self._active_pattern_document = None
+                self._active_pattern_resource = ""
+            self._document_widgets.pop(session.document.id, None)
+            self.central_tabs.removeTab(index)
+            widget.deleteLater()
+            if self.document_manager.active is None and self.central_tabs.count() == 0:
+                self.new_scene()
+            elif self.document_manager.active is not None:
+                active_widget = self._document_widgets.get(
+                    self.document_manager.active.document.id
+                )
+                if active_widget is not None:
+                    self.central_tabs.setCurrentWidget(active_widget)
+            self._refresh()
+            return
         if widget is None or not widget.close():
             return
         plugin_id = str(widget.property("editorPluginId") or "")
@@ -958,6 +1188,8 @@ class EditorMainWindow(QMainWindow):
         widget.deleteLater()
 
     def _resource_selected(self, record: AssetRecord) -> None:
+        if self.document_manager.active is not None:
+            self.session.selected_resource = record.resource_value
         self.statusBar().showMessage(record.resource_value, 3000)
 
     def _resource_activated(self, record: AssetRecord) -> None:
@@ -965,7 +1197,15 @@ class EditorMainWindow(QMainWindow):
         if record.kind == "pattern":
             self._open_pattern_preview(record.resource_value)
             return
+        if record.kind == "scene":
+            self._open_document(record.resource_value)
+            return
         if record.kind in {"image", "sprite"}:
+            if not isinstance(self.session.document, SceneDocument):
+                self.statusBar().showMessage(
+                    "Open a Scene document before adding image resources", 3000
+                )
+                return
             if selected is not None and selected.type == "Sprite":
                 self.set_node_property(
                     selected.id,
@@ -997,6 +1237,8 @@ class EditorMainWindow(QMainWindow):
                 self.open_plugin("texture_editor")
 
     def _resource_dropped(self, payload: dict, x: float, y: float) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         kind = str(payload.get("kind", ""))
         value = str(payload.get("resource_value", "")).strip()
         name = str(payload.get("name", "Sprite")).strip() or "Sprite"
@@ -1017,7 +1259,16 @@ class EditorMainWindow(QMainWindow):
         if kind == "pattern":
             selected = self.session.node(self._selected_id)
             if selected is not None and selected.type == "PatternInstance":
-                self.set_node_property(selected.id, "pattern", value)
+                self._apply_command(
+                    AssignResourceCommand(
+                        self.session.document.root,
+                        selected.id,
+                        "pattern",
+                        value,
+                        label="Assign Pattern resource",
+                    ),
+                    select_id=selected.id,
+                )
             self._open_pattern_preview(value)
             return
 
@@ -1029,6 +1280,8 @@ class EditorMainWindow(QMainWindow):
         x: float | None = None,
         y: float | None = None,
     ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         parent = self.session.node(self._selected_id) or self.session.document.root
         node = make_node("Sprite", name=Path(name).stem or "Sprite")
         node.properties["texture"] = resource_value
@@ -1096,6 +1349,9 @@ class EditorMainWindow(QMainWindow):
     def _populate_tree(self) -> None:
         self.tree.blockSignals(True)
         self.tree.clear()
+        if not isinstance(self.session.document, SceneDocument):
+            self.tree.blockSignals(False)
+            return
 
         def add_item(node: EditorNode, parent: QTreeWidgetItem | None = None):
             item = QTreeWidgetItem([node.name, node.type])
@@ -1126,13 +1382,35 @@ class EditorMainWindow(QMainWindow):
         self.tree.blockSignals(False)
 
     def _refresh(self) -> None:
-        if self.session.node(self._selected_id) is None:
-            self._selected_id = self.session.document.root.id
-        self._populate_tree()
-        self.viewport.rebuild(self.session.document)
-        self.viewport.select_node(self._selected_id)
-        self.inspector.set_node(self.session.node(self._selected_id))
-        self.timeline.set_document(self.session.document)
+        if self.document_manager.active is None:
+            return
+        document = self.session.document
+        widget = self._document_widgets.get(document.id)
+        if isinstance(document, SceneDocument):
+            if self.session.node(self._selected_id) is None:
+                self._selected_id = document.root.id
+            self._populate_tree()
+            self.tree.setEnabled(True)
+            if isinstance(widget, SceneViewport):
+                self.viewport = widget
+                widget.rebuild(document)
+                widget.select_node(self._selected_id)
+            self.inspector.set_node(self.session.node(self._selected_id))
+            self.timeline.set_document(document)
+        else:
+            self.tree.blockSignals(True)
+            self.tree.clear()
+            self.tree.blockSignals(False)
+            self.tree.setEnabled(False)
+            self.inspector.set_pattern(document)
+            self.timeline.setRowCount(0)
+            if isinstance(widget, PatternWorkspace):
+                player = tuple(
+                    self.session.editor_context.get("player_position", (0.0, -0.8))
+                )
+                widget.set_document(document, player_position=player)
+                if hasattr(self, "resource_browser"):
+                    widget.set_available_bullets(self.resource_browser.index.records)
         self._update_actions()
         self._update_title()
 
@@ -1149,25 +1427,42 @@ class EditorMainWindow(QMainWindow):
             if self.session.commands.redo_label
             else "Redo"
         )
-        is_root = self._selected_id == self.session.document.root.id
-        self.action_delete.setEnabled(not is_root)
-        self.action_move_up.setEnabled(not is_root)
-        self.action_move_down.setEnabled(not is_root)
-        self.action_outdent.setEnabled(not is_root)
-        self.action_indent.setEnabled(not is_root)
+        is_scene = isinstance(self.session.document, SceneDocument)
+        is_root = is_scene and self._selected_id == self.session.document.root.id
+        self.action_delete.setEnabled(is_scene and not is_root)
+        self.action_rename.setEnabled(is_scene and not is_root)
+        self.action_move_up.setEnabled(is_scene and not is_root)
+        self.action_move_down.setEnabled(is_scene and not is_root)
+        self.action_outdent.setEnabled(is_scene and not is_root)
+        self.action_indent.setEnabled(is_scene and not is_root)
+        self.action_revert.setEnabled(self.session.is_dirty or self.session.path is not None)
 
     def _update_title(self) -> None:
-        name = self.session.path.name if self.session.path else self.session.document.name
+        name = self.session.display_name
         self.setWindowModified(self.session.is_dirty)
         self.setWindowTitle(f"{name}[*] — {APP_NAME}")
+        for session in self.document_manager:
+            widget = self._document_widgets.get(session.document.id)
+            if widget is None:
+                continue
+            index = self.central_tabs.indexOf(widget)
+            if index >= 0:
+                suffix = " *" if session.is_dirty else ""
+                self.central_tabs.setTabText(index, session.display_name + suffix)
 
     def _log(self, message: str) -> None:
-        self.output.append(message)
+        self.output.append(html.escape(str(message)))
 
-    def _apply_command(self, command, *, select_id: str | None = None) -> bool:
+    def _apply_command(
+        self,
+        command,
+        *,
+        select_id: str | None = None,
+        coalesce: bool = False,
+    ) -> bool:
         try:
-            self.session.apply(command)
-        except (DocumentError, SceneMutationError, ValueError) as exc:
+            self.session.apply(command, coalesce=coalesce)
+        except (DocumentError, ResourceDocumentError, SceneMutationError, ValueError) as exc:
             self._show_error("Edit failed", exc)
             self._refresh()
             return False
@@ -1182,7 +1477,11 @@ class EditorMainWindow(QMainWindow):
         current: QTreeWidgetItem | None,
         previous: QTreeWidgetItem | None,
     ) -> None:
-        if self._syncing_selection or current is None:
+        if (
+            self._syncing_selection
+            or current is None
+            or not isinstance(self.session.document, SceneDocument)
+        ):
             return
         self._selected_id = str(current.data(0, Qt.UserRole))
         self._syncing_selection = True
@@ -1192,7 +1491,7 @@ class EditorMainWindow(QMainWindow):
         self._update_actions()
 
     def _select_from_viewport(self, node_id: str) -> None:
-        if self._syncing_selection:
+        if self._syncing_selection or not isinstance(self.session.document, SceneDocument):
             return
         item = self.tree._find_item(node_id)
         if item is None:
@@ -1205,12 +1504,14 @@ class EditorMainWindow(QMainWindow):
         self._update_actions()
 
     def _tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        if column != 0:
+        if column != 0 or not isinstance(self.session.document, SceneDocument):
             return
         node_id = str(item.data(0, Qt.UserRole))
         self.rename_node(node_id, item.text(0))
 
     def _move_from_tree(self, node_id: str, parent_id: str, index: int) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         node = self.session.node(node_id)
         location = find_parent(self.session.document.root, node_id)
         if node is None or location is None:
@@ -1231,6 +1532,8 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _set_node_position(self, node_id: str, x: float, y: float) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         node = self.session.node(node_id)
         if node is None:
             return
@@ -1250,8 +1553,18 @@ class EditorMainWindow(QMainWindow):
         )
 
     def add_node(self, node_type: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         parent = self.session.node(self._selected_id) or self.session.document.root
         node = make_node(node_type)
+        from .node_types import NODE_TYPE_REGISTRY
+
+        if not NODE_TYPE_REGISTRY.can_parent(parent.type, node.type):
+            self._show_error(
+                "Add node failed",
+                ValueError(f"{node.type} cannot be added under {parent.type}"),
+            )
+            return
         self._apply_command(
             AddNodeCommand(
                 self.session.document.root,
@@ -1262,7 +1575,63 @@ class EditorMainWindow(QMainWindow):
             select_id=node.id,
         )
 
+    def create_simple_spell_flow(self) -> None:
+        """Create the M3 Stage→Boss→Spell→Emitter→Pattern chain."""
+
+        if not isinstance(self.session.document, SceneDocument):
+            self._show_error(
+                "Create Spell failed",
+                ValueError("Open a Scene document first"),
+            )
+            return
+        root = self.session.document.root
+        stage = next((node for node in root.children if node.type == "Stage"), None)
+        created_stage = stage is None
+        stage = stage or make_node("Stage", name="Stage")
+        boss = make_node("Boss", name="Boss")
+        spell = make_node("Spell", name="Spell")
+        emitter = make_node("Emitter", name="Emitter")
+        instance = make_node("PatternInstance", name="Pattern")
+        selected_resource = str(self.session.selected_resource or "")
+        record = (
+            self.resource_browser.index.find(selected_resource)
+            if selected_resource and hasattr(self, "resource_browser")
+            else None
+        )
+        if record is None or record.kind != "pattern":
+            selected_resource = ""
+
+        self.session.commands.begin_transaction("Create simple Spell")
+        try:
+            if created_stage:
+                self.session.apply(AddNodeCommand(root, root.id, stage))
+            self.session.apply(AddNodeCommand(root, stage.id, boss))
+            self.session.apply(AddNodeCommand(root, boss.id, spell))
+            self.session.apply(AddNodeCommand(root, spell.id, emitter))
+            self.session.apply(AddNodeCommand(root, emitter.id, instance))
+            if selected_resource:
+                self.session.apply(
+                    AssignResourceCommand(
+                        root,
+                        instance.id,
+                        "pattern",
+                        selected_resource,
+                        label="Assign Pattern resource",
+                    )
+                )
+        except Exception as exc:
+            self.session.commands.cancel_transaction()
+            self._show_error("Create Spell failed", exc)
+            self._refresh()
+            return
+        self.session.commands.end_transaction()
+        self._selected_id = instance.id
+        self._log("Created Stage/Boss/Spell/Emitter/PatternInstance flow")
+        self._refresh()
+
     def delete_selected(self) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         if self._selected_id == self.session.document.root.id:
             return
         location = find_parent(self.session.document.root, self._selected_id)
@@ -1280,11 +1649,15 @@ class EditorMainWindow(QMainWindow):
         )
 
     def rename_selected(self) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         item = self.tree.currentItem()
         if item is not None:
             self.tree.editItem(item, 0)
 
     def rename_node(self, node_id: str, name: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         node = self.session.node(node_id)
         if node is None or node.name == name:
             return
@@ -1299,21 +1672,35 @@ class EditorMainWindow(QMainWindow):
         )
 
     def set_node_property(self, node_id: str, key: str, value) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         node = self.session.node(node_id)
         if node is None or node.properties.get(key) == value:
             return
+        spec = next(
+            (item for item in property_specs(node.type) if item.key == key),
+            None,
+        )
+        command_type = (
+            AssignResourceCommand
+            if spec is not None and spec.resource_types
+            else SetNodePropertyCommand
+        )
+        label = f"Assign {key}" if command_type is AssignResourceCommand else f"Set {key}"
         self._apply_command(
-            SetNodePropertyCommand(
+            command_type(
                 self.session.document.root,
                 node_id,
                 key,
                 value,
-                label=f"Set {key}",
+                label=label,
             ),
             select_id=node_id,
         )
 
     def move_selected(self, delta: int) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         location = find_parent(self.session.document.root, self._selected_id)
         node = self.session.node(self._selected_id)
         if location is None or node is None:
@@ -1334,6 +1721,8 @@ class EditorMainWindow(QMainWindow):
         )
 
     def indent_selected(self) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         location = find_parent(self.session.document.root, self._selected_id)
         node = self.session.node(self._selected_id)
         if location is None or node is None:
@@ -1354,6 +1743,8 @@ class EditorMainWindow(QMainWindow):
         )
 
     def outdent_selected(self) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
         location = find_parent(self.session.document.root, self._selected_id)
         node = self.session.node(self._selected_id)
         if location is None or node is None:
@@ -1380,94 +1771,176 @@ class EditorMainWindow(QMainWindow):
         if self.session.undo():
             self._log("Undo")
             self._refresh()
+            self._sync_active_pattern_preview()
 
     def redo(self) -> None:
         if self.session.redo():
             self._log("Redo")
             self._refresh()
+            self._sync_active_pattern_preview()
 
     def new_scene(self) -> None:
-        if not self._confirm_discard():
-            return
-        self.session.reset()
-        self._selected_id = self.session.document.root.id
+        session = self.document_manager.new_scene()
+        self._add_document_tab(session)
         self._log("New scene")
         self._refresh()
 
-    def open_scene(self) -> None:
-        if not self._confirm_discard():
-            return
+    def new_pattern(self) -> None:
+        session = self.document_manager.new_pattern()
+        self._add_document_tab(session)
+        self._active_pattern_session = session
+        self._active_pattern_document = session.document
+        self._active_pattern_resource = ""
+        self._log("New Pattern")
+        self._refresh()
+
+    def open_resource(self) -> None:
         start = self.project.game_content / "scenes"
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Open PySTG Scene",
+            "Open PySTG Resource",
             str(start),
-            SCENE_FILTER,
+            RESOURCE_FILTER,
         )
         if not path:
             return
+        self._open_document(path)
+
+    def open_scene(self) -> None:
+        """Compatibility alias retained for existing integrations."""
+
+        self.open_resource()
+
+    def _open_document(self, resource_value: str) -> ManagedDocument | None:
         try:
-            self.session.open(path)
-        except (OSError, DocumentError, ValueError) as exc:
+            if str(resource_value).startswith("res://"):
+                reference = ResourceReference.parse(resource_value)
+                if reference.subresource is not None:
+                    raise ResourceDocumentError(
+                        "Authoring documents cannot be opened from a fragment"
+                    )
+                path = reference.resolve(self.project, must_exist=True)
+            else:
+                path = self.project.resolve(resource_value)
+            session = self.document_manager.open(path)
+        except (
+            OSError,
+            DocumentError,
+            DocumentManagerError,
+            ResourceDocumentError,
+            ValueError,
+        ) as exc:
             self._show_error("Open failed", exc)
-            return
-        self._selected_id = self.session.document.root.id
+            return None
+        self._add_document_tab(session)
         self._log(f"Opened {self.project.relative(path)}")
         self._refresh()
+        return session
 
     def save_scene(self) -> bool:
-        if self.session.path is None:
-            return self.save_scene_as()
-        try:
-            path = self.session.save()
-        except (OSError, DocumentError, ValueError) as exc:
-            self._show_error("Save failed", exc)
-            return False
-        self._log(f"Saved {self.project.relative(path)}")
-        self._refresh()
-        return True
+        return self._save_document(self.session)
 
     def save_scene_as(self) -> bool:
-        start = self.project.game_content / "scenes"
+        return self._save_document(self.session, save_as=True)
+
+    def _save_document(
+        self,
+        session: ManagedDocument,
+        *,
+        save_as: bool = False,
+    ) -> bool:
+        if session.path is not None and not save_as:
+            try:
+                saved = self.document_manager.save(session)
+            except (OSError, DocumentError, ResourceDocumentError, ValueError) as exc:
+                self._show_error("Save failed", exc)
+                return False
+            self._log(f"Saved {self.project.relative(saved)}")
+            if session is self._active_pattern_session:
+                self._active_pattern_resource = session.resource_uri or ""
+                self.preview_panel.set_resource(self._active_pattern_resource)
+            if hasattr(self, "resource_browser"):
+                self.resource_browser.refresh()
+            self._refresh()
+            return True
+        folder = "patterns" if isinstance(session.document, PatternDocument) else "scenes"
+        start = self.project.game_content / folder
         start.mkdir(parents=True, exist_ok=True)
         suggested = start / (
-            self.session.path.name
-            if self.session.path
-            else "untitled.pystg.json"
+            session.path.name
+            if session.path
+            else ("new_pattern.pystg.json" if folder == "patterns" else "untitled.pystg.json")
         )
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save PySTG Scene",
+            "Save PySTG Resource",
             str(suggested),
-            SCENE_FILTER,
+            RESOURCE_FILTER,
         )
         if not path:
             return False
         if not path.lower().endswith(".json"):
             path += ".pystg.json"
         try:
-            saved = self.session.save(path)
-        except (OSError, DocumentError, ValueError) as exc:
+            saved = self.document_manager.save(session, path)
+        except (OSError, DocumentError, ResourceDocumentError, ValueError) as exc:
             self._show_error("Save failed", exc)
             return False
         self._log(f"Saved {self.project.relative(saved)}")
+        if session is self._active_pattern_session:
+            self._active_pattern_resource = session.resource_uri or ""
+            self.preview_panel.set_resource(self._active_pattern_resource)
+        if hasattr(self, "resource_browser"):
+            self.resource_browser.refresh()
         self._refresh()
         return True
 
-    def _confirm_discard(self) -> bool:
-        if not self.session.is_dirty:
+    def revert_document(self) -> None:
+        session = self.session
+        if session.is_dirty:
+            result = QMessageBox.warning(
+                self,
+                "Revert document",
+                f"Discard all changes to {session.display_name}?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if result != QMessageBox.Yes:
+                return
+        try:
+            self.document_manager.revert(session)
+        except (OSError, ValueError, ResourceDocumentError) as exc:
+            self._show_error("Revert failed", exc)
+            return
+        self._selected_id = session.default_selection
+        self._log(f"Reverted {session.display_name}")
+        self._refresh()
+        self._sync_active_pattern_preview()
+
+    def close_active_document(self) -> None:
+        widget = self._document_widgets.get(self.session.document.id)
+        if widget is not None:
+            self._close_central_tab(self.central_tabs.indexOf(widget))
+
+    def _confirm_discard(self, session: ManagedDocument | None = None) -> bool:
+        session = session or self.session
+        if not session.is_dirty:
+            return True
+        # Programmatic/offscreen smoke windows are never user-owned interactive
+        # surfaces, so closing them must not open a modal dialog during teardown.
+        if not self.isVisible():
             return True
         result = QMessageBox.warning(
             self,
             "Unsaved changes",
-            "Save changes to the current scene?",
+            f"Save changes to {session.display_name}?",
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
             QMessageBox.Save,
         )
         if result == QMessageBox.Cancel:
             return False
         if result == QMessageBox.Save:
-            return self.save_scene()
+            return self._save_document(session)
         return True
 
     def _fit_viewport(self) -> None:
@@ -1483,28 +1956,24 @@ class EditorMainWindow(QMainWindow):
         client.runningChanged.connect(self.preview_panel.set_running)
 
     def _open_pattern_preview(self, resource_value: str) -> None:
-        try:
-            reference = ResourceReference.parse(resource_value)
-            if reference.subresource is not None:
-                raise ResourceDocumentError(
-                    "PatternDocument references cannot contain a fragment"
-                )
-            path = reference.resolve(self.project, must_exist=True)
-            document = ResourceStore(self.project).load(path)
-            if not isinstance(document, PatternDocument):
-                raise ResourceDocumentError("Selected resource is not a PatternDocument")
-        except (OSError, ValueError, ResourceDocumentError, ProjectContextError) as exc:
-            self._show_error("Pattern preview unavailable", exc)
+        session = self._open_document(resource_value)
+        if session is None:
             return
-        self._active_pattern_document = document
-        self._active_pattern_resource = reference.uri
-        self.preview_panel.set_resource(reference.uri)
-        self.inspector.set_pattern(document)
+        if not isinstance(session.document, PatternDocument):
+            self._show_error(
+                "Pattern preview unavailable",
+                ValueError("Selected resource is not a PatternDocument"),
+            )
+            return
+        self._active_pattern_session = session
+        self._active_pattern_document = session.document
+        self._active_pattern_resource = session.resource_uri or ""
+        self.preview_panel.set_resource(self._active_pattern_resource)
         self.bottom_tabs.setCurrentWidget(self.preview_panel)
         self._launch_active_pattern_preview()
 
     def _launch_active_pattern_preview(self) -> None:
-        if not self._active_pattern_resource:
+        if self._active_pattern_document is None:
             self.preview_panel.handle_issue(
                 {"code": "no_pattern", "message": "Select a Pattern resource first"}
             )
@@ -1513,10 +1982,11 @@ class EditorMainWindow(QMainWindow):
             return
         self._pattern_preview_client.send_command(
             "load",
-            {"resource": self._active_pattern_resource},
+            {"document": self._active_pattern_document.to_dict()},
         )
         self._pattern_preview_client.send_command("play")
-        self._log(f"[pattern-preview] opening {self._active_pattern_resource}")
+        label = self._active_pattern_resource or self._active_pattern_document.name
+        self._log(f"[pattern-preview] opening {label}")
 
     def _send_pattern_preview_command(self, command: str, payload: dict) -> None:
         if command == "set-seed":
@@ -1537,20 +2007,30 @@ class EditorMainWindow(QMainWindow):
             )
 
     def _pattern_property_requested(self, path: str, value) -> None:
-        if self._active_pattern_document is None:
+        session = self._active_pattern_session
+        if session is None or not isinstance(session.document, PatternDocument):
             self.preview_panel.handle_issue(
                 {"code": "no_pattern", "message": "Select a Pattern resource first"}
             )
             return
+        if not path:
+            return
+        if not self._apply_pattern_properties({str(path): value}, f"Set {path}"):
+            if self._pattern_preview_client.is_running:
+                request_id = self._pattern_preview_client.send_command(
+                    "set-property",
+                    {"path": path, "value": value},
+                )
+                self._preview_pending_properties[request_id] = (str(path), value)
+            return
         if not self._pattern_preview_client.is_running:
             self._launch_active_pattern_preview()
-        if not self._pattern_preview_client.is_running:
-            return
-        request_id = self._pattern_preview_client.send_command(
-            "set-property",
-            {"path": path, "value": value},
-        )
-        self._preview_pending_properties[request_id] = (path, value)
+        elif self._pattern_preview_client.is_running:
+            request_id = self._pattern_preview_client.send_command(
+                "set-property",
+                {"path": path, "value": value},
+            )
+            self._preview_pending_properties[request_id] = (str(path), value)
 
     @staticmethod
     def _pattern_with_property(
@@ -1558,33 +2038,116 @@ class EditorMainWindow(QMainWindow):
         path: str,
         value,
     ) -> PatternDocument:
-        payload = document.to_dict()
-        target = payload
-        parts = path.split(".")
-        for part in parts[:-1]:
-            target = target[part]
-        target[parts[-1]] = value
-        return PatternDocument.from_dict(payload)
+        from .pattern_commands import pattern_with_property
+
+        return pattern_with_property(document, path, value)
+
+    def _apply_pattern_properties(
+        self,
+        values: dict[str, object],
+        label: str,
+    ) -> bool:
+        session = self._active_pattern_session
+        if session is None or not isinstance(session.document, PatternDocument):
+            return False
+        session.commands.begin_transaction(label)
+        try:
+            for path, value in values.items():
+                session.apply(
+                    SetPatternPropertyCommand(
+                        session.document,
+                        path,
+                        value,
+                        label=f"Set {path}",
+                    )
+                )
+        except Exception as exc:
+            session.commands.cancel_transaction()
+            self.preview_panel.handle_issue(
+                {"code": "invalid_pattern_edit", "message": str(exc)}
+            )
+            self._log(f"[pattern-edit:error] {exc}")
+            self._refresh()
+            return False
+        session.commands.end_transaction()
+        self._active_pattern_document = session.document
+        self._log(label)
+        self._refresh()
+        return True
+
+    def _apply_pattern_template(self, template: str) -> None:
+        templates = {
+            "starter_ring": {
+                "shape.kind": "ring",
+                "shape.count": 24,
+                "aim.mode": "fixed",
+                "aim.angle": 270.0,
+                "schedule.interval_frames": 12,
+                "schedule.burst_count": 8,
+                "schedule.loop_count": None,
+                "motion.speed": 2.0,
+                "motion.max_lifetime": 5.0,
+            },
+            "aimed_arc": {
+                "shape.kind": "arc",
+                "shape.count": 12,
+                "shape.angle_span": 60.0,
+                "aim.mode": "player",
+                "schedule.interval_frames": 24,
+                "schedule.burst_count": 4,
+                "motion.speed": 2.5,
+            },
+            "spiral": {
+                "shape.kind": "spiral",
+                "shape.count": 18,
+                "aim.mode": "fixed",
+                "schedule.interval_frames": 8,
+                "schedule.burst_count": 24,
+                "modifiers.angle_offset_per_burst": 11.0,
+                "motion.speed": 2.0,
+            },
+        }
+        values = templates.get(template)
+        if values is not None and self._apply_pattern_properties(
+            values, f"Apply {template.replace('_', ' ')} template"
+        ):
+            self._sync_active_pattern_preview()
+
+    def _pattern_origin_requested(self, x: float, y: float) -> None:
+        if self._apply_pattern_properties(
+            {"shape.origin_x": x, "shape.origin_y": y},
+            "Move Pattern emitter",
+        ):
+            self._sync_active_pattern_preview()
+
+    def _pattern_player_requested(self, x: float, y: float) -> None:
+        if self._active_pattern_session is not None:
+            self._active_pattern_session.editor_context["player_position"] = (x, y)
+        self._send_pattern_preview_command(
+            "set-player-position", {"x": float(x), "y": float(y)}
+        )
+
+    def _sync_active_pattern_preview(self) -> None:
+        session = self.document_manager.active
+        if (
+            session is None
+            or not isinstance(session.document, PatternDocument)
+            or not self._pattern_preview_client.is_running
+        ):
+            return
+        self._active_pattern_session = session
+        self._active_pattern_document = session.document
+        self._active_pattern_resource = session.resource_uri or ""
+        self._pattern_preview_client.send_command(
+            "load", {"document": session.document.to_dict()}
+        )
 
     def _handle_pattern_preview_event(self, message: dict) -> None:
         self.preview_panel.handle_event(message)
         request_id = message.get("request_id")
         payload = message.get("payload") or {}
         if message.get("event") == "response" and request_id in self._preview_pending_properties:
-            path, value = self._preview_pending_properties.pop(request_id)
-            if payload.get("ok") and self._active_pattern_document is not None:
-                try:
-                    self._active_pattern_document = self._pattern_with_property(
-                        self._active_pattern_document,
-                        path,
-                        value,
-                    )
-                except (KeyError, ValueError, ResourceDocumentError) as exc:
-                    self._handle_pattern_preview_issue(
-                        {"code": "local_reload_failed", "message": str(exc)}
-                    )
-            if self._active_pattern_document is not None:
-                self.inspector.set_pattern(self._active_pattern_document)
+            self._preview_pending_properties.pop(request_id)
         event = message.get("event")
         if event == "program_loaded":
             self._log(
@@ -1600,13 +2163,80 @@ class EditorMainWindow(QMainWindow):
             f"[pattern-preview:error] {issue.get('code')}: {issue.get('message')}"
         )
 
+    def _log_scene_diagnostics(self, error: SceneSpellCompileError) -> None:
+        for diagnostic in error.diagnostics:
+            href = (
+                f"pystg-node:{diagnostic.resource_id}:{diagnostic.node_id}"
+            )
+            path = diagnostic.path
+            if diagnostic.referenced_path:
+                path += f" → {diagnostic.referenced_path}"
+            self.output.append(
+                f'<a href="{html.escape(href)}">'
+                f'{html.escape(diagnostic.code)}: {html.escape(path)}</a> '
+                f'{html.escape(diagnostic.message)}'
+            )
+
+    def _diagnostic_link_clicked(self, url: QUrl) -> None:
+        value = url.toString()
+        if not value.startswith("pystg-node:"):
+            return
+        parts = value.split(":", 2)
+        if len(parts) != 3:
+            return
+        document_id, node_id = parts[1], parts[2]
+        session = next(
+            (
+                item
+                for item in self.document_manager
+                if item.document.id == document_id
+            ),
+            None,
+        )
+        if session is None or not isinstance(session.document, SceneDocument):
+            return
+        self.document_manager.activate(session)
+        widget = self._document_widgets.get(document_id)
+        if widget is not None:
+            self.central_tabs.setCurrentWidget(widget)
+        session.selected_id = node_id
+        self._refresh()
+
     def run_preview(self) -> None:
+        if isinstance(self.session.document, PatternDocument):
+            self._active_pattern_session = self.session
+            self._active_pattern_document = self.session.document
+            self._active_pattern_resource = self.session.resource_uri or ""
+            self._launch_active_pattern_preview()
+            return
         node = self.session.node(self._selected_id)
         if node is not None and node.type == "PatternInstance":
             resource = str(node.properties.get("pattern") or "").strip()
             if resource:
                 self._open_pattern_preview(resource)
                 return
+        if node is not None and node.type == "Spell":
+            try:
+                preview = compile_simple_spell(
+                    self.project,
+                    self.session.document,
+                    node.id,
+                )
+            except SceneSpellCompileError as exc:
+                self._log_scene_diagnostics(exc)
+                self._show_error("No-code Spell preview unavailable", exc)
+                return
+            self._active_pattern_session = None
+            self._active_pattern_document = preview.document
+            self._active_pattern_resource = preview.pattern_resource
+            self.preview_panel.set_resource(preview.pattern_resource)
+            self.bottom_tabs.setCurrentWidget(self.preview_panel)
+            self._launch_active_pattern_preview()
+            self._log(
+                f"[scene-preview] Spell {node.name} compiled through PatternInstance "
+                f"{preview.pattern_instance_id}"
+            )
+            return
         if self._preview_process is not None and self._preview_process.state() != QProcess.NotRunning:
             self.statusBar().showMessage("Preview is already running", 3000)
             return
@@ -1658,11 +2288,14 @@ class EditorMainWindow(QMainWindow):
         QMessageBox.critical(self, title, str(error))
 
     def closeEvent(self, event) -> None:
-        if not self._confirm_discard():
-            event.ignore()
-            return
-        for index in range(self.central_tabs.count() - 1, 0, -1):
+        for session in tuple(self.document_manager):
+            if not self._confirm_discard(session):
+                event.ignore()
+                return
+        for index in range(self.central_tabs.count() - 1, -1, -1):
             widget = self.central_tabs.widget(index)
+            if self._managed_for_widget(widget) is not None:
+                continue
             if widget is not None and not widget.close():
                 event.ignore()
                 return
