@@ -56,13 +56,17 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from src.core.project_context import ProjectContext
+from src.core.project_context import ProjectContext, ProjectContextError
 from src.authoring.coordinates import CoordinateSpace
+from src.authoring import ResourceStore
 from src.authoring.resources import ResourceDocumentError, ResourceReference
+from src.pattern import PatternDocument
 
 from .asset_index import AssetRecord, load_subresource_preview
 from .document import DocumentError, EditorNode, SceneDocument
 from .node_types import NODE_TYPES, PropertySpec, make_node, property_specs
+from .preview_panel import PatternPreviewPanel
+from .preview_process import PatternPreviewProcess
 from .resource_browser import RESOURCE_MIME_TYPE, ResourceBrowserPanel
 from .scene_commands import (
     AddNodeCommand,
@@ -446,6 +450,7 @@ class SceneViewport(QGraphicsView):
 class InspectorPanel(QScrollArea):
     renameRequested = pyqtSignal(str, str)
     propertyRequested = pyqtSignal(str, str, object)
+    patternPropertyRequested = pyqtSignal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -457,14 +462,19 @@ class InspectorPanel(QScrollArea):
         self._form.setContentsMargins(12, 12, 12, 12)
         self.setWidget(self._content)
         self._node_id: str | None = None
+        self._pattern_id: str | None = None
 
-    def set_node(self, node: EditorNode | None) -> None:
+    def _clear_form(self) -> None:
         while self._form.count():
             item = self._form.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+
+    def set_node(self, node: EditorNode | None) -> None:
+        self._clear_form()
         self._node_id = node.id if node else None
+        self._pattern_id = None
         if node is None:
             self._form.addRow(QLabel("No node selected"))
             return
@@ -499,6 +509,62 @@ class InspectorPanel(QScrollArea):
             extra_label.setWordWrap(True)
             extra_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             self._form.addRow("Other", extra_label)
+
+    def set_pattern(self, document: PatternDocument) -> None:
+        """Show lightweight live Pattern properties before the M3 workspace."""
+        self._clear_form()
+        self._node_id = None
+        self._pattern_id = document.id
+        title = QLabel(f"Pattern Preview: {document.name}")
+        title.setObjectName("inspectorPatternTitle")
+        self._form.addRow(title)
+        payload = document.to_dict()
+        fields = [("seed", payload["seed"])]
+        for section in ("bullet", "shape", "aim", "schedule", "motion", "modifiers"):
+            fields.extend(
+                (f"{section}.{key}", value)
+                for key, value in payload[section].items()
+            )
+        for path, value in fields:
+            editor = self._make_pattern_editor(path, value)
+            self._form.addRow(path, editor)
+
+    def _make_pattern_editor(self, path: str, value):
+        if isinstance(value, bool):
+            editor = QCheckBox()
+            editor.setChecked(value)
+            editor.toggled.connect(
+                lambda checked, key=path: self.patternPropertyRequested.emit(key, checked)
+            )
+        elif isinstance(value, float):
+            editor = QDoubleSpinBox()
+            editor.setDecimals(6)
+            editor.setRange(-1_000_000_000.0, 1_000_000_000.0)
+            editor.setSingleStep(0.1)
+            editor.setValue(value)
+            editor.editingFinished.connect(
+                lambda spin=editor, key=path: self.patternPropertyRequested.emit(key, spin.value())
+            )
+        else:
+            text = "" if value is None else str(value)
+            editor = QLineEdit(text)
+
+            def commit(edit=editor, key=path, original=value):
+                raw = edit.text().strip()
+                if original is None:
+                    parsed = None if raw in {"", "null", "None"} else raw
+                elif isinstance(original, int):
+                    try:
+                        parsed = int(raw)
+                    except ValueError:
+                        return
+                else:
+                    parsed = raw
+                self.patternPropertyRequested.emit(key, parsed)
+
+            editor.editingFinished.connect(commit)
+        editor.setObjectName("patternProperty_" + path.replace(".", "_"))
+        return editor
 
     def _make_editor(self, node_id: str, spec: PropertySpec, value):
         if spec.value_type is bool:
@@ -583,12 +649,17 @@ class EditorMainWindow(QMainWindow):
         self._selected_id = self.session.document.root.id
         self._syncing_selection = False
         self._preview_process: QProcess | None = None
+        self._pattern_preview_client = PatternPreviewProcess(project, parent=self)
+        self._active_pattern_document: PatternDocument | None = None
+        self._active_pattern_resource = ""
+        self._preview_pending_properties: dict[str, tuple[str, object]] = {}
         self._tool_processes: dict[str, QProcess] = {}
         self._plugin_widgets: dict[str, QWidget] = {}
         self.plugin_registry = PluginRegistry(project)
         self._register_plugins()
         self._build_actions()
         self._build_ui()
+        self._connect_pattern_preview()
         self._apply_theme()
         self._refresh()
         self.resize(1480, 920)
@@ -764,6 +835,7 @@ class EditorMainWindow(QMainWindow):
         self.inspector = InspectorPanel()
         self.inspector.renameRequested.connect(self.rename_node)
         self.inspector.propertyRequested.connect(self.set_node_property)
+        self.inspector.patternPropertyRequested.connect(self._pattern_property_requested)
         inspector_dock = QDockWidget("Inspector", self)
         inspector_dock.setObjectName("inspectorDock")
         inspector_dock.setWidget(self.inspector)
@@ -778,6 +850,11 @@ class EditorMainWindow(QMainWindow):
         self.bottom_tabs.setObjectName("bottomWorkbench")
         self.bottom_tabs.addTab(self.output, "Output")
         self.bottom_tabs.addTab(self.timeline, "Timeline")
+        self.preview_panel = PatternPreviewPanel()
+        self.preview_panel.launchRequested.connect(self._launch_active_pattern_preview)
+        self.preview_panel.commandRequested.connect(self._send_pattern_preview_command)
+        self.preview_panel.propertyRequested.connect(self._pattern_property_requested)
+        self.bottom_tabs.addTab(self.preview_panel, "Preview")
         for plugin in self.plugin_registry.by_mode("bottom"):
             widget = plugin.factory()
             self._plugin_widgets[plugin.id] = widget
@@ -885,6 +962,9 @@ class EditorMainWindow(QMainWindow):
 
     def _resource_activated(self, record: AssetRecord) -> None:
         selected = self.session.node(self._selected_id)
+        if record.kind == "pattern":
+            self._open_pattern_preview(record.resource_value)
+            return
         if record.kind in {"image", "sprite"}:
             if selected is not None and selected.type == "Sprite":
                 self.set_node_property(
@@ -933,6 +1013,13 @@ class EditorMainWindow(QMainWindow):
                 self._log(
                     "[assets] Drop scripts while a SpellCard is selected."
                 )
+            return
+        if kind == "pattern":
+            selected = self.session.node(self._selected_id)
+            if selected is not None and selected.type == "PatternInstance":
+                self.set_node_property(selected.id, "pattern", value)
+            self._open_pattern_preview(value)
+            return
 
     def _add_sprite_resource(
         self,
@@ -1386,12 +1473,144 @@ class EditorMainWindow(QMainWindow):
     def _fit_viewport(self) -> None:
         self.viewport.fit_canvas()
 
+    def _connect_pattern_preview(self) -> None:
+        client = self._pattern_preview_client
+        client.eventReceived.connect(self._handle_pattern_preview_event)
+        client.protocolError.connect(self._handle_pattern_preview_issue)
+        client.processLog.connect(
+            lambda text: self._log(f"[pattern-preview:stderr] {text}")
+        )
+        client.runningChanged.connect(self.preview_panel.set_running)
+
+    def _open_pattern_preview(self, resource_value: str) -> None:
+        try:
+            reference = ResourceReference.parse(resource_value)
+            if reference.subresource is not None:
+                raise ResourceDocumentError(
+                    "PatternDocument references cannot contain a fragment"
+                )
+            path = reference.resolve(self.project, must_exist=True)
+            document = ResourceStore(self.project).load(path)
+            if not isinstance(document, PatternDocument):
+                raise ResourceDocumentError("Selected resource is not a PatternDocument")
+        except (OSError, ValueError, ResourceDocumentError, ProjectContextError) as exc:
+            self._show_error("Pattern preview unavailable", exc)
+            return
+        self._active_pattern_document = document
+        self._active_pattern_resource = reference.uri
+        self.preview_panel.set_resource(reference.uri)
+        self.inspector.set_pattern(document)
+        self.bottom_tabs.setCurrentWidget(self.preview_panel)
+        self._launch_active_pattern_preview()
+
+    def _launch_active_pattern_preview(self) -> None:
+        if not self._active_pattern_resource:
+            self.preview_panel.handle_issue(
+                {"code": "no_pattern", "message": "Select a Pattern resource first"}
+            )
+            return
+        if not self._pattern_preview_client.start():
+            return
+        self._pattern_preview_client.send_command(
+            "load",
+            {"resource": self._active_pattern_resource},
+        )
+        self._pattern_preview_client.send_command("play")
+        self._log(f"[pattern-preview] opening {self._active_pattern_resource}")
+
+    def _send_pattern_preview_command(self, command: str, payload: dict) -> None:
+        if command == "set-seed":
+            self._pattern_property_requested("seed", payload.get("seed"))
+            return
+        if command == "set-property":
+            self._pattern_property_requested(payload.get("path"), payload.get("value"))
+            return
+        if not self._pattern_preview_client.is_running:
+            self._launch_active_pattern_preview()
+        if not self._pattern_preview_client.is_running:
+            return
+        try:
+            self._pattern_preview_client.send_command(command, payload)
+        except RuntimeError as exc:
+            self._handle_pattern_preview_issue(
+                {"code": "command_failed", "message": str(exc)}
+            )
+
+    def _pattern_property_requested(self, path: str, value) -> None:
+        if self._active_pattern_document is None:
+            self.preview_panel.handle_issue(
+                {"code": "no_pattern", "message": "Select a Pattern resource first"}
+            )
+            return
+        if not self._pattern_preview_client.is_running:
+            self._launch_active_pattern_preview()
+        if not self._pattern_preview_client.is_running:
+            return
+        request_id = self._pattern_preview_client.send_command(
+            "set-property",
+            {"path": path, "value": value},
+        )
+        self._preview_pending_properties[request_id] = (path, value)
+
+    @staticmethod
+    def _pattern_with_property(
+        document: PatternDocument,
+        path: str,
+        value,
+    ) -> PatternDocument:
+        payload = document.to_dict()
+        target = payload
+        parts = path.split(".")
+        for part in parts[:-1]:
+            target = target[part]
+        target[parts[-1]] = value
+        return PatternDocument.from_dict(payload)
+
+    def _handle_pattern_preview_event(self, message: dict) -> None:
+        self.preview_panel.handle_event(message)
+        request_id = message.get("request_id")
+        payload = message.get("payload") or {}
+        if message.get("event") == "response" and request_id in self._preview_pending_properties:
+            path, value = self._preview_pending_properties.pop(request_id)
+            if payload.get("ok") and self._active_pattern_document is not None:
+                try:
+                    self._active_pattern_document = self._pattern_with_property(
+                        self._active_pattern_document,
+                        path,
+                        value,
+                    )
+                except (KeyError, ValueError, ResourceDocumentError) as exc:
+                    self._handle_pattern_preview_issue(
+                        {"code": "local_reload_failed", "message": str(exc)}
+                    )
+            if self._active_pattern_document is not None:
+                self.inspector.set_pattern(self._active_pattern_document)
+        event = message.get("event")
+        if event == "program_loaded":
+            self._log(
+                f"[pattern-preview] loaded {payload.get('name')} "
+                f"({str(payload.get('content_hash') or '')[:12]})"
+            )
+        elif event in {"compile_error", "runtime_error", "protocol_error"}:
+            self._log(f"[pattern-preview:{event}] {payload}")
+
+    def _handle_pattern_preview_issue(self, issue: dict) -> None:
+        self.preview_panel.handle_issue(issue)
+        self._log(
+            f"[pattern-preview:error] {issue.get('code')}: {issue.get('message')}"
+        )
+
     def run_preview(self) -> None:
+        node = self.session.node(self._selected_id)
+        if node is not None and node.type == "PatternInstance":
+            resource = str(node.properties.get("pattern") or "").strip()
+            if resource:
+                self._open_pattern_preview(resource)
+                return
         if self._preview_process is not None and self._preview_process.state() != QProcess.NotRunning:
             self.statusBar().showMessage("Preview is already running", 3000)
             return
 
-        node = self.session.node(self._selected_id)
         try:
             arguments, label = build_preview_command(
                 self.project,
@@ -1451,6 +1670,7 @@ class EditorMainWindow(QMainWindow):
             self._preview_process.terminate()
             if not self._preview_process.waitForFinished(1500):
                 self._preview_process.kill()
+        self._pattern_preview_client.close()
         for process in tuple(self._tool_processes.values()):
             if process.state() == QProcess.NotRunning:
                 continue

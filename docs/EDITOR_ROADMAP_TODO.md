@@ -23,12 +23,12 @@ Godot-style workbench
 
 ## Current focus
 
-**Milestone M2 — Controllable formal preview**
+**Milestone M3 — First no-code vertical slice**
 
 Phase 0 contracts are frozen. Keep later changes compatible with them or add
 explicit schema migrations and contract tests.
 
-Next recommended task: **E2.1 — Define PreviewController contract.**
+Next recommended task: **E3.1 — Introduce multi-document editing and per-document savepoints.**
 
 ## Status and update rules
 
@@ -284,38 +284,38 @@ Goal: turn the existing preview runtime into an editor-controlled service.
 
 ### E2.1 PreviewController contract
 
-- [ ] Define load, play, pause, step, seek, reset, stop, set-property,
+- [x] Define load, play, pause, step, seek, reset, stop, set-property,
   set-player-position, set-seed, and get-stats commands.
-- [ ] Define structured status, compile error, runtime error, and statistics
+- [x] Define structured status, compile error, runtime error, and statistics
   events.
-- [ ] Preserve the last valid program when a hot reload fails.
-- [ ] Make lifecycle/cleanup idempotent.
+- [x] Preserve the last valid program when a hot reload fails.
+- [x] Make lifecycle/cleanup idempotent.
 
 ### E2.2 Process transport
 
-- [ ] Implement QProcess lifecycle management.
-- [ ] Use newline-delimited JSON over stdin/stdout for the first transport.
-- [ ] Add protocol version negotiation and request IDs.
-- [ ] Ensure child crashes and malformed output cannot freeze the editor.
-- [ ] Add protocol and subprocess smoke tests.
+- [x] Implement QProcess lifecycle management.
+- [x] Use newline-delimited JSON over stdin/stdout for the first transport.
+- [x] Add protocol version negotiation and request IDs.
+- [x] Ensure child crashes and malformed output cannot freeze the editor.
+- [x] Add protocol and subprocess smoke tests.
 
 ### E2.3 Preview surface
 
-- [ ] First integrate controllable external-window formal preview.
-- [ ] Show frame, bullet count, update/render timing, seed, pause state, and last
+- [x] First integrate controllable external-window formal preview.
+- [x] Show frame, bullet count, update/render timing, seed, pause state, and last
   compile/runtime error in the editor.
-- [ ] Add optional diagnostic gizmos without changing formal bullet behavior.
-- [ ] Research QOpenGLWidget + ModernGL attachment only after the controller
-  contract is stable.
-- [ ] Treat full `main.py` embedding as deferred; start with spell/pattern
+- [x] Add optional diagnostic gizmos without changing formal bullet behavior.
+- [x] Record QOpenGLWidget + ModernGL attachment research as deferred until the
+  controller contract is stable.
+- [x] Treat full `main.py` embedding as deferred; start with spell/pattern
   preview.
 
 ### Phase 2 gate
 
-- [ ] Inspector-driven changes reload a PatternDocument without Python codegen.
-- [ ] Pause, step, seek, reset, seed, and player-position control work.
-- [ ] Formal preview survives an invalid edit and recovers after correction.
-- [ ] Runtime parity and visual preview are both checked and recorded separately.
+- [x] Inspector-driven changes reload a PatternDocument without Python codegen.
+- [x] Pause, step, seek, reset, seed, and player-position control work.
+- [x] Formal preview survives an invalid edit and recovers after correction.
+- [x] Runtime parity and visual preview are both checked and recorded separately.
 
 ---
 
@@ -673,3 +673,46 @@ Append entries; do not rewrite old evidence. Keep each entry concise.
   `python -m pytest -q`, `python -m compileall -q main.py src game_content
   tools tests`, `python tools/validate_assets.py --format json`, and
   `python tools/benchmark_pattern_runtime.py`; `git diff --check` also passed.
+
+### 2026-08-01 — M2 controllable formal preview complete
+
+- Added `PatternPreviewController` around the formal
+  `PatternProgram -> PatternRunner -> StageContext -> OptimizedBulletPool` path
+  with fixed-tick load/play/pause/step/seek/reset/stop, live property, player,
+  seed, gizmo, statistics, and idempotent lifecycle commands.
+- Added version 1 UTF-8 NDJSON with required hello negotiation, request IDs,
+  structured responses/events, a headless worker, and a Qt `QProcess` client
+  that isolates malformed output and crashes, bounds stderr forwarding, and
+  performs bounded shutdown.
+- Added the controllable external ModernGL preview, real optimized-pool
+  rendering, side diagnostics, optional grid/player/emitter gizmos, keyboard
+  controls, a compact editor Preview panel, Pattern Inspector wiring, resource
+  activation/drop/F6 integration, and `starter_ring.pystg.json` as a QA sample.
+- Invalid Inspector edits compile prospectively and retain the last program,
+  bullets, frame, and play state. A valid correction atomically reloads the
+  PatternDocument without Python code generation. The protocol and ownership
+  boundaries are documented in `docs/PREVIEW_CONTROLLER_PROTOCOL.md`.
+- Structural/runtime evidence: 24 focused preview/controller/protocol/process/
+  editor tests passed in final verification; the complete target environment
+  regression passed 153 tests. Compileall passed for `main.py`,
+  `src`, `game_content`, `tools`, and `tests`.
+- Process evidence: a real headless worker completed hello/load/step/stats and
+  clean shutdown; malformed input remained recoverable; a forced child crash
+  produced a structured actionable issue. UTF-8 child I/O and bounded stderr
+  prevent routine asset logging from corrupting or flooding the editor.
+- Visual/interaction evidence: the native external window rendered the sample
+  through the optimized pool with readable frame, bullet, seed, update, and
+  render statistics. Space pause/play, single-frame step, reset, and gizmo
+  toggle were exercised. In the Qt editor, double-clicking the Pattern opened
+  the live Inspector and external preview; pause/step/reset worked; invalid
+  `shape.count = 0` left the old preview playing with an explicit retention
+  error, and correcting it to `12` reloaded successfully and cleared the error.
+- Windows integration fix: the real Numba render-batch path is prewarmed before
+  starting the live QProcess stdin-reader thread, avoiding a reproduced
+  first-render JIT deadlock without introducing an editor-only renderer.
+- Repository evidence: asset validation checked 72 JSON files, 745 sprites,
+  and 142 images with 0 errors and 0 warnings. QOpenGLWidget embedding and full
+  `main.py` embedding remain intentionally deferred.
+- Acceptance classification: M2 is structurally valid, runtime valid, process
+  isolation checked, and visually/interaction accepted. M1 parity and
+  performance evidence remain the formal-runtime baseline for this preview.
