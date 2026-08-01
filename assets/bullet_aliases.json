@@ -453,6 +453,42 @@
       "white":      "ball_light8",
       "black":      "ball_light8",
       "pink":       "ball_light2"
+    },
+    "scale_s": {
+      "red":      "ball_mid1",
+      "blue":     "ball_mid2",
+      "green":    "ball_mid3",
+      "yellow":   "ball_mid4",
+      "purple":   "ball_mid5",
+      "white":    "ball_mid6",
+      "darkblue": "ball_mid7",
+      "orange":   "ball_mid8",
+      "cyan":     "ball_mid1",
+      "pink":     "ball_mid5"
+    },
+    "rice_s": {
+      "red":      "ball_mid1",
+      "blue":     "ball_mid2",
+      "green":    "ball_mid3",
+      "yellow":   "ball_mid4",
+      "purple":   "ball_mid5",
+      "white":    "ball_mid6",
+      "darkblue": "ball_mid7",
+      "orange":   "ball_mid8",
+      "cyan":     "ball_mid1",
+      "pink":     "ball_mid5"
+    },
+    "scale_m": {
+      "red":      "ball_mid1",
+      "blue":     "ball_mid2",
+      "green":    "ball_mid3",
+      "yellow":   "ball_mid4",
+      "purple":   "ball_mid5",
+      "white":    "ball_mid6",
+      "darkblue": "ball_mid7",
+      "orange":   "ball_mid8",
+      "cyan":     "ball_mid1",
+      "pink":     "ball_mid5"
     }
   }
 }

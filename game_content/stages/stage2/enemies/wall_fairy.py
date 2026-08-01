@@ -1,6 +1,6 @@
 import random
 
-from src.game.bullet.tags import TAG_BOMB_PROTECTED_WALL
+from src.content_api import TAG_BOMB_PROTECTED_WALL
 from src.game.stage.enemy_script import EnemyScript
 
 

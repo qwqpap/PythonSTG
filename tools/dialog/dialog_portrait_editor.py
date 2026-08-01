@@ -21,6 +21,7 @@ from pygame import Surface
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
+from src.core.atomic_io import atomic_write_json
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "assets", "ui", "dialog_portrait_layout.json")
 CHAR_DIR = os.path.join(PROJECT_ROOT, "assets", "images", "character")
@@ -327,8 +328,7 @@ class PortraitEditor:
         focus["inactive_saturation"] = round(self.s_inactive_sat.value, 3)
 
         try:
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(self.layout_cfg, f, ensure_ascii=False, indent=2)
+            atomic_write_json(CONFIG_PATH, self.layout_cfg)
             self.status_text = f"已保存: {CONFIG_PATH}"
             self.status_frames = 180
         except Exception as e:

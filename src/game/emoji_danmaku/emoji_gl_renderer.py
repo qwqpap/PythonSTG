@@ -14,6 +14,7 @@ Emoji OpenGL 渲染器
 """
 import math
 import os
+import sys
 from typing import Optional
 
 import moderngl
@@ -50,6 +51,17 @@ _EMOJI_FALLBACK_LETTERS: dict[str, str] = {
     "💩": "poo",
     "😅": "swt",
 }
+
+
+def _safe_print(message: object, *, stream=None) -> None:
+    """Print diagnostics without crashing on legacy Windows console encodings."""
+    output = sys.stdout if stream is None else stream
+    encoding = getattr(output, "encoding", None) or "utf-8"
+    safe_message = str(message).encode(
+        encoding,
+        errors="backslashreplace",
+    ).decode(encoding)
+    print(safe_message, file=output)
 
 
 def _try_render_emoji_pil(emoji_char: str) -> Optional["Image"]:
@@ -248,7 +260,7 @@ void main() {
             return None
 
     def _bake_textures(self, emoji_chars: list[str]) -> None:
-        print("[emoji_danmaku] 正在加载 emoji 纹理...")
+        _safe_print("[emoji_danmaku] 正在加载 emoji 纹理...")
         asset_dir = os.path.normpath(self._ASSET_DIR)
 
         for ch in emoji_chars:
@@ -262,7 +274,7 @@ void main() {
                     if os.path.exists(png_path):
                         tex = self._load_png_to_texture(png_path)
                         if tex:
-                            print(f"  {ch}  ← {fn}.png ✓")
+                            _safe_print(f"  {ch}  ← {fn}.png ✓")
 
                 # ── 回退：PIL 即时渲染 ────────────────────────────────────
                 if tex is None:
@@ -271,13 +283,13 @@ void main() {
                     data = img.tobytes("raw", "RGBA")
                     tex = self.ctx.texture((EMOJI_TEX_SIZE, EMOJI_TEX_SIZE), 4, data)
                     tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                    print(f"  {ch}  ← PIL 渲染（未找到预生成 PNG）✓")
+                    _safe_print(f"  {ch}  ← PIL 渲染（未找到预生成 PNG）✓")
 
                 self._textures[ch] = tex
             except Exception as e:
-                print(f"  {ch}  加载失败: {e}")
+                _safe_print(f"  {ch}  加载失败: {e}")
 
-        print("[emoji_danmaku] emoji 纹理加载完成。")
+        _safe_print("[emoji_danmaku] emoji 纹理加载完成。")
 
     # ── 渲染 ─────────────────────────────────────────────────────────────────
 

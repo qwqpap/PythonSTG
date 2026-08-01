@@ -9,12 +9,18 @@
 *.py[cod]
 *.nbc
 *.nbi
+.pytest_cache/
+/build/
+/dist/
+/*.egg-info/
 tmpclaude-*-cwd
 
 # Node / VitePress docs build output
 node_modules/
 docs/.vitepress/cache/
+docs/.vitepress/.temp/
 docs/.vitepress/dist/
+vscode_in/out/
 
 # Local report/export artifacts
 .edge-headless/
@@ -41,6 +47,8 @@ tests/test_window_key_sync.py
 /userdata/settings.json
 /userdata/progress.json
 /userdata/replays/
+/userdata/audio_cache/
+/userdata/hiscore.json
 
 # 本地 Claude Code 项目说明（不分发）
 /CLAUDE.md

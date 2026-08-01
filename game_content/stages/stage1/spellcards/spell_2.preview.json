@@ -1,0 +1,10 @@
+{
+    "spell": "SunnySpell1",
+    "boss": "test_boss",
+    "player_pos": [0, -0.8],
+    "seed": 114514,
+    "speed": 1.0,
+    "hitbox": true,
+    "auto_reload": true,
+    "duration": 1800
+}

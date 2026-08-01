@@ -48,10 +48,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # 尝试导入引擎的统一纹理系统
 try:
     from src.resource.unified_texture import (
-        UnifiedTextureManager, TextureSheet, TextureRegion,
+        TextureSheet, TextureRegion,
         AssetType, BaseAsset, SpriteAsset, AnimationAsset,
         LaserAsset, BentLaserAsset, ColorVariantGroup, PlayerAsset
     )
+    from src.resource.service import init_resource_service
+    from src.core.project_context import get_project_context
+    from src.core.atomic_io import atomic_write_json
     HAS_ENGINE = True
 except ImportError as e:
     print(f"警告: 无法导入引擎纹理系统: {e}")
@@ -177,8 +180,13 @@ class EngineIntegratedAssetManager(QMainWindow):
             QMessageBox.critical(None, "错误", "无法导入引擎模块，编辑器无法启动")
             sys.exit(1)
         
-        # 引擎纹理管理器 - 核心！
-        self.engine = UnifiedTextureManager(str(ASSETS_ROOT))
+        # Project-scoped resource service is the single construction point for
+        # both the runtime catalog and the editor compatibility model.
+        self.resource_service = init_resource_service(
+            project=get_project_context(PROJECT_ROOT),
+            asset_root=ASSETS_ROOT,
+        )
+        self.engine = self.resource_service.editor
         
         # 当前选中的纹理表和资产
         self.current_sheet: Optional[TextureSheet] = None
@@ -931,7 +939,11 @@ class EngineIntegratedAssetManager(QMainWindow):
     def _reload_all_configs(self):
         """重新加载所有配置"""
         # 重建引擎
-        self.engine = UnifiedTextureManager(str(ASSETS_ROOT))
+        self.resource_service = init_resource_service(
+            project=get_project_context(PROJECT_ROOT),
+            asset_root=ASSETS_ROOT,
+        )
+        self.engine = self.resource_service.editor
         self._discover_all_configs()
         self._refresh_asset_tree()
         self.statusBar().showMessage("已重新加载所有配置")
@@ -1600,8 +1612,7 @@ class EngineIntegratedAssetManager(QMainWindow):
                         config['animations'][name]['loop'] = anim.loop
             
             # 写入文件
-            with open(self.current_config_path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
+            atomic_write_json(self.current_config_path, config)
             
             self.is_modified = False
             self.save_status_label.setText("✓ 已保存")
@@ -1630,8 +1641,7 @@ class EngineIntegratedAssetManager(QMainWindow):
                 "animations": {}
             }
             
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
+            atomic_write_json(path, config)
             
             # 重新加载
             self._reload_all_configs()

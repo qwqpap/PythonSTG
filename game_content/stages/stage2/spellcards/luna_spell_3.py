@@ -1,7 +1,6 @@
 import random
 from src.game.stage.spellcard import SpellCard
-from src.game.bullet.optimized_pool import CURVE_LINEAR_SPEED
-from src.game.bullet.tags import TAG_BOMB_PROTECTED_GRID
+from src.content_api import CURVE_LINEAR_SPEED, TAG_BOMB_PROTECTED_GRID
 
 class LunaSpell3(SpellCard):
     """

@@ -709,7 +709,14 @@ class UnifiedTextureManager:
     
     def _parse_player_config(self, config: dict, config_dir: Path, sheet_name: str) -> TextureSheet:
         """解析玩家配置"""
-        texture_file = config.get('texture', f'{sheet_name}.png')
+        texture_files = config.get('textures', {})
+        if not isinstance(texture_files, dict):
+            texture_files = {}
+        texture_file = (
+            config.get('texture')
+            or texture_files.get('player')
+            or f'{sheet_name}.png'
+        )
         texture_path = self._resolve_texture_path(config_dir, texture_file)
         
         sheet = TextureSheet(path=texture_path)
@@ -718,34 +725,56 @@ class UnifiedTextureManager:
         # 解析精灵
         sprites_data = config.get('sprites', {})
         sprite_map: Dict[str, SpriteAsset] = {}
-        
+
         for name, data in sprites_data.items():
+            if not isinstance(data, dict):
+                continue
+            source = str(data.get('source', 'player'))
+            sprite_texture_file = texture_files.get(source, texture_file)
+            sprite_texture_path = self._resolve_texture_path(config_dir, sprite_texture_file)
             region = TextureRegion.from_dict(data)
             sprite = SpriteAsset(
                 name=name,
                 asset_type=AssetType.SPRITE,
-                texture_path=texture_path,
+                texture_path=sprite_texture_path,
                 region=region
             )
             sprite_map[name] = sprite
             sheet.sprites[name] = sprite
             self.all_sprites[name] = sprite
-        
+            self._asset_to_sheet[name] = sheet_name
+
         # 解析动画
         animations_data = config.get('animations', {})
+        if (
+            isinstance(animations_data, dict)
+            and isinstance(animations_data.get('animations'), dict)
+        ):
+            animations_data = animations_data['animations']
+        if not isinstance(animations_data, dict):
+            animations_data = {}
         anim_map: Dict[str, AnimationAsset] = {}
-        
+
         for name, data in animations_data.items():
+            if not isinstance(data, dict):
+                continue
             anim = self._parse_animation(name, data, texture_path, sprite_map)
             if anim:
                 anim_map[name] = anim
                 sheet.animations[name] = anim
                 self.all_animations[name] = anim
+                self._asset_to_sheet[name] = sheet_name
         
         # 识别子弹精灵
         bullet_sprites = {}
         for name, sprite in sprite_map.items():
-            if 'knife' in name.lower() or 'bullet' in name.lower() or 'shot' in name.lower():
+            source = str(sprites_data.get(name, {}).get('source', ''))
+            if (
+                source == 'bullet'
+                or 'knife' in name.lower()
+                or 'bullet' in name.lower()
+                or 'shot' in name.lower()
+            ):
                 bullet_sprites[name] = sprite
         
         # 创建玩家资产

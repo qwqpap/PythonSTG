@@ -29,6 +29,7 @@ PySTG 是一个面向**关卡内容创作者**和**引擎二次开发者**的弹
 - 🌟 **激光系统** — 直线激光（三段式：展开→持续→收缩）+ 曲线激光
 - 📦 **数据驱动资产** — 纹理图集、精灵动画、弹幕别名表全部 JSON 配置
 - 🎨 **可视化编辑器** — 弹幕别名管理器、纹理资产编辑器、自机编辑器、对话立绘编辑器
+- 🧩 **统一插件工作台** — Scene、Inspector、资源浏览器、JSON 子资源和现有编辑工具统一入口
 - 🔊 **双层音频** — 全局 bank + 关卡私有 bank，关卡音效可覆盖全局同名音效
 - 🌅 **3D 背景** — 透视投影 + 雾效 + 程序化生成（如湖面反射）
 - 🛠 **Debug 模式** — 一键跳转任意 Wave / Boss / 符卡，加速开发迭代
@@ -65,13 +66,30 @@ python main.py --debug
 
 # 性能分析
 python main.py --profile
+
+# 打开统一场景编辑器（需要开发依赖）
+python tools/scene_editor.py
 ```
+
+场景编辑器同时是编辑工具工作台：
+
+- 底部 **Assets** 浏览 `assets/` 与 `game_content/`，支持搜索、类型/目录过滤，以及 JSON 内的 sprite/animation 子资源。
+- 双击图片或 sprite 会创建 Sprite；选中已有 Sprite 时会设置其 `texture`。
+- 从 Assets 拖图片或 sprite 到 Scene 会按落点创建 Sprite；选中 SpellCard 后可双击或拖入 Python 脚本设置 `script`。
+- **Tools** 菜单内嵌弹幕别名管理器，并以独立进程打开纹理、自机、敌人、背景、弹幕脚本、对话和 UI 布局工具。
+- 所有旧工具脚本和 `tools/editor_launcher.py` 仍可独立启动。
 
 ### 开发依赖（编辑器与测试）
 
 ```bash
 pip install -r requirements-dev.txt
-pip install PyQt5   # 编辑器工具
+```
+
+如果希望使用安装后的命令入口，再执行：
+
+```bash
+pip install -e .
+pystg-editor
 ```
 
 ---
@@ -117,7 +135,8 @@ flowchart TB
 | [快速开始](docs/getting-started.md) | 环境搭建、第一份脚本、目录约定 |
 | [弹幕脚本开发指南](docs/STAGE_SCRIPTING_GUIDE.md) | 完整 API 参考、符卡/波次/敌人/Boss 编写方法 |
 | [敌人预设系统](docs/ENEMY_PRESET_SYSTEM.md) | 用 JSON 预设快速创建杂兵 |
-| [编辑器工具](docs/EDITOR_TOOLS_GUIDE.md) | 弹幕别名管理器、纹理编辑器、自机编辑器 |
+| [编辑器工具](docs/EDITOR_TOOLS_GUIDE.md) | 统一工作台与专用编辑器 |
+| [场景编辑器](docs/SCENE_EDITOR_MVP.md) | Scene、Inspector、资源浏览和预览边界 |
 
 ### 给引擎开发者（修引擎 / 加新模块）
 
@@ -125,6 +144,8 @@ flowchart TB
 |------|------|
 | [架构概览](docs/architecture.md) | 引擎分层、模块依赖、数据流 |
 | [纹理资产系统](docs/TEXTURE_ASSET_SYSTEM.md) | 图集加载、精灵定义、动画配置 |
+| [开发工具链](docs/DEVTOOLS_PHASE1.md) | 资源校验、热重载、Pattern Lab 和符卡预览 |
+| [编辑器架构边界](docs/EDITOR_ARCHITECTURE.md) | 编辑器、文档、运行时和资源服务的依赖约束 |
 
 也可以本地启动 VitePress 文档站点：
 
@@ -323,7 +344,7 @@ async def _(event: MessageEvent):
 
 - Replay 录像系统
 - 游戏设置界面（按键绑定、画质）
-- 可视化关卡编辑器
+- 将场景编辑器从 MVP 扩展为可编排关卡内容的正式工作流
 - 更多可选自机
 
 ---
@@ -340,8 +361,8 @@ async def _(event: MessageEvent):
 跑测试：
 
 ```bash
-pytest                # 全量
-pytest -m smoke       # 仅快速回归
+python -m pytest -q             # 全量
+python -m pytest -m smoke -q    # 仅快速回归
 ```
 
 ---

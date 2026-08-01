@@ -11,6 +11,7 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -23,6 +24,10 @@ from PyQt5.QtCore import Qt, QRect
 # ═══════════════════════════════════════════════════════════════
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from src.core.atomic_io import atomic_write_json
+
 ASSET_ROOT = PROJECT_ROOT / "assets"
 BULLET_IMAGE_DIR = ASSET_ROOT / "images" / "bullet"
 ENEMY_IMAGE_DIR = ASSET_ROOT / "images" / "enemy"
@@ -280,9 +285,7 @@ def save_bullet_aliases(mapping: Dict[str, Dict[str, str]],
         }
     """
     data = {"version": "1.0", "mapping": mapping}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, data)
 
 
 def generate_default_aliases(atlases: Dict[str, List[SpriteEntry]]
@@ -498,6 +501,4 @@ def save_enemy_aliases(mapping: Dict[str, str],
         }
     """
     data = {"version": "1.0", "mapping": mapping}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    atomic_write_json(path, data)

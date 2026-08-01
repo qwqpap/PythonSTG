@@ -8,6 +8,7 @@ import json
 import os
 from typing import Dict, Any
 
+from src.core.atomic_io import atomic_write_json
 
 def default_layout() -> Dict[str, Any]:
     """返回默认主菜单布局，与 MainMenuRenderer 原硬编码值一致。"""
@@ -58,9 +59,7 @@ def load_layout(path: str) -> Dict[str, Any]:
 def save_layout(path: str, layout: Dict[str, Any]) -> bool:
     """保存布局到 JSON 文件。"""
     try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(layout, f, indent=2, ensure_ascii=False)
+        atomic_write_json(path, layout)
         return True
     except Exception:
         return False
