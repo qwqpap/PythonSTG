@@ -106,7 +106,7 @@ def test_workbench_contains_assets_and_assigns_resources(tmp_path):
     assert [
         window.bottom_tabs.tabText(index)
         for index in range(window.bottom_tabs.count())
-    ] == ["Output", "Timeline", "Assets"]
+    ] == ["Output", "Timeline", "Preview", "Assets"]
     assert window.findChild(QLabel, "assetSummary").text() == "1 resources"
     assert window.findChild(
         type(window.action_run),

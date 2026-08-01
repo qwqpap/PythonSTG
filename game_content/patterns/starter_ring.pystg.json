@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "type": "pystg.pattern",
+  "id": "3a3212e7-452f-4f5d-91e8-9740ce96e053",
+  "name": "星环入门弹幕",
+  "symbol_name": "starter_ring",
+  "metadata": {
+    "description": "M2 formal preview starter pattern"
+  },
+  "seed": 20260801,
+  "bullet": {
+    "bullet_type": "ball_m",
+    "color": "red",
+    "resource": null
+  },
+  "shape": {
+    "kind": "ring",
+    "count": 24,
+    "origin_x": 0.0,
+    "origin_y": 0.62,
+    "angle_span": 360.0,
+    "line_length": 1.0,
+    "line_angle": 0.0
+  },
+  "aim": {
+    "mode": "fixed",
+    "angle": 270.0
+  },
+  "schedule": {
+    "delay_frames": 0,
+    "interval_frames": 12,
+    "burst_count": 8,
+    "loop_count": null
+  },
+  "motion": {
+    "speed": 2.0,
+    "friction": 0.0,
+    "spin": 0.0,
+    "time_scale": 1.0,
+    "max_lifetime": 5.0,
+    "render_scale": 1.0,
+    "bounce_x": false,
+    "bounce_y": false
+  },
+  "modifiers": {
+    "angle_offset_per_burst": 7.5,
+    "speed_offset_per_burst": 0.0,
+    "random_speed_variation": 0.0
+  }
+}
