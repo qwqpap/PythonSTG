@@ -22,8 +22,8 @@ python main.py --debug
 python main.py --profile
 
 # 运行测试
-pytest
-pytest -m smoke  # 仅快速回归测试
+python -m pytest -q
+python -m pytest -m smoke -q  # 仅快速回归测试
 
 # 安装依赖（开发环境）
 pip install -r requirements-dev.txt
@@ -31,7 +31,10 @@ pip install -r requirements-dev.txt
 # 生成子弹/敌人图片画廊
 python tools/asset/generate_combat_gallery.py
 
-# 启动可视化编辑器
+# 启动统一场景编辑器工作台
+python tools/scene_editor.py
+
+# 旧版独立工具启动器仍可用
 python tools/editor_launcher.py
 ```
 
@@ -47,9 +50,11 @@ main.py                         ← 入口、主循环、游戏状态机
 │   ├── bullet/                 ← 子弹池（Numba JIT，NumPy 结构数组）
 │   ├── stage/                  ← 关卡系统核心（stage_base, context, wave_base, spellcard, boss_base）
 │   ├── player/                 ← 玩家、射击系统、Option、动画状态机
-│   ├── laser/                  ← 激光系统（直线/曲线）
-│   ├── item/                   ← 道具系统
-│   └── audio/                  ← 双层音频（全局 bank + 关卡私有 bank）
+│   ├── background_render/      ← 数据驱动背景与正式预览渲染
+│   ├── emoji_danmaku/          ← 外部弹幕输入与子弹桥接
+│   ├── laser.py                ← 直线/曲线激光
+│   ├── item.py                 ← 道具系统
+│   └── audio.py                ← 双层音频（全局 bank + 关卡私有 bank）
 ├── src/render/                 ← OpenGL 渲染管线（实例化渲染）
 ├── src/ui/                     ← HUD、对话框、主菜单
 └── game_content/stages/        ← 关卡内容脚本（与引擎解耦）
@@ -104,3 +109,5 @@ game_content/stages/stageN/
 - `docs/STAGE_SCRIPTING_GUIDE.md` — 完整 API 参考与示例
 - `docs/ENEMY_PRESET_SYSTEM.md` — 预设敌人配置说明
 - `docs/TEXTURE_ASSET_SYSTEM.md` — 精灵/图集管理原理
+- `docs/SCENE_EDITOR_MVP.md` — 场景编辑器当前能力与边界
+- `docs/EDITOR_TOOLS_GUIDE.md` — 工作台与专用编辑器入口

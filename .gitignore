@@ -18,6 +18,7 @@ tmpclaude-*-cwd
 # Node / VitePress docs build output
 node_modules/
 docs/.vitepress/cache/
+docs/.vitepress/.temp/
 docs/.vitepress/dist/
 vscode_in/out/
 

@@ -3,6 +3,8 @@
 统一场景编辑器提供一个接近 Godot 工作流的 PyQt5 主窗口，并直接读写版本化
 `pystg.scene` 文档。它不会替代现有纹理、立绘等专用工具，而是作为场景编排入口。
 
+当前工作台已经包含 Scene、Inspector、2D Viewport、资源浏览器、Tools 插件入口和只读 Timeline；本页的“当前边界”描述仍然适用于 MVP 阶段。
+
 ## 启动
 
 安装开发依赖后，在项目根目录运行：
@@ -58,7 +60,7 @@ Inspector 修改都经过统一命令栈，可以 Undo/Redo。
 
 - 高密度子弹不会展开成 Scene Tree 节点。
 - 时间轴当前只读，后续再接事件增删和拖动。
-- `Sprite.texture` 第一版接受项目内图片路径；图集 sprite ID 选择器将在资源浏览器
-  接入后补充。
+- Assets 资源浏览器已接入，支持图片、脚本、JSON 以及 atlas 的 `sprites` / `animations` 子资源；子资源引用使用 `path.json#name`。
+- `Sprite.texture` 可由资源浏览器选择图片或 sprite 子资源设置；选中 `SpellCard` 后也可以设置 Python `script`。
 - 场景文档到任意 Python 关卡脚本的完整 runtime bridge 尚未实现；正式关卡预览
   当前由 `preview_stage` 选择已有 Stage。

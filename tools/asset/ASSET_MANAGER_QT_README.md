@@ -26,12 +26,12 @@
 ## 运行方式
 
 ```bash
-python tools/asset_manager_qt.py
+python tools/asset/asset_manager_qt.py
 ```
 
 ## 依赖
 - PyQt5
-- pygame-ce（引擎依赖）
+- pygame（开发依赖中的兼容运行时）
 
 ## 快捷键
 

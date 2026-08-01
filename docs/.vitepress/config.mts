@@ -52,7 +52,9 @@ export default defineConfig({
           { text: '弹幕脚本开发指南', link: '/STAGE_SCRIPTING_GUIDE' },
           { text: '敌人预设系统', link: '/ENEMY_PRESET_SYSTEM' },
           { text: '统一场景编辑器', link: '/SCENE_EDITOR_MVP' },
-          { text: '编辑器工具', link: '/EDITOR_TOOLS_GUIDE' }
+          { text: '编辑器工具', link: '/EDITOR_TOOLS_GUIDE' },
+          { text: '开发工具链', link: '/DEVTOOLS_PHASE1' },
+          { text: '编辑器架构边界', link: '/EDITOR_ARCHITECTURE' }
         ]
       },
       {
@@ -61,7 +63,7 @@ export default defineConfig({
           { text: '架构概览', link: '/architecture' },
           { text: '纹理资产系统', link: '/TEXTURE_ASSET_SYSTEM' }
         ]
-      }
+      },
     ],
     socialLinks: [
       { icon: 'github', link: 'https://github.com/qwqpap/PythonSTG' }

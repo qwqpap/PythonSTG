@@ -23,13 +23,20 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
+如果希望使用安装后的 `pystg-editor` 命令，再安装项目本身：
+
+```bash
+pip install -e .
+pystg-editor
+```
+
 统一场景编辑器可直接运行：
 
 ```bash
 python tools/scene_editor.py
 ```
 
-参见 [统一场景编辑器 MVP](SCENE_EDITOR_MVP.md)。
+参见 [统一场景编辑器 MVP](SCENE_EDITOR_MVP.md)，以及[编辑器工具指南](EDITOR_TOOLS_GUIDE.md)中的工作台说明。
 
 ## 运行游戏
 

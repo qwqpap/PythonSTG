@@ -52,7 +52,6 @@ Runtime / renderer / resource service
 ```bash
 python -m compileall -q main.py src game_content tools
 python -m pytest -q
-pytest -q
 python tools/validate_assets.py
 ```
 

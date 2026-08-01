@@ -200,4 +200,4 @@ VSCode task：
 3. 添加 `<script>.preview.json` 或类内 preview 元数据。
 4. 在 VSCode 中编辑时运行 `python tools/preview.py <script.py>`。
 5. 符卡效果稳定后，运行 `python main.py --debug --hot-reload`，进入实际关卡测试。
-6. 提交前运行 `python tools/validate_assets.py` 和 pytest。
+6. 提交前运行 `python tools/validate_assets.py` 和 `python -m pytest -q`。
