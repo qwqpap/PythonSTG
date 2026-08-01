@@ -17,6 +17,7 @@ from src.authoring import (
     build_default_resource_type_registry,
 )
 from src.core.project_context import ProjectContext
+from src.pattern import PatternDocument
 
 
 def test_all_initial_resource_types_round_trip_atomically(tmp_path):
@@ -31,6 +32,12 @@ def test_all_initial_resource_types_round_trip_atomically(tmp_path):
             ),
             body={"objects": [{"id": str(__import__("uuid").uuid4()), "value": index}]},
         )
+        if resource_type == "pystg.pattern":
+            document = PatternDocument.new(
+                name=document.name,
+                symbol_name=f"resource_{index}",
+            )
+            document.header.metadata = {"author": "typed-test"}
         path = store.save(document, f"assets/resources/{index}.pystg.json")
         loaded = store.load(path)
 

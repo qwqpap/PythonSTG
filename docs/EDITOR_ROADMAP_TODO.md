@@ -23,12 +23,12 @@ Godot-style workbench
 
 ## Current focus
 
-**Milestone M1 — Pattern IR and formal runtime execution**
+**Milestone M2 — Controllable formal preview**
 
 Phase 0 contracts are frozen. Keep later changes compatible with them or add
 explicit schema migrations and contract tests.
 
-Next recommended task: **E1.1 — Define PatternDocument.**
+Next recommended task: **E2.1 — Define PreviewController contract.**
 
 ## Status and update rules
 
@@ -234,47 +234,47 @@ Goal: make data-authored patterns directly runnable without generating Python.
 
 ### E1.1 PatternDocument
 
-- [ ] Define recipe-level sections: Bullet, Shape, Aim, Schedule, Motion, and
+- [x] Define recipe-level sections: Bullet, Shape, Aim, Schedule, Motion, and
   Modifiers.
-- [ ] Support initial shapes: ring, arc, line, spiral, and random distribution.
-- [ ] Support initial scheduling: delay, interval, burst count, loop.
-- [ ] Support fixed direction and aim-at-player.
-- [ ] Support stable random seed configuration.
-- [ ] Provide migration/import from the prototype PatternSpec.
+- [x] Support initial shapes: ring, arc, line, spiral, and random distribution.
+- [x] Support initial scheduling: delay, interval, burst count, loop.
+- [x] Support fixed direction and aim-at-player.
+- [x] Support stable random seed configuration.
+- [x] Provide migration/import from the prototype PatternSpec.
 
 ### E1.2 Pattern compiler
 
-- [ ] Implement `PatternDocument -> immutable PatternProgram` compilation.
-- [ ] Resolve and validate resource references during compilation.
-- [ ] Precompute static angles, speeds, and resource indices.
-- [ ] Produce structured diagnostics containing resource ID and property path.
-- [ ] Cache compiled programs using content/version identity.
+- [x] Implement `PatternDocument -> immutable PatternProgram` compilation.
+- [x] Resolve and validate resource references during compilation.
+- [x] Precompute static angles, speeds, and resource indices.
+- [x] Produce structured diagnostics containing resource ID and property path.
+- [x] Cache compiled programs using content/version identity.
 
 ### E1.3 Pattern runner
 
-- [ ] Implement a fixed-tick PatternRunner that executes PatternProgram through
+- [x] Implement a fixed-tick PatternRunner that executes PatternProgram through
   StageContext.
-- [ ] Define start, pause, reset, stop, and deterministic replay semantics.
-- [ ] Track ownership/tags so a pattern instance can clear or transform only its
+- [x] Define start, pause, reset, stop, and deterministic replay semantics.
+- [x] Track ownership/tags so a pattern instance can clear or transform only its
   own bullets.
-- [ ] Add batch spawn APIs to StageContext and OptimizedBulletPool.
-- [ ] Keep common bullet motion in NumPy/Numba-compatible data paths.
+- [x] Add batch spawn APIs to StageContext and OptimizedBulletPool.
+- [x] Keep common bullet motion in NumPy/Numba-compatible data paths.
 
 ### E1.4 Runtime parity tests
 
-- [ ] Compare compiled output against known PatternSpec parameter fixtures.
-- [ ] Verify identical seeds produce identical spawn traces.
-- [ ] Verify preview and gameplay runners produce identical traces.
-- [ ] Add load/compile/run failure tests with actionable diagnostics.
-- [ ] Add representative dense-burst performance measurements after dependency
+- [x] Compare compiled output against known PatternSpec parameter fixtures.
+- [x] Verify identical seeds produce identical spawn traces.
+- [x] Verify preview and gameplay runners produce identical traces.
+- [x] Add load/compile/run failure tests with actionable diagnostics.
+- [x] Add representative dense-burst performance measurements after dependency
   versions are aligned.
 
 ### Phase 1 gate
 
-- [ ] One PatternDocument runs in the formal game runtime without Python codegen.
-- [ ] Ring, arc, spiral, aim, interval, multi-burst, and random-seed parity pass.
-- [ ] Dense patterns do not require scene nodes or per-bullet Python callbacks.
-- [ ] Runtime and structural tests pass; performance evidence is recorded.
+- [x] One PatternDocument runs in the formal game runtime without Python codegen.
+- [x] Ring, arc, spiral, aim, interval, multi-burst, and random-seed parity pass.
+- [x] Dense patterns do not require scene nodes or per-bullet Python callbacks.
+- [x] Runtime and structural tests pass; performance evidence is recorded.
 
 ---
 
@@ -634,3 +634,42 @@ Append entries; do not rewrite old evidence. Keep each entry concise.
   target conda environment was used for the full regression.
 - Acceptance classification: M0 is structurally valid and visually inspected.
   Pattern runtime parity and performance remain Phase 1+ work.
+
+### 2026-08-01 — M1 pattern IR and formal runtime complete
+
+- Added strict `PatternDocument` v1 and Draft 2020-12 schema with Bullet, Shape,
+  Aim, Schedule, Motion, Modifiers, stable seed, Unicode display identity, and
+  direct import from the development `PatternSpec` without Python codegen.
+- Added content/dependency-keyed compilation into immutable `PatternProgram`
+  templates, alias/direct-fragment resolution, optional sprite-index
+  precomputation, bounded compile size, and structured resource/property
+  diagnostics.
+- Added deterministic fixed-tick `PatternRunner` lifecycle and owner-tag
+  isolation, plus vectorized `StageContext`/`OptimizedBulletPool` batch spawn,
+  translate, time-scale, and clear paths. Formal batches create no scene nodes
+  and install no per-bullet Python callbacks.
+- Structural/runtime evidence: 45 focused Pattern/authoring/devtools tests
+  passed, and the complete target-environment regression passed (`135 passed`),
+  including three consecutive full-suite runs after stabilizing the shared Qt
+  application lifetime. Draft
+  2020-12 schema validation and `python -m compileall -q main.py src
+  game_content tools tests` also passed.
+- Parity evidence: ring, arc, spiral, flower compatibility, player/fixed aim,
+  interval/multi-burst scheduling, identical-seed replay, and two formal
+  preview/game contexts consuming the same runner produced matching traces.
+- Performance evidence in `touhou_guess` (Python 3.12.9, NumPy 2.2.4, Numba
+  0.63.1): 100 batches × 512 bullets spawned 51,200/51,200 bullets in 0.127511
+  seconds (401,534 bullets/second), with 100 observed batch calls and zero
+  per-bullet callbacks. This is a recorded representative measurement, not a
+  universal frame-time guarantee.
+- Repository evidence: asset validation checked 71 JSON files, 745 sprites, and
+  142 images with 0 errors and 0 warnings; `git diff --check` passed.
+- Visual evidence: M1 adds no editor surface, so no new visual interaction is
+  claimed. M2 will put controls and diagnostic overlays around this same formal
+  runtime rather than introduce a separate editor-only renderer.
+- Acceptance classification: M1 is structurally valid, runtime valid, and
+  performance checked; visual acceptance is not applicable to this milestone.
+- Final commands run in the `touhou_guess` environment:
+  `python -m pytest -q`, `python -m compileall -q main.py src game_content
+  tools tests`, `python tools/validate_assets.py --format json`, and
+  `python tools/benchmark_pattern_runtime.py`; `git diff --check` also passed.

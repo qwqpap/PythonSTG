@@ -1,7 +1,7 @@
 import pytest
 
 from src.devtools.pattern_lab import PatternSpec, export_spellcard, simulate_burst
-from src.devtools.pattern_runtime import preview_positions, spawn_pattern_burst
+from src.devtools.pattern_runtime import PatternPlayback, preview_positions, spawn_pattern_burst
 
 
 def test_pattern_lab_export_matches_spellcard_api_names():
@@ -58,3 +58,26 @@ def test_native_pattern_runtime_supports_multiple_modes():
     assert len(ring) == len(spiral) == len(flower) == 4
     assert spiral != ring
     assert flower != ring
+
+
+def test_pattern_playback_uses_formal_batch_runner_not_per_bullet_calls():
+    calls = []
+
+    class FakeContext:
+        def create_bullets_batch(self, **kwargs):
+            calls.append(kwargs)
+            return list(range(len(kwargs["angles"])))
+
+        def create_bullet(self, **kwargs):
+            raise AssertionError("formal playback must not use per-bullet spawning")
+
+    playback = PatternPlayback(
+        PatternSpec(pattern="ring", count=4, interval=2, bursts=2),
+        owner_tag=4242,
+    )
+
+    assert playback.update(FakeContext()) == 4
+    assert playback.update(FakeContext()) == 0
+    assert playback.update(FakeContext()) == 4
+    assert len(calls) == 2
+    assert playback.runner.program is playback.program

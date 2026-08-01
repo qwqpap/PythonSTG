@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.devtools.pattern_lab import PatternSpec, bullet_parameters
 from src.game.stage.context import StageContext
+from src.pattern import PatternCompiler, PatternDocument, PatternProgram, PatternRunner
 
 
 @dataclass
@@ -14,20 +15,30 @@ class PatternPlayback:
     spec: PatternSpec
     frame: int = 0
     burst_index: int = 0
+    owner_tag: int | None = None
+    program: PatternProgram = field(init=False)
+    runner: PatternRunner = field(init=False)
 
-    def reset(self) -> None:
+    def __post_init__(self) -> None:
+        self.spec.validate()
+        document = PatternDocument.from_pattern_spec(self.spec)
+        self.program = PatternCompiler().compile(document)
+        self.runner = PatternRunner(self.program, owner_tag=self.owner_tag)
+        self.owner_tag = self.runner.owner_tag
+
+    def reset(self, ctx: StageContext | None = None) -> None:
+        self.runner.reset(ctx, clear_owned=ctx is not None)
         self.frame = 0
         self.burst_index = 0
 
     def update(self, ctx: StageContext) -> int:
-        """Advance playback by one frame and spawn bullets when due."""
-        self.spec.validate()
-        spawned = 0
-        if self.frame % self.spec.interval == 0:
-            spawned = spawn_pattern_burst(ctx, self.spec, self.burst_index)
-            self.burst_index = (self.burst_index + 1) % self.spec.bursts
-        self.frame += 1
-        return spawned
+        """Advance the same formal runner used by gameplay by one fixed tick."""
+        if self.runner.state.value == "stopped":
+            self.runner.start(ctx, reset=False)
+        result = self.runner.tick(ctx)
+        self.frame = self.runner.frame
+        self.burst_index = self.runner.emission_count % self.spec.bursts
+        return result.spawned_count
 
 
 def spawn_pattern_burst(ctx: StageContext, spec: PatternSpec, burst_index: int = 0) -> int:

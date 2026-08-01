@@ -187,6 +187,97 @@ class StageContext(SpellCardContext):
             self._bullet_indices.append(idx)
         return idx
 
+    def create_bullets_batch(
+        self,
+        *,
+        positions,
+        angles,
+        speeds,
+        bullet_type: str = "ball_m",
+        color: str = "red",
+        sprite_id: str = None,
+        sprite_idx: int = -1,
+        tag: int = 0,
+        friction: float = 0.0,
+        time_scale: float = 1.0,
+        bounce_x: bool = False,
+        bounce_y: bool = False,
+        spin: float = 0.0,
+        max_lifetime: float = 0.0,
+        render_scale: float = 1.0,
+    ) -> np.ndarray:
+        """Create a heterogeneous formal-runtime burst in one pool operation.
+
+        This is the batch equivalent of :meth:`create_bullet`: public angles
+        are degrees and speeds are per second, while the pool receives radians
+        and normalized units per frame.
+        """
+        position_array = np.asarray(positions, dtype=np.float32)
+        angle_array = np.asarray(angles, dtype=np.float32)
+        speed_array = np.asarray(speeds, dtype=np.float32)
+        if position_array.size == 0:
+            position_array = position_array.reshape((0, 2))
+        if position_array.ndim != 2 or position_array.shape[1] != 2:
+            raise ValueError("positions must have shape (count, 2)")
+        if angle_array.ndim != 1 or speed_array.ndim != 1:
+            raise ValueError("angles and speeds must be one-dimensional")
+        if not (len(position_array) == len(angle_array) == len(speed_array)):
+            raise ValueError("positions, angles, and speeds must have equal length")
+
+        resolved_sprite_id = sprite_id or self._resolve_sprite_id(bullet_type, color)
+        flags = FLAG_RENDER_ANGLE_LOCKED
+        if bounce_x:
+            flags |= FLAG_BOUNCE_X
+        if bounce_y:
+            flags |= FLAG_BOUNCE_Y
+        if spin != 0.0:
+            flags &= ~FLAG_RENDER_ANGLE_LOCKED
+
+        angle_radians = np.deg2rad(angle_array).astype(np.float32, copy=False)
+        speed_per_frame = speed_array / 60.0
+        if hasattr(self.bullet_pool, "spawn_bullets_batch"):
+            indices = self.bullet_pool.spawn_bullets_batch(
+                positions=position_array,
+                angles=angle_radians,
+                speeds=speed_per_frame,
+                sprite_id=resolved_sprite_id,
+                sprite_idx=sprite_idx,
+                tag=tag,
+                friction=friction,
+                time_scale=time_scale,
+                flags=flags,
+                angular_vel=math.radians(spin),
+                max_lifetime=max_lifetime,
+                render_scale=render_scale,
+            )
+        else:
+            spawned = []
+            for (x, y), angle_rad, speed_value in zip(
+                position_array, angle_radians, speed_per_frame
+            ):
+                idx = self.bullet_pool.spawn_bullet(
+                    x=float(x),
+                    y=float(y),
+                    angle=float(angle_rad),
+                    speed=float(speed_value),
+                    sprite_id=resolved_sprite_id,
+                    sprite_idx=sprite_idx,
+                    tag=tag,
+                    friction=friction,
+                    time_scale=time_scale,
+                    flags=flags,
+                    angular_vel=math.radians(spin),
+                    max_lifetime=max_lifetime,
+                    render_scale=render_scale,
+                )
+                if idx >= 0:
+                    spawned.append(idx)
+            indices = np.asarray(spawned, dtype=np.intp)
+
+        result = np.asarray(indices, dtype=np.intp)
+        self._bullet_indices.extend(int(index) for index in result)
+        return result
+
     def create_polar_bullet(self, center, orbit_radius: float, theta: float,
                             radial_speed: float = 0.0, angular_velocity: float = 0.0,
                             bullet_type: str = "ball_m", color: str = "red",
@@ -284,7 +375,7 @@ class StageContext(SpellCardContext):
         self.bullet_pool.clear_all()
         self._bullet_indices.clear()
 
-    def clear_bullets_by_tag(self, tag: int):
+    def clear_bullets_by_tag(self, tag: int) -> int:
         """按标签消除所有子弹"""
         self.bullet_pool.clear_by_tag(tag)
 
@@ -296,7 +387,31 @@ class StageContext(SpellCardContext):
         mask = (self.bullet_pool.data['alive'] == 1) & (self.bullet_pool.data['tag'] == tag)
         positions = self.bullet_pool.data['pos'][mask].copy()
         self._item_pool.spawn_points_from_positions(positions, attract=True)
-        self.bullet_pool.clear_by_tag(tag)
+        owned = {
+            idx
+            for idx in self._bullet_indices
+            if 0 <= idx < len(self.bullet_pool.data['alive'])
+            and self.bullet_pool.data['alive'][idx] == 1
+            and self.bullet_pool.data['tag'][idx] == tag
+        }
+        result = self.bullet_pool.clear_by_tag(tag)
+        self._bullet_indices = [
+            idx for idx in self._bullet_indices if idx not in owned
+        ]
+        return len(owned) if result is None else int(result)
+
+    def translate_bullets_by_tag(self, tag: int, dx: float, dy: float) -> int:
+        """Translate one owner group without touching other live bullets."""
+        if hasattr(self.bullet_pool, "translate_by_tag"):
+            return int(self.bullet_pool.translate_by_tag(tag, dx, dy))
+        mask = (
+            (self.bullet_pool.data['alive'] == 1)
+            & (self.bullet_pool.data['tag'] == tag)
+        )
+        count = int(np.count_nonzero(mask))
+        self.bullet_pool.data['pos'][mask, 0] += dx
+        self.bullet_pool.data['pos'][mask, 1] += dy
+        return count
 
     def set_time_scale(self, scale: float, tag: int = None):
         """设置子弹时间缩放（tag=None 影响全部）"""

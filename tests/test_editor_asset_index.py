@@ -7,6 +7,7 @@ from src.editor.asset_index import (
     classify_file,
     load_subresource_preview,
 )
+from src.pattern import PatternDocument
 
 
 def _write_json(path: Path, value) -> None:
@@ -124,12 +125,7 @@ def test_asset_index_reports_invalid_typed_resource_without_aborting(tmp_path):
     assets.mkdir()
     _write_json(
         assets / "valid.pystg.json",
-        {
-            "schema_version": 1,
-            "type": "pystg.pattern",
-            "id": "08ac589e-a51a-45dc-beb9-7af6f4e136db",
-            "name": "Valid",
-        },
+        PatternDocument.new("Valid").to_dict(),
     )
     _write_json(
         assets / "invalid.pystg.json",

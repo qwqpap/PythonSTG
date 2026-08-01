@@ -110,11 +110,26 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
         (UI_RESOURCE_TYPE, "UI", "ui"),
         (BACKGROUND_RESOURCE_TYPE, "Background", "background"),
     ):
-        registry.register(
-            ResourceTypeSpec(
-                type_name=type_name,
-                display_name=display_name,
-                asset_kind=asset_kind,
+        if type_name == PATTERN_RESOURCE_TYPE:
+            # Local import keeps the common registry independent of domain
+            # modules while still providing typed loading and compilation.
+            from src.pattern import PatternDocument, compile_pattern
+
+            registry.register(
+                ResourceTypeSpec(
+                    type_name=type_name,
+                    display_name=display_name,
+                    asset_kind=asset_kind,
+                    loader=PatternDocument.from_dict,
+                    compiler=compile_pattern,
+                )
             )
-        )
+        else:
+            registry.register(
+                ResourceTypeSpec(
+                    type_name=type_name,
+                    display_name=display_name,
+                    asset_kind=asset_kind,
+                )
+            )
     return registry
