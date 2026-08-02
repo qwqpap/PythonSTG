@@ -36,5 +36,9 @@ class ResourceStore:
         payload = document.to_dict()
         # Loading through the registry proves current schema/type validation
         # before the atomic replacement is attempted.
-        self.registry.load(payload)
-        return atomic_write_json(target, payload)
+        validated = self.registry.load(payload)
+        # Persist the registry-normalized current representation so saving an
+        # older envelope cannot immediately reopen as a semantically different
+        # document after migration.
+        canonical_payload = validated.to_dict()
+        return atomic_write_json(target, canonical_payload)

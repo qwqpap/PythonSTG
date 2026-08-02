@@ -11,6 +11,7 @@ from .resources import (
     BACKGROUND_RESOURCE_TYPE,
     PATTERN_RESOURCE_TYPE,
     RESOURCE_SCHEMA_VERSION,
+    SCENE_RESOURCE_SCHEMA_VERSION,
     SCENE_RESOURCE_TYPE,
     UI_RESOURCE_TYPE,
     GenericResourceDocument,
@@ -94,6 +95,8 @@ class ResourceTypeRegistry(Mapping[str, ResourceTypeSpec]):
         document = loader(migrated)
         if spec.validator is not None:
             spec.validator(document)
+        elif isinstance(document, GenericResourceDocument):
+            document.validate(current_version=spec.current_version)
         elif hasattr(document, "validate"):
             document.validate()
         return document
@@ -122,8 +125,17 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
                 return GenericResourceDocument.from_dict(
                     payload,
                     expected_type=SCENE_RESOURCE_TYPE,
-                    current_version=RESOURCE_SCHEMA_VERSION,
+                    current_version=SCENE_RESOURCE_SCHEMA_VERSION,
                 )
+
+            def compile_scene(document, *, project=None, **kwargs):
+                if project is None:
+                    raise ResourceDocumentError(
+                        "a ProjectContext is required to compile a SceneDocument"
+                    )
+                from src.editor.stage_compile import compile_stage
+
+                return compile_stage(project, document, **kwargs)
 
             registry.register(
                 ResourceTypeSpec(
@@ -131,6 +143,8 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
                     display_name=display_name,
                     asset_kind=asset_kind,
                     loader=load_scene,
+                    compiler=compile_scene,
+                    current_version=SCENE_RESOURCE_SCHEMA_VERSION,
                 )
             )
         elif type_name == PATTERN_RESOURCE_TYPE:

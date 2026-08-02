@@ -23,12 +23,12 @@ Godot-style workbench
 
 ## Current focus
 
-**Milestone M4 — Editable timeline and StageProgram**
+**Milestone M5 — Behavior graph, curves, expressions, scripts**
 
 Phase 0 contracts are frozen. Keep later changes compatible with them or add
 explicit schema migrations and contract tests.
 
-Next recommended task: **E4.1 — Define the editable timeline document model.**
+Next recommended task: **E5.1 — Define reusable curves and bindings.**
 
 ## Status and update rules
 
@@ -372,37 +372,37 @@ Goal: author a 30-60 second spell or stage segment through tracks and clips.
 
 ### E4.1 Timeline document model
 
-- [ ] Replace the flat display-only event list with Track, Clip, and Keyframe
+- [x] Replace the flat display-only event list with Track, Clip, and Keyframe
   models.
-- [ ] Give every track/clip/keyframe a stable UUID.
-- [ ] Define start frame, duration, target UUID, channel, ordering, looping,
+- [x] Give every track/clip/keyframe a stable UUID.
+- [x] Define start frame, duration, target UUID, channel, ordering, looping,
   interpolation, and payload contracts.
-- [ ] Define initial clips: Pattern, Movement, Audio, Event, and Property.
-- [ ] Add migration from legacy flat TimelineEvent entries.
+- [x] Define initial clips: Pattern, Movement, Audio, Event, and Property.
+- [x] Add migration from legacy flat TimelineEvent entries.
 
 ### E4.2 Timeline editor
 
-- [ ] Build a QGraphicsScene-based ruler, tracks, clips, playhead, selection, and
+- [x] Build a QGraphicsScene-based ruler, tracks, clips, playhead, selection, and
   snapping interaction.
-- [ ] Add clip creation, movement, resize, duplication, deletion, and Undo/Redo.
-- [ ] Connect playhead scrubbing to formal preview seek.
-- [ ] Support zoom without changing stored frame values.
-- [ ] Add keyboard and focus behavior tests.
+- [x] Add clip creation, movement, resize, duplication, deletion, and Undo/Redo.
+- [x] Connect playhead scrubbing to formal preview seek.
+- [x] Support zoom without changing stored frame values.
+- [x] Add keyboard and focus behavior tests.
 
 ### E4.3 StageProgram compiler/runtime
 
-- [ ] Compile Scene + Timeline + referenced resources into StageProgram.
-- [ ] Schedule pattern, movement, audio, property, and typed-event clips.
-- [ ] Define conflict resolution when multiple clips target the same property.
-- [ ] Retain ScriptEvent as an explicit escape hatch.
-- [ ] Add deterministic stage trace tests.
+- [x] Compile Scene + Timeline + referenced resources into StageProgram.
+- [x] Schedule pattern, movement, audio, property, and typed-event clips.
+- [x] Define conflict resolution when multiple clips target the same property.
+- [x] Retain ScriptEvent as an explicit escape hatch.
+- [x] Add deterministic stage trace tests.
 
 ### Phase 4 gate
 
-- [ ] A 30-60 second spell can be authored and previewed using scene, pattern,
+- [x] A 30-60 second spell can be authored and previewed using scene, pattern,
   movement, audio, and property tracks.
-- [ ] Timeline edits support Undo/Redo and survive save/reopen.
-- [ ] Scrubbing and normal playback agree at deterministic checkpoints.
+- [x] Timeline edits support Undo/Redo and survive save/reopen.
+- [x] Scrubbing and normal playback agree at deterministic checkpoints.
 
 ---
 
@@ -755,3 +755,46 @@ Append entries; do not rewrite old evidence. Keep each entry concise.
   visually/interaction accepted. Existing M1 performance evidence remains the
   data-oriented runtime baseline; M3 adds no new per-bullet callback or scene-node
   path.
+
+### 2026-08-02 — M4 editable timeline and StageProgram complete
+
+- Added Scene schema v2 Track, Clip, and Keyframe authoring models with stable
+  UUIDs, ordering, targets, channels, loops, interpolation, payload validation,
+  legacy flat-event migration, round-trip persistence, and the initial Pattern,
+  Movement, Audio, Event, Property, and ScriptEvent clip kinds.
+- Replaced the read-only timeline with a `QGraphicsScene` editor for ruler,
+  tracks, clips, playhead, snapping, zoom, selection, create, move, resize,
+  duplicate, delete, keyboard navigation, Inspector editing, Undo/Redo, and
+  formal-preview scrub. Native QA found and fixed an initialization bug that
+  pinned clips to the ruler; a row-geometry regression assertion now covers it.
+- Added immutable Scene + Timeline + referenced Pattern compilation into
+  `StageProgram` and fixed-tick `StageRunner` scheduling. Movement updates the
+  emitter used by later Pattern bursts; Property/Movement conflicts use
+  `(track.order, clip.order, clip.id)` last-wins ordering; ScriptEvent calls only
+  a typed host hook and never imports, evaluates, or executes source text.
+- Added `game_content/scenes/timeline_showcase.pystg.json`, a 30-second scene
+  containing all six track kinds. The external formal preview now supplies the
+  existing `GameAudioBank`/`AudioManager`; its Audio track plays the existing
+  `00.wav` BGM and stops it at the scene boundary. Headless preview remains
+  intentionally silent while exercising the same scheduled actions.
+- Structural evidence: 25 focused M4 model/command/UI/compiler/runtime/process
+  tests passed. The final full repository regression passed all 189 collected
+  tests. `python -m compileall -q main.py src game_content tools tests` and
+  `git diff --check` passed. Asset validation checked 73 JSON files, 745 sprites,
+  and 142 images with 0 errors and 0 warnings.
+- Runtime evidence: deterministic reset/replay and normal-play/seek traces agree;
+  a real QProcess loaded and stepped a Scene document; preview audio dispatch was
+  verified through an injected `AudioManager`; and the native Stage preview ran
+  `StageRunner -> PatternRunner -> StageContext -> OptimizedBulletPool` with no
+  bullet scene nodes or per-bullet Python callbacks. The main game also reached
+  its rendered menu in a separate launch smoke.
+- Visual/interaction evidence: the native editor was inspected at 1480x920 and
+  the supported 960x640 minimum. All track rows and clip kinds rendered in the
+  correct lanes; Pattern selection opened its clip Inspector; drag, right-edge
+  resize, Undo, bottom-dock expansion, and narrow-layout scrolling were exercised.
+  The external Stage preview showed moving-emitter bursts and diagnostics; editor
+  Reset/Step/Play/Pause worked, and Timeline scrub at 15 seconds produced frame
+  900 in both the editor statistics and rendered external preview.
+- Acceptance classification: M4 is structurally valid, runtime valid, and
+  visually/interaction accepted. M5 may now begin at E5.1; full arbitrary Python
+  round-trip and per-bullet callbacks remain outside the architecture contract.

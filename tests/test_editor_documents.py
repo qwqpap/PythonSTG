@@ -5,7 +5,13 @@ import pytest
 
 from src.core.project_context import ProjectContext
 from src.editor.commands import CommandStack
-from src.editor.document import DocumentError, EditorNode, SceneDocument, TimelineEvent
+from src.editor.document import (
+    CURRENT_SCHEMA_VERSION,
+    DocumentError,
+    EditorNode,
+    SceneDocument,
+    TimelineEvent,
+)
 from src.editor.spell_codegen import build_spellcard_code
 from src.editor.storage import DocumentStore
 
@@ -38,7 +44,7 @@ def test_scene_document_atomic_round_trip_and_migration(tmp_path):
         "name": "Legacy",
         "nodes": [{"type": "Wave", "name": "Opening", "children": []}],
     })
-    assert legacy.schema_version == 1
+    assert legacy.schema_version == CURRENT_SCHEMA_VERSION
     assert legacy.root.children[0].type == "Wave"
 
 

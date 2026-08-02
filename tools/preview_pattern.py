@@ -1,4 +1,4 @@
-"""Controllable external-window preview for formal PatternDocument programs."""
+"""Controllable external-window preview for formal Pattern/Stage programs."""
 
 from __future__ import annotations
 
@@ -120,22 +120,29 @@ def _draw_overlay(ui, controller: PatternPreviewController) -> None:
         for y in range(0, GAME_H + 1, 112):
             ui.render_rect(0, y, GAME_W, 1, color=(58, 72, 92), alpha=0.24)
         _draw_crosshair(ui, controller.player.x, controller.player.y, (100, 225, 255), "Player")
-        if controller.program is not None:
-            _draw_crosshair(ui, *controller.program.origin, (255, 175, 90), "Emitter")
+        for index, position in enumerate(controller.emitter_positions()[:8], start=1):
+            label = "Emitter" if index == 1 else f"Emitter {index}"
+            _draw_crosshair(ui, *position, (255, 175, 90), label)
 
     stats = controller.get_stats(emit=False)
     x = PANEL_X + 20
-    ui.render_ttf_text("Formal Pattern Preview", x, 24, size=22)
-    ui.render_ttf_text("PatternRunner + StageContext + optimized pool", x, 54, size=13, color=(160, 200, 225))
-    rows = (
+    title = "Formal Stage Preview" if stats["mode"] == "stage" else "Formal Pattern Preview"
+    runner_name = "StageRunner + PatternRunner" if stats["mode"] == "stage" else "PatternRunner"
+    ui.render_ttf_text(title, x, 24, size=22)
+    ui.render_ttf_text(f"{runner_name} + optimized pool", x, 54, size=13, color=(160, 200, 225))
+    rows = [
         ("State", stats["state"]),
         ("Frame", stats["frame"]),
         ("Bullets", f'{stats["bullet_count"]} / {stats["max_bullets"]}'),
-        ("Seed", stats["seed"]),
         ("Update", f'{stats["update_ms"]:.3f} ms'),
         ("Render", f'{stats["render_ms"]:.3f} ms'),
         ("Gizmos", "on" if stats["gizmos"] else "off"),
-    )
+    ]
+    if stats["mode"] == "stage":
+        rows.insert(2, ("Duration", stats["duration_frames"]))
+        rows.insert(3, ("Active", len(stats["active_clips"])))
+    else:
+        rows.insert(3, ("Seed", stats["seed"]))
     y = 102
     for label, value in rows:
         ui.render_ttf_text(f"{label:10s} {value}", x, y, size=15, color=(225, 235, 245))
@@ -167,6 +174,7 @@ def run_window(project: ProjectContext, max_bullets: int, initial_pattern: str |
     from src.core import init_config
     from src.core.input_manager import KEY_ESCAPE
     from src.core.window import EVENT_KEYDOWN, EVENT_QUIT, FrameClock, GameWindow
+    from src.game.audio import AudioManager, GameAudioBank
     from src.render.optimized_bullet_renderer import OptimizedBulletRenderer
     from src.ui.ui_renderer import UIRenderer
 
@@ -178,11 +186,11 @@ def run_window(project: ProjectContext, max_bullets: int, initial_pattern: str |
         game_scale=2,
         viewport_margin_x=0,
     )
-    window = GameWindow(WINDOW_W, WINDOW_H, "PySTG Formal Pattern Preview")
+    window = GameWindow(WINDOW_W, WINDOW_H, "PySTG Formal Preview")
     ctx = moderngl.create_context()
     ctx.enable(moderngl.BLEND)
     ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
-    manager = renderer = ui = controller = None
+    manager = renderer = ui = controller = audio_bank = audio_manager = None
     commands: queue.Queue[str] = queue.Queue()
     shutdown = False
     try:
@@ -192,10 +200,17 @@ def run_window(project: ProjectContext, max_bullets: int, initial_pattern: str |
         with contextlib.redirect_stdout(io.StringIO()):
             manager, textures, registry = _load_engine_assets(ctx, project)
             pool = OptimizedBulletPool(max_bullets=max_bullets, sprite_registry=registry)
+            audio_bank = GameAudioBank()
+            audio_bank.load_defaults(
+                se_dir=str(project.root / "assets" / "audio" / "se"),
+                bgm_dir=str(project.root / "assets" / "audio" / "music"),
+            )
+            audio_manager = AudioManager(audio_bank)
             controller = PatternPreviewController(
                 pool,
                 project=project,
                 sprite_index_resolver=pool.register_sprite,
+                audio_manager=audio_manager,
             )
         protocol = PreviewProtocolSession(controller)
         renderer = OptimizedBulletRenderer(ctx, textures)
@@ -278,6 +293,10 @@ def run_window(project: ProjectContext, max_bullets: int, initial_pattern: str |
     finally:
         if controller is not None:
             controller.close()
+        if audio_manager is not None:
+            audio_manager.stop_bgm()
+        if audio_bank is not None:
+            audio_bank.clear()
         if renderer is not None:
             renderer.cleanup()
         if ui is not None:
@@ -291,7 +310,8 @@ def run_window(project: ProjectContext, max_bullets: int, initial_pattern: str |
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, default=PROJECT_ROOT)
-    parser.add_argument("--pattern", help="Initial res:// PatternDocument path")
+    parser.add_argument("--resource", help="Initial res:// Pattern or Scene path")
+    parser.add_argument("--pattern", help="Deprecated alias for --resource")
     parser.add_argument("--max-bullets", type=int, default=50000)
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args(argv)
@@ -299,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     project.activate()
     if args.headless:
         return run_headless(project, args.max_bullets)
-    return run_window(project, args.max_bullets, args.pattern)
+    return run_window(project, args.max_bullets, args.resource or args.pattern)
 
 
 if __name__ == "__main__":

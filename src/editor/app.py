@@ -42,6 +42,7 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -49,7 +50,6 @@ from PyQt5.QtWidgets import (
     QStyle,
     QTabWidget,
     QTableWidget,
-    QTableWidgetItem,
     QTextBrowser,
     QToolBar,
     QToolButton,
@@ -65,7 +65,14 @@ from src.authoring.resources import ResourceDocumentError, ResourceReference
 from src.pattern import PatternDocument
 
 from .asset_index import AssetRecord, load_subresource_preview
-from .document import DocumentError, EditorNode, SceneDocument
+from .document import (
+    DocumentError,
+    EditorNode,
+    SceneDocument,
+    TimelineClip,
+    TimelineKeyframe,
+    TimelineTrack,
+)
 from .node_types import NODE_TYPES, PropertySpec, make_node, property_specs
 from .preview_panel import PatternPreviewPanel
 from .preview_process import PatternPreviewProcess
@@ -89,6 +96,17 @@ from .scene_commands import (
     find_parent,
 )
 from .scene_compile import SceneSpellCompileError, compile_simple_spell
+from .timeline_commands import (
+    AddClipCommand,
+    AddTrackCommand,
+    MoveResizeClipCommand,
+    RemoveClipCommand,
+    SetClipPropertiesCommand,
+    clone_clip_with_new_ids,
+    find_clip,
+    require_track,
+)
+from .timeline_workspace import TimelineEditor
 from .workbench import EditorPlugin, PluginRegistry, default_external_plugins
 
 
@@ -498,6 +516,7 @@ class InspectorPanel(QScrollArea):
     renameRequested = pyqtSignal(str, str)
     propertyRequested = pyqtSignal(str, str, object)
     patternPropertyRequested = pyqtSignal(str, object)
+    timelineClipPropertiesRequested = pyqtSignal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -512,6 +531,7 @@ class InspectorPanel(QScrollArea):
         self.setWidget(self._content)
         self._node_id: str | None = None
         self._pattern_id: str | None = None
+        self._timeline_clip_id: str | None = None
 
     def _clear_form(self) -> None:
         while self._form.count():
@@ -524,6 +544,7 @@ class InspectorPanel(QScrollArea):
         self._clear_form()
         self._node_id = node.id if node else None
         self._pattern_id = None
+        self._timeline_clip_id = None
         if node is None:
             self._form.addRow(QLabel("No node selected"))
             return
@@ -564,6 +585,7 @@ class InspectorPanel(QScrollArea):
         self._clear_form()
         self._node_id = None
         self._pattern_id = document.id
+        self._timeline_clip_id = None
         title = QLabel(f"Pattern Preview: {document.name}")
         title.setObjectName("inspectorPatternTitle")
         self._form.addRow(title)
@@ -587,6 +609,133 @@ class InspectorPanel(QScrollArea):
             for path, value in section_fields:
                 editor = self._make_pattern_editor(path, value)
                 self._form.addRow(self._pattern_label(path), editor)
+
+    def set_timeline_clip(
+        self,
+        track: TimelineTrack,
+        clip: TimelineClip,
+        nodes: list[EditorNode],
+    ) -> None:
+        self._clear_form()
+        self._node_id = None
+        self._pattern_id = None
+        self._timeline_clip_id = clip.id
+        title = QLabel(f"{track.name} / {clip.kind} Clip")
+        title.setStyleSheet("font-weight:600; color:#9fc5ff;")
+        self._form.addRow(title)
+
+        name = QLineEdit(clip.name)
+        name.setObjectName("timelineClipName")
+        name.editingFinished.connect(
+            lambda edit=name, clip_id=clip.id: self.timelineClipPropertiesRequested.emit(
+                clip_id, {"name": edit.text().strip()}
+            )
+        )
+        self._form.addRow("Name", name)
+        kind = QLineEdit(clip.kind)
+        kind.setReadOnly(True)
+        self._form.addRow("Kind", kind)
+
+        for label, key, value, minimum in (
+            ("Start [frame]", "start_frame", clip.start_frame, 0),
+            ("Duration [frame]", "duration_frames", clip.duration_frames, 1),
+            ("Loop Count", "loop_count", clip.loop_count, 1),
+            ("Order", "order", clip.order, 0),
+        ):
+            spin = QSpinBox()
+            spin.setObjectName("timelineClip_" + key)
+            spin.setRange(minimum, 1_000_000)
+            spin.setValue(int(value))
+            spin.editingFinished.connect(
+                lambda editor=spin, clip_id=clip.id, field=key: self.timelineClipPropertiesRequested.emit(
+                    clip_id, {field: editor.value()}
+                )
+            )
+            self._form.addRow(label, spin)
+
+        enabled = QCheckBox()
+        enabled.setChecked(clip.enabled)
+        enabled.toggled.connect(
+            lambda checked, clip_id=clip.id: self.timelineClipPropertiesRequested.emit(
+                clip_id, {"enabled": checked}
+            )
+        )
+        self._form.addRow("Enabled", enabled)
+
+        target = QComboBox()
+        target.setObjectName("timelineClipTarget")
+        target.addItem("(inherit / none)", None)
+        for node in nodes:
+            target.addItem(f"{node.name} [{node.type}]", node.id)
+        target_index = target.findData(clip.target_id)
+        target.setCurrentIndex(max(0, target_index))
+        target.activated.connect(
+            lambda _index, combo=target, clip_id=clip.id: self.timelineClipPropertiesRequested.emit(
+                clip_id, {"target_id": combo.currentData()}
+            )
+        )
+        self._form.addRow("Target", target)
+
+        channel = QLineEdit(clip.channel)
+        channel.setObjectName("timelineClipChannel")
+        channel.editingFinished.connect(
+            lambda edit=channel, clip_id=clip.id: self.timelineClipPropertiesRequested.emit(
+                clip_id, {"channel": edit.text().strip()}
+            )
+        )
+        self._form.addRow("Channel", channel)
+
+        error = QLabel("")
+        error.setObjectName("timelineClipJsonError")
+        error.setStyleSheet("color:#ff9ca8;")
+        error.setWordWrap(True)
+        payload = QPlainTextEdit(json.dumps(clip.payload, ensure_ascii=False, indent=2))
+        payload.setObjectName("timelineClipPayload")
+        payload.setMinimumHeight(100)
+        self._form.addRow("Payload [JSON]", payload)
+        apply_payload = QPushButton("Apply Payload")
+
+        def commit_payload() -> None:
+            try:
+                value = json.loads(payload.toPlainText())
+                if not isinstance(value, dict):
+                    raise ValueError("Payload must be a JSON object")
+            except (json.JSONDecodeError, ValueError) as exc:
+                error.setText(str(exc))
+                return
+            error.clear()
+            self.timelineClipPropertiesRequested.emit(clip.id, {"payload": value})
+
+        apply_payload.clicked.connect(commit_payload)
+        self._form.addRow(apply_payload)
+
+        keyframes = QPlainTextEdit(
+            json.dumps(
+                [item.to_dict() for item in clip.keyframes],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        keyframes.setObjectName("timelineClipKeyframes")
+        keyframes.setMinimumHeight(120)
+        self._form.addRow("Keyframes [JSON]", keyframes)
+        apply_keyframes = QPushButton("Apply Keyframes")
+
+        def commit_keyframes() -> None:
+            try:
+                value = json.loads(keyframes.toPlainText())
+                if not isinstance(value, list):
+                    raise ValueError("Keyframes must be a JSON array")
+                parsed = [TimelineKeyframe.from_dict(item).to_dict() for item in value]
+            except (json.JSONDecodeError, ValueError, DocumentError) as exc:
+                error.setText(str(exc))
+                return
+            error.clear()
+            self.timelineClipPropertiesRequested.emit(clip.id, {"keyframes": parsed})
+
+        apply_keyframes.clicked.connect(commit_keyframes)
+        self._form.addRow(apply_keyframes)
+        self._form.addRow(error)
 
     @staticmethod
     def _pattern_label(path: str) -> str:
@@ -724,27 +873,6 @@ class InspectorPanel(QScrollArea):
             )
         )
         return editor
-
-
-class TimelinePanel(QTableWidget):
-    def __init__(self, parent=None):
-        super().__init__(0, 3, parent)
-        self.setHorizontalHeaderLabels(["Frame", "Type", "Properties"])
-        self.horizontalHeader().setStretchLastSection(True)
-        self.verticalHeader().setVisible(False)
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-
-    def set_document(self, document: SceneDocument) -> None:
-        self.setRowCount(len(document.timeline))
-        for row, event in enumerate(document.timeline):
-            self.setItem(row, 0, QTableWidgetItem(str(event.frame)))
-            self.setItem(row, 1, QTableWidgetItem(event.type))
-            self.setItem(
-                row,
-                2,
-                QTableWidgetItem(json.dumps(event.properties, ensure_ascii=False)),
-            )
 
 
 class EditorMainWindow(QMainWindow):
@@ -970,6 +1098,9 @@ class EditorMainWindow(QMainWindow):
         self.inspector.renameRequested.connect(self.rename_node)
         self.inspector.propertyRequested.connect(self.set_node_property)
         self.inspector.patternPropertyRequested.connect(self._pattern_property_requested)
+        self.inspector.timelineClipPropertiesRequested.connect(
+            self._timeline_clip_properties_requested
+        )
         inspector_dock = QDockWidget("Inspector", self)
         inspector_dock.setObjectName("inspectorDock")
         inspector_dock.setWidget(self.inspector)
@@ -981,14 +1112,22 @@ class EditorMainWindow(QMainWindow):
         self.output.setOpenLinks(False)
         self.output.anchorClicked.connect(self._diagnostic_link_clicked)
         self.output.document().setMaximumBlockCount(1000)
-        self.timeline = TimelinePanel()
+        self.timeline = TimelineEditor()
+        self.timeline.addTrackRequested.connect(self._timeline_add_track)
+        self.timeline.addClipRequested.connect(self._timeline_add_clip)
+        self.timeline.clipGeometryRequested.connect(self._timeline_clip_geometry)
+        self.timeline.duplicateClipRequested.connect(self._timeline_duplicate_clip)
+        self.timeline.deleteClipRequested.connect(self._timeline_delete_clip)
+        self.timeline.clipSelected.connect(self._timeline_clip_selected)
+        self.timeline.playheadChanged.connect(self._timeline_playhead_changed)
+        self.timeline.zoomChanged.connect(self._timeline_zoom_changed)
         self.bottom_tabs = QTabWidget()
         self.bottom_tabs.setObjectName("bottomWorkbench")
         self.bottom_tabs.addTab(self.output, "Output")
         self.bottom_tabs.addTab(self.timeline, "Timeline")
         self.preview_panel = PatternPreviewPanel()
         self.preview_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
-        self.preview_panel.launchRequested.connect(self._launch_active_pattern_preview)
+        self.preview_panel.launchRequested.connect(self._launch_active_preview)
         self.preview_panel.commandRequested.connect(self._send_pattern_preview_command)
         self.preview_panel.propertyRequested.connect(self._pattern_property_requested)
         self.bottom_tabs.addTab(self.preview_panel, "Preview")
@@ -1027,7 +1166,7 @@ class EditorMainWindow(QMainWindow):
             widget.resourceDropped.connect(self._resource_dropped)
         elif isinstance(session.document, PatternDocument):
             widget = PatternWorkspace()
-            widget.previewRequested.connect(self._launch_active_pattern_preview)
+            widget.previewRequested.connect(self._launch_active_preview)
             widget.templateRequested.connect(self._apply_pattern_template)
             widget.bulletResourceRequested.connect(
                 lambda value: self._apply_pattern_properties(
@@ -1067,6 +1206,11 @@ class EditorMainWindow(QMainWindow):
         self.document_manager.activate(session)
         if isinstance(session.document, SceneDocument):
             self.viewport = self.central_tabs.widget(index)
+            if session.document.tracks:
+                self.preview_panel.set_resource(
+                    session.resource_uri or f"unsaved://{session.document.id}"
+                )
+                self.preview_panel.set_mode("stage")
         else:
             self._active_pattern_session = session
             self._active_pattern_document = session.document
@@ -1074,6 +1218,7 @@ class EditorMainWindow(QMainWindow):
             self.preview_panel.set_resource(
                 self._active_pattern_resource or f"unsaved://{session.document.id}"
             )
+            self.preview_panel.set_mode("pattern")
             if hasattr(self, "bottom_dock"):
                 target_height = 210 if self.height() <= 700 else 250
                 self.resizeDocks([self.bottom_dock], [target_height], Qt.Vertical)
@@ -1395,15 +1540,40 @@ class EditorMainWindow(QMainWindow):
                 self.viewport = widget
                 widget.rebuild(document)
                 widget.select_node(self._selected_id)
-            self.inspector.set_node(self.session.node(self._selected_id))
-            self.timeline.set_document(document)
+            selected_clip_id = self.session.editor_context.get("selected_clip_id")
+            clip_result = (
+                find_clip(document, str(selected_clip_id))
+                if selected_clip_id
+                else None
+            )
+            if clip_result is not None:
+                self.inspector.set_timeline_clip(
+                    clip_result[0],
+                    clip_result[1],
+                    list(document.root.walk()),
+                )
+            else:
+                self.session.editor_context.pop("selected_clip_id", None)
+                self.inspector.set_node(self.session.node(self._selected_id))
+            self.timeline.set_document(
+                document,
+                selected_clip_id=(clip_result[1].id if clip_result is not None else None),
+                zoom=float(self.session.editor_context.get("timeline_zoom", 0.25)),
+            )
+            self.timeline.selected_track_id = self.session.editor_context.get(
+                "selected_track_id"
+            ) or self.timeline.selected_track_id
+            self.timeline.set_playhead(
+                int(self.session.editor_context.get("timeline_playhead", 0)),
+                emit=False,
+            )
         else:
             self.tree.blockSignals(True)
             self.tree.clear()
             self.tree.blockSignals(False)
             self.tree.setEnabled(False)
             self.inspector.set_pattern(document)
-            self.timeline.setRowCount(0)
+            self.timeline.clear_document()
             if isinstance(widget, PatternWorkspace):
                 player = tuple(
                     self.session.editor_context.get("player_position", (0.0, -0.8))
@@ -1483,6 +1653,7 @@ class EditorMainWindow(QMainWindow):
             or not isinstance(self.session.document, SceneDocument)
         ):
             return
+        self.session.editor_context.pop("selected_clip_id", None)
         self._selected_id = str(current.data(0, Qt.UserRole))
         self._syncing_selection = True
         self.viewport.select_node(self._selected_id)
@@ -1493,6 +1664,7 @@ class EditorMainWindow(QMainWindow):
     def _select_from_viewport(self, node_id: str) -> None:
         if self._syncing_selection or not isinstance(self.session.document, SceneDocument):
             return
+        self.session.editor_context.pop("selected_clip_id", None)
         item = self.tree._find_item(node_id)
         if item is None:
             return
@@ -1698,6 +1870,283 @@ class EditorMainWindow(QMainWindow):
             select_id=node_id,
         )
 
+    def _timeline_default_target(self, kind: str) -> EditorNode | None:
+        if not isinstance(self.session.document, SceneDocument):
+            return None
+        selected = self.session.node(self._selected_id)
+        if kind == "Pattern":
+            if selected is not None and selected.type == "PatternInstance":
+                return selected
+            return next(
+                (
+                    node
+                    for node in self.session.document.root.walk()
+                    if node.type == "PatternInstance"
+                ),
+                None,
+            )
+        if kind in {"Movement", "Property"}:
+            return selected or self.session.document.root
+        return None
+
+    def _timeline_add_track(self, kind: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        target = self._timeline_default_target(kind)
+        if kind == "Pattern" and target is None:
+            self._show_error(
+                "Add timeline track failed",
+                ValueError("Create or select a PatternInstance before adding a Pattern track"),
+            )
+            return
+        channels = {
+            "Pattern": "danmaku",
+            "Movement": "position",
+            "Audio": "bgm",
+            "Event": "event",
+            "Property": "enabled",
+            "ScriptEvent": "script",
+        }
+        track = TimelineTrack(
+            name=f"{kind} Track",
+            kind=kind,
+            channel=channels[kind],
+            target_id=target.id if target is not None else None,
+            order=len(self.session.document.tracks),
+        )
+        try:
+            self.session.apply(
+                AddTrackCommand(
+                    self.session.document,
+                    track,
+                    label=f"Add {kind} track",
+                )
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Add timeline track failed", exc)
+            return
+        self.timeline.selected_track_id = track.id
+        self.session.editor_context["selected_track_id"] = track.id
+        self._log(f"Added {kind} timeline track")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_add_clip(self, track_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            track = require_track(self.session.document, track_id)
+        except ValueError as exc:
+            self._show_error("Add timeline clip failed", exc)
+            return
+        start = self.timeline.playhead_frame
+        target_id = track.target_id
+        duration = 1
+        payload: dict[str, object] = {}
+        keyframes: list[TimelineKeyframe] = []
+        if track.kind == "Pattern":
+            duration = self.session.document.timebase.tick_rate * 10
+            if target_id is None:
+                self._show_error(
+                    "Add timeline clip failed",
+                    ValueError("Pattern track needs a PatternInstance target"),
+                )
+                return
+        elif track.kind == "Movement":
+            duration = self.session.document.timebase.tick_rate * 2
+            node = self.session.node(target_id)
+            if node is None:
+                self._show_error(
+                    "Add timeline clip failed",
+                    ValueError("Movement track needs a Scene node target"),
+                )
+                return
+            x = float(node.properties.get("x", 192.0))
+            y = float(node.properties.get("y", 224.0))
+            keyframes = [
+                TimelineKeyframe(0, {"x": x, "y": y}),
+                TimelineKeyframe(
+                    duration,
+                    {"x": min(384.0, x + 64.0), "y": y},
+                    interpolation="ease_in_out",
+                ),
+            ]
+        elif track.kind == "Audio":
+            duration = max(
+                self.session.document.timebase.tick_rate * 30,
+                self.session.document.duration_frames,
+            )
+            payload = {"action": "play", "name": "bgm", "loops": -1}
+        elif track.kind == "Event":
+            payload = {"event_type": "timeline_event", "data": {}}
+        elif track.kind == "Property":
+            node = self.session.node(target_id)
+            if node is None:
+                self._show_error(
+                    "Add timeline clip failed",
+                    ValueError("Property track needs a Scene node target"),
+                )
+                return
+            payload = {
+                "property": track.channel,
+                "value": node.properties.get(track.channel, True),
+            }
+        elif track.kind == "ScriptEvent":
+            payload = {"hook": "on_timeline_event", "data": {}}
+        clip = TimelineClip(
+            name=f"{track.kind} Clip",
+            kind=track.kind,
+            start_frame=start,
+            duration_frames=duration,
+            target_id=target_id,
+            channel=track.channel,
+            order=len(track.clips),
+            payload=payload,
+            keyframes=keyframes,
+        )
+        try:
+            self.session.apply(
+                AddClipCommand(
+                    self.session.document,
+                    track.id,
+                    clip,
+                    label=f"Add {track.kind} clip",
+                )
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Add timeline clip failed", exc)
+            return
+        self.session.editor_context["selected_clip_id"] = clip.id
+        self.timeline.selected_clip_id = clip.id
+        self._log(f"Added {track.kind} clip at frame {start}")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_clip_geometry(
+        self,
+        clip_id: str,
+        start_frame: int,
+        duration_frames: int,
+    ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                MoveResizeClipCommand(
+                    self.session.document,
+                    clip_id,
+                    start_frame,
+                    duration_frames,
+                ),
+                coalesce=True,
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Move timeline clip failed", exc)
+            self._refresh()
+            return
+        self.session.editor_context["selected_clip_id"] = clip_id
+        self._log(f"Moved timeline clip to frame {start_frame}")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_duplicate_clip(self, clip_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        result = find_clip(self.session.document, clip_id)
+        if result is None:
+            return
+        track, clip, index = result
+        duplicate = clone_clip_with_new_ids(clip)
+        duplicate.start_frame = clip.end_frame
+        try:
+            self.session.apply(
+                AddClipCommand(
+                    self.session.document,
+                    track.id,
+                    duplicate,
+                    index=index + 1,
+                    label=f"Duplicate {clip.name}",
+                )
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Duplicate timeline clip failed", exc)
+            return
+        self.session.editor_context["selected_clip_id"] = duplicate.id
+        self._log(f"Duplicated {clip.name}")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_delete_clip(self, clip_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                RemoveClipCommand(
+                    self.session.document,
+                    clip_id,
+                    label="Delete timeline clip",
+                )
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Delete timeline clip failed", exc)
+            return
+        self.session.editor_context.pop("selected_clip_id", None)
+        self.timeline.selected_clip_id = None
+        self._log("Deleted timeline clip")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_clip_selected(self, track_id: str, clip_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        result = find_clip(self.session.document, clip_id)
+        if result is None:
+            return
+        self.session.editor_context["selected_track_id"] = track_id
+        self.session.editor_context["selected_clip_id"] = clip_id
+        self.inspector.set_timeline_clip(
+            result[0],
+            result[1],
+            list(self.session.document.root.walk()),
+        )
+
+    def _timeline_clip_properties_requested(
+        self,
+        clip_id: str,
+        values: dict[str, object],
+    ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                SetClipPropertiesCommand(
+                    self.session.document,
+                    clip_id,
+                    values,
+                    label="Edit timeline clip",
+                ),
+                coalesce=True,
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Edit timeline clip failed", exc)
+            self._refresh()
+            return
+        self.session.editor_context["selected_clip_id"] = clip_id
+        self._log("Edited timeline clip")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_playhead_changed(self, frame: int) -> None:
+        if self.document_manager.active is None:
+            return
+        self.session.editor_context["timeline_playhead"] = int(frame)
+        if self._pattern_preview_client.is_running:
+            self._pattern_preview_client.send_command("seek", {"frame": int(frame)})
+
+    def _timeline_zoom_changed(self, value: float) -> None:
+        if self.document_manager.active is not None:
+            self.session.editor_context["timeline_zoom"] = float(value)
+
     def move_selected(self, delta: int) -> None:
         if not isinstance(self.session.document, SceneDocument):
             return
@@ -1772,12 +2221,14 @@ class EditorMainWindow(QMainWindow):
             self._log("Undo")
             self._refresh()
             self._sync_active_pattern_preview()
+            self._sync_active_stage_preview()
 
     def redo(self) -> None:
         if self.session.redo():
             self._log("Redo")
             self._refresh()
             self._sync_active_pattern_preview()
+            self._sync_active_stage_preview()
 
     def new_scene(self) -> None:
         session = self.document_manager.new_scene()
@@ -1972,6 +2423,42 @@ class EditorMainWindow(QMainWindow):
         self.bottom_tabs.setCurrentWidget(self.preview_panel)
         self._launch_active_pattern_preview()
 
+    def _launch_active_preview(self) -> None:
+        session = self.document_manager.active
+        if (
+            session is not None
+            and isinstance(session.document, SceneDocument)
+            and session.document.tracks
+        ):
+            self._launch_active_stage_preview(session)
+            return
+        self._launch_active_pattern_preview()
+
+    def _launch_active_stage_preview(self, session: ManagedDocument) -> None:
+        if not isinstance(session.document, SceneDocument) or not session.document.tracks:
+            self.preview_panel.handle_issue(
+                {
+                    "code": "no_stage_timeline",
+                    "message": "Add at least one Timeline track before launching Stage preview",
+                }
+            )
+            return
+        if not self._pattern_preview_client.start():
+            return
+        self.preview_panel.set_resource(
+            session.resource_uri or f"unsaved://{session.document.id}"
+        )
+        self.preview_panel.set_mode("stage")
+        self.bottom_tabs.setCurrentWidget(self.preview_panel)
+        self._pattern_preview_client.send_command(
+            "load",
+            {"document": session.document.to_dict()},
+        )
+        self._pattern_preview_client.send_command("play")
+        self._log(
+            f"[stage-preview] opening {session.resource_uri or session.document.name}"
+        )
+
     def _launch_active_pattern_preview(self) -> None:
         if self._active_pattern_document is None:
             self.preview_panel.handle_issue(
@@ -1985,18 +2472,24 @@ class EditorMainWindow(QMainWindow):
             {"document": self._active_pattern_document.to_dict()},
         )
         self._pattern_preview_client.send_command("play")
+        self.preview_panel.set_mode("pattern")
         label = self._active_pattern_resource or self._active_pattern_document.name
         self._log(f"[pattern-preview] opening {label}")
 
     def _send_pattern_preview_command(self, command: str, payload: dict) -> None:
-        if command == "set-seed":
+        active_document = (
+            self.document_manager.active.document
+            if self.document_manager.active is not None
+            else None
+        )
+        if command == "set-seed" and isinstance(active_document, PatternDocument):
             self._pattern_property_requested("seed", payload.get("seed"))
             return
-        if command == "set-property":
+        if command == "set-property" and isinstance(active_document, PatternDocument):
             self._pattern_property_requested(payload.get("path"), payload.get("value"))
             return
         if not self._pattern_preview_client.is_running:
-            self._launch_active_pattern_preview()
+            self._launch_active_preview()
         if not self._pattern_preview_client.is_running:
             return
         try:
@@ -2142,6 +2635,19 @@ class EditorMainWindow(QMainWindow):
             "load", {"document": session.document.to_dict()}
         )
 
+    def _sync_active_stage_preview(self) -> None:
+        session = self.document_manager.active
+        if (
+            session is None
+            or not isinstance(session.document, SceneDocument)
+            or not session.document.tracks
+            or not self._pattern_preview_client.is_running
+        ):
+            return
+        self._pattern_preview_client.send_command(
+            "load", {"document": session.document.to_dict()}
+        )
+
     def _handle_pattern_preview_event(self, message: dict) -> None:
         self.preview_panel.handle_event(message)
         request_id = message.get("request_id")
@@ -2150,8 +2656,9 @@ class EditorMainWindow(QMainWindow):
             self._preview_pending_properties.pop(request_id)
         event = message.get("event")
         if event == "program_loaded":
+            mode = str(payload.get("mode") or "pattern")
             self._log(
-                f"[pattern-preview] loaded {payload.get('name')} "
+                f"[{mode}-preview] loaded {payload.get('name')} "
                 f"({str(payload.get('content_hash') or '')[:12]})"
             )
         elif event in {"compile_error", "runtime_error", "protocol_error"}:
@@ -2208,6 +2715,9 @@ class EditorMainWindow(QMainWindow):
             self._active_pattern_document = self.session.document
             self._active_pattern_resource = self.session.resource_uri or ""
             self._launch_active_pattern_preview()
+            return
+        if isinstance(self.session.document, SceneDocument) and self.session.document.tracks:
+            self._launch_active_stage_preview(self.session)
             return
         node = self.session.node(self._selected_id)
         if node is not None and node.type == "PatternInstance":

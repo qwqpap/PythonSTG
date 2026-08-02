@@ -1,4 +1,4 @@
-"""Editor-controllable PatternDocument execution through the formal runtime."""
+"""Editor-controllable Pattern/Stage execution through the formal runtime."""
 
 from __future__ import annotations
 
@@ -14,7 +14,14 @@ import numpy as np
 
 from src.authoring import ResourceReference, ResourceStore
 from src.core.project_context import ProjectContext
+from src.editor.document import DocumentError, SceneDocument
+from src.editor.stage_compile import StageCompileError
 from src.game.stage.context import StageContext
+from src.game.stage.program import (
+    StageProgram,
+    StageRunner,
+    StageRuntimeError,
+)
 from src.pattern import (
     PatternCompileError,
     PatternCompiler,
@@ -22,7 +29,6 @@ from src.pattern import (
     PatternDocumentError,
     PatternProgram,
     PatternRunner,
-    PatternRunnerState,
     PatternRuntimeError,
 )
 
@@ -84,7 +90,7 @@ class PreviewPlayer:
 
 
 class PatternPreviewController:
-    """Own one formal PatternRunner and expose deterministic editor commands.
+    """Own one formal PatternRunner or StageRunner and expose editor commands.
 
     Candidate documents are parsed and compiled before the active runner is
     replaced. Invalid hot reloads therefore retain the last runnable program,
@@ -116,17 +122,22 @@ class PatternPreviewController:
         player_position: tuple[float, float] = (0.0, -0.8),
         compiler: PatternCompiler | None = None,
         sprite_index_resolver=None,
+        audio_manager: Any | None = None,
     ) -> None:
         self.bullet_pool = bullet_pool
         self.project = project
         self.store = ResourceStore(project)
         self.player = PreviewPlayer(*player_position)
-        self.context = StageContext(bullet_pool=bullet_pool, player=self.player)
+        self.context = StageContext(
+            bullet_pool=bullet_pool,
+            player=self.player,
+            audio_manager=audio_manager,
+        )
         self.compiler = compiler or PatternCompiler()
         self.sprite_index_resolver = sprite_index_resolver
-        self.document: PatternDocument | None = None
-        self.program: PatternProgram | None = None
-        self.runner: PatternRunner | None = None
+        self.document: PatternDocument | SceneDocument | None = None
+        self.program: PatternProgram | StageProgram | None = None
+        self.runner: PatternRunner | StageRunner | None = None
         self.resource_path: Path | None = None
         self.state = PreviewState.UNLOADED
         self.frame = 0
@@ -137,6 +148,14 @@ class PatternPreviewController:
         self._events: list[PreviewEvent] = []
         self._sequence = 0
         self._closed = False
+
+    @property
+    def mode(self) -> str:
+        if isinstance(self.program, StageProgram):
+            return "stage"
+        if isinstance(self.program, PatternProgram):
+            return "pattern"
+        return "unloaded"
 
     def _emit(self, event: str, **payload: Any) -> PreviewEvent:
         self._sequence += 1
@@ -160,32 +179,47 @@ class PatternPreviewController:
 
     def _require_loaded(self, command: str) -> None:
         if self.runner is None or self.program is None or self.document is None:
-            raise PreviewCommandError(command, "no PatternDocument is loaded")
+            raise PreviewCommandError(command, "no authoring document is loaded")
 
-    def _resolve_document_source(self, source: Any) -> tuple[PatternDocument, Path | None]:
+    def _resolve_document_source(
+        self, source: Any
+    ) -> tuple[PatternDocument | SceneDocument, Path | None]:
         if isinstance(source, PatternDocument):
             return PatternDocument.from_dict(source.to_dict()), None
+        if isinstance(source, SceneDocument):
+            return SceneDocument.from_dict(source.to_dict()), None
         if isinstance(source, Mapping):
-            return PatternDocument.from_dict(source), None
+            resource_type = str(source.get("type") or "")
+            if resource_type == "pystg.pattern":
+                return PatternDocument.from_dict(source), None
+            if resource_type == "pystg.scene":
+                return SceneDocument.from_dict(dict(source)), None
+            raise DocumentError(
+                f"load.resource: unsupported authoring resource type {resource_type!r}"
+            )
         if not isinstance(source, (str, Path)):
-            raise PatternDocumentError("load", "document must be an object or resource path")
+            raise DocumentError("load: document must be an object or resource path")
 
         text = str(source)
         if text.startswith("res://"):
             reference = ResourceReference.parse(text)
             if reference.subresource is not None:
-                raise PatternDocumentError("load.resource", "PatternDocument paths cannot use fragments")
+                raise DocumentError("load.resource: authoring document paths cannot use fragments")
             path = reference.resolve(self.project, must_exist=True)
         else:
             path = self.project.resolve(Path(text))
             self.project.relative(path)
         loaded = self.store.load(path)
-        if not isinstance(loaded, PatternDocument):
-            raise PatternDocumentError("load.resource", "resource is not a pystg.pattern document")
+        if not isinstance(loaded, (PatternDocument, SceneDocument)):
+            raise DocumentError(
+                "load.resource: resource is not a supported Pattern or Scene document"
+            )
         return loaded, path
 
     @staticmethod
-    def _diagnostics(error: PatternCompileError) -> list[dict[str, Any]]:
+    def _diagnostics(
+        error: PatternCompileError | StageCompileError,
+    ) -> list[dict[str, Any]]:
         return [
             {
                 "severity": item.severity,
@@ -193,12 +227,35 @@ class PatternPreviewController:
                 "resource_id": item.resource_id,
                 "path": item.path,
                 "message": item.message,
+                **(
+                    {
+                        "track_id": item.track_id,
+                        "clip_id": item.clip_id,
+                        "node_id": item.node_id,
+                        "referenced_path": item.referenced_path,
+                    }
+                    if isinstance(error, StageCompileError)
+                    else {}
+                ),
             }
             for item in error.diagnostics
         ]
 
-    def _compile_candidate(self, document: PatternDocument) -> PatternProgram:
-        return self.compiler.compile(
+    def _compile_candidate(
+        self, document: PatternDocument | SceneDocument
+    ) -> PatternProgram | StageProgram:
+        if isinstance(document, PatternDocument):
+            return self.compiler.compile(
+                document,
+                project=self.project,
+                sprite_index_resolver=self.sprite_index_resolver,
+            )
+        contribution = self.store.registry[document.type].compiler
+        if contribution is None:
+            raise DocumentError(
+                f"No compiler is registered for resource type {document.type!r}"
+            )
+        return contribution(
             document,
             project=self.project,
             sprite_index_resolver=self.sprite_index_resolver,
@@ -206,7 +263,7 @@ class PatternPreviewController:
 
     def _record_compile_failure(self, error: BaseException, *, command: str) -> None:
         preserved = self.program is not None
-        if isinstance(error, PatternCompileError):
+        if isinstance(error, (PatternCompileError, StageCompileError)):
             diagnostics = self._diagnostics(error)
         elif isinstance(error, PatternDocumentError):
             diagnostics = [
@@ -238,8 +295,8 @@ class PatternPreviewController:
 
     def _replace_program(
         self,
-        document: PatternDocument,
-        program: PatternProgram,
+        document: PatternDocument | SceneDocument,
+        program: PatternProgram | StageProgram,
         *,
         resource_path: Path | None,
         resume: bool,
@@ -250,7 +307,11 @@ class PatternPreviewController:
             old_runner.stop(self.context, clear_owned=True)
         self.document = document
         self.program = program
-        self.runner = PatternRunner(program)
+        self.runner = (
+            StageRunner(program)
+            if isinstance(program, StageProgram)
+            else PatternRunner(program)
+        )
         self.resource_path = resource_path
         self.frame = 0
         self.last_error = None
@@ -263,7 +324,11 @@ class PatternPreviewController:
             resource_id=program.resource_id,
             content_hash=program.content_hash,
             name=program.name,
-            seed=program.seed,
+            seed=program.seed if isinstance(program, PatternProgram) else None,
+            mode=self.mode,
+            duration_frames=(
+                program.duration_frames if isinstance(program, StageProgram) else None
+            ),
             resource_path=str(resource_path) if resource_path else None,
         )
         self._status(message)
@@ -284,7 +349,11 @@ class PatternPreviewController:
             resume=was_playing,
             message=f"Loaded {document.name}",
         )
-        return {"resource_id": program.resource_id, "content_hash": program.content_hash}
+        return {
+            "resource_id": program.resource_id,
+            "content_hash": program.content_hash,
+            "mode": self.mode,
+        }
 
     def play(self) -> None:
         self._ensure_open("play")
@@ -293,12 +362,8 @@ class PatternPreviewController:
         if self.state == PreviewState.PLAYING:
             self._status("Already playing")
             return
-        if self.runner.state in {
-            PatternRunnerState.STOPPED,
-            PatternRunnerState.FINISHED,
-            PatternRunnerState.ERROR,
-        }:
-            if self.runner.state != PatternRunnerState.STOPPED or self.frame != 0:
+        if self.runner.state.value in {"stopped", "finished", "error"}:
+            if self.runner.state.value != "stopped" or self.frame != 0:
                 self.runner.reset(self.context)
                 self.frame = 0
             self.runner.start(self.context, reset=False)
@@ -315,30 +380,41 @@ class PatternPreviewController:
         self.state = PreviewState.PAUSED
         self._status("Paused")
 
-    def _advance_one(self) -> None:
+    def _advance_one(self, *, dispatch_actions: bool = True) -> None:
         assert self.runner is not None
         start = time.perf_counter()
         try:
-            if self.runner.state == PatternRunnerState.PAUSED:
+            if self.runner.state.value == "paused":
                 self.runner.resume()
-            if self.runner.state == PatternRunnerState.STOPPED:
+            if self.runner.state.value == "stopped":
                 self.runner.start(self.context, reset=False)
-            if self.runner.state == PatternRunnerState.RUNNING:
-                self.runner.tick(self.context)
-            self.bullet_pool.update(FIXED_DT)
-            self.frame += 1
+            if self.runner.state.value == "running":
+                if isinstance(self.runner, StageRunner):
+                    self.runner.tick(
+                        self.context,
+                        dispatch_actions=dispatch_actions,
+                    )
+                    self.frame = self.runner.frame
+                    dt = 1.0 / self.runner.program.tick_rate
+                else:
+                    self.runner.tick(self.context)
+                    self.frame += 1
+                    dt = FIXED_DT
+                self.bullet_pool.update(dt)
         except Exception as exc:
-            if isinstance(exc, PatternRuntimeError):
+            if isinstance(exc, (PatternRuntimeError, StageRuntimeError)):
                 detail = exc.detail
                 resource_id = exc.resource_id
+                path = exc.path
             else:
                 detail = str(exc)
                 resource_id = self.program.resource_id if self.program else ""
+                path = "runtime"
             self.last_error = {
                 "kind": "runtime",
                 "resource_id": resource_id,
                 "frame": self.frame,
-                "path": "runtime",
+                "path": path,
                 "message": detail,
             }
             self.state = PreviewState.ERROR
@@ -352,15 +428,17 @@ class PatternPreviewController:
             return
         self._advance_one()
         assert self.runner is not None
-        if self.runner.state == PatternRunnerState.FINISHED:
+        if self.runner.state.value == "finished":
             self.state = PreviewState.PAUSED
-            self._status("Pattern finished")
+            self._status(
+                "Stage finished" if isinstance(self.runner, StageRunner) else "Pattern finished"
+            )
 
     def step(self) -> None:
         self._ensure_open("step")
         self._require_loaded("step")
         assert self.runner is not None
-        if self.runner.state in {PatternRunnerState.FINISHED, PatternRunnerState.ERROR}:
+        if self.runner.state.value in {"finished", "error"}:
             self.runner.reset(self.context)
             self.frame = 0
         self._advance_one()
@@ -373,6 +451,12 @@ class PatternPreviewController:
         self._require_loaded("seek")
         if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame <= 1_000_000:
             raise PreviewCommandError("seek", "frame must be an integer in 0..1000000", path="frame")
+        if isinstance(self.program, StageProgram) and frame > self.program.duration_frames:
+            raise PreviewCommandError(
+                "seek",
+                f"frame must not exceed stage duration {self.program.duration_frames}",
+                path="frame",
+            )
         assert self.runner is not None
         start = time.perf_counter()
         self.runner.reset(self.context)
@@ -380,7 +464,7 @@ class PatternPreviewController:
         self.runner.start(self.context, reset=False)
         try:
             for _ in range(frame):
-                self._advance_one()
+                self._advance_one(dispatch_actions=False)
         except Exception:
             raise
         finally:
@@ -410,6 +494,12 @@ class PatternPreviewController:
 
     def _candidate_with_property(self, path: str, value: Any) -> PatternDocument:
         self._require_loaded("set-property")
+        if not isinstance(self.document, PatternDocument):
+            raise PreviewCommandError(
+                "set-property",
+                "live property reload is only available for PatternDocument; edit Scene tracks through the editor",
+                path="path",
+            )
         if not isinstance(path, str) or not path.strip():
             raise PreviewCommandError("set-property", "path must be non-empty", path="path")
         payload = self.document.to_dict()
@@ -457,6 +547,12 @@ class PatternPreviewController:
     def set_seed(self, seed: int) -> None:
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise PreviewCommandError("set-seed", "seed must be an integer", path="seed")
+        if not isinstance(self.document, PatternDocument):
+            raise PreviewCommandError(
+                "set-seed",
+                "seed override is only available for PatternDocument previews",
+                path="seed",
+            )
         self.set_property("seed", seed)
 
     def set_gizmos(self, visible: bool) -> None:
@@ -468,14 +564,46 @@ class PatternPreviewController:
         if math.isfinite(value) and value >= 0:
             self.last_render_ms = value
 
+    def emitter_positions(self) -> tuple[tuple[float, float], ...]:
+        if isinstance(self.runner, StageRunner):
+            values = []
+            seen = set()
+            for schedule in self.runner.program.patterns:
+                target_id = schedule.position_target_id
+                if target_id in seen:
+                    continue
+                seen.add(target_id)
+                state = self.runner.node_state.get(target_id or "", {})
+                values.append(
+                    (
+                        float(state.get("x", schedule.base_origin[0])),
+                        float(state.get("y", schedule.base_origin[1])),
+                    )
+                )
+            return tuple(values)
+        if isinstance(self.program, PatternProgram):
+            return (self.program.origin,)
+        return ()
+
     def get_stats(self, *, emit: bool = True) -> dict[str, Any]:
         bullet_count = int(np.count_nonzero(self.bullet_pool.data["alive"]))
+        stage_runner = self.runner if isinstance(self.runner, StageRunner) else None
         payload = {
+            "mode": self.mode,
             "state": self.state.value,
             "frame": self.frame,
             "bullet_count": bullet_count,
             "max_bullets": int(self.bullet_pool.max_bullets),
-            "seed": self.document.seed if self.document else None,
+            "seed": self.document.seed if isinstance(self.document, PatternDocument) else None,
+            "duration_frames": (
+                self.program.duration_frames
+                if isinstance(self.program, StageProgram)
+                else None
+            ),
+            "active_clips": (
+                list(stage_runner.active_clip_ids) if stage_runner is not None else []
+            ),
+            "trace_events": len(stage_runner.trace) if stage_runner is not None else 0,
             "paused": self.state != PreviewState.PLAYING,
             "update_ms": round(self.last_update_ms, 6),
             "render_ms": round(self.last_render_ms, 6),

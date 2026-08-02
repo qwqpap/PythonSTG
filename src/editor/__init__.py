@@ -6,7 +6,10 @@ from .document import (
     DocumentError,
     EditorNode,
     SceneDocument,
+    TimelineClip,
     TimelineEvent,
+    TimelineKeyframe,
+    TimelineTrack,
 )
 from .storage import DocumentStore
 from .node_types import (
@@ -32,10 +35,8 @@ from .scene_commands import (
     find_parent,
 )
 from .pattern_commands import (
-    AddTimelineEventCommand,
     PatternMutationError,
     SetPatternPropertyCommand,
-    SetTimelineEventPropertyCommand,
     pattern_with_property,
 )
 from .document_manager import (
@@ -50,6 +51,19 @@ from .scene_compile import (
     SceneSpellPreview,
     compile_simple_spell,
 )
+from .timeline_commands import (
+    AddClipCommand,
+    AddKeyframeCommand,
+    AddTrackCommand,
+    MoveResizeClipCommand,
+    RemoveClipCommand,
+    RemoveTrackCommand,
+    SetClipPropertiesCommand,
+    TimelineMutationError,
+    clone_clip_with_new_ids,
+    find_clip,
+    find_track,
+)
 from .session import SceneEditorSession
 
 __all__ = [
@@ -61,7 +75,10 @@ __all__ = [
     "DocumentStore",
     "EditorNode",
     "SceneDocument",
+    "TimelineClip",
     "TimelineEvent",
+    "TimelineKeyframe",
+    "TimelineTrack",
     "NODE_TYPES",
     "NODE_TYPE_REGISTRY",
     "NodeTypeRegistry",
@@ -81,10 +98,8 @@ __all__ = [
     "find_node",
     "find_parent",
     "SceneEditorSession",
-    "AddTimelineEventCommand",
     "PatternMutationError",
     "SetPatternPropertyCommand",
-    "SetTimelineEventPropertyCommand",
     "pattern_with_property",
     "DocumentManager",
     "DocumentManagerError",
@@ -94,4 +109,15 @@ __all__ = [
     "SceneSpellCompileError",
     "SceneSpellPreview",
     "compile_simple_spell",
+    "AddClipCommand",
+    "AddKeyframeCommand",
+    "AddTrackCommand",
+    "MoveResizeClipCommand",
+    "RemoveClipCommand",
+    "RemoveTrackCommand",
+    "SetClipPropertiesCommand",
+    "TimelineMutationError",
+    "clone_clip_with_new_ids",
+    "find_clip",
+    "find_track",
 ]

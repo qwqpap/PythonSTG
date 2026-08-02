@@ -35,7 +35,7 @@ class PatternPreviewPanel(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
 
         header = QHBoxLayout()
-        self.resource_label = QLabel("No PatternDocument selected")
+        self.resource_label = QLabel("No authoring resource selected")
         self.resource_label.setObjectName("previewResource")
         self.resource_label.setTextInteractionFlags(self.resource_label.textInteractionFlags())
         launch = QPushButton("Launch Preview")
@@ -80,8 +80,11 @@ class PatternPreviewPanel(QWidget):
         stats_form = QFormLayout(stats_box)
         self.stats_labels = {}
         for key, label in (
+            ("mode", "Mode"),
             ("state", "State"),
             ("frame", "Frame"),
+            ("duration_frames", "Duration"),
+            ("active_clips", "Active Clips"),
             ("bullet_count", "Bullets"),
             ("seed", "Seed"),
             ("update_ms", "Update"),
@@ -122,13 +125,13 @@ class PatternPreviewPanel(QWidget):
         target_form.addRow("Player X/Y", player_row)
         self.seed_edit = QLineEdit("0")
         self.seed_edit.setObjectName("previewSeed")
-        seed_apply = QPushButton("Set seed")
-        seed_apply.clicked.connect(self._set_seed)
+        self.seed_apply = QPushButton("Set seed")
+        self.seed_apply.clicked.connect(self._set_seed)
         seed_row = QWidget()
         seed_layout = QHBoxLayout(seed_row)
         seed_layout.setContentsMargins(0, 0, 0, 0)
         seed_layout.addWidget(self.seed_edit)
-        seed_layout.addWidget(seed_apply)
+        seed_layout.addWidget(self.seed_apply)
         target_form.addRow("Seed", seed_row)
         self.gizmos = QCheckBox("Grid, emitter and player gizmos")
         self.gizmos.setObjectName("previewGizmos")
@@ -139,8 +142,8 @@ class PatternPreviewPanel(QWidget):
         target_form.addRow(self.gizmos)
         body.addWidget(target_box, 0, 1)
 
-        live_box = QGroupBox("Live Inspector property")
-        live_form = QFormLayout(live_box)
+        self.live_box = QGroupBox("Live Inspector property")
+        live_form = QFormLayout(self.live_box)
         self.property_path = QLineEdit("shape.count")
         self.property_path.setObjectName("previewPropertyPath")
         self.property_value = QLineEdit("24")
@@ -151,7 +154,7 @@ class PatternPreviewPanel(QWidget):
         live_form.addRow("Path", self.property_path)
         live_form.addRow("JSON value", self.property_value)
         live_form.addRow(apply_property)
-        body.addWidget(live_box, 0, 2)
+        body.addWidget(self.live_box, 0, 2)
         body.setColumnStretch(0, 1)
         body.setColumnStretch(1, 2)
         body.setColumnStretch(2, 2)
@@ -175,7 +178,16 @@ class PatternPreviewPanel(QWidget):
 
     def set_resource(self, resource: str) -> None:
         self._resource = resource
-        self.resource_label.setText(resource or "No PatternDocument selected")
+        self.resource_label.setText(resource or "No authoring resource selected")
+
+    def set_mode(self, mode: str) -> None:
+        is_stage = mode == "stage"
+        self.seed_edit.setEnabled(not is_stage)
+        self.seed_apply.setEnabled(not is_stage)
+        self.live_box.setEnabled(not is_stage)
+        self.live_box.setTitle(
+            "Edit Scene clips in Timeline" if is_stage else "Live Inspector property"
+        )
 
     def _set_seed(self) -> None:
         try:
@@ -219,6 +231,8 @@ class PatternPreviewPanel(QWidget):
         elif event == "statistics":
             for key in self.stats_labels:
                 value = payload.get(key)
+                if key == "active_clips" and isinstance(value, list):
+                    value = len(value)
                 if key in {"update_ms", "render_ms"} and value is not None:
                     value = f"{float(value):.3f} ms"
                 self._set_stat(key, value)
@@ -234,6 +248,7 @@ class PatternPreviewPanel(QWidget):
             self._show_preview_error(payload.get("error") or payload)
         elif event == "program_loaded":
             self.error_label.clear()
+            self.set_mode(str(payload.get("mode") or "pattern"))
             self.seed_edit.setText(str(payload.get("seed", 0)))
 
     def _set_stat(self, key: str, value) -> None:

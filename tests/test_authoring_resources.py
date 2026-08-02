@@ -16,6 +16,7 @@ from src.authoring import (
     ResourceTypeSpec,
     build_default_resource_type_registry,
 )
+from src.authoring.resources import SCENE_RESOURCE_SCHEMA_VERSION
 from src.core.project_context import ProjectContext
 from src.pattern import PatternDocument
 
@@ -41,7 +42,14 @@ def test_all_initial_resource_types_round_trip_atomically(tmp_path):
         path = store.save(document, f"assets/resources/{index}.pystg.json")
         loaded = store.load(path)
 
-        assert loaded.to_dict() == document.to_dict()
+        expected = document.to_dict()
+        if resource_type == "pystg.scene":
+            expected = {
+                **expected,
+                "schema_version": SCENE_RESOURCE_SCHEMA_VERSION,
+                "tracks": [],
+            }
+        assert loaded.to_dict() == expected
         assert loaded.name == f"中文资源 {index}"
         assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 

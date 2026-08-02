@@ -4,6 +4,8 @@ from PyQt5.QtCore import QProcess
 
 from src.core.project_context import ProjectContext
 from src.editor.preview_process import PatternPreviewProcess
+from src.editor.document import SceneDocument, TimelineClip, TimelineTrack
+from src.editor.node_types import make_default_root
 from src.pattern import PatternDocument
 
 
@@ -54,6 +56,54 @@ def test_qprocess_headless_worker_handshake_commands_and_clean_shutdown(tmp_path
     client.stop()
     client.stop()
     assert client.wait_for(lambda: not client.is_running)
+
+
+def test_qprocess_headless_worker_loads_and_steps_stage_program(tmp_path, qapp_session):
+    del qapp_session
+    project = _project(tmp_path)
+    scene = SceneDocument(
+        "Subprocess Stage",
+        make_default_root("Subprocess Stage"),
+        metadata={"duration_frames": 1800},
+        tracks=[
+            TimelineTrack(
+                name="Events",
+                kind="Event",
+                channel="phase",
+                clips=[
+                    TimelineClip(
+                        name="Start",
+                        kind="Event",
+                        start_frame=0,
+                        duration_frames=1,
+                        channel="phase",
+                        payload={"event_type": "stage_started", "data": {}},
+                    )
+                ],
+            )
+        ],
+    )
+    client = PatternPreviewProcess(project)
+    issues = []
+    client.protocolError.connect(issues.append)
+
+    assert client.start(headless=True, max_bullets=64)
+    assert client.wait_for(lambda: client.ready)
+    load_id = client.send_command("load", {"document": scene.to_dict()})
+    assert client.wait_for(lambda: bool(_matching(client, load_id)))
+    assert _matching(client, load_id)[0]["payload"]["result"]["mode"] == "stage"
+
+    step_id = client.send_command("step")
+    assert client.wait_for(lambda: bool(_matching(client, step_id)))
+    stats_id = client.send_command("get-stats")
+    assert client.wait_for(lambda: bool(_matching(client, stats_id)))
+    stats = _matching(client, stats_id)[0]["payload"]["result"]
+    assert stats["mode"] == "stage"
+    assert stats["duration_frames"] == 1800
+    assert stats["frame"] == 1
+    assert stats["trace_events"] == 1
+    assert issues == []
+    client.stop()
 
 
 def test_worker_malformed_input_is_reported_without_freezing(tmp_path, qapp_session):

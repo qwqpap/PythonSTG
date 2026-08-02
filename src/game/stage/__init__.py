@@ -332,3 +332,36 @@ class StageManager:
         """
         for _ in range(frames):
             yield
+
+
+# Runtime-only authored-stage API. Kept at the end so the legacy StageManager
+# above remains import-compatible while M4 content can use a typed program.
+from .program import (  # noqa: E402
+    PatternSchedule,
+    StageAction,
+    StageAutomation,
+    StageKeyframe,
+    StageNode,
+    StageProgram,
+    StageRunner,
+    StageRunnerState,
+    StageRuntimeError,
+    StageTickResult,
+    StageTraceEvent,
+)
+
+
+__all__ = [
+    "PatternSchedule",
+    "StageAction",
+    "StageAutomation",
+    "StageKeyframe",
+    "StageManager",
+    "StageNode",
+    "StageProgram",
+    "StageRunner",
+    "StageRunnerState",
+    "StageRuntimeError",
+    "StageTickResult",
+    "StageTraceEvent",
+]
