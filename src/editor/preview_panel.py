@@ -21,6 +21,8 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 
+from .i18n import LanguageManager
+
 
 class PatternPreviewPanel(QWidget):
     launchRequested = pyqtSignal()
@@ -31,6 +33,7 @@ class PatternPreviewPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("patternPreviewPanel")
         self._resource = ""
+        self._language_manager: LanguageManager | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
 
@@ -177,9 +180,21 @@ class PatternPreviewPanel(QWidget):
         root.addWidget(self.status_label)
         root.addWidget(self.error_label)
 
+    def set_language_manager(self, manager: LanguageManager) -> None:
+        self._language_manager = manager
+
+    def _tr(self, text: str) -> str:
+        return (
+            self._language_manager.translate(text)
+            if self._language_manager is not None
+            else text
+        )
+
     def set_resource(self, resource: str) -> None:
         self._resource = resource
-        self.resource_label.setText(resource or "No authoring resource selected")
+        self.resource_label.setText(
+            resource or self._tr("No authoring resource selected")
+        )
 
     def set_mode(self, mode: str) -> None:
         is_stage = mode == "stage"
@@ -187,14 +202,16 @@ class PatternPreviewPanel(QWidget):
         self.seed_apply.setEnabled(not is_stage)
         self.live_box.setEnabled(not is_stage)
         self.live_box.setTitle(
-            "Edit Scene clips in Timeline" if is_stage else "Live Inspector property"
+            self._tr("Edit Scene clips in Timeline")
+            if is_stage
+            else self._tr("Live Inspector property")
         )
 
     def _set_seed(self) -> None:
         try:
             seed = int(self.seed_edit.text().strip())
         except ValueError:
-            self.error_label.setText("Seed must be an integer")
+            self.error_label.setText(self._tr("Seed must be an integer"))
             return
         self.propertyRequested.emit("seed", seed)
 
@@ -202,7 +219,7 @@ class PatternPreviewPanel(QWidget):
         path = self.property_path.text().strip()
         raw = self.property_value.text().strip()
         if not path:
-            self.error_label.setText("Property path is required")
+            self.error_label.setText(self._tr("Property path is required"))
             return
         try:
             value = json.loads(raw)
@@ -212,7 +229,9 @@ class PatternPreviewPanel(QWidget):
 
     def set_running(self, running: bool) -> None:
         self.status_label.setText(
-            "Starting preview process…" if running else "Preview process is stopped"
+            self._tr("Starting preview process…")
+            if running
+            else self._tr("Preview process is stopped")
         )
         if running:
             self.error_label.clear()
@@ -224,7 +243,9 @@ class PatternPreviewPanel(QWidget):
         event = message.get("event")
         payload = message.get("payload") or {}
         if event == "hello":
-            self.status_label.setText(f'Connected (protocol {payload.get("protocol_version")})')
+            self.status_label.setText(
+                self._tr(f'Connected (protocol {payload.get("protocol_version")})')
+            )
         elif event == "status":
             self.status_label.setText(str(payload.get("message") or payload.get("state") or ""))
             self._set_stat("state", payload.get("state"))
@@ -262,4 +283,6 @@ class PatternPreviewPanel(QWidget):
             diagnostic = error["diagnostics"][0]
             message = f'{diagnostic.get("path")}: {diagnostic.get("message")}'
         preserved = " Last valid program remains active." if error.get("active_program_preserved") else ""
-        self.error_label.setText(f"{message or 'Preview error'}.{preserved}".strip())
+        self.error_label.setText(
+            f"{self._tr(message or 'Preview error')}.{self._tr(preserved)}".strip()
+        )

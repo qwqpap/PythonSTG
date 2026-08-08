@@ -22,7 +22,6 @@ from src.qt_compat.QtGui import (
 )
 from src.qt_compat.QtWidgets import (
     QAbstractItemView,
-    QAction,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -59,6 +58,11 @@ from src.qt_compat.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from src.qt_compat.QtGui import QAction
+except ImportError:  # The legacy Qt binding keeps QAction in QtWidgets.
+    from src.qt_compat.QtWidgets import QAction
 
 from src.core.project_context import ProjectContext
 from src.authoring.coordinates import CoordinateSpace
@@ -127,6 +131,12 @@ from .timeline_commands import (
 )
 from .timeline_workspace import TimelineEditor
 from .plugin_sdk import PluginRegistry as SDKPluginRegistry
+from .i18n import (
+    LANGUAGE_CHINESE,
+    LANGUAGE_ENGLISH,
+    LanguageManager,
+    translate_widget_tree,
+)
 from .workbench import (
     EditorPlugin,
     PluginRegistry as EditorPluginRegistry,
@@ -1444,6 +1454,8 @@ class EditorMainWindow(QMainWindow):
     def __init__(self, project: ProjectContext):
         super().__init__()
         self.project = project
+        self.language_manager = LanguageManager(self)
+        self.language_manager.languageChanged.connect(self._language_changed)
         # The SDK registries are the same objects used by document loading and
         # scene validation.  Legacy workbench widgets remain a separate view
         # catalog, but plugin contributions now have a real runtime owner.
@@ -1491,6 +1503,39 @@ class EditorMainWindow(QMainWindow):
         self._refresh()
         self.resize(1480, 920)
         self.setMinimumSize(960, 640)
+
+    @property
+    def language(self) -> str:
+        """Return the current UI language code."""
+
+        return self.language_manager.language
+
+    def set_language(self, language: str) -> None:
+        """Switch UI labels without changing document or runtime data."""
+
+        self.language_manager.set_language(language)
+
+    def _language_changed(self, _language: str) -> None:
+        # Refresh the existing editor context so dynamically rebuilt Inspector
+        # forms and newly opened workspaces receive the same language as the
+        # shell.  No document command is issued by this path.
+        if hasattr(self, "tree"):
+            self._refresh()
+        translate_widget_tree(self, self.language_manager)
+        runtime_host = getattr(self, "_runtime_preview_host", None)
+        if runtime_host is not None:
+            index = self.central_tabs.indexOf(runtime_host)
+            if index >= 0:
+                self.central_tabs.setTabText(
+                    index,
+                    self.language_manager.translate("Runtime Preview"),
+                )
+        self._update_language_actions()
+
+    def _update_language_actions(self) -> None:
+        english = self.language == LANGUAGE_ENGLISH
+        self.action_language_english.setChecked(english)
+        self.action_language_chinese.setChecked(not english)
 
     @property
     def session(self) -> ManagedDocument:
@@ -1587,6 +1632,18 @@ class EditorMainWindow(QMainWindow):
         self.action_indent = self._action("Make Child of Previous", "Alt+Right", self.indent_selected)
         self.action_run = self._action("Run / Preview", Qt.Key_F6, self.run_preview)
         self.action_fit = self._action("Frame Canvas", "F", self._fit_viewport)
+        self.action_language_english = self._action(
+            "English",
+            None,
+            lambda checked=False: self.set_language(LANGUAGE_ENGLISH),
+        )
+        self.action_language_english.setCheckable(True)
+        self.action_language_chinese = self._action(
+            "简体中文",
+            None,
+            lambda checked=False: self.set_language(LANGUAGE_CHINESE),
+        )
+        self.action_language_chinese.setCheckable(True)
 
     def _action(self, text: str, shortcut, callback: Callable) -> QAction:
         action = QAction(text, self)
@@ -1631,7 +1688,13 @@ class EditorMainWindow(QMainWindow):
                 lambda checked=False, plugin_id=plugin.id: self.open_plugin(plugin_id)
             )
 
+        self.language_menu = self.menuBar().addMenu("&Language")
+        self.language_menu.addActions(
+            [self.action_language_english, self.action_language_chinese]
+        )
+
         main_toolbar = QToolBar("Main", self)
+        self.main_toolbar = main_toolbar
         main_toolbar.setObjectName("mainToolbar")
         main_toolbar.setMovable(False)
         main_toolbar.addActions([
@@ -1708,6 +1771,7 @@ class EditorMainWindow(QMainWindow):
         tree_layout.addWidget(self.tree)
 
         tree_dock = QDockWidget("Scene", self)
+        self.scene_dock = tree_dock
         tree_dock.setObjectName("sceneDock")
         tree_dock.setWidget(tree_content)
         tree_dock.setMinimumWidth(220)
@@ -1737,6 +1801,7 @@ class EditorMainWindow(QMainWindow):
             self._timeline_keyframe_properties_requested
         )
         inspector_dock = QDockWidget("Inspector", self)
+        self.inspector_dock = inspector_dock
         inspector_dock.setObjectName("inspectorDock")
         inspector_dock.setWidget(self.inspector)
         inspector_dock.setMinimumWidth(260)
@@ -1748,6 +1813,7 @@ class EditorMainWindow(QMainWindow):
         self.output.anchorClicked.connect(self._diagnostic_link_clicked)
         self.output.document().setMaximumBlockCount(1000)
         self.timeline = TimelineEditor()
+        self.timeline.set_language_manager(self.language_manager)
         self.timeline.addTrackRequested.connect(self._timeline_add_track)
         self.timeline.addClipRequested.connect(self._timeline_add_clip)
         self.timeline.clipGeometryRequested.connect(self._timeline_clip_geometry)
@@ -1770,6 +1836,7 @@ class EditorMainWindow(QMainWindow):
         self.bottom_tabs.addTab(self.output, "Output")
         self.bottom_tabs.addTab(self.timeline, "Timeline")
         self.preview_panel = PatternPreviewPanel()
+        self.preview_panel.set_language_manager(self.language_manager)
         self.preview_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.preview_panel.launchRequested.connect(self._launch_active_preview)
         self.preview_panel.commandRequested.connect(self._send_pattern_preview_command)
@@ -1777,6 +1844,8 @@ class EditorMainWindow(QMainWindow):
         self.bottom_tabs.addTab(self.preview_panel, "Preview")
         for plugin in self.plugin_registry.by_mode("bottom"):
             widget = plugin.factory()
+            if hasattr(widget, "set_language_manager"):
+                widget.set_language_manager(self.language_manager)
             self._plugin_widgets[plugin.id] = widget
             self.bottom_tabs.addTab(widget, plugin.title)
             if plugin.id == "resource_browser":
@@ -2368,7 +2437,8 @@ class EditorMainWindow(QMainWindow):
     def _update_title(self) -> None:
         name = self.session.display_name
         self.setWindowModified(self.session.is_dirty)
-        self.setWindowTitle(f"{name}[*] — {APP_NAME}")
+        app_title = self.language_manager.translate(APP_NAME)
+        self.setWindowTitle(f"{name}[*] — {app_title}")
         for session in self.document_manager:
             widget = self._document_widgets.get(session.document.id)
             if widget is None:
@@ -2377,6 +2447,9 @@ class EditorMainWindow(QMainWindow):
             if index >= 0:
                 suffix = " *" if session.is_dirty else ""
                 self.central_tabs.setTabText(index, session.display_name + suffix)
+        if hasattr(self, "language_manager"):
+            translate_widget_tree(self, self.language_manager)
+            self._update_language_actions()
 
     def _log(self, message: str) -> None:
         self.output.append(html.escape(str(message)))
@@ -3247,7 +3320,7 @@ class EditorMainWindow(QMainWindow):
         start = self.project.game_content / "scenes"
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Open PySTG Resource",
+            self.language_manager.translate("Open PySTG Resource"),
             str(start),
             RESOURCE_FILTER,
         )
@@ -3336,7 +3409,7 @@ class EditorMainWindow(QMainWindow):
         )
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save PySTG Resource",
+            self.language_manager.translate("Save PySTG Resource"),
             str(suggested),
             RESOURCE_FILTER,
         )
@@ -3363,8 +3436,10 @@ class EditorMainWindow(QMainWindow):
         if session.is_dirty:
             result = QMessageBox.warning(
                 self,
-                "Revert document",
-                f"Discard all changes to {session.display_name}?",
+                self.language_manager.translate("Revert document"),
+                self.language_manager.translate(
+                    f"Discard all changes to {session.display_name}?"
+                ),
                 QMessageBox.Yes | QMessageBox.Cancel,
                 QMessageBox.Cancel,
             )
@@ -3395,8 +3470,10 @@ class EditorMainWindow(QMainWindow):
             return True
         result = QMessageBox.warning(
             self,
-            "Unsaved changes",
-            f"Save changes to {session.display_name}?",
+            self.language_manager.translate("Unsaved changes"),
+            self.language_manager.translate(
+                f"Save changes to {session.display_name}?"
+            ),
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
             QMessageBox.Save,
         )
@@ -3424,9 +3501,18 @@ class EditorMainWindow(QMainWindow):
         if host is not None:
             return host
         host = RuntimePreviewHost()
+        host.set_language_manager(self.language_manager)
         host.setProperty("runtimePreview", True)
         self._runtime_preview_host = host
-        self.central_tabs.addTab(host, "Runtime Preview")
+        index = self.central_tabs.addTab(
+            host,
+            self.language_manager.translate("Runtime Preview"),
+        )
+        if self.language == LANGUAGE_ENGLISH:
+            # The English source is captured by the normal tree pass.  Keeping
+            # this explicit also covers a host created after a language toggle.
+            self.central_tabs.setTabText(index, "Runtime Preview")
+        translate_widget_tree(self, self.language_manager)
         return host
 
     def _show_runtime_preview_host(self, *, select: bool = False) -> None:
@@ -4522,7 +4608,10 @@ class EditorMainWindow(QMainWindow):
             )
             return
         if self._preview_process is not None and self._preview_process.state() != QProcess.NotRunning:
-            self.statusBar().showMessage("Preview is already running", 3000)
+            self.statusBar().showMessage(
+                self.language_manager.translate("Preview is already running"),
+                3000,
+            )
             return
 
         try:
@@ -4569,7 +4658,7 @@ class EditorMainWindow(QMainWindow):
 
     def _show_error(self, title: str, error: Exception) -> None:
         self._log(f"[error] {title}: {error}")
-        QMessageBox.critical(self, title, str(error))
+        QMessageBox.critical(self, self.language_manager.translate(title), str(error))
 
     def closeEvent(self, event) -> None:
         for session in tuple(self.document_manager):

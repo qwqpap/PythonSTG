@@ -17,6 +17,8 @@ from src.qt_compat.QtCore import Qt, QTimer, pyqtSignal
 from src.qt_compat.QtGui import QWindow
 from src.qt_compat.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from .i18n import LanguageManager
+
 
 class RuntimePreviewHost(QWidget):
     """Embed the formal preview window when the platform supports it.
@@ -34,6 +36,7 @@ class RuntimePreviewHost(QWidget):
         self._process: Any | None = None
         self._foreign_window: QWindow | None = None
         self._container: QWidget | None = None
+        self._language_manager: LanguageManager | None = None
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(50)
         self._poll_timer.timeout.connect(self._try_attach)
@@ -51,6 +54,16 @@ class RuntimePreviewHost(QWidget):
     @property
     def is_attached(self) -> bool:
         return self._container is not None
+
+    def set_language_manager(self, manager: LanguageManager) -> None:
+        self._language_manager = manager
+
+    def _tr(self, text: str) -> str:
+        return (
+            self._language_manager.translate(text)
+            if self._language_manager is not None
+            else text
+        )
 
     def attach_process(self, process: Any) -> None:
         """Start polling for the native window belonging to ``process``."""
@@ -90,7 +103,7 @@ class RuntimePreviewHost(QWidget):
         self.attached.emit(False)
 
     def _show_fallback(self, text: str) -> None:
-        self._message.setText(text)
+        self._message.setText(self._tr(text))
         self._message.show()
 
     def _try_attach(self) -> None:

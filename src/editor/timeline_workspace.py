@@ -20,6 +20,7 @@ from src.qt_compat.QtWidgets import (
 )
 
 from .document import SceneDocument, TimelineClip, TimelineTrack
+from .i18n import LanguageManager
 
 
 RULER_HEIGHT = 28.0
@@ -388,20 +389,22 @@ class TimelineEditor(QWidget):
         self.playhead_frame = 0
         self.active_clip_ids: set[str] = set()
         self.pixels_per_frame = 0.25
+        self._language_manager: LanguageManager | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
 
         track_toolbar = QHBoxLayout()
         self.kind_picker = QComboBox()
         self.kind_picker.setObjectName("timelineKindPicker")
-        self.kind_picker.addItems(
-            ["Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent"]
-        )
+        for kind in ("Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent"):
+            self.kind_picker.addItem(kind, kind)
         track_toolbar.addWidget(self.kind_picker)
         add_track = QPushButton("+ Track")
         add_track.setObjectName("timelineAddTrack")
         add_track.clicked.connect(
-            lambda: self.addTrackRequested.emit(self.kind_picker.currentText())
+            lambda: self.addTrackRequested.emit(
+                str(self.kind_picker.currentData() or self.kind_picker.currentText())
+            )
         )
         track_toolbar.addWidget(add_track)
         delete_track = QPushButton("- Track")
@@ -473,6 +476,16 @@ class TimelineEditor(QWidget):
         self.view.deleteRequested.connect(self._request_delete)
         self.view.duplicateRequested.connect(self._request_duplicate)
         root.addWidget(self.view, 1)
+
+    def set_language_manager(self, manager: LanguageManager) -> None:
+        self._language_manager = manager
+
+    def _tr(self, text: str) -> str:
+        return (
+            self._language_manager.translate(text)
+            if self._language_manager is not None
+            else text
+        )
 
     def set_document(
         self,
@@ -580,7 +593,7 @@ class TimelineEditor(QWidget):
 
     def set_playhead(self, frame: int, *, emit: bool = True) -> None:
         self.playhead_frame = max(0, int(frame))
-        self.playhead_label.setText(f"Frame {self.playhead_frame}")
+        self.playhead_label.setText(self._tr(f"Frame {self.playhead_frame}"))
         self._position_playhead()
         if emit:
             self.playheadChanged.emit(self.playhead_frame)
@@ -625,7 +638,9 @@ class TimelineEditor(QWidget):
                 scene.addItem(label)
 
         if not tracks:
-            empty = QGraphicsSimpleTextItem("No tracks. Choose a kind and add the first track.")
+            empty = QGraphicsSimpleTextItem(
+                self._tr("No tracks. Choose a kind and add the first track.")
+            )
             empty.setBrush(QColor("#9aa9bd"))
             empty.setPos(18, RULER_HEIGHT + 22)
             scene.addItem(empty)
@@ -648,7 +663,9 @@ class TimelineEditor(QWidget):
                 QPen(QColor("#44516a")),
                 QColor("#1d2737"),
             )
-            label = QGraphicsSimpleTextItem(f"{track.name}\n{track.kind}")
+            label = QGraphicsSimpleTextItem(
+                f"{track.name}\n{self._tr(track.kind)}"
+            )
             label.setBrush(QColor("#d7e1ee") if not track.muted else QColor("#778397"))
             label.setPos(8, y + 5)
             scene.addItem(label)

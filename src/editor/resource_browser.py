@@ -34,6 +34,7 @@ from src.qt_compat.QtWidgets import (
 from src.core.project_context import ProjectContext
 
 from .asset_index import AssetIndex, AssetRecord
+from .i18n import LanguageManager
 
 
 RESOURCE_MIME_TYPE = "application/x-pystg-resource"
@@ -260,8 +261,19 @@ class ResourceBrowserPanel(QWidget):
         self.model = AssetListModel(thumbnails=self.thumbnails)
         self.proxy = AssetFilterProxyModel()
         self.proxy.setSourceModel(self.model)
+        self._language_manager: LanguageManager | None = None
         self._build_ui()
         self.refresh()
+
+    def set_language_manager(self, manager: LanguageManager) -> None:
+        self._language_manager = manager
+
+    def _tr(self, text: str) -> str:
+        return (
+            self._language_manager.translate(text)
+            if self._language_manager is not None
+            else text
+        )
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -367,16 +379,18 @@ class ResourceBrowserPanel(QWidget):
         records = self.index.scan()
         self.model.set_records(records)
         self._populate_folders(records)
-        message = f"{len(records)} resources"
+        message = self._tr(f"{len(records)} resources")
         if self.index.errors:
-            message += f" · {len(self.index.errors)} invalid JSON files skipped"
+            message += " · " + self._tr(
+                f"{len(self.index.errors)} invalid JSON files skipped"
+            )
         self.summary.setText(message)
         self._clear_details()
 
     def _populate_folders(self, records: tuple[AssetRecord, ...]) -> None:
         self.folder_tree.blockSignals(True)
         self.folder_tree.clear()
-        all_item = QTreeWidgetItem(["All resources"])
+        all_item = QTreeWidgetItem([self._tr("All resources")])
         all_item.setData(0, Qt.UserRole, "")
         self.folder_tree.addTopLevelItem(all_item)
         nodes: dict[str, QTreeWidgetItem] = {"": all_item}
@@ -451,21 +465,23 @@ class ResourceBrowserPanel(QWidget):
         self.preview.setPixmap(pixmap)
         self.detail_title.setText(f"<b>{record.name}</b>")
         lines = [
-            f"Type: {record.kind}",
-            f"Path: {record.resource_value}",
+            f"{self._tr('Type: ')}{record.kind}",
+            f"{self._tr('Path: ')}{record.resource_value}",
         ]
         if record.rect:
-            lines.append("Rect: {}, {}, {}, {}".format(*record.rect))
+            lines.append(
+                f"{self._tr('Rect: ')}{', '.join(str(value) for value in record.rect)}"
+            )
         if record.metadata.get("size") is not None:
-            lines.append(f"Size: {record.metadata['size']} bytes")
+            lines.append(f"{self._tr('Size: ')}{record.metadata['size']} bytes")
         if record.metadata.get("frames") is not None:
-            lines.append(f"Frames: {record.metadata['frames']}")
+            lines.append(f"{self._tr('Frames: ')}{record.metadata['frames']}")
         if record.metadata.get("fps") is not None:
-            lines.append(f"FPS: {record.metadata['fps']}")
+            lines.append(f"{self._tr('FPS: ')}{record.metadata['fps']}")
         self.detail_text.setText("\n".join(lines))
 
     def _clear_details(self) -> None:
         self.preview.clear()
-        self.preview.setText("Select a resource")
+        self.preview.setText(self._tr("Select a resource"))
         self.detail_title.clear()
         self.detail_text.clear()
