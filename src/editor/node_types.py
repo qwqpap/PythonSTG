@@ -98,6 +98,13 @@ class NodeTypeRegistry(Mapping[str, NodeTypeSpec]):
         self._types[spec.type_name] = spec
         return spec
 
+    def unregister(self, type_name: str) -> NodeTypeSpec:
+        """Remove one plugin-owned node type during activation rollback."""
+        try:
+            return self._types.pop(type_name)
+        except KeyError as exc:
+            raise KeyError(type_name) from exc
+
     def __getitem__(self, key: str) -> NodeTypeSpec:
         try:
             return self._types[key]

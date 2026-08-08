@@ -502,6 +502,7 @@ class SceneDocument:
                 raise DocumentError(f"Duplicate document object id: {node.id}")
             ids.add(node.id)
         node_ids = {node.id for node in self.root.walk()}
+        nodes_by_id = {node.id: node for node in self.root.walk()}
         for track in self.tracks:
             if not isinstance(track, TimelineTrack):
                 raise DocumentError("document.tracks entries must be TimelineTrack values")
@@ -520,6 +521,29 @@ class SceneDocument:
                 effective_target = clip.target_id or track.target_id
                 if clip.kind in {"Movement", "Property"} and effective_target is None:
                     raise DocumentError(f"{clip.kind} clip needs a track or clip target_id")
+                target_node = nodes_by_id.get(effective_target or "")
+                if clip.kind == "Movement" and target_node is not None:
+                    x = target_node.properties.get("x")
+                    y = target_node.properties.get("y")
+                    if (
+                        isinstance(x, bool)
+                        or not isinstance(x, (int, float))
+                        or isinstance(y, bool)
+                        or not isinstance(y, (int, float))
+                    ):
+                        raise DocumentError(
+                            "Movement clip target must expose numeric x and y properties"
+                        )
+                if clip.kind == "Property" and target_node is not None:
+                    property_name = str(
+                        clip.payload.get("property") or clip.channel
+                    ).strip()
+                    if not property_name:
+                        raise DocumentError("Property clip needs a property name or channel")
+                    if property_name not in target_node.properties:
+                        raise DocumentError(
+                            f"Property clip target has no property {property_name!r}"
+                        )
                 if (
                     clip.kind == "Pattern"
                     and effective_target is None

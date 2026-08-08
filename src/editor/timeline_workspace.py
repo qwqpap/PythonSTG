@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QKeyEvent, QPainter, QPen
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from src.qt_compat.QtGui import QColor, QKeyEvent, QPainter, QPainterPath, QPen
+from src.qt_compat.QtWidgets import (
     QComboBox,
     QGraphicsItem,
     QGraphicsObject,
@@ -46,6 +46,7 @@ def _snap(value: int, step: int) -> int:
 
 class TimelineClipItem(QGraphicsObject):
     geometryCommitted = pyqtSignal(str, int, int)
+    keyframeGeometryCommitted = pyqtSignal(str, str, int)
     selectedRequested = pyqtSignal(str, str)
 
     def __init__(
@@ -65,6 +66,11 @@ class TimelineClipItem(QGraphicsObject):
         self.kind = clip.kind
         self.start_frame = clip.start_frame
         self.duration_frames = clip.duration_frames
+        self.loop_count = clip.loop_count
+        self.enabled = clip.enabled
+        self.track_muted = track.muted
+        self.active = False
+        self.keyframe_frames = tuple(item.frame for item in clip.keyframes)
         self.pixels_per_frame = pixels_per_frame
         self.snap_frames = snap_frames
         self.row_y = row_y
@@ -82,9 +88,24 @@ class TimelineClipItem(QGraphicsObject):
             TRACK_HEADER_WIDTH + clip.start_frame * pixels_per_frame,
             row_y + (TRACK_HEIGHT - CLIP_HEIGHT) / 2,
         )
+        for keyframe in clip.keyframes:
+            marker = TimelineKeyframeItem(
+                clip.id,
+                keyframe.id,
+                keyframe.frame,
+                clip.duration_frames,
+                pixels_per_frame=pixels_per_frame,
+                snap_frames=snap_frames,
+                parent=self,
+            )
+            marker.geometryCommitted.connect(self.keyframeGeometryCommitted)
+            marker.selectedRequested.connect(self.selectedRequested)
 
     def _width(self) -> float:
-        return max(14.0, self._preview_duration * self.pixels_per_frame)
+        return max(
+            14.0,
+            self._preview_duration * self.loop_count * self.pixels_per_frame,
+        )
 
     def boundingRect(self) -> QRectF:
         return QRectF(0.0, 0.0, self._width(), CLIP_HEIGHT)
@@ -92,9 +113,16 @@ class TimelineClipItem(QGraphicsObject):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         del option, widget
         base = QColor(KIND_COLORS.get(self.kind, "#596579"))
+        if not self.enabled or self.track_muted:
+            base = QColor("#4b5360")
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setBrush(base.lighter(118) if self.isSelected() else base)
-        painter.setPen(QPen(QColor("#dce7f5") if self.isSelected() else base.lighter(150), 2 if self.isSelected() else 1))
+        outline = (
+            QColor("#ffd166")
+            if self.active
+            else QColor("#dce7f5") if self.isSelected() else base.lighter(150)
+        )
+        painter.setPen(QPen(outline, 3 if self.active else 2 if self.isSelected() else 1))
         painter.drawRoundedRect(self.boundingRect().adjusted(1, 1, -1, -1), 4, 4)
         painter.setPen(QColor("#ffffff"))
         painter.drawText(
@@ -106,6 +134,27 @@ class TimelineClipItem(QGraphicsObject):
             QRectF(max(0.0, self._width() - 6), 3, 3, CLIP_HEIGHT - 6),
             QColor("#e6edf7"),
         )
+        single_loop_width = self._preview_duration * self.pixels_per_frame
+        painter.setPen(QPen(base.lighter(175), 1, Qt.DashLine))
+        for loop_index in range(1, self.loop_count):
+            x = loop_index * single_loop_width
+            painter.drawLine(QPointF(x, 3), QPointF(x, CLIP_HEIGHT - 3))
+        painter.setBrush(QColor("#ffe08a"))
+        painter.setPen(Qt.NoPen)
+        # The first-loop markers are interactive child items. Repeated-loop
+        # markers remain visual copies because they all edit the same local
+        # keyframe.
+        for loop_index in range(1, self.loop_count):
+            offset = loop_index * single_loop_width
+            for frame in self.keyframe_frames:
+                x = offset + min(frame, self._preview_duration) * self.pixels_per_frame
+                marker = QPainterPath()
+                marker.moveTo(x, 3)
+                marker.lineTo(x + 4, 7)
+                marker.lineTo(x, 11)
+                marker.lineTo(x - 4, 7)
+                marker.closeSubpath()
+                painter.drawPath(marker)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and not self._resizing:
@@ -137,8 +186,9 @@ class TimelineClipItem(QGraphicsObject):
 
     def mouseMoveEvent(self, event) -> None:
         if self._resizing:
-            frames = max(1, int(round(event.pos().x() / self.pixels_per_frame)))
-            frames = max(self.snap_frames, _snap(frames, self.snap_frames))
+            span_frames = max(1, int(round(event.pos().x() / self.pixels_per_frame)))
+            span_frames = max(self.snap_frames, _snap(span_frames, self.snap_frames))
+            frames = max(1, int(round(span_frames / self.loop_count)))
             if frames != self._preview_duration:
                 self.prepareGeometryChange()
                 self._preview_duration = frames
@@ -170,6 +220,82 @@ class TimelineClipItem(QGraphicsObject):
         )
         if start != self.start_frame:
             self.geometryCommitted.emit(self.clip_id, start, self.duration_frames)
+
+
+class TimelineKeyframeItem(QGraphicsObject):
+    """Draggable first-loop keyframe marker backed by an undoable command."""
+
+    geometryCommitted = pyqtSignal(str, str, int)
+    selectedRequested = pyqtSignal(str, str)
+
+    def __init__(
+        self,
+        clip_id: str,
+        keyframe_id: str,
+        frame: int,
+        duration_frames: int,
+        *,
+        pixels_per_frame: float,
+        snap_frames: int,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.clip_id = clip_id
+        self.keyframe_id = keyframe_id
+        self.frame = int(frame)
+        self.duration_frames = int(duration_frames)
+        self.pixels_per_frame = float(pixels_per_frame)
+        self.snap_frames = int(snap_frames)
+        self.setFlags(
+            QGraphicsItem.ItemIsSelectable
+            | QGraphicsItem.ItemIsMovable
+            | QGraphicsItem.ItemSendsGeometryChanges
+        )
+        self.setCursor(Qt.SizeHorCursor)
+        self.setZValue(3)
+        self.setPos(self.frame * self.pixels_per_frame, 7.0)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(-6.0, -6.0, 12.0, 12.0)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        del option, widget
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor("#fff1a8") if self.isSelected() else QColor("#ffe08a"))
+        painter.setPen(QPen(QColor("#624c12"), 1))
+        marker = QPainterPath()
+        marker.moveTo(0, -5)
+        marker.lineTo(5, 0)
+        marker.lineTo(0, 5)
+        marker.lineTo(-5, 0)
+        marker.closeSubpath()
+        painter.drawPath(marker)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            point = QPointF(value)
+            maximum = self.duration_frames * self.pixels_per_frame
+            return QPointF(min(maximum, max(0.0, point.x())), 7.0)
+        return super().itemChange(change, value)
+
+    def mousePressEvent(self, event) -> None:
+        parent = self.parentItem()
+        if isinstance(parent, TimelineClipItem):
+            self.selectedRequested.emit(parent.track_id, self.clip_id)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        self._commit_position()
+
+    def _commit_position(self) -> None:
+        local_frame = min(
+            self.duration_frames,
+            _snap(int(round(self.x() / self.pixels_per_frame)), self.snap_frames),
+        )
+        self.setPos(local_frame * self.pixels_per_frame, 7.0)
+        if local_frame != self.frame:
+            self.geometryCommitted.emit(self.clip_id, self.keyframe_id, local_frame)
 
 
 class TimelineGraphicsView(QGraphicsView):
@@ -242,6 +368,13 @@ class TimelineEditor(QWidget):
     clipGeometryRequested = pyqtSignal(str, int, int)
     duplicateClipRequested = pyqtSignal(str)
     deleteClipRequested = pyqtSignal(str)
+    deleteTrackRequested = pyqtSignal(str)
+    moveTrackRequested = pyqtSignal(str, int)
+    muteTrackRequested = pyqtSignal(str, bool)
+    addKeyframeRequested = pyqtSignal(str, int)
+    deleteKeyframeRequested = pyqtSignal(str, int)
+    keyframeGeometryRequested = pyqtSignal(str, str, int)
+    trackSelected = pyqtSignal(str)
     clipSelected = pyqtSignal(str, str)
     playheadChanged = pyqtSignal(int)
     zoomChanged = pyqtSignal(float)
@@ -253,57 +386,85 @@ class TimelineEditor(QWidget):
         self.selected_track_id: str | None = None
         self.selected_clip_id: str | None = None
         self.playhead_frame = 0
+        self.active_clip_ids: set[str] = set()
         self.pixels_per_frame = 0.25
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
 
-        toolbar = QHBoxLayout()
+        track_toolbar = QHBoxLayout()
         self.kind_picker = QComboBox()
         self.kind_picker.setObjectName("timelineKindPicker")
         self.kind_picker.addItems(
             ["Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent"]
         )
-        toolbar.addWidget(self.kind_picker)
+        track_toolbar.addWidget(self.kind_picker)
         add_track = QPushButton("+ Track")
         add_track.setObjectName("timelineAddTrack")
         add_track.clicked.connect(
             lambda: self.addTrackRequested.emit(self.kind_picker.currentText())
         )
-        toolbar.addWidget(add_track)
+        track_toolbar.addWidget(add_track)
+        delete_track = QPushButton("- Track")
+        delete_track.setObjectName("timelineDeleteTrack")
+        delete_track.clicked.connect(self._request_delete_track)
+        track_toolbar.addWidget(delete_track)
+        track_up = QPushButton("Track Up")
+        track_up.setObjectName("timelineTrackUp")
+        track_up.clicked.connect(lambda: self._request_move_track(-1))
+        track_toolbar.addWidget(track_up)
+        track_down = QPushButton("Track Down")
+        track_down.setObjectName("timelineTrackDown")
+        track_down.clicked.connect(lambda: self._request_move_track(1))
+        track_toolbar.addWidget(track_down)
+        mute_track = QPushButton("Mute")
+        mute_track.setObjectName("timelineMuteTrack")
+        mute_track.clicked.connect(self._request_toggle_mute)
+        track_toolbar.addWidget(mute_track)
+        track_toolbar.addStretch()
+        self.playhead_label = QLabel("Frame 0")
+        self.playhead_label.setObjectName("timelinePlayheadLabel")
+        track_toolbar.addWidget(self.playhead_label)
+        root.addLayout(track_toolbar)
+
+        clip_toolbar = QHBoxLayout()
         add_clip = QPushButton("+ Clip")
         add_clip.setObjectName("timelineAddClip")
         add_clip.clicked.connect(self._request_add_clip)
-        toolbar.addWidget(add_clip)
+        clip_toolbar.addWidget(add_clip)
         duplicate = QPushButton("Duplicate")
         duplicate.setObjectName("timelineDuplicateClip")
         duplicate.clicked.connect(self._request_duplicate)
-        toolbar.addWidget(duplicate)
+        clip_toolbar.addWidget(duplicate)
         delete = QPushButton("Delete")
         delete.setObjectName("timelineDeleteClip")
         delete.clicked.connect(self._request_delete)
-        toolbar.addWidget(delete)
-        toolbar.addSpacing(12)
-        zoom_out = QPushButton("−")
+        clip_toolbar.addWidget(delete)
+        add_key = QPushButton("+ Key")
+        add_key.setObjectName("timelineAddKeyframe")
+        add_key.clicked.connect(self._request_add_keyframe)
+        clip_toolbar.addWidget(add_key)
+        delete_key = QPushButton("- Key")
+        delete_key.setObjectName("timelineDeleteKeyframe")
+        delete_key.clicked.connect(self._request_delete_keyframe)
+        clip_toolbar.addWidget(delete_key)
+        clip_toolbar.addStretch()
+        zoom_out = QPushButton("-")
         zoom_out.setObjectName("timelineZoomOut")
         zoom_out.clicked.connect(lambda: self.set_zoom(self.pixels_per_frame / 1.25))
-        toolbar.addWidget(zoom_out)
+        clip_toolbar.addWidget(zoom_out)
         zoom_in = QPushButton("+")
         zoom_in.setObjectName("timelineZoomIn")
         zoom_in.clicked.connect(lambda: self.set_zoom(self.pixels_per_frame * 1.25))
-        toolbar.addWidget(zoom_in)
-        toolbar.addWidget(QLabel("Snap"))
+        clip_toolbar.addWidget(zoom_in)
+        clip_toolbar.addWidget(QLabel("Snap"))
         self.snap_spin = QSpinBox()
         self.snap_spin.setObjectName("timelineSnapFrames")
         self.snap_spin.setRange(1, 600)
         self.snap_spin.setValue(6)
         self.snap_spin.setSuffix(" fr")
         self.snap_spin.valueChanged.connect(self._snap_changed)
-        toolbar.addWidget(self.snap_spin)
-        toolbar.addStretch()
-        self.playhead_label = QLabel("Frame 0")
-        self.playhead_label.setObjectName("timelinePlayheadLabel")
-        toolbar.addWidget(self.playhead_label)
-        root.addLayout(toolbar)
+        clip_toolbar.addWidget(self.snap_spin)
+        root.addLayout(clip_toolbar)
 
         self.view = TimelineGraphicsView()
         self.view.playheadRequested.connect(self.set_playhead)
@@ -350,6 +511,9 @@ class TimelineEditor(QWidget):
 
     def _track_selected(self, track_id: str) -> None:
         self.selected_track_id = track_id
+        self.selected_clip_id = None
+        self.view.graphics_scene.clearSelection()
+        self.trackSelected.emit(track_id)
 
     def _clip_selected(self, track_id: str, clip_id: str) -> None:
         self.selected_track_id = track_id
@@ -367,6 +531,39 @@ class TimelineEditor(QWidget):
     def _request_delete(self) -> None:
         if self.selected_clip_id:
             self.deleteClipRequested.emit(self.selected_clip_id)
+
+    def _request_delete_track(self) -> None:
+        if self.selected_track_id:
+            self.deleteTrackRequested.emit(self.selected_track_id)
+
+    def _request_move_track(self, delta: int) -> None:
+        if self.selected_track_id:
+            self.moveTrackRequested.emit(self.selected_track_id, int(delta))
+
+    def _request_toggle_mute(self) -> None:
+        if self.document is None or not self.selected_track_id:
+            return
+        track = next(
+            (item for item in self.document.tracks if item.id == self.selected_track_id),
+            None,
+        )
+        if track is not None:
+            self.muteTrackRequested.emit(track.id, not track.muted)
+
+    def _request_add_keyframe(self) -> None:
+        if self.selected_clip_id:
+            self.addKeyframeRequested.emit(self.selected_clip_id, self.playhead_frame)
+
+    def _request_delete_keyframe(self) -> None:
+        if self.selected_clip_id:
+            self.deleteKeyframeRequested.emit(self.selected_clip_id, self.playhead_frame)
+
+    def set_active_clips(self, clip_ids) -> None:
+        self.active_clip_ids = {str(value) for value in clip_ids}
+        for item in self.view.graphics_scene.items():
+            if isinstance(item, TimelineClipItem):
+                item.active = item.clip_id in self.active_clip_ids
+                item.update()
 
     def _nudge_clip(self, clip_id: str, delta: int) -> None:
         if self.document is None:
@@ -455,8 +652,6 @@ class TimelineEditor(QWidget):
             label.setBrush(QColor("#d7e1ee") if not track.muted else QColor("#778397"))
             label.setPos(8, y + 5)
             scene.addItem(label)
-            if track.muted:
-                continue
             for clip in track.clips:
                 item = TimelineClipItem(
                     track,
@@ -466,8 +661,10 @@ class TimelineEditor(QWidget):
                     row_y=y,
                 )
                 item.geometryCommitted.connect(self.clipGeometryRequested)
+                item.keyframeGeometryCommitted.connect(self.keyframeGeometryRequested)
                 item.selectedRequested.connect(self._clip_selected)
                 scene.addItem(item)
+                item.active = clip.id in self.active_clip_ids
                 if clip.id == self.selected_clip_id:
                     item.setSelected(True)
                     self.selected_track_id = track.id

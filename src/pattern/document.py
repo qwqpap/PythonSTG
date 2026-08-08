@@ -13,6 +13,10 @@ from src.authoring.resources import (
     ResourceHeader,
 )
 
+from .bindings import BindingError, BindingSpec
+from .graph import BehaviorGraph
+from .script import ScriptBehavior
+
 
 PATTERN_SHAPES = ("ring", "arc", "line", "spiral", "random", "flower")
 AIM_MODES = ("fixed", "player")
@@ -305,6 +309,9 @@ class PatternDocument:
     motion: MotionSpec
     modifiers: ModifierSpec
     seed: int = 0
+    bindings: tuple[BindingSpec, ...] = ()
+    graph: BehaviorGraph | None = None
+    script: ScriptBehavior | None = None
 
     @property
     def id(self) -> str:
@@ -345,10 +352,27 @@ class PatternDocument:
         seed = _integer(self.seed, "seed")
         if not 0 <= seed <= 0x7FFF_FFFF_FFFF_FFFF:
             raise PatternDocumentError("seed", "must be in 0..2^63-1")
+        if not isinstance(self.bindings, tuple):
+            raise PatternDocumentError("bindings", "must be an array of bindings")
+        for index, binding in enumerate(self.bindings):
+            if not isinstance(binding, BindingSpec):
+                raise PatternDocumentError(
+                    f"bindings[{index}]", "must be a BindingSpec"
+                )
+            try:
+                binding.validate(path=f"bindings[{index}]")
+            except BindingError as exc:
+                raise PatternDocumentError(exc.path, exc.message) from exc
+        if self.graph is not None and not isinstance(self.graph, BehaviorGraph):
+            raise PatternDocumentError("graph", "must be a BehaviorGraph or null")
+        if self.graph is not None:
+            self.graph.validate()
+        if self.script is not None and not isinstance(self.script, ScriptBehavior):
+            raise PatternDocumentError("script", "must be a ScriptBehavior or null")
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
-        return {
+        payload = {
             **self.header.to_dict(),
             "seed": self.seed,
             "bullet": asdict(self.bullet),
@@ -357,7 +381,11 @@ class PatternDocument:
             "schedule": asdict(self.schedule),
             "motion": asdict(self.motion),
             "modifiers": asdict(self.modifiers),
+            "bindings": [binding.to_dict() for binding in self.bindings],
+            "graph": self.graph.to_dict() if self.graph is not None else None,
+            "script": self.script.to_dict() if self.script is not None else None,
         }
+        return payload
 
     @classmethod
     def new(
@@ -401,6 +429,9 @@ class PatternDocument:
                 "schedule",
                 "motion",
                 "modifiers",
+                "bindings",
+                "graph",
+                "script",
             },
             "pattern",
         )
@@ -419,6 +450,9 @@ class PatternDocument:
                 "pattern",
                 "missing sections: " + ", ".join(missing),
             )
+        raw_bindings = data.get("bindings", ())
+        if not isinstance(raw_bindings, (list, tuple)):
+            raise PatternDocumentError("bindings", "must be an array")
         document = cls(
             header=header,
             bullet=BulletSpec.from_dict(data["bullet"]),
@@ -428,6 +462,19 @@ class PatternDocument:
             motion=MotionSpec.from_dict(data["motion"]),
             modifiers=ModifierSpec.from_dict(data["modifiers"]),
             seed=data.get("seed", 0),
+            bindings=tuple(
+                BindingSpec.from_dict(item) for item in raw_bindings
+            ),
+            graph=(
+                BehaviorGraph.from_dict(data["graph"])
+                if data.get("graph") is not None
+                else None
+            ),
+            script=(
+                ScriptBehavior.from_dict(data["script"])
+                if data.get("script") is not None
+                else None
+            ),
         )
         document.validate()
         return document

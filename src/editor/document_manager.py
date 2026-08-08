@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from src.authoring import ResourceStore
-from src.authoring.resources import PATTERN_RESOURCE_TYPE, SCENE_RESOURCE_TYPE
+from src.authoring.resources import (
+    BACKGROUND_RESOURCE_TYPE,
+    PATTERN_RESOURCE_TYPE,
+    SCENE_RESOURCE_TYPE,
+    UI_RESOURCE_TYPE,
+)
 from src.core.project_context import ProjectContext
 from src.pattern import PatternDocument
 
@@ -17,8 +22,12 @@ from .document import EditorNode, SceneDocument
 from .session import SceneEditorSession
 
 
-SUPPORTED_DOCUMENT_TYPES = (SCENE_RESOURCE_TYPE, PATTERN_RESOURCE_TYPE)
-
+SUPPORTED_DOCUMENT_TYPES = (
+    SCENE_RESOURCE_TYPE,
+    PATTERN_RESOURCE_TYPE,
+    UI_RESOURCE_TYPE,
+    BACKGROUND_RESOURCE_TYPE,
+)
 
 class DocumentManagerError(ValueError):
     """Raised when a document lifecycle operation cannot be completed."""
@@ -42,6 +51,7 @@ class ManagedDocument:
     store: ResourceStore
     document: SceneDocument | PatternDocument
     path: Path | None = None
+    node_registry: Any | None = field(default=None, repr=False)
     commands: CommandStack = field(default_factory=CommandStack)
     selected_id: str | None = None
     selected_resource: str | None = None
@@ -114,9 +124,12 @@ class ManagedDocument:
     def _validate(self) -> None:
         self.document.validate()
         if isinstance(self.document, SceneDocument):
-            from .node_types import NODE_TYPE_REGISTRY
+            registry = self.node_registry
+            if registry is None:
+                from .node_types import NODE_TYPE_REGISTRY
 
-            NODE_TYPE_REGISTRY.validate_tree(self.document.root)
+                registry = NODE_TYPE_REGISTRY
+            registry.validate_tree(self.document.root)
 
     def undo(self) -> bool:
         changed = self.commands.undo()
@@ -161,9 +174,17 @@ def _clone_document_from_payload(document: Any, payload: dict[str, Any]) -> Any:
 
 
 class DocumentManager:
-    def __init__(self, project: ProjectContext, *, create_initial_scene: bool = True):
+    def __init__(
+        self,
+        project: ProjectContext,
+        *,
+        create_initial_scene: bool = True,
+        registry: Any | None = None,
+        node_registry: Any | None = None,
+    ):
         self.project = project
-        self.store = ResourceStore(project)
+        self.store = ResourceStore(project, registry=registry)
+        self.node_registry = node_registry
         self._documents: list[ManagedDocument] = []
         self._active_index = -1
         if create_initial_scene:
@@ -201,7 +222,12 @@ class DocumentManager:
         document: SceneDocument | PatternDocument,
         path: str | Path | None = None,
     ) -> ManagedDocument:
-        session = ManagedDocument(self.store, document, Path(path) if path else None)
+        session = ManagedDocument(
+            self.store,
+            document,
+            Path(path) if path else None,
+            node_registry=self.node_registry,
+        )
         self._documents.append(session)
         self._active_index = len(self._documents) - 1
         return session
@@ -230,9 +256,15 @@ class DocumentManager:
             return self.activate(existing)
         resolved = self.project.resolve(path)
         document = self.store.load(resolved)
-        if not isinstance(document, (SceneDocument, PatternDocument)):
+        from src.game.background_render.document import BackgroundDocument
+        from src.ui.document import UIDocument
+
+        if not isinstance(
+            document,
+            (SceneDocument, PatternDocument, UIDocument, BackgroundDocument),
+        ):
             raise DocumentManagerError(
-                f"No M3 editor context for {getattr(document, 'type', type(document).__name__)!r}"
+                f"No editor context for {getattr(document, 'type', type(document).__name__)!r}"
             )
         return self.add(document, resolved)
 

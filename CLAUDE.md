@@ -23,7 +23,6 @@ python main.py --profile
 
 # 运行测试
 python -m pytest -q
-python -m pytest -m smoke -q  # 仅快速回归测试
 
 # 安装依赖（开发环境）
 pip install -r requirements-dev.txt

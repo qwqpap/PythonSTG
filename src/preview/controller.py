@@ -175,7 +175,14 @@ class PatternPreviewController:
             message=message,
             frame=self.frame,
             paused=self.state != PreviewState.PLAYING,
+            mode=self.mode,
+            resource_id=self.program.resource_id if self.program is not None else None,
         )
+
+    def _emit_statistics(self) -> None:
+        """Publish one complete formal-runtime snapshot to editor clients."""
+
+        self._emit("statistics", **self.get_stats(emit=False))
 
     def _require_loaded(self, command: str) -> None:
         if self.runner is None or self.program is None or self.document is None:
@@ -371,6 +378,7 @@ class PatternPreviewController:
             self.runner.resume()
         self.state = PreviewState.PLAYING
         self._status("Playing")
+        self._emit_statistics()
 
     def pause(self) -> None:
         self._ensure_open("pause")
@@ -379,6 +387,7 @@ class PatternPreviewController:
         self.runner.pause()
         self.state = PreviewState.PAUSED
         self._status("Paused")
+        self._emit_statistics()
 
     def _advance_one(self, *, dispatch_actions: bool = True) -> None:
         assert self.runner is not None
@@ -433,6 +442,11 @@ class PatternPreviewController:
             self._status(
                 "Stage finished" if isinstance(self.runner, StageRunner) else "Pattern finished"
             )
+        # Stage authoring surfaces consume this event as the authoritative
+        # playhead/runtime snapshot.  Emitting it after every fixed tick keeps
+        # the Qt timeline and runtime poses in lockstep with the formal runner;
+        # the external renderer remains the only owner of bullet rendering.
+        self._emit_statistics()
 
     def step(self) -> None:
         self._ensure_open("step")
@@ -445,6 +459,7 @@ class PatternPreviewController:
         self.runner.pause()
         self.state = PreviewState.PAUSED
         self._status("Stepped one frame")
+        self._emit_statistics()
 
     def seek(self, frame: int) -> None:
         self._ensure_open("seek")
@@ -469,9 +484,12 @@ class PatternPreviewController:
             raise
         finally:
             self.last_update_ms = (time.perf_counter() - start) * 1000.0
+        if isinstance(self.runner, StageRunner):
+            self.runner.restore_audio_state(self.context)
         self.runner.pause()
         self.state = PreviewState.PAUSED
         self._status(f"Seeked to frame {frame}")
+        self._emit_statistics()
 
     def reset(self) -> None:
         self._ensure_open("reset")
@@ -482,6 +500,7 @@ class PatternPreviewController:
         self.state = PreviewState.PAUSED
         self.last_error = None
         self._status("Reset to frame 0")
+        self._emit_statistics()
 
     def stop(self) -> None:
         if self._closed:
@@ -491,6 +510,7 @@ class PatternPreviewController:
         self.frame = 0
         self.state = PreviewState.STOPPED if self.program is not None else PreviewState.UNLOADED
         self._status("Stopped")
+        self._emit_statistics()
 
     def _candidate_with_property(self, path: str, value: Any) -> PatternDocument:
         self._require_loaded("set-property")
@@ -590,6 +610,7 @@ class PatternPreviewController:
         stage_runner = self.runner if isinstance(self.runner, StageRunner) else None
         payload = {
             "mode": self.mode,
+            "resource_id": self.program.resource_id if self.program is not None else None,
             "state": self.state.value,
             "frame": self.frame,
             "bullet_count": bullet_count,
@@ -602,6 +623,14 @@ class PatternPreviewController:
             ),
             "active_clips": (
                 list(stage_runner.active_clip_ids) if stage_runner is not None else []
+            ),
+            "node_state": (
+                copy.deepcopy(stage_runner.node_state) if stage_runner is not None else {}
+            ),
+            "timeline_events": (
+                list(self.context.timeline_events())[-20:]
+                if stage_runner is not None
+                else []
             ),
             "trace_events": len(stage_runner.trace) if stage_runner is not None else 0,
             "paused": self.state != PreviewState.PLAYING,

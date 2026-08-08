@@ -110,6 +110,15 @@ class UITree:
                     'color': node.bg_color,
                     'alpha': node.bg_alpha,
                 })
+        elif node.node_type == "image":
+            out.append({
+                'type': 'textured_rect',
+                'position': (abs_x, abs_y),
+                'width': node.width,
+                'height': node.height,
+                'texture_path': node.texture,
+                'alpha': node.alpha,
+            })
 
         for child in node.children:
             self._flatten_node(child, abs_x, abs_y, out)

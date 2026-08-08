@@ -38,6 +38,13 @@ class MigrationRegistry:
             )
         self._current_versions[resource_type] = current_version
 
+    def unregister_type(self, resource_type: str) -> None:
+        """Remove a type and all migrations owned by it during plugin rollback."""
+        self._current_versions.pop(resource_type, None)
+        for key in tuple(self._migrations):
+            if key[0] == resource_type:
+                self._migrations.pop(key, None)
+
     def register(
         self,
         resource_type: str,

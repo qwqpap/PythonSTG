@@ -24,7 +24,7 @@ try:
 except ImportError:
     HAS_NUMPY = False
 
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QTreeWidget, QTreeWidgetItem, QListWidget,
     QLabel, QPushButton, QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox,
@@ -32,8 +32,8 @@ from PyQt5.QtWidgets import (
     QFileDialog, QMessageBox, QSlider, QSizePolicy,
     QColorDialog, QAction, QHeaderView
 )
-from PyQt5.QtCore import Qt, QTimer, QPointF, pyqtSignal, QFileSystemWatcher
-from PyQt5.QtGui import (
+from src.qt_compat.QtCore import Qt, QTimer, QPointF, pyqtSignal, QFileSystemWatcher
+from src.qt_compat.QtGui import (
     QPixmap, QImage, QPainter, QColor, QPen, QBrush,
     QPolygonF, QTransform
 )
@@ -1815,7 +1815,7 @@ def main():
     app.setStyle('Fusion')
     window = BackgroundEditor()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

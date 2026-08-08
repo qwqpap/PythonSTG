@@ -106,6 +106,77 @@ class RemoveTrackCommand:
 
 
 @dataclass
+class SetTrackPropertiesCommand:
+    document: SceneDocument
+    track_id: str
+    values: dict[str, Any]
+    label: str = "Edit timeline track"
+    _previous: dict[str, Any] | None = field(default=None, init=False, repr=False)
+
+    _ALLOWED = frozenset({"name", "target_id", "channel", "order", "muted"})
+
+    def execute(self) -> None:
+        unknown = set(self.values) - self._ALLOWED
+        if unknown:
+            raise TimelineMutationError(
+                "Unsupported track properties: " + ", ".join(sorted(unknown))
+            )
+        track = require_track(self.document, self.track_id)
+        if self._previous is None:
+            self._previous = {key: deepcopy(getattr(track, key)) for key in self.values}
+        for key, value in self.values.items():
+            setattr(track, key, deepcopy(value))
+
+    def undo(self) -> None:
+        if self._previous is None:
+            raise TimelineMutationError("Cannot undo track edit before execution")
+        track = require_track(self.document, self.track_id)
+        for key, value in self._previous.items():
+            setattr(track, key, deepcopy(value))
+
+    def merge_with(self, other: object) -> bool:
+        if not isinstance(other, SetTrackPropertiesCommand):
+            return False
+        if self.document is not other.document or self.track_id != other.track_id:
+            return False
+        if set(self.values) != set(other.values):
+            return False
+        self.values = deepcopy(other.values)
+        return True
+
+
+@dataclass
+class MoveTrackCommand:
+    document: SceneDocument
+    track_id: str
+    target_index: int
+    label: str = "Reorder timeline track"
+    _previous_tracks: list[TimelineTrack] | None = field(default=None, init=False, repr=False)
+    _previous_orders: dict[str, int] | None = field(default=None, init=False, repr=False)
+
+    def execute(self) -> None:
+        track = require_track(self.document, self.track_id)
+        if self._previous_tracks is None:
+            self._previous_tracks = list(self.document.tracks)
+            self._previous_orders = {item.id: item.order for item in self.document.tracks}
+        old_index = self.document.tracks.index(track)
+        target = max(0, min(int(self.target_index), len(self.document.tracks) - 1))
+        if target == old_index:
+            return
+        self.document.tracks.pop(old_index)
+        self.document.tracks.insert(target, track)
+        for order, item in enumerate(self.document.tracks):
+            item.order = order
+
+    def undo(self) -> None:
+        if self._previous_tracks is None or self._previous_orders is None:
+            raise TimelineMutationError("Cannot undo track reorder before execution")
+        self.document.tracks[:] = self._previous_tracks
+        for item in self.document.tracks:
+            item.order = self._previous_orders[item.id]
+
+
+@dataclass
 class AddClipCommand:
     document: SceneDocument
     track_id: str
@@ -272,3 +343,78 @@ class AddKeyframeCommand:
                 clip.keyframes.pop(index)
                 return
         raise TimelineMutationError("Cannot undo keyframe add; keyframe is missing")
+
+
+@dataclass
+class RemoveKeyframeCommand:
+    document: SceneDocument
+    clip_id: str
+    keyframe_id: str
+    label: str = "Delete timeline keyframe"
+    _keyframe: TimelineKeyframe | None = field(default=None, init=False, repr=False)
+    _index: int | None = field(default=None, init=False, repr=False)
+
+    def execute(self) -> None:
+        _track, clip, _clip_index = require_clip(self.document, self.clip_id)
+        for index, keyframe in enumerate(clip.keyframes):
+            if keyframe.id == self.keyframe_id:
+                self._keyframe = keyframe
+                self._index = index
+                clip.keyframes.pop(index)
+                return
+        raise TimelineMutationError(f"Timeline keyframe does not exist: {self.keyframe_id}")
+
+    def undo(self) -> None:
+        if self._keyframe is None or self._index is None:
+            raise TimelineMutationError("Cannot undo keyframe delete before execution")
+        _track, clip, _clip_index = require_clip(self.document, self.clip_id)
+        clip.keyframes.insert(min(self._index, len(clip.keyframes)), self._keyframe)
+
+
+@dataclass
+class SetKeyframePropertiesCommand:
+    document: SceneDocument
+    clip_id: str
+    keyframe_id: str
+    values: dict[str, Any]
+    label: str = "Edit timeline keyframe"
+    _previous: dict[str, Any] | None = field(default=None, init=False, repr=False)
+
+    _ALLOWED = frozenset({"frame", "value", "interpolation"})
+
+    def execute(self) -> None:
+        unknown = set(self.values) - self._ALLOWED
+        if unknown:
+            raise TimelineMutationError(
+                "Unsupported keyframe properties: " + ", ".join(sorted(unknown))
+            )
+        _track, clip, _clip_index = require_clip(self.document, self.clip_id)
+        keyframe = next(
+            (item for item in clip.keyframes if item.id == self.keyframe_id), None
+        )
+        if keyframe is None:
+            raise TimelineMutationError(
+                f"Timeline keyframe does not exist: {self.keyframe_id}"
+            )
+        if self._previous is None:
+            self._previous = {
+                key: deepcopy(getattr(keyframe, key)) for key in self.values
+            }
+        for key, value in self.values.items():
+            setattr(keyframe, key, deepcopy(value))
+        clip.keyframes.sort(key=lambda item: item.frame)
+
+    def undo(self) -> None:
+        if self._previous is None:
+            raise TimelineMutationError("Cannot undo keyframe edit before execution")
+        _track, clip, _clip_index = require_clip(self.document, self.clip_id)
+        keyframe = next(
+            (item for item in clip.keyframes if item.id == self.keyframe_id), None
+        )
+        if keyframe is None:
+            raise TimelineMutationError(
+                f"Timeline keyframe does not exist: {self.keyframe_id}"
+            )
+        for key, value in self._previous.items():
+            setattr(keyframe, key, deepcopy(value))
+        clip.keyframes.sort(key=lambda item: item.frame)

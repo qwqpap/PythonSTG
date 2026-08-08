@@ -7,6 +7,7 @@ miniaudio==1.61
 freetype-py==2.5.1
 moderngl==5.12.0
 
-# Keep this pair pinned together. We already saw mismatches break imports.
-numpy==2.2.4
-numba==0.63.1
+# Keep this pair pinned together. This is the verified Python 3.12 runtime
+# used by the current acceptance environment.
+numpy==1.26.4
+numba==0.60.0

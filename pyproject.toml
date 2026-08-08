@@ -16,14 +16,15 @@ dependencies = [
     "miniaudio==1.61",
     "freetype-py==2.5.1",
     "moderngl==5.12.0",
-    "numpy==2.2.4",
-    "numba==0.63.1",
+    "numpy==1.26.4",
+    "numba==0.60.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==8.4.1",
-    "PyQt5==5.15.10",
+    "PySide6==6.8.1.1",
+    "websockets==15.0.1",
     "pygame==2.6.1",
     "watchdog==4.0.1",
 ]

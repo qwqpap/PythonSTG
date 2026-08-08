@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from PyQt5.QtCore import QPointF, QProcess, QRectF, Qt, QUrl, pyqtSignal
-from PyQt5.QtGui import (
+from src.qt_compat.QtCore import QPointF, QProcess, QRectF, Qt, QUrl, pyqtSignal
+from src.qt_compat.QtGui import (
     QBrush,
     QColor,
     QFont,
@@ -20,7 +20,7 @@ from PyQt5.QtGui import (
     QPen,
     QPixmap,
 )
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtWidgets import (
     QAbstractItemView,
     QAction,
     QApplication,
@@ -50,6 +50,7 @@ from PyQt5.QtWidgets import (
     QStyle,
     QTabWidget,
     QTableWidget,
+    QTableWidgetItem,
     QTextBrowser,
     QToolBar,
     QToolButton,
@@ -61,8 +62,11 @@ from PyQt5.QtWidgets import (
 
 from src.core.project_context import ProjectContext
 from src.authoring.coordinates import CoordinateSpace
+from src.authoring.registry import build_default_resource_type_registry
 from src.authoring.resources import ResourceDocumentError, ResourceReference
+from src.game.background_render.document import BackgroundDocument
 from src.pattern import PatternDocument
+from src.ui.document import UIDocument
 
 from .asset_index import AssetRecord, load_subresource_preview
 from .document import (
@@ -73,9 +77,16 @@ from .document import (
     TimelineKeyframe,
     TimelineTrack,
 )
-from .node_types import NODE_TYPES, PropertySpec, make_node, property_specs
+from .node_types import (
+    NODE_TYPES,
+    PropertySpec,
+    build_default_node_type_registry,
+    make_node,
+    property_specs,
+)
 from .preview_panel import PatternPreviewPanel
 from .preview_process import PatternPreviewProcess
+from .runtime_preview import RuntimePreviewHost
 from .document_manager import (
     DocumentManager,
     DocumentManagerError,
@@ -84,6 +95,7 @@ from .document_manager import (
 from .pattern_commands import SetPatternPropertyCommand
 from .pattern_workspace import PatternWorkspace
 from .resource_browser import RESOURCE_MIME_TYPE, ResourceBrowserPanel
+from .ui_workspace import BackgroundWorkspace, UIWorkspace
 from .scene_commands import (
     AddNodeCommand,
     AssignResourceCommand,
@@ -98,16 +110,28 @@ from .scene_commands import (
 from .scene_compile import SceneSpellCompileError, compile_simple_spell
 from .timeline_commands import (
     AddClipCommand,
+    AddKeyframeCommand,
     AddTrackCommand,
+    MoveTrackCommand,
     MoveResizeClipCommand,
     RemoveClipCommand,
+    RemoveKeyframeCommand,
+    RemoveTrackCommand,
     SetClipPropertiesCommand,
+    SetKeyframePropertiesCommand,
+    SetTrackPropertiesCommand,
     clone_clip_with_new_ids,
     find_clip,
+    find_track,
     require_track,
 )
 from .timeline_workspace import TimelineEditor
-from .workbench import EditorPlugin, PluginRegistry, default_external_plugins
+from .plugin_sdk import PluginRegistry as SDKPluginRegistry
+from .workbench import (
+    EditorPlugin,
+    PluginRegistry as EditorPluginRegistry,
+    default_external_plugins,
+)
 
 
 APP_NAME = "PySTG Editor"
@@ -220,6 +244,7 @@ class NodeGraphicsItem(QGraphicsObject):
         node: EditorNode,
         project: ProjectContext,
         grid_size: int,
+        node_registry=None,
     ):
         super().__init__()
         self.node_id = node.id
@@ -227,8 +252,14 @@ class NodeGraphicsItem(QGraphicsObject):
         self.node_name = node.name
         self.grid_size = max(1, grid_size)
         self._drag_start = QPointF()
-        self._spec = NODE_TYPES.get(node.type)
-        self._pixmap = self._load_pixmap(node, project)
+        self._node_registry = node_registry
+        self._spec = (
+            node_registry.get(node.type)
+            if node_registry is not None
+            else NODE_TYPES.get(node.type)
+        )
+        self._pixmap = self._load_pixmap(node, project, node_registry)
+        self._runtime_pose = False
         self.setFlags(
             QGraphicsItem.ItemIsMovable
             | QGraphicsItem.ItemIsSelectable
@@ -238,8 +269,12 @@ class NodeGraphicsItem(QGraphicsObject):
         self.setZValue(10)
 
     @staticmethod
-    def _load_pixmap(node: EditorNode, project: ProjectContext) -> QPixmap:
-        spec = NODE_TYPES.get(node.type)
+    def _load_pixmap(node: EditorNode, project: ProjectContext, node_registry=None) -> QPixmap:
+        spec = (
+            node_registry.get(node.type)
+            if node_registry is not None
+            else NODE_TYPES.get(node.type)
+        )
         preview_property = spec.viewport.preview_property if spec is not None else None
         if preview_property is None:
             return QPixmap()
@@ -293,7 +328,15 @@ class NodeGraphicsItem(QGraphicsObject):
         spec = self._spec
         color = QColor(spec.color if spec else "#9aa4b2")
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor("#f5f7ff") if self.isSelected() else color, 3 if self.isSelected() else 2))
+        painter.setPen(
+            QPen(
+                QColor("#54e1ff")
+                if self._runtime_pose
+                else QColor("#f5f7ff") if self.isSelected() else color,
+                3 if self.isSelected() or self._runtime_pose else 2,
+                Qt.DashLine if self._runtime_pose else Qt.SolidLine,
+            )
+        )
         painter.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 72)))
 
         shape = spec.viewport.shape if spec is not None else "box"
@@ -320,6 +363,15 @@ class NodeGraphicsItem(QGraphicsObject):
 
         painter.setPen(QColor("#e8ecf5"))
         painter.drawText(QRectF(-70, 34, 140, 22), Qt.AlignHCenter | Qt.AlignTop, self.node_name)
+        if self._runtime_pose:
+            painter.setPen(QColor("#54e1ff"))
+            painter.drawText(QRectF(-34, -48, 68, 14), Qt.AlignCenter, "RUNTIME")
+
+    def set_runtime_position(self, x: float, y: float, *, active: bool) -> None:
+        self._runtime_pose = bool(active)
+        self.setFlag(QGraphicsItem.ItemIsMovable, not self._runtime_pose)
+        self.setPos(float(x), float(y))
+        self.update()
 
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
@@ -343,14 +395,16 @@ class SceneViewport(QGraphicsView):
     nodePositionRequested = pyqtSignal(str, float, float)
     resourceDropped = pyqtSignal(object, float, float)
 
-    def __init__(self, project: ProjectContext, parent=None):
+    def __init__(self, project: ProjectContext, parent=None, node_registry=None):
         self.graphics_scene = QGraphicsScene(parent)
         super().__init__(self.graphics_scene, parent)
         self.project = project
+        self.node_registry = node_registry
         self._document: SceneDocument | None = None
         self._items: dict[str, NodeGraphicsItem] = {}
         self._grid_size = 16
         self._background = QColor("#171a24")
+        self._runtime_state: dict[str, dict] = {}
         self.coordinate_space = CoordinateSpace()
         self._fit_on_next_resize = True
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -378,10 +432,16 @@ class SceneViewport(QGraphicsView):
         self.graphics_scene.setSceneRect(0, 0, width, height)
 
         for node in root.walk():
-            spec = NODE_TYPES.get(node.type)
+            spec = (
+                self.node_registry.get(node.type)
+                if self.node_registry is not None
+                else NODE_TYPES.get(node.type)
+            )
             if spec is None or not spec.viewport_item:
                 continue
-            item = NodeGraphicsItem(node, self.project, self._grid_size)
+            item = NodeGraphicsItem(
+                node, self.project, self._grid_size, self.node_registry
+            )
             item.setPos(
                 float(node.properties.get("x", width / 2)),
                 float(node.properties.get("y", height / 2)),
@@ -391,6 +451,8 @@ class SceneViewport(QGraphicsView):
             self._items[node.id] = item
 
         self.viewport().update()
+        if self._runtime_state:
+            self._apply_runtime_state()
         if self._fit_on_next_resize:
             self.fit_canvas()
 
@@ -406,6 +468,54 @@ class SceneViewport(QGraphicsView):
     def runtime_position(self, x: float, y: float) -> tuple[float, float]:
         """Convert a gizmo position through the formal authoring contract."""
         return self.coordinate_space.authoring_to_runtime(x, y)
+
+    def set_runtime_state(self, node_state: dict | None) -> None:
+        self._runtime_state = dict(node_state or {})
+        self._apply_runtime_state()
+
+    def clear_runtime_state(self) -> None:
+        self._runtime_state = {}
+        if self._document is None:
+            return
+        nodes = {node.id: node for node in self._document.root.walk()}
+        width = self.coordinate_space.logical_width
+        height = self.coordinate_space.logical_height
+        for node_id, item in self._items.items():
+            node = nodes.get(node_id)
+            if node is None:
+                continue
+            item.set_runtime_position(
+                float(node.properties.get("x", width / 2)),
+                float(node.properties.get("y", height / 2)),
+                active=False,
+            )
+        self.viewport().update()
+
+    def _apply_runtime_state(self) -> None:
+        if self._document is None:
+            return
+        nodes = {node.id: node for node in self._document.root.walk()}
+        for node_id, item in self._items.items():
+            state = self._runtime_state.get(node_id)
+            x = state.get("x") if isinstance(state, dict) else None
+            y = state.get("y") if isinstance(state, dict) else None
+            if (
+                isinstance(x, (int, float))
+                and not isinstance(x, bool)
+                and isinstance(y, (int, float))
+                and not isinstance(y, bool)
+            ):
+                authoring_x, authoring_y = self.coordinate_space.runtime_to_authoring(x, y)
+                item.set_runtime_position(authoring_x, authoring_y, active=True)
+                continue
+            node = nodes.get(node_id)
+            if node is not None:
+                item.set_runtime_position(
+                    float(node.properties.get("x", self.coordinate_space.logical_width / 2)),
+                    float(node.properties.get("y", self.coordinate_space.logical_height / 2)),
+                    active=False,
+                )
+        self.viewport().update()
 
     def _selection_changed(self) -> None:
         selected = self.graphics_scene.selectedItems()
@@ -512,11 +622,94 @@ class ResourceLineEdit(QLineEdit):
         event.acceptProposedAction()
 
 
+_GRAPH_NODE_DEFAULTS: dict[str, object] = {
+    "count": 24,
+    "origin_x": 0.0,
+    "origin_y": 0.65,
+    "angle_span": 360.0,
+    "line_length": 1.0,
+    "line_angle": 0.0,
+    "angle": 270.0,
+    "delay_frames": 0,
+    "interval_frames": 20,
+    "burst_count": 1,
+    "loop_count": 1,
+    "speed": 2.0,
+    "friction": 0.0,
+    "spin": 0.0,
+    "time_scale": 1.0,
+    "max_lifetime": 0.0,
+    "render_scale": 1.0,
+    "bounce_x": False,
+    "bounce_y": False,
+    "angle_offset_per_burst": 0.0,
+    "speed_offset_per_burst": 0.0,
+    "random_speed_variation": 0.0,
+    "bullet_type": "ball_m",
+    "color": "red",
+    "resource": None,
+}
+
+
+def _coerce_graph_value(original, text: str):
+    """Parse an Inspector text edit back to the node property's type."""
+    raw = str(text).strip()
+    if original is None:
+        return None if raw in {"", "null", "None"} else raw
+    if isinstance(original, bool):
+        return original
+    if isinstance(original, int):
+        try:
+            return int(raw)
+        except ValueError:
+            return original
+    if isinstance(original, float):
+        try:
+            return float(raw)
+        except ValueError:
+            return original
+    return raw
+
+
+def _coerce_ui_value(original, text: str):
+    """Parse an Inspector text edit back to the UI node property's type."""
+    raw = str(text).strip()
+    if original is None:
+        return None if raw in {"", "null", "None"} else raw
+    if isinstance(original, bool):
+        return raw.strip().lower() in {"true", "1", "yes"}
+    if isinstance(original, int):
+        try:
+            return int(raw)
+        except ValueError:
+            return original
+    if isinstance(original, float):
+        try:
+            return float(raw)
+        except ValueError:
+            return original
+    return raw
+
+
+def _find_ui_node(root, node_id: str):
+    from src.ui.document import UIDocumentNode
+
+    for node, _depth in root.walk():
+        if node.id == node_id:
+            return node
+    return None
+
+
 class InspectorPanel(QScrollArea):
     renameRequested = pyqtSignal(str, str)
     propertyRequested = pyqtSignal(str, str, object)
     patternPropertyRequested = pyqtSignal(str, object)
+    graphNodePropertyRequested = pyqtSignal(str, object)
+    uiNodePropertyRequested = pyqtSignal(str, object)
+    backgroundPropertyRequested = pyqtSignal(str, object)
     timelineClipPropertiesRequested = pyqtSignal(str, object)
+    timelineTrackPropertiesRequested = pyqtSignal(str, object)
+    timelineKeyframePropertiesRequested = pyqtSignal(str, str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -532,6 +725,8 @@ class InspectorPanel(QScrollArea):
         self._node_id: str | None = None
         self._pattern_id: str | None = None
         self._timeline_clip_id: str | None = None
+        self._timeline_track_id: str | None = None
+        self.node_registry = None
 
     def _clear_form(self) -> None:
         while self._form.count():
@@ -545,6 +740,7 @@ class InspectorPanel(QScrollArea):
         self._node_id = node.id if node else None
         self._pattern_id = None
         self._timeline_clip_id = None
+        self._timeline_track_id = None
         if node is None:
             self._form.addRow(QLabel("No node selected"))
             return
@@ -563,12 +759,17 @@ class InspectorPanel(QScrollArea):
         type_edit.setReadOnly(True)
         self._form.addRow("Type", type_edit)
 
-        for spec in property_specs(node.type):
+        specs = (
+            self.node_registry.get(node.type).properties
+            if self.node_registry is not None and self.node_registry.get(node.type) is not None
+            else property_specs(node.type)
+        )
+        for spec in specs:
             value = node.properties.get(spec.key, spec.default)
             editor = self._make_editor(node.id, spec, value)
             self._form.addRow(spec.label, editor)
 
-        known = {spec.key for spec in property_specs(node.type)}
+        known = {spec.key for spec in specs}
         extras = {
             key: value
             for key, value in node.properties.items()
@@ -586,6 +787,7 @@ class InspectorPanel(QScrollArea):
         self._node_id = None
         self._pattern_id = document.id
         self._timeline_clip_id = None
+        self._timeline_track_id = None
         title = QLabel(f"Pattern Preview: {document.name}")
         title.setObjectName("inspectorPatternTitle")
         self._form.addRow(title)
@@ -610,6 +812,249 @@ class InspectorPanel(QScrollArea):
                 editor = self._make_pattern_editor(path, value)
                 self._form.addRow(self._pattern_label(path), editor)
 
+    def set_graph_node(self, node) -> None:
+        """Show property editors for one selected behavior graph node."""
+        from src.editor.graph_workspace import GRAPH_NODE_PROPERTY_SPECS
+
+        self._clear_form()
+        self._node_id = None
+        self._pattern_id = None
+        self._timeline_clip_id = None
+        self._timeline_track_id = None
+        if node is None:
+            self._form.addRow(QLabel("No graph node selected"))
+            return
+        title = QLabel(f"{node.category.title()} · {node.node_type}")
+        title.setObjectName("inspectorGraphNodeTitle")
+        title.setStyleSheet("font-weight:600; color:#9fc5ff;")
+        self._form.addRow(title)
+        type_edit = QLineEdit(f"{node.category} / {node.node_type}")
+        type_edit.setReadOnly(True)
+        self._form.addRow("Type", type_edit)
+        for key, label, kind in GRAPH_NODE_PROPERTY_SPECS.get(node.category, ()):
+            value = node.properties.get(key, _GRAPH_NODE_DEFAULTS.get(key))
+            editor = self._make_graph_property_editor(node.id, key, value)
+            self._form.addRow(label, editor)
+
+    def set_ui_node(self, node) -> None:
+        """Show property editors for one selected UI document node."""
+        from src.ui.document import ANIMATABLE_PROPERTIES
+
+        self._clear_form()
+        self._node_id = None
+        self._pattern_id = None
+        self._timeline_clip_id = None
+        self._timeline_track_id = None
+        if node is None:
+            self._form.addRow(QLabel("No UI node selected"))
+            return
+        title = QLabel(f"{node.node_type} · {node.name}")
+        title.setObjectName("inspectorUiNodeTitle")
+        title.setStyleSheet("font-weight:600; color:#9fc5ff;")
+        self._form.addRow(title)
+        for key in ("x", "y", "width", "height", "visible"):
+            value = getattr(node, key)
+            editor = self._make_ui_property_editor(node.id, key, value)
+            self._form.addRow(key.title(), editor)
+        for key in ANIMATABLE_PROPERTIES.get(node.node_type, ()):
+            if key in {"x", "y", "width", "height"}:
+                continue
+            value = getattr(node, key, None)
+            if isinstance(value, tuple):
+                value = list(value)
+            editor = self._make_ui_property_editor(node.id, key, value)
+            self._form.addRow(key.replace("_", " ").title(), editor)
+
+    def set_background_document(self, document) -> None:
+        """Show editable camera/fog/scroll/layer properties.
+
+        Values are emitted as property paths and are committed by the owning
+        ``ManagedDocument`` through ``SetBackgroundPropertyCommand``.  The
+        Inspector never mutates the document directly.
+        """
+        self._clear_form()
+        self._node_id = None
+        self._pattern_id = None
+        self._timeline_clip_id = None
+        self._timeline_track_id = None
+        title = QLabel(f"Background: {document.name}")
+        title.setObjectName("inspectorBackgroundTitle")
+        title.setStyleSheet("font-weight:600; color:#9fc5ff;")
+        self._form.addRow(title)
+        body = document.body
+        camera = body.get("camera") or {}
+        for key in ("eye", "at", "up", "fovy", "z_near", "z_far"):
+            value = camera.get(key)
+            if value is None:
+                continue
+            editor = self._make_background_editor(f"camera.{key}", value)
+            self._form.addRow(f"Camera {key}", editor)
+        fog = body.get("fog") or {}
+        for key in ("enabled", "color", "start", "end"):
+            if key in fog:
+                self._form.addRow(
+                    f"Fog {key}",
+                    self._make_background_editor(f"fog.{key}", fog[key]),
+                )
+        scroll = body.get("scroll") or {}
+        for key in ("base_speed", "direction"):
+            if key in scroll:
+                self._form.addRow(
+                    f"Scroll {key}",
+                    self._make_background_editor(f"scroll.{key}", scroll[key]),
+                )
+        layers = body.get("layers") or []
+        layer_label = QLabel(f"{len(layers)} layers")
+        layer_label.setWordWrap(True)
+        self._form.addRow("Layers", layer_label)
+        for index, layer in enumerate(layers[:8]):
+            prefix = f"layers.{index}"
+            for key in ("name", "texture", "z_order", "z_depth", "blend_mode", "alpha", "scroll_multiplier", "enabled"):
+                if key in layer:
+                    self._form.addRow(
+                        f"Layer {index} {key}",
+                        self._make_background_editor(f"{prefix}.{key}", layer[key]),
+                    )
+            transform = layer.get("transform") or {}
+            for key in ("x", "y", "scale", "rotation"):
+                if key in transform:
+                    self._form.addRow(
+                        f"Layer {index} transform {key}",
+                        self._make_background_editor(
+                            f"{prefix}.transform.{key}", transform[key]
+                        ),
+                    )
+
+    def _make_background_editor(self, path: str, value):
+        if isinstance(value, bool):
+            editor = QCheckBox()
+            editor.setChecked(value)
+            editor.toggled.connect(
+                lambda checked, target=path: self.backgroundPropertyRequested.emit(
+                    target, bool(checked)
+                )
+            )
+            return editor
+        if isinstance(value, int) and not isinstance(value, bool):
+            editor = QSpinBox()
+            editor.setRange(-1_000_000, 1_000_000)
+            editor.setValue(value)
+            editor.valueChanged.connect(
+                lambda number, target=path: self.backgroundPropertyRequested.emit(
+                    target, int(number)
+                )
+            )
+            return editor
+        if isinstance(value, float):
+            editor = QDoubleSpinBox()
+            editor.setDecimals(5)
+            editor.setRange(-1_000_000.0, 1_000_000.0)
+            editor.setValue(value)
+            editor.valueChanged.connect(
+                lambda number, target=path: self.backgroundPropertyRequested.emit(
+                    target, float(number)
+                )
+            )
+            return editor
+        editor = QLineEdit(
+            json.dumps(value, ensure_ascii=False)
+            if isinstance(value, (list, tuple, dict))
+            else str(value)
+        )
+
+        def commit(edit=editor, target=path, original=value):
+            raw = edit.text().strip()
+            parsed = raw
+            if isinstance(original, (list, tuple, dict)):
+                try:
+                    parsed = json.loads(raw)
+                except (TypeError, ValueError):
+                    parsed = original
+                if isinstance(original, tuple) and isinstance(parsed, list):
+                    parsed = tuple(parsed)
+            self.backgroundPropertyRequested.emit(target, parsed)
+
+        editor.editingFinished.connect(commit)
+        return editor
+
+    def _make_ui_property_editor(self, node_id: str, key: str, value):
+        if isinstance(value, bool):
+            editor = QCheckBox()
+            editor.setChecked(value)
+            editor.toggled.connect(
+                lambda checked, nid=node_id, k=key: self.uiNodePropertyRequested.emit(
+                    nid, {k: checked}
+                )
+            )
+        elif isinstance(value, (int, float)):
+            editor = QDoubleSpinBox()
+            editor.setDecimals(6)
+            editor.setRange(-1_000_000_000.0, 1_000_000_000.0)
+            editor.setSingleStep(0.1)
+            editor.setValue(float(value))
+            editor.editingFinished.connect(
+                lambda spin=editor, nid=node_id, k=key, original=value: self.uiNodePropertyRequested.emit(
+                    nid,
+                    {
+                        k: int(spin.value())
+                        if isinstance(original, int)
+                        else spin.value()
+                    },
+                )
+            )
+        elif isinstance(value, list):
+            editor = QLineEdit(json.dumps(value))
+            editor.editingFinished.connect(
+                lambda edit=editor, nid=node_id, k=key: self.uiNodePropertyRequested.emit(
+                    nid, {k: json.loads(edit.text()) if edit.text().strip() else []}
+                )
+            )
+        else:
+            editor = QLineEdit("" if value is None else str(value))
+            editor.editingFinished.connect(
+                lambda edit=editor, nid=node_id, k=key, original=value: self.uiNodePropertyRequested.emit(
+                    nid, {k: _coerce_ui_value(original, edit.text())}
+                )
+            )
+        editor.setObjectName("uiNodeProperty_" + key)
+        return editor
+
+    def _make_graph_property_editor(self, node_id: str, key: str, value):
+        if isinstance(value, bool):
+            editor = QCheckBox()
+            editor.setChecked(value)
+            editor.toggled.connect(
+                lambda checked, nid=node_id, k=key: self.graphNodePropertyRequested.emit(
+                    nid, {k: checked}
+                )
+            )
+        elif isinstance(value, (int, float)):
+            editor = QDoubleSpinBox()
+            editor.setDecimals(6)
+            editor.setRange(-1_000_000_000.0, 1_000_000_000.0)
+            editor.setSingleStep(0.1)
+            editor.setValue(float(value))
+            editor.editingFinished.connect(
+                lambda spin=editor, nid=node_id, k=key: self.graphNodePropertyRequested.emit(
+                    nid,
+                    {
+                        k: int(spin.value())
+                        if isinstance(value, int)
+                        else spin.value()
+                    },
+                )
+            )
+        else:
+            editor = QLineEdit("" if value is None else str(value))
+            editor.editingFinished.connect(
+                lambda edit=editor, nid=node_id, k=key, original=value: self.graphNodePropertyRequested.emit(
+                    nid,
+                    {k: _coerce_graph_value(original, edit.text())},
+                )
+            )
+        editor.setObjectName("graphNodeProperty_" + key)
+        return editor
+
     def set_timeline_clip(
         self,
         track: TimelineTrack,
@@ -620,6 +1065,7 @@ class InspectorPanel(QScrollArea):
         self._node_id = None
         self._pattern_id = None
         self._timeline_clip_id = clip.id
+        self._timeline_track_id = None
         title = QLabel(f"{track.name} / {clip.kind} Clip")
         title.setStyleSheet("font-weight:600; color:#9fc5ff;")
         self._form.addRow(title)
@@ -665,7 +1111,25 @@ class InspectorPanel(QScrollArea):
         target = QComboBox()
         target.setObjectName("timelineClipTarget")
         target.addItem("(inherit / none)", None)
-        for node in nodes:
+        property_name = str(clip.payload.get("property") or clip.channel)
+        compatible_nodes = [
+            node
+            for node in nodes
+            if (
+                clip.kind != "Movement"
+                or (
+                    isinstance(node.properties.get("x"), (int, float))
+                    and not isinstance(node.properties.get("x"), bool)
+                    and isinstance(node.properties.get("y"), (int, float))
+                    and not isinstance(node.properties.get("y"), bool)
+                )
+            )
+            and (
+                clip.kind != "Property"
+                or property_name in node.properties
+            )
+        ]
+        for node in compatible_nodes:
             target.addItem(f"{node.name} [{node.type}]", node.id)
         target_index = target.findData(clip.target_id)
         target.setCurrentIndex(max(0, target_index))
@@ -709,33 +1173,134 @@ class InspectorPanel(QScrollArea):
         apply_payload.clicked.connect(commit_payload)
         self._form.addRow(apply_payload)
 
-        keyframes = QPlainTextEdit(
-            json.dumps(
-                [item.to_dict() for item in clip.keyframes],
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        keyframes.setObjectName("timelineClipKeyframes")
+        keyframes = QTableWidget(len(clip.keyframes), 3)
+        keyframes.setObjectName("timelineKeyframeTable")
+        keyframes.setHorizontalHeaderLabels(["Frame", "Value", "Interpolation"])
+        keyframes.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        keyframes.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        keyframes.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         keyframes.setMinimumHeight(120)
-        self._form.addRow("Keyframes [JSON]", keyframes)
-        apply_keyframes = QPushButton("Apply Keyframes")
+        keyframes.blockSignals(True)
+        for row, item in enumerate(clip.keyframes):
+            frame_item = QTableWidgetItem(str(item.frame))
+            frame_item.setData(Qt.UserRole, item.id)
+            keyframes.setItem(row, 0, frame_item)
+            keyframes.setItem(
+                row,
+                1,
+                QTableWidgetItem(json.dumps(item.value, ensure_ascii=False)),
+            )
+            keyframes.setItem(row, 2, QTableWidgetItem(item.interpolation))
+        keyframes.blockSignals(False)
 
-        def commit_keyframes() -> None:
+        def commit_keyframe(item: QTableWidgetItem) -> None:
+            frame_item = keyframes.item(item.row(), 0)
+            if frame_item is None:
+                return
+            keyframe_id = str(frame_item.data(Qt.UserRole) or "")
             try:
-                value = json.loads(keyframes.toPlainText())
-                if not isinstance(value, list):
-                    raise ValueError("Keyframes must be a JSON array")
-                parsed = [TimelineKeyframe.from_dict(item).to_dict() for item in value]
-            except (json.JSONDecodeError, ValueError, DocumentError) as exc:
+                if item.column() == 0:
+                    values = {"frame": int(item.text())}
+                elif item.column() == 1:
+                    values = {"value": json.loads(item.text())}
+                else:
+                    values = {"interpolation": item.text().strip()}
+            except (ValueError, json.JSONDecodeError) as exc:
                 error.setText(str(exc))
                 return
             error.clear()
-            self.timelineClipPropertiesRequested.emit(clip.id, {"keyframes": parsed})
+            self.timelineKeyframePropertiesRequested.emit(
+                clip.id,
+                keyframe_id,
+                values,
+            )
 
-        apply_keyframes.clicked.connect(commit_keyframes)
-        self._form.addRow(apply_keyframes)
+        keyframes.itemChanged.connect(commit_keyframe)
+        self._form.addRow("Keyframes", keyframes)
         self._form.addRow(error)
+
+    def set_timeline_track(
+        self,
+        track: TimelineTrack,
+        nodes: list[EditorNode],
+    ) -> None:
+        self._clear_form()
+        self._node_id = None
+        self._pattern_id = None
+        self._timeline_clip_id = None
+        self._timeline_track_id = track.id
+        title = QLabel(f"{track.name} / {track.kind} Track")
+        title.setStyleSheet("font-weight:600; color:#9fc5ff;")
+        self._form.addRow(title)
+
+        name = QLineEdit(track.name)
+        name.setObjectName("timelineTrackName")
+        name.editingFinished.connect(
+            lambda edit=name, track_id=track.id: self.timelineTrackPropertiesRequested.emit(
+                track_id, {"name": edit.text().strip()}
+            )
+        )
+        self._form.addRow("Name", name)
+        kind = QLineEdit(track.kind)
+        kind.setReadOnly(True)
+        self._form.addRow("Kind", kind)
+
+        order = QSpinBox()
+        order.setObjectName("timelineTrackOrder")
+        order.setRange(0, 1_000_000)
+        order.setValue(track.order)
+        order.editingFinished.connect(
+            lambda editor=order, track_id=track.id: self.timelineTrackPropertiesRequested.emit(
+                track_id, {"order": editor.value()}
+            )
+        )
+        self._form.addRow("Order", order)
+
+        muted = QCheckBox()
+        muted.setObjectName("timelineTrackMuted")
+        muted.setChecked(track.muted)
+        muted.toggled.connect(
+            lambda checked, track_id=track.id: self.timelineTrackPropertiesRequested.emit(
+                track_id, {"muted": checked}
+            )
+        )
+        self._form.addRow("Muted", muted)
+
+        target = QComboBox()
+        target.setObjectName("timelineTrackTarget")
+        target.addItem("(none)", None)
+        compatible_nodes = [
+            node
+            for node in nodes
+            if (
+                track.kind != "Movement"
+                or (
+                    isinstance(node.properties.get("x"), (int, float))
+                    and not isinstance(node.properties.get("x"), bool)
+                    and isinstance(node.properties.get("y"), (int, float))
+                    and not isinstance(node.properties.get("y"), bool)
+                )
+            )
+            and (track.kind != "Property" or track.channel in node.properties)
+        ]
+        for node in compatible_nodes:
+            target.addItem(f"{node.name} [{node.type}]", node.id)
+        target.setCurrentIndex(max(0, target.findData(track.target_id)))
+        target.activated.connect(
+            lambda _index, combo=target, track_id=track.id: self.timelineTrackPropertiesRequested.emit(
+                track_id, {"target_id": combo.currentData()}
+            )
+        )
+        self._form.addRow("Target", target)
+
+        channel = QLineEdit(track.channel)
+        channel.setObjectName("timelineTrackChannel")
+        channel.editingFinished.connect(
+            lambda edit=channel, track_id=track.id: self.timelineTrackPropertiesRequested.emit(
+                track_id, {"channel": edit.text().strip()}
+            )
+        )
+        self._form.addRow("Channel", channel)
 
     @staticmethod
     def _pattern_label(path: str) -> str:
@@ -879,7 +1444,21 @@ class EditorMainWindow(QMainWindow):
     def __init__(self, project: ProjectContext):
         super().__init__()
         self.project = project
-        self.document_manager = DocumentManager(project)
+        # The SDK registries are the same objects used by document loading and
+        # scene validation.  Legacy workbench widgets remain a separate view
+        # catalog, but plugin contributions now have a real runtime owner.
+        self.resource_type_registry = build_default_resource_type_registry()
+        self.node_type_registry = build_default_node_type_registry()
+        self.plugin_sdk_registry = SDKPluginRegistry(
+            project,
+            resource_types=self.resource_type_registry,
+            node_types=self.node_type_registry,
+        )
+        self.document_manager = DocumentManager(
+            project,
+            registry=self.resource_type_registry,
+            node_registry=self.node_type_registry,
+        )
         self._fallback_selected_id = ""
         self._selected_id = self.session.document.root.id
         self._syncing_selection = False
@@ -888,14 +1467,25 @@ class EditorMainWindow(QMainWindow):
         self._active_pattern_document: PatternDocument | None = None
         self._active_pattern_session: ManagedDocument | None = None
         self._active_pattern_resource = ""
+        self._active_stage_session: ManagedDocument | None = None
+        self._preview_loaded_resource_id: str | None = None
+        self._preview_mode = "unloaded"
+        self._preview_state = "stopped"
         self._preview_pending_properties: dict[str, tuple[str, object]] = {}
+        self._runtime_preview_host: RuntimePreviewHost | None = None
+        self._sdk_plugins_deactivated = False
         self._tool_processes: dict[str, QProcess] = {}
         self._plugin_widgets: dict[str, QWidget] = {}
         self._document_widgets: dict[str, QWidget] = {}
-        self.plugin_registry = PluginRegistry(project)
+        # The legacy registry continues to own built-in Qt tool widgets.  The
+        # SDK registry above owns project-local resource/node/runtime
+        # contributions and is deliberately the same registry instance wired
+        # into DocumentManager; never replace it with a detached copy.
+        self.plugin_registry = EditorPluginRegistry(project)
         self._register_plugins()
         self._build_actions()
         self._build_ui()
+        self._discover_sdk_plugins()
         self._connect_pattern_preview()
         self._apply_theme()
         self._refresh()
@@ -944,6 +1534,32 @@ class EditorMainWindow(QMainWindow):
         )
         for plugin in default_external_plugins(self.project):
             self.plugin_registry.register(plugin)
+
+    def _discover_sdk_plugins(self) -> None:
+        """Register and activate project-local SDK manifests in isolation."""
+        for manifest in self.plugin_sdk_registry.discover().values():
+            try:
+                self.plugin_sdk_registry.register(manifest)
+            except Exception as exc:  # noqa: BLE001 - one bad plugin is isolated
+                # The SDK keeps the structured error; this log is only the
+                # editor-facing diagnostic and must not stop the shell.
+                self._log(f"[plugin:error] {manifest.id}: {exc}")
+        self.plugin_sdk_registry.activate_all()
+        self._refresh_node_add_menu()
+
+    def _refresh_node_add_menu(self) -> None:
+        """Expose newly activated SDK node contributions in the shell menu."""
+        menu = getattr(self, "_node_add_menu", None)
+        if menu is None:
+            return
+        for type_name, spec in self.node_type_registry.items():
+            if type_name == "SceneRoot" or type_name in self._node_menu_types:
+                continue
+            action = menu.addAction(spec.display_name)
+            action.triggered.connect(
+                lambda checked=False, node_type=type_name: self.add_node(node_type)
+            )
+            self._node_menu_types.add(type_name)
 
     @staticmethod
     def _create_bullet_alias_editor() -> QWidget:
@@ -1055,10 +1671,13 @@ class EditorMainWindow(QMainWindow):
         quick_flow.setObjectName("addSimpleSpellFlow")
         quick_flow.triggered.connect(self.create_simple_spell_flow)
         add_menu.addSeparator()
-        for type_name, spec in NODE_TYPES.items():
+        self._node_add_menu = add_menu
+        self._node_menu_types: set[str] = set()
+        for type_name, spec in self.node_type_registry.items():
             if type_name == "SceneRoot":
                 continue
             action = add_menu.addAction(spec.display_name)
+            self._node_menu_types.add(type_name)
             action.triggered.connect(
                 lambda checked=False, node_type=type_name: self.add_node(node_type)
             )
@@ -1095,11 +1714,27 @@ class EditorMainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
         self.inspector = InspectorPanel()
+        self.inspector.node_registry = self.node_type_registry
         self.inspector.renameRequested.connect(self.rename_node)
         self.inspector.propertyRequested.connect(self.set_node_property)
         self.inspector.patternPropertyRequested.connect(self._pattern_property_requested)
+        self.inspector.graphNodePropertyRequested.connect(
+            self._graph_node_property_requested
+        )
+        self.inspector.uiNodePropertyRequested.connect(
+            self._ui_node_property_requested
+        )
+        self.inspector.backgroundPropertyRequested.connect(
+            self._background_property_requested
+        )
         self.inspector.timelineClipPropertiesRequested.connect(
             self._timeline_clip_properties_requested
+        )
+        self.inspector.timelineTrackPropertiesRequested.connect(
+            self._timeline_track_properties_requested
+        )
+        self.inspector.timelineKeyframePropertiesRequested.connect(
+            self._timeline_keyframe_properties_requested
         )
         inspector_dock = QDockWidget("Inspector", self)
         inspector_dock.setObjectName("inspectorDock")
@@ -1118,6 +1753,15 @@ class EditorMainWindow(QMainWindow):
         self.timeline.clipGeometryRequested.connect(self._timeline_clip_geometry)
         self.timeline.duplicateClipRequested.connect(self._timeline_duplicate_clip)
         self.timeline.deleteClipRequested.connect(self._timeline_delete_clip)
+        self.timeline.deleteTrackRequested.connect(self._timeline_delete_track)
+        self.timeline.moveTrackRequested.connect(self._timeline_move_track)
+        self.timeline.muteTrackRequested.connect(self._timeline_mute_track)
+        self.timeline.addKeyframeRequested.connect(self._timeline_add_keyframe)
+        self.timeline.deleteKeyframeRequested.connect(self._timeline_delete_keyframe)
+        self.timeline.keyframeGeometryRequested.connect(
+            self._timeline_keyframe_geometry
+        )
+        self.timeline.trackSelected.connect(self._timeline_track_selected)
         self.timeline.clipSelected.connect(self._timeline_clip_selected)
         self.timeline.playheadChanged.connect(self._timeline_playhead_changed)
         self.timeline.zoomChanged.connect(self._timeline_zoom_changed)
@@ -1160,7 +1804,9 @@ class EditorMainWindow(QMainWindow):
             self.central_tabs.setCurrentWidget(existing)
             return existing
         if isinstance(session.document, SceneDocument):
-            widget: QWidget = SceneViewport(self.project)
+            widget: QWidget = SceneViewport(
+                self.project, node_registry=self.node_type_registry
+            )
             widget.nodeSelected.connect(self._select_from_viewport)
             widget.nodePositionRequested.connect(self._set_node_position)
             widget.resourceDropped.connect(self._resource_dropped)
@@ -1176,6 +1822,44 @@ class EditorMainWindow(QMainWindow):
             )
             widget.originPositionRequested.connect(self._pattern_origin_requested)
             widget.playerPositionRequested.connect(self._pattern_player_requested)
+            widget.graphExpandRequested.connect(self._graph_expand_requested)
+            widget.graphFoldRequested.connect(self._graph_fold_requested)
+            widget.graphModeChanged.connect(self._graph_mode_changed)
+            widget.graphNodeSelected.connect(self._graph_node_selected)
+            widget.graphNodePropertyRequested.connect(
+                self._graph_node_property_requested
+            )
+            widget.graphNodePositionRequested.connect(
+                self._graph_node_position_requested
+            )
+            widget.graphNodeCreateRequested.connect(self._graph_node_create_requested)
+            widget.graphEdgeRequested.connect(self._graph_edge_requested)
+            widget.graphNodeRemoveRequested.connect(self._graph_node_remove_requested)
+            widget.graphEdgeRemoveRequested.connect(self._graph_edge_remove_requested)
+        elif isinstance(session.document, UIDocument):
+            from .ui_workspace import UIWorkspace
+
+            widget = UIWorkspace()
+            widget.nodeSelected.connect(self._ui_node_selected)
+            widget.nodePropertyRequested.connect(self._ui_node_property_requested)
+            widget.nodeCreateRequested.connect(self._ui_node_create_requested)
+            widget.nodeRemoveRequested.connect(self._ui_node_remove_requested)
+            widget.canvas.nodeGeometryCommitted.connect(
+                self._ui_node_geometry_requested
+            )
+            widget.canvas.resourceDropped.connect(self._ui_resource_dropped)
+            widget.viewportChanged.connect(self._ui_viewport_changed)
+        elif isinstance(session.document, BackgroundDocument):
+            from .ui_workspace import BackgroundWorkspace
+
+            widget = BackgroundWorkspace()
+            widget.layerSelected.connect(self._background_layer_selected)
+            widget.layerTransformCommitted.connect(
+                self._background_layer_transform_requested
+            )
+            widget.layerCreateRequested.connect(self._background_layer_create_requested)
+            widget.layerRemoveRequested.connect(self._background_layer_remove_requested)
+            widget.bindingRequested.connect(self._background_binding_requested)
         else:
             raise DocumentManagerError(
                 f"No editor workspace for {session.document.type!r}"
@@ -1200,7 +1884,10 @@ class EditorMainWindow(QMainWindow):
         )
 
     def _central_tab_changed(self, index: int) -> None:
-        session = self._managed_for_widget(self.central_tabs.widget(index))
+        widget = self.central_tabs.widget(index)
+        if widget is not None and bool(widget.property("runtimePreview")):
+            return
+        session = self._managed_for_widget(widget)
         if session is None:
             return
         self.document_manager.activate(session)
@@ -1211,7 +1898,7 @@ class EditorMainWindow(QMainWindow):
                     session.resource_uri or f"unsaved://{session.document.id}"
                 )
                 self.preview_panel.set_mode("stage")
-        else:
+        elif isinstance(session.document, PatternDocument):
             self._active_pattern_session = session
             self._active_pattern_document = session.document
             self._active_pattern_resource = session.resource_uri or ""
@@ -1302,6 +1989,13 @@ class EditorMainWindow(QMainWindow):
 
     def _close_central_tab(self, index: int) -> None:
         widget = self.central_tabs.widget(index)
+        if widget is not None and bool(widget.property("runtimePreview")):
+            if isinstance(widget, RuntimePreviewHost):
+                widget.detach()
+            self.central_tabs.removeTab(index)
+            widget.deleteLater()
+            self._runtime_preview_host = None
+            return
         session = self._managed_for_widget(widget)
         if session is not None:
             if not self._confirm_discard(session):
@@ -1508,7 +2202,7 @@ class EditorMainWindow(QMainWindow):
             else:
                 flags &= ~Qt.ItemIsDragEnabled
             item.setFlags(flags)
-            spec = NODE_TYPES.get(node.type)
+            spec = self.node_type_registry.get(node.type)
             if spec:
                 item.setForeground(1, QColor(spec.color))
             if parent is None:
@@ -1541,9 +2235,15 @@ class EditorMainWindow(QMainWindow):
                 widget.rebuild(document)
                 widget.select_node(self._selected_id)
             selected_clip_id = self.session.editor_context.get("selected_clip_id")
+            selected_track_id = self.session.editor_context.get("selected_track_id")
             clip_result = (
                 find_clip(document, str(selected_clip_id))
                 if selected_clip_id
+                else None
+            )
+            track_result = (
+                find_track(document, str(selected_track_id))
+                if selected_track_id
                 else None
             )
             if clip_result is not None:
@@ -1552,33 +2252,91 @@ class EditorMainWindow(QMainWindow):
                     clip_result[1],
                     list(document.root.walk()),
                 )
+            elif track_result is not None:
+                self.inspector.set_timeline_track(
+                    track_result,
+                    list(document.root.walk()),
+                )
             else:
                 self.session.editor_context.pop("selected_clip_id", None)
+                self.session.editor_context.pop("selected_track_id", None)
                 self.inspector.set_node(self.session.node(self._selected_id))
             self.timeline.set_document(
                 document,
                 selected_clip_id=(clip_result[1].id if clip_result is not None else None),
                 zoom=float(self.session.editor_context.get("timeline_zoom", 0.25)),
             )
-            self.timeline.selected_track_id = self.session.editor_context.get(
-                "selected_track_id"
-            ) or self.timeline.selected_track_id
+            self.timeline.selected_track_id = (
+                track_result.id if track_result is not None else None
+            )
             self.timeline.set_playhead(
                 int(self.session.editor_context.get("timeline_playhead", 0)),
                 emit=False,
+            )
+            stored_active = self.session.editor_context.get(
+                "timeline_active_clips", ()
+            )
+            self.timeline.set_active_clips(
+                stored_active if isinstance(stored_active, (list, tuple, set)) else ()
             )
         else:
             self.tree.blockSignals(True)
             self.tree.clear()
             self.tree.blockSignals(False)
             self.tree.setEnabled(False)
-            self.inspector.set_pattern(document)
+            if isinstance(document, UIDocument):
+                self.inspector.set_ui_node(None)
+                if isinstance(widget, UIWorkspace):
+                    from src.qt_compat.QtCore import QTimer
+
+                    QTimer.singleShot(
+                        0,
+                        lambda doc=document, w=widget: self._apply_ui_document_view(
+                            w, doc
+                        ),
+                    )
+                self._update_actions()
+                self._update_title()
+                return
+            if isinstance(document, BackgroundDocument):
+                self.inspector.set_background_document(document)
+                if isinstance(widget, BackgroundWorkspace):
+                    widget.set_document(document)
+                    selected_layer = self.session.editor_context.get(
+                        "background_selected_layer", 0
+                    )
+                    if widget.layers.count():
+                        widget.layers.setCurrentRow(
+                            max(0, min(int(selected_layer), widget.layers.count() - 1))
+                        )
+                self.timeline.clear_document()
+                self._update_actions()
+                self._update_title()
+                return
+            graph_mode = bool(self.session.editor_context.get("graph_mode", False))
+            selected_graph_node = self.session.editor_context.get(
+                "selected_graph_node_id"
+            )
+            if graph_mode and document.graph is not None:
+                selected_node = next(
+                    (
+                        node
+                        for node in document.graph.nodes
+                        if node.id == str(selected_graph_node)
+                    ),
+                    None,
+                )
+                self.inspector.set_graph_node(selected_node)
+            else:
+                self.inspector.set_pattern(document)
             self.timeline.clear_document()
             if isinstance(widget, PatternWorkspace):
                 player = tuple(
                     self.session.editor_context.get("player_position", (0.0, -0.8))
                 )
                 widget.set_document(document, player_position=player)
+                mode = "graph" if graph_mode else "recipe"
+                widget.set_mode(mode, emit=False)
                 if hasattr(self, "resource_browser"):
                     widget.set_available_bullets(self.resource_browser.index.records)
         self._update_actions()
@@ -1728,10 +2486,17 @@ class EditorMainWindow(QMainWindow):
         if not isinstance(self.session.document, SceneDocument):
             return
         parent = self.session.node(self._selected_id) or self.session.document.root
-        node = make_node(node_type)
-        from .node_types import NODE_TYPE_REGISTRY
+        spec = self.node_type_registry.get(str(node_type))
+        if spec is None:
+            self._show_error("Add node failed", ValueError(f"Unknown node type: {node_type}"))
+            return
+        node = EditorNode(
+            type=str(node_type),
+            name=spec.display_name,
+            properties={prop.key: prop.default for prop in spec.properties},
+        )
 
-        if not NODE_TYPE_REGISTRY.can_parent(parent.type, node.type):
+        if not self.node_type_registry.can_parent(parent.type, node.type):
             self._show_error(
                 "Add node failed",
                 ValueError(f"{node.type} cannot be added under {parent.type}"),
@@ -1885,18 +2650,46 @@ class EditorMainWindow(QMainWindow):
                 ),
                 None,
             )
-        if kind in {"Movement", "Property"}:
-            return selected or self.session.document.root
+        if kind == "Movement":
+            if (
+                selected is not None
+                and isinstance(selected.properties.get("x"), (int, float))
+                and not isinstance(selected.properties.get("x"), bool)
+                and isinstance(selected.properties.get("y"), (int, float))
+                and not isinstance(selected.properties.get("y"), bool)
+            ):
+                return selected
+            return next(
+                (
+                    node
+                    for node in self.session.document.root.walk()
+                    if node.type in {"Emitter", "Boss"}
+                ),
+                None,
+            )
+        if kind == "Property":
+            if selected is not None and "enabled" in selected.properties:
+                return selected
+            return next(
+                (
+                    node
+                    for node in self.session.document.root.walk()
+                    if "enabled" in node.properties
+                ),
+                None,
+            )
         return None
 
     def _timeline_add_track(self, kind: str) -> None:
         if not isinstance(self.session.document, SceneDocument):
             return
         target = self._timeline_default_target(kind)
-        if kind == "Pattern" and target is None:
+        if kind in {"Pattern", "Movement", "Property"} and target is None:
             self._show_error(
                 "Add timeline track failed",
-                ValueError("Create or select a PatternInstance before adding a Pattern track"),
+                ValueError(
+                    f"Create or select a compatible target before adding a {kind} track"
+                ),
             )
             return
         channels = {
@@ -1930,6 +2723,86 @@ class EditorMainWindow(QMainWindow):
         self._log(f"Added {kind} timeline track")
         self._refresh()
         self._sync_active_stage_preview()
+
+    def _timeline_track_selected(self, track_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            track = require_track(self.session.document, track_id)
+        except ValueError:
+            return
+        self.session.editor_context["selected_track_id"] = track.id
+        self.session.editor_context.pop("selected_clip_id", None)
+        self.inspector.set_timeline_track(
+            track,
+            list(self.session.document.root.walk()),
+        )
+
+    def _timeline_track_properties_requested(
+        self,
+        track_id: str,
+        values: dict[str, object],
+    ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                SetTrackPropertiesCommand(
+                    self.session.document,
+                    track_id,
+                    values,
+                ),
+                coalesce=True,
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Edit timeline track failed", exc)
+            self._refresh()
+            return
+        self.session.editor_context["selected_track_id"] = track_id
+        self.session.editor_context.pop("selected_clip_id", None)
+        self._log("Edited timeline track")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_delete_track(self, track_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                RemoveTrackCommand(self.session.document, track_id)
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Delete timeline track failed", exc)
+            return
+        self.session.editor_context.pop("selected_track_id", None)
+        self.session.editor_context.pop("selected_clip_id", None)
+        self.timeline.selected_track_id = None
+        self.timeline.selected_clip_id = None
+        self._log("Deleted timeline track")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_move_track(self, track_id: str, delta: int) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            track = require_track(self.session.document, track_id)
+            current = self.session.document.tracks.index(track)
+            target = max(0, min(current + int(delta), len(self.session.document.tracks) - 1))
+            if target == current:
+                return
+            self.session.apply(
+                MoveTrackCommand(self.session.document, track_id, target)
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Reorder timeline track failed", exc)
+            return
+        self.session.editor_context["selected_track_id"] = track_id
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_mute_track(self, track_id: str, muted: bool) -> None:
+        self._timeline_track_properties_requested(track_id, {"muted": bool(muted)})
 
     def _timeline_add_clip(self, track_id: str) -> None:
         if not isinstance(self.session.document, SceneDocument):
@@ -2021,6 +2894,93 @@ class EditorMainWindow(QMainWindow):
         self._log(f"Added {track.kind} clip at frame {start}")
         self._refresh()
         self._sync_active_stage_preview()
+
+    def _timeline_add_keyframe(self, clip_id: str, playhead_frame: int) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        result = find_clip(self.session.document, clip_id)
+        if result is None:
+            return
+        track, clip, _index = result
+        if clip.kind not in {"Movement", "Property"}:
+            self._show_error(
+                "Add timeline keyframe failed",
+                ValueError("Only Movement and Property clips support keyframes"),
+            )
+            return
+        relative = max(0, int(playhead_frame) - clip.start_frame)
+        local = min(clip.duration_frames, relative % clip.duration_frames if clip.loop_count > 1 else relative)
+        if any(item.frame == local for item in clip.keyframes):
+            self._show_error(
+                "Add timeline keyframe failed",
+                ValueError(f"A keyframe already exists at local frame {local}"),
+            )
+            return
+        target = self.session.node(clip.target_id or track.target_id)
+        if clip.kind == "Movement":
+            value = {
+                "x": float(target.properties.get("x", 192.0)) if target else 192.0,
+                "y": float(target.properties.get("y", 224.0)) if target else 224.0,
+            }
+        else:
+            value = clip.payload.get("value")
+            if clip.keyframes:
+                previous = [item for item in clip.keyframes if item.frame < local]
+                value = (previous[-1] if previous else clip.keyframes[0]).value
+        keyframe = TimelineKeyframe(local, value)
+        try:
+            self.session.apply(
+                AddKeyframeCommand(self.session.document, clip.id, keyframe)
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Add timeline keyframe failed", exc)
+            return
+        self._log(f"Added keyframe at local frame {local}")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_delete_keyframe(self, clip_id: str, playhead_frame: int) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        result = find_clip(self.session.document, clip_id)
+        if result is None or not result[1].keyframes:
+            return
+        clip = result[1]
+        relative = max(0, int(playhead_frame) - clip.start_frame)
+        local = min(clip.duration_frames, relative % clip.duration_frames if clip.loop_count > 1 else relative)
+        keyframe = min(clip.keyframes, key=lambda item: abs(item.frame - local))
+        if abs(keyframe.frame - local) > self.timeline.snap_spin.value():
+            self._show_error(
+                "Delete timeline keyframe failed",
+                ValueError("Move the playhead onto a keyframe before deleting it"),
+            )
+            return
+        try:
+            self.session.apply(
+                RemoveKeyframeCommand(
+                    self.session.document,
+                    clip.id,
+                    keyframe.id,
+                )
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Delete timeline keyframe failed", exc)
+            return
+        self._log(f"Deleted keyframe at local frame {keyframe.frame}")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_keyframe_geometry(
+        self,
+        clip_id: str,
+        keyframe_id: str,
+        frame: int,
+    ) -> None:
+        self._timeline_keyframe_properties_requested(
+            clip_id,
+            keyframe_id,
+            {"frame": int(frame)},
+        )
 
     def _timeline_clip_geometry(
         self,
@@ -2136,11 +3096,45 @@ class EditorMainWindow(QMainWindow):
         self._refresh()
         self._sync_active_stage_preview()
 
-    def _timeline_playhead_changed(self, frame: int) -> None:
-        if self.document_manager.active is None:
+    def _timeline_keyframe_properties_requested(
+        self,
+        clip_id: str,
+        keyframe_id: str,
+        values: dict[str, object],
+    ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
             return
-        self.session.editor_context["timeline_playhead"] = int(frame)
-        if self._pattern_preview_client.is_running:
+        try:
+            self.session.apply(
+                SetKeyframePropertiesCommand(
+                    self.session.document,
+                    clip_id,
+                    keyframe_id,
+                    values,
+                ),
+                coalesce=True,
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Edit timeline keyframe failed", exc)
+            self._refresh()
+            return
+        self.session.editor_context["selected_clip_id"] = clip_id
+        self._log("Edited timeline keyframe")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _timeline_playhead_changed(self, frame: int) -> None:
+        session = self.document_manager.active
+        if session is None:
+            return
+        session.editor_context["timeline_playhead"] = int(frame)
+        if (
+            self._pattern_preview_client.is_running
+            and session is self._active_stage_session
+            and isinstance(session.document, SceneDocument)
+            and self._preview_mode == "stage"
+            and self._preview_loaded_resource_id == session.document.id
+        ):
             self._pattern_preview_client.send_command("seek", {"frame": int(frame)})
 
     def _timeline_zoom_changed(self, value: float) -> None:
@@ -2216,19 +3210,23 @@ class EditorMainWindow(QMainWindow):
             select_id=node.id,
         )
 
-    def undo(self) -> None:
-        if self.session.undo():
+    def undo(self) -> bool:
+        changed = self.session.undo()
+        if changed:
             self._log("Undo")
             self._refresh()
             self._sync_active_pattern_preview()
             self._sync_active_stage_preview()
+        return bool(changed)
 
-    def redo(self) -> None:
-        if self.session.redo():
+    def redo(self) -> bool:
+        changed = self.session.redo()
+        if changed:
             self._log("Redo")
             self._refresh()
             self._sync_active_pattern_preview()
             self._sync_active_stage_preview()
+        return bool(changed)
 
     def new_scene(self) -> None:
         session = self.document_manager.new_scene()
@@ -2293,6 +3291,20 @@ class EditorMainWindow(QMainWindow):
 
     def save_scene_as(self) -> bool:
         return self._save_document(self.session, save_as=True)
+
+    def autosave_open_documents(self) -> tuple[Path, ...]:
+        """Autosave dirty, path-backed sessions to recovery sidecars."""
+        written: list[Path] = []
+        store = self.document_manager.store
+        for session in tuple(self.document_manager):
+            if not session.is_dirty or session.path is None:
+                continue
+            written.append(store.autosave(session.document, session.path))
+        return tuple(written)
+
+    def find_recovery_candidates(self):
+        """Return sidecars that can be offered without changing open sessions."""
+        return self.document_manager.store.recovery_candidates()
 
     def _save_document(
         self,
@@ -2405,6 +3417,49 @@ class EditorMainWindow(QMainWindow):
             lambda text: self._log(f"[pattern-preview:stderr] {text}")
         )
         client.runningChanged.connect(self.preview_panel.set_running)
+        client.runningChanged.connect(self._preview_running_changed)
+
+    def _ensure_runtime_preview_host(self) -> RuntimePreviewHost:
+        host = self._runtime_preview_host
+        if host is not None:
+            return host
+        host = RuntimePreviewHost()
+        host.setProperty("runtimePreview", True)
+        self._runtime_preview_host = host
+        self.central_tabs.addTab(host, "Runtime Preview")
+        return host
+
+    def _show_runtime_preview_host(self, *, select: bool = False) -> None:
+        """Show the formal renderer inside the Qt workbench when possible."""
+
+        host = self._ensure_runtime_preview_host()
+        host.attach_process(self._pattern_preview_client)
+        if select:
+            self.central_tabs.setCurrentWidget(host)
+
+    def _preview_running_changed(self, running: bool) -> None:
+        if running:
+            return
+        if self._runtime_preview_host is not None:
+            self._runtime_preview_host.detach()
+        self._preview_loaded_resource_id = None
+        self._preview_mode = "unloaded"
+        self._preview_state = "stopped"
+        self._clear_stage_runtime_feedback()
+        self._active_stage_session = None
+
+    def _clear_stage_runtime_feedback(self) -> None:
+        self.timeline.set_active_clips(())
+        owner = self._active_stage_session
+        if owner is not None:
+            # Keep the document-local playhead coherent even when the preview
+            # process exits unexpectedly (in the normal stop path a statistics
+            # snapshot will also carry frame=0).
+            owner.editor_context["timeline_playhead"] = 0
+            owner.editor_context["timeline_active_clips"] = []
+        for widget in self._document_widgets.values():
+            if isinstance(widget, SceneViewport):
+                widget.clear_runtime_state()
 
     def _open_pattern_preview(self, resource_value: str) -> None:
         session = self._open_document(resource_value)
@@ -2419,6 +3474,9 @@ class EditorMainWindow(QMainWindow):
         self._active_pattern_session = session
         self._active_pattern_document = session.document
         self._active_pattern_resource = session.resource_uri or ""
+        self._active_stage_session = None
+        self._preview_loaded_resource_id = None
+        self._preview_mode = "pattern"
         self.preview_panel.set_resource(self._active_pattern_resource)
         self.bottom_tabs.setCurrentWidget(self.preview_panel)
         self._launch_active_pattern_preview()
@@ -2445,6 +3503,12 @@ class EditorMainWindow(QMainWindow):
             return
         if not self._pattern_preview_client.start():
             return
+        self._show_runtime_preview_host(select=True)
+        if self._active_stage_session is not session:
+            self._clear_stage_runtime_feedback()
+        self._active_stage_session = session
+        self._preview_loaded_resource_id = None
+        self._preview_mode = "stage"
         self.preview_panel.set_resource(
             session.resource_uri or f"unsaved://{session.document.id}"
         )
@@ -2467,6 +3531,14 @@ class EditorMainWindow(QMainWindow):
             return
         if not self._pattern_preview_client.start():
             return
+        # Keep the Pattern workspace visible while the formal renderer runs in
+        # its dedicated Runtime Preview tab.  The Stage flow selects that tab
+        # because its timeline is authored in the scene workspace.
+        self._show_runtime_preview_host()
+        self._clear_stage_runtime_feedback()
+        self._active_stage_session = None
+        self._preview_loaded_resource_id = None
+        self._preview_mode = "pattern"
         self._pattern_preview_client.send_command(
             "load",
             {"document": self._active_pattern_document.to_dict()},
@@ -2534,6 +3606,650 @@ class EditorMainWindow(QMainWindow):
         from .pattern_commands import pattern_with_property
 
         return pattern_with_property(document, path, value)
+
+    def _apply_graph_command(self, command, label: str) -> bool:
+        session = self._active_pattern_session
+        if session is None or not isinstance(session.document, PatternDocument):
+            return False
+        try:
+            session.apply(command)
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_graph_edit", "message": str(exc)}
+            )
+            self._log(f"[graph-edit:error] {exc}")
+            self._refresh()
+            return False
+        self._active_pattern_document = session.document
+        self._log(label)
+        self._refresh()
+        self._sync_active_pattern_preview()
+        return True
+
+    def _graph_mode_changed(self, mode: str) -> None:
+        session = self._active_pattern_session
+        if session is None:
+            return
+        if str(mode) == "graph":
+            session.editor_context["graph_mode"] = True
+        else:
+            session.editor_context["graph_mode"] = False
+            session.editor_context.pop("selected_graph_node_id", None)
+        self._refresh()
+
+    def _graph_expand_requested(self) -> None:
+        from .graph_commands import ExpandToGraphCommand
+
+        session = self._active_pattern_session
+        if session is None:
+            return
+        session.editor_context["graph_mode"] = True
+        if self._apply_graph_command(
+            ExpandToGraphCommand(session.document),
+            "Expand pattern to graph",
+        ):
+            pass
+
+    def _graph_fold_requested(self) -> None:
+        from .graph_commands import FoldBackToRecipeCommand
+
+        session = self._active_pattern_session
+        if session is None:
+            return
+        session.editor_context["graph_mode"] = False
+        session.editor_context.pop("selected_graph_node_id", None)
+        if self._apply_graph_command(
+            FoldBackToRecipeCommand(session.document),
+            "Fold graph back to recipe",
+        ):
+            pass
+
+    def _graph_node_selected(self, node_id: str) -> None:
+        session = self._active_pattern_session
+        if session is None or not isinstance(session.document, PatternDocument):
+            return
+        if session.document.graph is None:
+            return
+        session.editor_context["selected_graph_node_id"] = str(node_id)
+        selected = next(
+            (
+                node
+                for node in session.document.graph.nodes
+                if node.id == str(node_id)
+            ),
+            None,
+        )
+        self.inspector.set_graph_node(selected)
+
+    def _graph_node_property_requested(self, node_id: str, properties) -> None:
+        from .graph_commands import SetGraphNodePropertiesCommand
+
+        self._apply_graph_command(
+            SetGraphNodePropertiesCommand(
+                self._active_pattern_document,
+                str(node_id),
+                dict(properties),
+            ),
+            "Set graph node property",
+        )
+
+    def _graph_node_position_requested(self, node_id: str, x: float, y: float) -> None:
+        from .graph_commands import SetGraphNodePositionCommand
+
+        self._apply_graph_command(
+            SetGraphNodePositionCommand(
+                self._active_pattern_document,
+                str(node_id),
+                float(x),
+                float(y),
+            ),
+            "Move graph node",
+        )
+
+    def _graph_node_create_requested(self, category: str, node_type: str) -> None:
+        from .graph_commands import AddGraphNodeCommand
+
+        self._apply_graph_command(
+            AddGraphNodeCommand(
+                self._active_pattern_document,
+                str(category),
+                str(node_type),
+                label=f"Add {category} node",
+            ),
+            f"Add {category} node",
+        )
+
+    def _graph_edge_requested(self, from_id: str, to_id: str) -> None:
+        from .graph_commands import AddGraphEdgeCommand
+
+        self._apply_graph_command(
+            AddGraphEdgeCommand(
+                self._active_pattern_document,
+                str(from_id),
+                str(to_id),
+            ),
+            "Connect graph nodes",
+        )
+
+    def _graph_node_remove_requested(self, node_id: str) -> None:
+        from .graph_commands import RemoveGraphNodeCommand
+
+        self._apply_graph_command(
+            RemoveGraphNodeCommand(self._active_pattern_document, str(node_id)),
+            "Remove graph node",
+        )
+
+    def _graph_edge_remove_requested(self, edge_id: str) -> None:
+        from .graph_commands import RemoveGraphEdgeCommand
+
+        self._apply_graph_command(
+            RemoveGraphEdgeCommand(self._active_pattern_document, str(edge_id)),
+            "Remove graph edge",
+        )
+
+    def _apply_ui_document_view(self, widget, document) -> None:
+        widget.set_document(document)
+        selected = self.session.editor_context.get("selected_ui_node_id")
+        if selected:
+            widget.select_node(str(selected))
+
+    def _ui_node_selected(self, node_id: str) -> None:
+        session, _widget = self._ui_session_for_sender()
+        if session is None:
+            return
+        session.editor_context["selected_ui_node_id"] = str(node_id)
+        node = _find_ui_node(session.document.root, str(node_id))
+        if session is self.document_manager.active:
+            self.inspector.set_ui_node(node)
+
+    def _ui_node_create_requested(
+        self, parent_id: str, node_type: str, name: str
+    ) -> None:
+        from .ui_commands import AddUINodeCommand
+        from src.ui.document import UIDocumentNode
+
+        session, widget = self._ui_session_for_sender()
+        if session is None:
+            return
+        if not isinstance(session.document, UIDocument):
+            return
+        if node_type not in {
+            "text",
+            "rect",
+            "bar",
+            "image",
+            "panel",
+            "container_h",
+            "container_v",
+            "container_grid",
+        }:
+            self._log(f"[ui-edit:error] unknown UI node type: {node_type}")
+            return
+        node = UIDocumentNode(
+            node_type=str(node_type),
+            name=str(name or f"New {node_type}"),
+            width=96.0,
+            height=32.0,
+        )
+        if node_type == "text":
+            node.text = node.name
+        elif node_type == "image":
+            node.width = 64.0
+            node.height = 64.0
+        try:
+            session.apply(
+                AddUINodeCommand(
+                    session.document,
+                    str(parent_id or session.document.root.id),
+                    node,
+                )
+            )
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_ui_add", "message": str(exc)}
+            )
+            self._log(f"[ui-edit:error] {exc}")
+            return
+        session.editor_context["selected_ui_node_id"] = node.id
+        self._log("Add UI node")
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, UIWorkspace):
+            self._apply_ui_document_view(widget, session.document)
+
+    def _ui_node_remove_requested(self, node_id: str) -> None:
+        from .ui_commands import RemoveUINodeCommand
+
+        session, widget = self._ui_session_for_sender()
+        if session is None or not isinstance(session.document, UIDocument):
+            return
+        if str(node_id) == session.document.root.id:
+            self._log("[ui-edit] root node cannot be removed")
+            return
+        try:
+            session.apply(RemoveUINodeCommand(session.document, str(node_id)))
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_ui_remove", "message": str(exc)}
+            )
+            self._log(f"[ui-edit:error] {exc}")
+            return
+        session.editor_context["selected_ui_node_id"] = session.document.root.id
+        self._log("Remove UI node")
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, UIWorkspace):
+            self._apply_ui_document_view(widget, session.document)
+
+    def _ui_node_property_requested(self, node_id: str, properties) -> None:
+        from .ui_commands import SetUINodePropertyCommand
+
+        session, widget = self._ui_session_for_sender()
+        if session is None:
+            return
+        try:
+            session.apply(
+                SetUINodePropertyCommand(
+                    session.document,
+                    str(node_id),
+                    dict(properties),
+                )
+            )
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_ui_edit", "message": str(exc)}
+            )
+            self._log(f"[ui-edit:error] {exc}")
+            return
+        self._log("Set UI node property")
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, UIWorkspace):
+            self._apply_ui_document_view(widget, session.document)
+
+    def _ui_session_for_sender(self):
+        """Resolve a UI signal to its owning document, not merely the active tab."""
+        sender = self.sender()
+        widget = sender
+        while widget is not None:
+            session = self._managed_for_widget(widget)
+            if session is not None and isinstance(session.document, UIDocument):
+                return session, widget
+            parent_getter = getattr(widget, "parentWidget", None)
+            widget = parent_getter() if callable(parent_getter) else None
+        active = self.document_manager.active
+        if active is not None and isinstance(active.document, UIDocument):
+            return active, self._document_widgets.get(active.document.id)
+        return None, None
+
+    def _ui_node_geometry_requested(
+        self,
+        node_id: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        from .ui_commands import SetUINodePropertyCommand
+
+        session, widget = self._ui_session_for_sender()
+        if session is None:
+            return
+        try:
+            session.apply(
+                SetUINodePropertyCommand(
+                    session.document,
+                    str(node_id),
+                    {
+                        "x": float(x),
+                        "y": float(y),
+                        "width": float(width),
+                        "height": float(height),
+                    },
+                )
+            )
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_ui_geometry", "message": str(exc)}
+            )
+            self._log(f"[ui-edit:error] {exc}")
+            return
+        self._log("Move UI node")
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, UIWorkspace):
+            self._apply_ui_document_view(widget, session.document)
+
+    def _ui_resource_dropped(self, node_id: str, resource_uri: str) -> None:
+        """Assign a dropped project resource through the normal command path."""
+        from .ui_commands import SetUINodePropertyCommand
+
+        session, _widget = self._ui_session_for_sender()
+        if session is None:
+            return
+        node = _find_ui_node(session.document.root, str(node_id))
+        if node is None:
+            return
+        property_name = "texture" if node.node_type == "image" else "style"
+        value = str(resource_uri).strip()
+        if not value.startswith("res://"):
+            self._show_error(
+                "Invalid UI resource",
+                ResourceDocumentError("UI resources must use res:// references"),
+            )
+            return
+        try:
+            session.apply(
+                SetUINodePropertyCommand(
+                    session.document,
+                    str(node_id),
+                    {property_name: value},
+                )
+            )
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_ui_resource", "message": str(exc)}
+            )
+            self._log(f"[ui-edit:error] {exc}")
+            return
+        self._log("Assign UI resource")
+        if session is self.document_manager.active:
+            self._refresh()
+
+    def _background_session_for_sender(self):
+        sender = self.sender()
+        widget = sender
+        while widget is not None:
+            document_id = str(widget.property("managedDocumentId") or "")
+            if document_id:
+                session = next(
+                    (
+                        item
+                        for item in self.document_manager
+                        if item.document.id == document_id
+                    ),
+                    None,
+                )
+                if session is not None and isinstance(session.document, BackgroundDocument):
+                    return session, widget
+            parent_getter = getattr(widget, "parentWidget", None)
+            widget = parent_getter() if callable(parent_getter) else None
+        active = self.document_manager.active
+        if active is not None and isinstance(active.document, BackgroundDocument):
+            return active, self._document_widgets.get(active.document.id)
+        return None, None
+
+    def _background_layer_selected(self, index: int) -> None:
+        session, _widget = self._background_session_for_sender()
+        if session is not None:
+            session.editor_context["background_selected_layer"] = int(index)
+            if session is self.document_manager.active:
+                self.inspector.set_background_document(session.document)
+
+    def _background_property_requested(self, path: str, value) -> None:
+        from .background_commands import SetBackgroundPropertyCommand
+
+        session, widget = self._background_session_for_sender()
+        if session is None:
+            return
+        try:
+            session.apply(
+                SetBackgroundPropertyCommand(session.document, str(path), value),
+                coalesce=True,
+            )
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_background_edit", "message": str(exc)}
+            )
+            self._log(f"[background-edit:error] {exc}")
+            return
+        self._log(f"Set background property {path}")
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, BackgroundWorkspace):
+            widget.set_document(session.document)
+
+    def _background_layer_transform_requested(
+        self, index: int, x: float, y: float, scale: float, rotation: float
+    ) -> None:
+        from .background_commands import SetBackgroundPropertyCommand
+
+        session, widget = self._background_session_for_sender()
+        if session is None:
+            return
+        layers = session.document.body.get("layers") or []
+        if not isinstance(layers, list) or not 0 <= int(index) < len(layers):
+            return
+        current = dict(layers[int(index)].get("transform") or {})
+        current.update(
+            x=float(x), y=float(y), scale=float(scale), rotation=float(rotation)
+        )
+        try:
+            session.apply(
+                SetBackgroundPropertyCommand(
+                    session.document,
+                    f"layers.{int(index)}.transform",
+                    current,
+                ),
+                coalesce=True,
+            )
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_background_transform", "message": str(exc)}
+            )
+            self._log(f"[background-edit:error] {exc}")
+            return
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, BackgroundWorkspace):
+            widget.set_document(session.document)
+
+    def _background_layer_create_requested(self) -> None:
+        from .background_commands import AddBackgroundLayerCommand
+
+        session, widget = self._background_session_for_sender()
+        if session is None:
+            return
+        textures = session.document.body.get("textures") or {}
+        texture = next(iter(textures), None)
+        layer = {
+            "name": f"Layer {len(session.document.body.get('layers') or []) + 1}",
+            "texture": texture,
+            "z_order": len(session.document.body.get("layers") or []),
+            "z_depth": 0.0,
+            "blend_mode": "normal",
+            "alpha": 1.0,
+            "scroll_multiplier": 1.0,
+            "tile": {"x_range": [-1, 1], "y_range": [-1, 1], "size": 1.0},
+            "variants": [],
+            "enabled": True,
+            "transform": {"x": 0.0, "y": 0.0, "scale": 1.0, "rotation": 0.0},
+        }
+        try:
+            session.apply(AddBackgroundLayerCommand(session.document, layer))
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_background_add", "message": str(exc)}
+            )
+            self._log(f"[background-edit:error] {exc}")
+            return
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, BackgroundWorkspace):
+            widget.set_document(session.document)
+
+    def _background_layer_remove_requested(self, index: int) -> None:
+        from .background_commands import RemoveBackgroundLayerCommand
+
+        session, widget = self._background_session_for_sender()
+        if session is None:
+            return
+        try:
+            session.apply(RemoveBackgroundLayerCommand(session.document, int(index)))
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_background_remove", "message": str(exc)}
+            )
+            self._log(f"[background-edit:error] {exc}")
+            return
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, BackgroundWorkspace):
+            widget.set_document(session.document)
+
+    def _background_binding_requested(self, target: str, expression: str) -> None:
+        from .background_commands import SetBackgroundBindingCommand
+
+        session, widget = self._background_session_for_sender()
+        if session is None:
+            return
+        try:
+            session.apply(
+                SetBackgroundBindingCommand(
+                    session.document, str(target).strip(), str(expression).strip()
+                )
+            )
+        except Exception as exc:
+            self.preview_panel.handle_issue(
+                {"code": "invalid_background_binding", "message": str(exc)}
+            )
+            self._log(f"[background-edit:error] {exc}")
+            return
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, BackgroundWorkspace):
+            widget.set_document(session.document)
+
+    def _ui_viewport_changed(self, width: int, height: int) -> None:
+        session, widget = self._ui_session_for_sender()
+        if session is None:
+            return
+        session.editor_context["ui_viewport"] = (int(width), int(height))
+        if session is self.document_manager.active:
+            self._refresh()
+        elif isinstance(widget, UIWorkspace):
+            widget.refresh_canvas()
+
+    def save_layout(self, path: str | Path) -> Path:
+        """Persist dock/tab state plus open document paths."""
+        from src.core.atomic_io import atomic_write_json
+
+        payload = {
+            "schema_version": 1,
+            "window_state": bytes(self.saveState()).decode("latin-1"),
+            "open_documents": [
+                session.resource_uri
+                for session in self.document_manager
+                if session.resource_uri is not None
+            ],
+            "active_document": self.session.resource_uri
+            if self.document_manager.active is not None
+            else None,
+        }
+        return atomic_write_json(path, payload)
+
+    def restore_layout(self, path: str | Path) -> None:
+        """Restore dock/tab geometry and reopen persisted documents."""
+        import json as _json
+
+        from pathlib import Path as _Path
+
+        layout_path = _Path(path).expanduser().resolve()
+        try:
+            data = _json.loads(layout_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, _json.JSONDecodeError) as exc:
+            line = getattr(exc, "lineno", None)
+            location = f" at line {line}" if line is not None else ""
+            raise ResourceDocumentError(
+                f"{layout_path}: invalid layout JSON{location}: {exc}"
+            ) from exc
+        if not isinstance(data, dict):
+            raise ResourceDocumentError(f"{layout_path}: layout must be an object")
+        if data.get("schema_version") != 1:
+            raise ResourceDocumentError(
+                f"{layout_path}: unsupported layout schema_version"
+            )
+        documents = data.get("open_documents")
+        if not isinstance(documents, list):
+            raise ResourceDocumentError(
+                f"{layout_path}: open_documents must be an array"
+            )
+        if len(documents) > 256:
+            raise ResourceDocumentError(
+                f"{layout_path}: open_documents exceeds the 256-document limit"
+            )
+        resolved_documents: list[Path] = []
+        for index, document_uri in enumerate(documents):
+            if not isinstance(document_uri, str) or not document_uri.startswith("res://"):
+                raise ResourceDocumentError(
+                    f"{layout_path}: open_documents[{index}] must be a res:// URI"
+                )
+            try:
+                reference = ResourceReference.parse(document_uri)
+                if reference.subresource is not None:
+                    raise ResourceDocumentError("layout document URI cannot contain a fragment")
+                resolved = reference.resolve(self.project, must_exist=True)
+                self.project.relative(resolved)
+                # Load every document before mutating tabs, so one malformed
+                # entry cannot leave a partially restored workspace.
+                self.document_manager.store.load(resolved)
+            except (OSError, ValueError, ResourceDocumentError) as exc:
+                raise ResourceDocumentError(
+                    f"{layout_path}: invalid open_documents[{index}] {document_uri!r}: {exc}"
+                ) from exc
+            resolved_documents.append(resolved)
+
+        window_state = data.get("window_state")
+        if window_state is not None and not isinstance(window_state, str):
+            raise ResourceDocumentError(
+                f"{layout_path}: window_state must be a string"
+            )
+        active_uri = data.get("active_document")
+        if active_uri is not None and active_uri not in documents:
+            raise ResourceDocumentError(
+                f"{layout_path}: active_document must refer to open_documents"
+            )
+
+        if isinstance(window_state, str):
+            self.restoreState(bytes(window_state.encode("latin-1")))
+        for resolved in resolved_documents:
+            self._open_document(resolved)
+        if isinstance(active_uri, str):
+            target = ResourceReference.parse(active_uri).resolve(
+                self.project, must_exist=True
+            )
+            session = self.document_manager.find_path(target)
+            if session is not None:
+                self.document_manager.activate(session)
+
+    def _apply_graph_diagnostics(self, diagnostics) -> None:
+        node_ids: list[str] = []
+        edge_ids: list[str] = []
+        for item in diagnostics or ():
+            prefix, separator, rest = str(item.get("path") or "").partition(":")
+            if not separator:
+                continue
+            object_id = rest.split(":", 1)[0]
+            if prefix == "graph.node":
+                node_ids.append(object_id)
+            elif prefix == "graph.edge":
+                edge_ids.append(object_id)
+        if not node_ids and not edge_ids:
+            return
+        session = self.document_manager.active
+        if session is None:
+            return
+        widget = self._document_widgets.get(session.document.id)
+        if isinstance(widget, PatternWorkspace) and widget.mode() == "graph":
+            widget.set_graph_diagnostics(tuple(node_ids), tuple(edge_ids))
+
+    def _clear_graph_diagnostics(self) -> None:
+        session = self.document_manager.active
+        if session is None:
+            return
+        widget = self._document_widgets.get(session.document.id)
+        if isinstance(widget, PatternWorkspace):
+            widget.clear_graph_diagnostics()
 
     def _apply_pattern_properties(
         self,
@@ -2642,11 +4358,19 @@ class EditorMainWindow(QMainWindow):
             or not isinstance(session.document, SceneDocument)
             or not session.document.tracks
             or not self._pattern_preview_client.is_running
+            or self._active_stage_session is not session
+            or self._preview_mode != "stage"
+            or self._preview_loaded_resource_id != session.document.id
         ):
             return
+        frame = int(self.timeline.playhead_frame)
+        was_playing = self._preview_state == "playing"
         self._pattern_preview_client.send_command(
             "load", {"document": session.document.to_dict()}
         )
+        self._pattern_preview_client.send_command("seek", {"frame": frame})
+        if was_playing:
+            self._pattern_preview_client.send_command("play")
 
     def _handle_pattern_preview_event(self, message: dict) -> None:
         self.preview_panel.handle_event(message)
@@ -2655,14 +4379,64 @@ class EditorMainWindow(QMainWindow):
         if message.get("event") == "response" and request_id in self._preview_pending_properties:
             self._preview_pending_properties.pop(request_id)
         event = message.get("event")
+        if event in {"status", "statistics"}:
+            self._preview_state = str(payload.get("state") or self._preview_state)
+            self._preview_mode = str(payload.get("mode") or self._preview_mode)
+            resource_id = payload.get("resource_id")
+            if resource_id:
+                self._preview_loaded_resource_id = str(resource_id)
+            self._sync_stage_runtime_feedback(payload)
         if event == "program_loaded":
             mode = str(payload.get("mode") or "pattern")
+            self._preview_mode = mode
+            self._preview_loaded_resource_id = str(payload.get("resource_id") or "") or None
             self._log(
                 f"[{mode}-preview] loaded {payload.get('name')} "
                 f"({str(payload.get('content_hash') or '')[:12]})"
             )
+            self._clear_graph_diagnostics()
         elif event in {"compile_error", "runtime_error", "protocol_error"}:
             self._log(f"[pattern-preview:{event}] {payload}")
+            if event == "compile_error":
+                self._apply_graph_diagnostics(payload.get("diagnostics"))
+
+    def _sync_stage_runtime_feedback(self, payload: dict) -> None:
+        # Runtime feedback belongs to the scene that launched the preview, not
+        # whichever document happens to be active while the preview is still
+        # running.  This matters when the user switches tabs mid-playback: the
+        # owner scene must keep receiving the authoritative pose/playhead so it
+        # is correct as soon as the user returns to it.
+        session = self._active_stage_session
+        if (
+            session is None
+            or not isinstance(session.document, SceneDocument)
+            or self._preview_mode != "stage"
+            or self._preview_loaded_resource_id != session.document.id
+        ):
+            return
+        frame = payload.get("frame")
+        if isinstance(frame, int) and not isinstance(frame, bool):
+            session.editor_context["timeline_playhead"] = frame
+            # TimelineEditor is a single shared bottom panel, so only update it
+            # when it is currently showing the owner document.  The owner
+            # context above is still updated while another tab is active;
+            # _refresh() restores that playhead on return without seeking back
+            # into the preview.
+            if self.document_manager.active is session:
+                self.timeline.set_playhead(frame, emit=False)
+        active_clips = payload.get("active_clips")
+        if isinstance(active_clips, list):
+            session.editor_context["timeline_active_clips"] = list(active_clips)
+            if self.document_manager.active is session:
+                self.timeline.set_active_clips(active_clips)
+        widget = self._document_widgets.get(session.document.id)
+        state = str(payload.get("state") or self._preview_state)
+        node_state = payload.get("node_state")
+        if isinstance(widget, SceneViewport):
+            if state in {"playing", "paused"} and isinstance(node_state, dict):
+                widget.set_runtime_state(node_state)
+            elif state in {"stopped", "unloaded", "error"}:
+                widget.clear_runtime_state()
 
     def _handle_pattern_preview_issue(self, issue: dict) -> None:
         self.preview_panel.handle_issue(issue)
@@ -2820,6 +4594,9 @@ class EditorMainWindow(QMainWindow):
             process.terminate()
             if not process.waitForFinished(1500):
                 process.kill()
+        if not self._sdk_plugins_deactivated:
+            self.plugin_sdk_registry.deactivate_all()
+            self._sdk_plugins_deactivated = True
         event.accept()
 
 
@@ -2840,7 +4617,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setFont(QFont("Microsoft YaHei UI", 9))
     window = create_window(project)
     window.show()
-    return app.exec_()
+    return app.exec()
 
 
 if __name__ == "__main__":

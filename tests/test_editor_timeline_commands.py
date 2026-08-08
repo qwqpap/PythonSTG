@@ -3,10 +3,16 @@ from src.editor import SceneEditorSession, TimelineClip, TimelineKeyframe, Timel
 from src.editor.document_manager import DocumentManager
 from src.editor.timeline_commands import (
     AddClipCommand,
+    AddKeyframeCommand,
     AddTrackCommand,
+    MoveTrackCommand,
     MoveResizeClipCommand,
     RemoveClipCommand,
+    RemoveKeyframeCommand,
+    RemoveTrackCommand,
     SetClipPropertiesCommand,
+    SetKeyframePropertiesCommand,
+    SetTrackPropertiesCommand,
 )
 
 
@@ -85,7 +91,7 @@ def test_keyframes_round_trip_through_clip_property_command(tmp_path):
     track = TimelineTrack(
         name="Properties",
         kind="Property",
-        channel="alpha",
+        channel="background",
         target_id=target,
     )
     clip = TimelineClip(
@@ -93,7 +99,7 @@ def test_keyframes_round_trip_through_clip_property_command(tmp_path):
         kind="Property",
         start_frame=0,
         duration_frames=60,
-        channel="alpha",
+        channel="background",
         target_id=target,
         payload={"value": 1.0},
     )
@@ -114,3 +120,85 @@ def test_keyframes_round_trip_through_clip_property_command(tmp_path):
     assert [item.value for item in clip.keyframes] == [0.0, 1.0]
     assert session.undo()
     assert not clip.keyframes
+
+
+def test_track_edit_reorder_mute_delete_all_round_trip(tmp_path):
+    session = _managed_scene(tmp_path)
+    first = TimelineTrack(name="First", kind="Event", channel="event", order=0)
+    second = TimelineTrack(name="Second", kind="Event", channel="event", order=1)
+    session.apply(AddTrackCommand(session.document, first))
+    session.apply(AddTrackCommand(session.document, second))
+
+    session.apply(
+        SetTrackPropertiesCommand(
+            session.document,
+            first.id,
+            {"name": "Renamed", "muted": True, "channel": "phase"},
+        )
+    )
+    assert (first.name, first.muted, first.channel) == ("Renamed", True, "phase")
+    assert session.undo()
+    assert (first.name, first.muted, first.channel) == ("First", False, "event")
+    assert session.redo()
+
+    session.apply(MoveTrackCommand(session.document, second.id, 0))
+    assert session.document.tracks == [second, first]
+    assert [track.order for track in session.document.tracks] == [0, 1]
+    assert session.undo()
+    assert session.document.tracks == [first, second]
+    assert [track.order for track in session.document.tracks] == [0, 1]
+
+    session.apply(RemoveTrackCommand(session.document, first.id))
+    assert session.document.tracks == [second]
+    assert session.undo()
+    assert session.document.tracks == [first, second]
+
+
+def test_keyframe_add_edit_delete_all_round_trip(tmp_path):
+    session = _managed_scene(tmp_path)
+    target = session.document.root.id
+    track = TimelineTrack(
+        name="Background",
+        kind="Property",
+        channel="background",
+        target_id=target,
+    )
+    clip = TimelineClip(
+        name="Tint",
+        kind="Property",
+        start_frame=0,
+        duration_frames=60,
+        channel="background",
+        target_id=target,
+        payload={"value": "#171a24"},
+    )
+    session.apply(AddTrackCommand(session.document, track))
+    session.apply(AddClipCommand(session.document, track.id, clip))
+    keyframe = TimelineKeyframe(24, "#334455")
+
+    session.apply(AddKeyframeCommand(session.document, clip.id, keyframe))
+    assert clip.keyframes == [keyframe]
+    session.apply(
+        SetKeyframePropertiesCommand(
+            session.document,
+            clip.id,
+            keyframe.id,
+            {"frame": 36, "value": "#ffffff", "interpolation": "step"},
+        )
+    )
+    assert (keyframe.frame, keyframe.value, keyframe.interpolation) == (
+        36,
+        "#ffffff",
+        "step",
+    )
+    assert session.undo()
+    assert (keyframe.frame, keyframe.value, keyframe.interpolation) == (
+        24,
+        "#334455",
+        "linear",
+    )
+
+    session.apply(RemoveKeyframeCommand(session.document, clip.id, keyframe.id))
+    assert clip.keyframes == []
+    assert session.undo()
+    assert clip.keyframes == [keyframe]

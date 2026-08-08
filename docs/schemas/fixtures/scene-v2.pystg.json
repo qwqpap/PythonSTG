@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "type": "pystg.scene",
+  "id": "b88e1d39-dc9d-4fc9-8fb7-9023b17dba30",
+  "name": "Scene V2 Fixture",
+  "metadata": {},
+  "root": {
+    "id": "f330ee96-e0b4-45f4-a0a6-0ba7c90131ef",
+    "type": "SceneRoot",
+    "name": "Scene V2 Fixture",
+    "properties": {
+      "width": 384,
+      "height": 448,
+      "grid_size": 16,
+      "background": "#171a24"
+    },
+    "children": []
+  },
+  "tracks": []
+}

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
 
-from PyQt5.QtWidgets import QWidget
+from src.qt_compat.QtWidgets import QWidget
 
 from src.core.project_context import ProjectContext
 

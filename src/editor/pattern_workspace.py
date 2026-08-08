@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import math
 
-from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPen
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from src.qt_compat.QtGui import QColor, QPainter, QPainterPath, QPen
+from src.qt_compat.QtWidgets import (
     QCheckBox,
     QComboBox,
     QGraphicsItem,
@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -211,6 +212,16 @@ class PatternWorkspace(QWidget):
     bulletResourceRequested = pyqtSignal(str)
     originPositionRequested = pyqtSignal(float, float)
     playerPositionRequested = pyqtSignal(float, float)
+    graphModeChanged = pyqtSignal(str)
+    graphExpandRequested = pyqtSignal()
+    graphFoldRequested = pyqtSignal()
+    graphNodeSelected = pyqtSignal(str)
+    graphNodePropertyRequested = pyqtSignal(str, object)
+    graphNodePositionRequested = pyqtSignal(str, float, float)
+    graphNodeCreateRequested = pyqtSignal(str, str)
+    graphEdgeRequested = pyqtSignal(str, str)
+    graphNodeRemoveRequested = pyqtSignal(str)
+    graphEdgeRemoveRequested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -223,6 +234,19 @@ class PatternWorkspace(QWidget):
         self.title.setStyleSheet("font-size:16px; font-weight:600;")
         primary_toolbar.addWidget(self.title)
         primary_toolbar.addStretch()
+        self.mode_switch = QComboBox()
+        self.mode_switch.setObjectName("patternModeSwitch")
+        self.mode_switch.setToolTip(
+            "Authoring mode: Recipe (fields) or Graph (behavior nodes)"
+        )
+        self.mode_switch.addItem("Recipe", "recipe")
+        self.mode_switch.addItem("Graph", "graph")
+        self.mode_switch.currentIndexChanged.connect(self._mode_changed)
+        primary_toolbar.addWidget(self.mode_switch)
+        self.fold_button = QPushButton("Fold back to Recipe")
+        self.fold_button.setObjectName("graphFoldButton")
+        self.fold_button.clicked.connect(self.graphFoldRequested)
+        primary_toolbar.addWidget(self.fold_button)
         self.guides = QCheckBox("Guides")
         self.guides.setChecked(True)
         primary_toolbar.addWidget(self.guides)
@@ -265,6 +289,32 @@ class PatternWorkspace(QWidget):
         authoring_toolbar.setColumnStretch(1, 1)
         layout.addLayout(authoring_toolbar)
 
+        self.graph_toolbar_widget = QWidget()
+        self.graph_toolbar_widget.setObjectName("graphToolbar")
+        self.graph_toolbar = QGridLayout(self.graph_toolbar_widget)
+        self.graph_toolbar.setContentsMargins(0, 0, 0, 0)
+        self.graph_toolbar.addWidget(QLabel("Add Node"), 0, 0)
+        from .graph_workspace import CREATABLE_NODE_CATEGORIES, GraphCanvas, GraphPlaceholder
+
+        self._creatable_node_categories = CREATABLE_NODE_CATEGORIES
+        self.node_type_picker = QComboBox()
+        self.node_type_picker.setObjectName("graphNodeTypePicker")
+        for category, node_type in self._creatable_node_categories:
+            self.node_type_picker.addItem(category.title(), (category, node_type))
+        self.graph_toolbar.addWidget(self.node_type_picker, 0, 1)
+        add_node = QPushButton("Add")
+        add_node.setObjectName("graphAddNode")
+        add_node.clicked.connect(self._request_add_node)
+        self.graph_toolbar.addWidget(add_node, 0, 2)
+        self.graph_toolbar.addWidget(QLabel("Tip"), 1, 0)
+        tip = QLabel("Drag between ports to connect. Del removes selection.")
+        tip.setObjectName("graphWorkspaceHint")
+        tip.setWordWrap(True)
+        self.graph_toolbar.addWidget(tip, 1, 1, 1, 2)
+        self.graph_toolbar.setColumnStretch(1, 1)
+        self.graph_toolbar_widget.setVisible(False)
+        layout.addWidget(self.graph_toolbar_widget)
+
         hint = QLabel(
             "Drag E/P gizmos. Drop an Assets sprite to assign."
         )
@@ -276,7 +326,60 @@ class PatternWorkspace(QWidget):
         self.canvas.playerPositionRequested.connect(self.playerPositionRequested)
         self.canvas.bulletResourceDropped.connect(self.bulletResourceRequested)
         self.guides.toggled.connect(self.canvas.set_guides)
-        layout.addWidget(self.canvas, 1)
+
+        from .graph_workspace import GraphCanvas, GraphPlaceholder
+
+        self.graph_canvas = GraphCanvas()
+        self.graph_canvas.nodeSelected.connect(self.graphNodeSelected)
+        self.graph_canvas.nodePositionCommitted.connect(
+            self.graphNodePositionRequested
+        )
+        self.graph_canvas.edgeRequested.connect(self.graphEdgeRequested)
+        self.graph_canvas.nodeRemoveRequested.connect(self.graphNodeRemoveRequested)
+        self.graph_canvas.edgeRemoveRequested.connect(self.graphEdgeRemoveRequested)
+        self.graph_placeholder = GraphPlaceholder()
+        self.graph_placeholder.expandRequested.connect(self.graphExpandRequested)
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.canvas)
+        self.stack.addWidget(self.graph_canvas)
+        self.stack.addWidget(self.graph_placeholder)
+        layout.addWidget(self.stack, 1)
+        self._mode = "recipe"
+        self._document: PatternDocument | None = None
+        self._player_position = (0.0, -0.8)
+        self._mode_switching = False
+
+    def _mode_changed(self) -> None:
+        mode = str(self.mode_switch.currentData())
+        if mode == self._mode:
+            return
+        self._mode = mode
+        self._refresh_mode()
+        self.graphModeChanged.emit(mode)
+
+    def _refresh_mode(self) -> None:
+        self._mode_switching = True
+        try:
+            document = self._document
+            if self._mode == "graph":
+                self.fold_button.setVisible(True)
+                self.graph_toolbar_widget.setVisible(True)
+                if document is not None and document.graph is not None:
+                    self.graph_canvas.set_graph(document.graph)
+                    self.stack.setCurrentWidget(self.graph_canvas)
+                else:
+                    self.stack.setCurrentWidget(self.graph_placeholder)
+            else:
+                self.fold_button.setVisible(False)
+                self.graph_toolbar_widget.setVisible(False)
+                self.stack.setCurrentWidget(self.canvas)
+        finally:
+            self._mode_switching = False
+
+    def _request_add_node(self) -> None:
+        category, node_type = self.node_type_picker.currentData()
+        self.graphNodeCreateRequested.emit(str(category), str(node_type))
 
     def set_document(
         self,
@@ -284,11 +387,50 @@ class PatternWorkspace(QWidget):
         *,
         player_position: tuple[float, float] = (0.0, -0.8),
     ) -> None:
+        self._document = document
+        self._player_position = player_position
         self.title.setText(document.name)
         self.canvas.set_document(document, player_position=player_position)
         index = self.bullet_picker.findData(document.bullet.resource)
         if index >= 0:
             self.bullet_picker.setCurrentIndex(index)
+        self._refresh_mode()
+
+    def set_mode(self, mode: str, *, emit: bool = True) -> None:
+        mode = str(mode)
+        if mode not in {"recipe", "graph"}:
+            raise ValueError(f"unsupported pattern workspace mode: {mode!r}")
+        if emit:
+            index = self.mode_switch.findData(mode)
+            if index >= 0 and index != self.mode_switch.currentIndex():
+                self.mode_switch.setCurrentIndex(index)
+            elif index == self.mode_switch.currentIndex():
+                self._mode = mode
+                self._refresh_mode()
+        else:
+            self._mode = mode
+            self._refresh_mode()
+
+    def mode(self) -> str:
+        return self._mode
+
+    def refresh_graph(self) -> None:
+        if self._mode == "graph" and self._document is not None:
+            if self._document.graph is not None:
+                self.graph_canvas.set_graph(self._document.graph)
+                self.stack.setCurrentWidget(self.graph_canvas)
+            else:
+                self.stack.setCurrentWidget(self.graph_placeholder)
+
+    def select_graph_node(self, node_id: str) -> None:
+        self.graph_canvas.select_node(node_id)
+
+    def set_graph_diagnostics(self, node_ids: tuple[str, ...], edge_ids: tuple[str, ...]) -> None:
+        if self._mode == "graph":
+            self.graph_canvas.set_diagnostics(node_ids, edge_ids)
+
+    def clear_graph_diagnostics(self) -> None:
+        self.graph_canvas.clear_diagnostics()
 
     def set_available_bullets(self, records) -> None:
         current = self.bullet_picker.currentData()

@@ -12,9 +12,10 @@ import json
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.pattern import PatternProgram, PatternRunner, PatternRunnerState
+if TYPE_CHECKING:
+    from src.pattern import PatternProgram, PatternRunner
 
 
 def _decode_json(value: str) -> Any:
@@ -276,6 +277,10 @@ class StageRunner:
         self.trace: list[StageTraceEvent] = []
         self.last_events: tuple[StageTraceEvent, ...] = ()
         self._active_patterns: dict[tuple[str, int], _ActivePattern] = {}
+        self._context: Any | None = None
+        self._audio_started = False
+        self._audio_paused = False
+        self._active_audio_clip_id: str | None = None
         self._automation_values = {
             item.clip_id: tuple(keyframe.value for keyframe in item.keyframes)
             for item in program.automations
@@ -285,6 +290,8 @@ class StageRunner:
     @property
     def active_clip_ids(self) -> tuple[str, ...]:
         active = {item.schedule.clip_id for item in self._active_patterns.values()}
+        if self._active_audio_clip_id is not None:
+            active.add(self._active_audio_clip_id)
         active.update(
             item.clip_id
             for item in self.program.automations
@@ -305,6 +312,8 @@ class StageRunner:
         reset: bool = True,
         clear_owned: bool = True,
     ) -> None:
+        if context is not None:
+            self._context = context
         if reset:
             self.reset(context, clear_owned=clear_owned)
         self.state = StageRunnerState.RUNNING
@@ -314,15 +323,31 @@ class StageRunner:
             self.state = StageRunnerState.PAUSED
             for item in self._active_patterns.values():
                 item.runner.pause()
+            if self._audio_started and not self._audio_paused:
+                hook = getattr(self._context, "pause_bgm", None)
+                if callable(hook):
+                    hook()
+                    self._audio_paused = True
 
     def resume(self) -> None:
         if self.state == StageRunnerState.PAUSED:
             self.state = StageRunnerState.RUNNING
             for item in self._active_patterns.values():
                 item.runner.resume()
+            if self._audio_started and self._audio_paused:
+                hook = getattr(self._context, "unpause_bgm", None)
+                if callable(hook):
+                    hook()
+                    self._audio_paused = False
 
     def reset(self, context: Any | None = None, *, clear_owned: bool = True) -> None:
+        if context is not None:
+            self._context = context
         self._stop_all_patterns(context, clear_owned=clear_owned)
+        self._stop_audio()
+        clear_state = getattr(self._context, "clear_authored_stage_state", None)
+        if callable(clear_state):
+            clear_state()
         self.frame = 0
         self.state = StageRunnerState.STOPPED
         self.last_error = None
@@ -339,6 +364,7 @@ class StageRunner:
         self._active_patterns.clear()
 
     def tick(self, context: Any, *, dispatch_actions: bool = True) -> StageTickResult:
+        self._context = context
         current = self.frame
         if self.state != StageRunnerState.RUNNING:
             return StageTickResult(current, self.state)
@@ -421,6 +447,7 @@ class StageRunner:
     def _finish(self, context: Any, *, events: list[StageTraceEvent] | None = None) -> None:
         target = events if events is not None else []
         self._expire_patterns(context, self.program.duration_frames, target, force=True)
+        self._stop_audio()
         self.state = StageRunnerState.FINISHED
 
     def _expire_patterns(
@@ -467,6 +494,8 @@ class StageRunner:
             key = (schedule.clip_id, loop_index)
             if key in self._active_patterns:
                 continue
+            from src.pattern import PatternRunner
+
             runner = PatternRunner(schedule.program)
             runner.start(
                 _PatternContext(context, self, schedule),
@@ -505,8 +534,18 @@ class StageRunner:
             if not item.start_frame <= frame < item.end_frame:
                 continue
             local = (frame - item.start_frame) % item.duration_frames
+            # Clips use a half-open runtime span, but authoring keyframes may
+            # intentionally place the destination at duration_frames. Sample
+            # that endpoint on the final live frame so the authored value is
+            # actually reached before a loop restarts or the clip ends.
+            if (
+                local == item.duration_frames - 1
+                and item.keyframes
+                and item.keyframes[-1].frame == item.duration_frames
+            ):
+                local = item.duration_frames
             value = self._automation_value(item, local)
-            key = (item.target_id, item.channel)
+            key = (item.target_id, item.property_name)
             previous = winners.get(key)
             conflicts = 1 if previous is None else previous[2] + 1
             if previous is None or previous[0].order_key <= item.order_key:
@@ -574,7 +613,12 @@ class StageRunner:
             payload = item.payload
             if dispatch:
                 if item.kind == "Audio":
-                    self._dispatch_audio(context, item.channel, payload)
+                    self._dispatch_audio(
+                        context,
+                        item.channel,
+                        payload,
+                        clip_id=item.clip_id,
+                    )
                 elif item.kind == "Event":
                     hook = getattr(context, "emit_event", None)
                     if callable(hook):
@@ -598,8 +642,14 @@ class StageRunner:
                 )
             )
 
-    @staticmethod
-    def _dispatch_audio(context: Any, channel: str, payload: dict[str, Any]) -> None:
+    def _dispatch_audio(
+        self,
+        context: Any,
+        channel: str,
+        payload: dict[str, Any],
+        *,
+        clip_id: str | None = None,
+    ) -> None:
         action = str(payload.get("action", "play"))
         bus = str(payload.get("bus") or channel or "se").lower()
         if action == "play":
@@ -610,16 +660,86 @@ class StageRunner:
                     int(payload.get("loops", -1)),
                     int(payload.get("fade_ms", 0)),
                 )
+                self._audio_started = True
+                self._audio_paused = False
+                self._active_audio_clip_id = clip_id
             elif bus == "danmaku_se" and hasattr(context, "play_danmaku_se"):
                 context.play_danmaku_se(name, payload.get("volume"))
             else:
                 context.play_se(name, payload.get("volume"))
         elif action == "stop":
+            if payload.get("automatic") is True and self._active_audio_clip_id != clip_id:
+                return
             context.stop_bgm(int(payload.get("fade_ms", 0)))
+            self._audio_started = False
+            self._audio_paused = False
+            self._active_audio_clip_id = None
         elif action == "pause":
             context.pause_bgm()
+            if self._audio_started:
+                self._audio_paused = True
         elif action == "resume":
             context.unpause_bgm()
+            if self._audio_started:
+                self._audio_paused = False
+
+    def _stop_audio(self) -> None:
+        if not self._audio_started:
+            self._audio_paused = False
+            self._active_audio_clip_id = None
+            return
+        hook = getattr(self._context, "stop_bgm", None)
+        if callable(hook):
+            hook(0)
+        self._audio_started = False
+        self._audio_paused = False
+        self._active_audio_clip_id = None
+
+    def restore_audio_state(self, context: Any | None = None) -> None:
+        """Reconstruct persistent BGM state after side-effect-free seeking."""
+
+        if context is not None:
+            self._context = context
+        self._stop_audio()
+        if self.state == StageRunnerState.FINISHED:
+            return
+        state: tuple[str, dict[str, Any], str, str] | None = None
+        for item in self.program.actions:
+            if item.kind != "Audio" or item.frame >= self.frame:
+                continue
+            payload = item.payload
+            bus = str(payload.get("bus") or item.channel or "se").lower()
+            if bus != "bgm":
+                continue
+            action = str(payload.get("action", "play"))
+            if action == "play":
+                state = ("play", payload, item.channel, item.clip_id)
+            elif action == "stop":
+                if (
+                    payload.get("automatic") is True
+                    and state is not None
+                    and state[3] != item.clip_id
+                ):
+                    continue
+                state = None
+            elif action == "pause" and state is not None:
+                state = ("pause", state[1], state[2], state[3])
+            elif action == "resume" and state is not None:
+                state = ("play", state[1], state[2], state[3])
+        if state is None or self._context is None:
+            return
+        mode, payload, channel, clip_id = state
+        self._dispatch_audio(
+            self._context,
+            channel,
+            payload,
+            clip_id=clip_id,
+        )
+        if mode == "pause":
+            hook = getattr(self._context, "pause_bgm", None)
+            if callable(hook):
+                hook()
+                self._audio_paused = True
 
     @staticmethod
     def _trace_event(

@@ -32,10 +32,81 @@
     "aim": {"$ref": "#/$defs/aim"},
     "schedule": {"$ref": "#/$defs/schedule"},
     "motion": {"$ref": "#/$defs/motion"},
-    "modifiers": {"$ref": "#/$defs/modifiers"}
+    "modifiers": {"$ref": "#/$defs/modifiers"},
+    "bindings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/binding"}
+    },
+    "graph": {
+      "type": ["object", "null"],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/graph_node"}
+        },
+        "edges": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/graph_edge"}
+        }
+      },
+      "required": ["nodes", "edges"],
+      "additionalProperties": false
+    },
+    "script": {
+      "type": ["object", "null"],
+      "properties": {
+        "resource_uri": {"type": "string", "minLength": 1}
+      },
+      "required": ["resource_uri"],
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false,
   "$defs": {
+    "binding": {
+      "type": "object",
+      "required": ["path", "kind", "value"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "kind": {
+          "enum": ["constant", "curve", "variable", "expression"]
+        },
+        "value": {
+          "type": ["number", "string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "graph_node": {
+      "type": "object",
+      "required": ["id", "category", "node_type", "name", "properties"],
+      "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "category": {"type": "string", "minLength": 1},
+        "node_type": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "properties": {"type": "object"},
+        "position": {
+          "type": "array",
+          "items": {"type": "number"},
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "additionalProperties": false
+    },
+    "graph_edge": {
+      "type": "object",
+      "required": ["id", "from_node", "from_port", "to_node", "to_port"],
+      "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "from_node": {"type": "string", "format": "uuid"},
+        "from_port": {"type": "string", "minLength": 1},
+        "to_node": {"type": "string", "format": "uuid"},
+        "to_port": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
     "bullet": {
       "type": "object",
       "required": ["bullet_type", "color", "resource"],

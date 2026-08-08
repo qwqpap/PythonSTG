@@ -44,6 +44,9 @@ def _copy_pattern(target: PatternDocument, source: PatternDocument) -> None:
     target.motion = source.motion
     target.modifiers = source.modifiers
     target.seed = source.seed
+    target.bindings = source.bindings
+    target.graph = source.graph
+    target.script = source.script
 
 
 @dataclass

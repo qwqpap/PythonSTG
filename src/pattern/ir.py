@@ -50,7 +50,20 @@ class PatternProgram:
     render_scale: float
     bounce_x: bool
     bounce_y: bool
+    speed: float
     templates: tuple[BurstTemplate, ...]
+    bindings: tuple = ()
+    script: object | None = None
+    # Authoring geometry/modifier defaults retained so runtime bindings can
+    # rebuild one burst without carrying a mutable document into the runner.
+    shape_kind: str = "ring"
+    shape_count: int = 24
+    shape_angle_span: float = 360.0
+    shape_line_length: float = 1.0
+    shape_line_angle: float = 0.0
+    angle_offset_per_burst: float = 0.0
+    speed_offset_per_burst: float = 0.0
+    random_speed_variation: float = 0.0
 
     @property
     def total_emissions(self) -> int | None:

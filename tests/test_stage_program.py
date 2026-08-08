@@ -63,6 +63,12 @@ class RecordingAudioManager:
     def stop_bgm(self, fade_ms=0):
         self.events.append(("stop_bgm", fade_ms))
 
+    def pause_bgm(self):
+        self.events.append(("pause_bgm",))
+
+    def unpause_bgm(self):
+        self.events.append(("unpause_bgm",))
+
 
 def _project(tmp_path):
     aliases = tmp_path / "assets" / "bullet_aliases.json"
@@ -254,12 +260,42 @@ def test_compile_scene_timeline_to_immutable_stage_program(tmp_path):
     assert first.tick_rate == 60
     assert len(first.patterns) == 1
     assert len(first.automations) == 3
-    assert [item.kind for item in first.actions] == ["Audio", "Event", "ScriptEvent", "Audio"]
+    assert [item.kind for item in first.actions] == [
+        "Audio",
+        "Event",
+        "ScriptEvent",
+        "Audio",
+        "Audio",
+    ]
+    assert first.actions[-1].payload == {
+        "action": "stop",
+        "bus": "bgm",
+        "fade_ms": 0,
+        "automatic": True,
+    }
     assert first.patterns[0].target_id == instance.id
     assert first.patterns[0].position_target_id == emitter.id
     assert first.patterns[0].base_origin == pytest.approx((0.0, 0.0))
     with pytest.raises(Exception):
         first.patterns = ()
+
+
+def test_boss_movement_updates_runtime_node_state_and_feedback_hook(tmp_path):
+    project, scene, _emitter, _instance = _authored_stage(tmp_path)
+    boss = next(node for node in scene.root.walk() if node.type == "Boss")
+    movement = next(track for track in scene.tracks if track.kind == "Movement")
+    movement.target_id = boss.id
+
+    program = compile_stage(project, scene)
+    pool = OptimizedBulletPool(max_bullets=256)
+    context = RecordingContext(pool)
+    runner = StageRunner(program)
+    runner.start(context)
+    initial_x = runner.node_state[boss.id]["x"]
+    runner.advance(context, 6)
+
+    assert runner.node_state[boss.id]["x"] > initial_x
+    assert any(item[0] == boss.id for item in context.positions)
 
 
 def test_stage_runner_schedules_all_clip_types_and_last_order_wins(tmp_path):
@@ -300,6 +336,97 @@ def test_stage_runner_schedules_all_clip_types_and_last_order_wins(tmp_path):
     assert spawned_x[0] == pytest.approx(0.0)
     assert spawned_x[5] == pytest.approx(0.5)
     assert context.positions[-1][0] == emitter.id
+
+
+def test_movement_reaches_authored_endpoint_on_last_live_frame(tmp_path):
+    project, scene, emitter, _instance = _authored_stage(tmp_path)
+    context = RecordingContext(OptimizedBulletPool(max_bullets=128))
+    runner = StageRunner(compile_stage(project, scene))
+
+    runner.start(context)
+    runner.advance(context, 10)
+
+    assert runner.node_state[emitter.id]["x"] == pytest.approx(1.0)
+    assert context.positions[-1][0] == emitter.id
+    assert context.positions[-1][1:] == pytest.approx((1.0, 0.0))
+
+
+def test_property_conflicts_use_property_name_not_display_channel(tmp_path):
+    project, scene, emitter, _instance = _authored_stage(tmp_path)
+    scene.tracks.extend(
+        [
+            TimelineTrack(
+                name="X",
+                kind="Property",
+                channel="transform",
+                target_id=emitter.id,
+                order=10,
+                clips=[
+                    TimelineClip(
+                        name="X value",
+                        kind="Property",
+                        start_frame=0,
+                        duration_frames=2,
+                        channel="transform",
+                        payload={"property": "x", "value": 11.0},
+                    )
+                ],
+            ),
+            TimelineTrack(
+                name="Y",
+                kind="Property",
+                channel="transform",
+                target_id=emitter.id,
+                order=11,
+                clips=[
+                    TimelineClip(
+                        name="Y value",
+                        kind="Property",
+                        start_frame=0,
+                        duration_frames=2,
+                        channel="transform",
+                        payload={"property": "y", "value": 22.0},
+                    )
+                ],
+            ),
+            TimelineTrack(
+                name="Enabled alias",
+                kind="Property",
+                channel="alternate-channel",
+                target_id=scene.tracks[3].target_id,
+                order=12,
+                clips=[
+                    TimelineClip(
+                        name="Disable wins across channels",
+                        kind="Property",
+                        start_frame=1,
+                        duration_frames=2,
+                        channel="alternate-channel",
+                        payload={"property": "enabled", "value": False},
+                    )
+                ],
+            ),
+        ]
+    )
+    scene.validate()
+    context = RecordingContext(OptimizedBulletPool(max_bullets=128))
+    runner = StageRunner(compile_stage(project, scene))
+
+    runner.start(context)
+    runner.advance(context, 2)
+
+    assert runner.node_state[emitter.id]["x"] == pytest.approx(11.0)
+    assert runner.node_state[emitter.id]["y"] == pytest.approx(22.0)
+    instance_id = scene.tracks[3].target_id
+    assert runner.node_state[instance_id]["enabled"] is False
+    enabled = [
+        event
+        for event in runner.last_events
+        if event.kind == "property"
+        and event.clip_id == scene.tracks[-1].clips[0].id
+    ]
+    assert len(enabled) == 1
+    assert enabled[0].value["conflict_count"] == 3
 
 
 def test_reset_replay_produces_identical_deterministic_stage_trace(tmp_path):
@@ -396,3 +523,179 @@ def test_formal_preview_dispatches_stage_audio_through_injected_manager(tmp_path
         ("play_bgm", "stage_theme", -1, 0),
         ("play_bgm", "stage_theme", -1, 0),
     ]
+
+
+def test_stage_audio_pause_resume_seek_reset_stop_and_finish(tmp_path):
+    project, scene, _emitter, _instance = _authored_stage(tmp_path)
+    audio = RecordingAudioManager()
+    controller = PatternPreviewController(
+        OptimizedBulletPool(max_bullets=256),
+        project=project,
+        audio_manager=audio,
+    )
+    controller.load(scene.to_dict())
+    controller.play()
+    for _ in range(5):
+        controller.update()
+
+    controller.pause()
+    controller.play()
+    assert audio.events[-2:] == [("pause_bgm",), ("unpause_bgm",)]
+
+    audio.events.clear()
+    controller.seek(5)
+    assert audio.events == [
+        ("stop_bgm", 0),
+        ("play_bgm", "stage_theme", -1, 0),
+        ("pause_bgm",),
+    ]
+
+    controller.reset()
+    assert audio.events[-1] == ("stop_bgm", 0)
+    controller.play()
+    for _ in range(3):
+        controller.update()
+    controller.stop()
+    assert audio.events[-1] == ("stop_bgm", 0)
+
+    short_project, short_scene, _emitter, _instance = _authored_stage(
+        tmp_path / "short", duration=3
+    )
+    short_scene.tracks = [
+        TimelineTrack(
+            name="Short audio",
+            kind="Audio",
+            channel="bgm",
+            clips=[
+                TimelineClip(
+                    name="Short theme",
+                    kind="Audio",
+                    start_frame=0,
+                    duration_frames=3,
+                    channel="bgm",
+                    payload={"action": "play", "name": "stage_theme"},
+                )
+            ],
+        )
+    ]
+    short_scene.validate()
+    short_audio = RecordingAudioManager()
+    short = PatternPreviewController(
+        OptimizedBulletPool(max_bullets=64),
+        project=short_project,
+        audio_manager=short_audio,
+    )
+    short.load(short_scene.to_dict())
+    short.play()
+    for _ in range(3):
+        short.update()
+    assert short_audio.events[-2:] == [
+        ("play_bgm", "stage_theme", -1, 0),
+        ("stop_bgm", 0),
+    ]
+
+
+def test_automatic_audio_stop_does_not_stop_newer_overlapping_bgm(tmp_path):
+    project, scene, _emitter, _instance = _authored_stage(tmp_path, duration=20)
+    audio_track = next(track for track in scene.tracks if track.kind == "Audio")
+    audio_track.channel = "music"
+    audio_track.clips = [
+        TimelineClip(
+            name="First",
+            kind="Audio",
+            start_frame=0,
+            duration_frames=6,
+            channel="music",
+            payload={"action": "play", "bus": "bgm", "name": "first"},
+        ),
+        TimelineClip(
+            name="Second",
+            kind="Audio",
+            start_frame=3,
+            duration_frames=10,
+            channel="music",
+            order=1,
+            payload={"action": "play", "bus": "bgm", "name": "second"},
+        ),
+    ]
+    scene.validate()
+    audio = RecordingAudioManager()
+    context = StageContext(
+        OptimizedBulletPool(max_bullets=128),
+        DummyPlayer(),
+        audio_manager=audio,
+    )
+    runner = StageRunner(compile_stage(project, scene))
+
+    runner.start(context)
+    runner.advance(context, 7)
+    assert audio.events == [
+        ("play_bgm", "first", -1, 0),
+        ("play_bgm", "second", -1, 0),
+    ]
+    runner.advance(context, 13)
+    assert audio.events[-1] == ("stop_bgm", 0)
+
+    audio.events.clear()
+    runner.reset(context)
+    runner.start(context, reset=False)
+    runner.advance(context, 7, dispatch_actions=False)
+    runner.restore_audio_state(context)
+    assert audio.events == [("play_bgm", "second", -1, 0)]
+
+    audio.events.clear()
+    runner.reset(context)
+    audio.events.clear()
+    runner.start(context, reset=False)
+    runner.advance(context, 14, dispatch_actions=False)
+    runner.restore_audio_state(context)
+    assert audio.events == []
+
+
+def test_explicit_audio_stop_suppresses_duplicate_automatic_stop(tmp_path):
+    project, scene, _emitter, _instance = _authored_stage(tmp_path)
+    audio_track = next(track for track in scene.tracks if track.kind == "Audio")
+    audio_track.clips.append(
+        TimelineClip(
+            name="Explicit stop",
+            kind="Audio",
+            start_frame=12,
+            duration_frames=1,
+            channel="bgm",
+            order=1,
+            payload={"action": "stop", "fade_ms": 250},
+        )
+    )
+
+    program = compile_stage(project, scene)
+    stops = [
+        item
+        for item in program.actions
+        if item.frame == 12 and item.payload.get("action") == "stop"
+    ]
+    assert len(stops) == 1
+    assert stops[0].payload == {"action": "stop", "fade_ms": 250}
+
+
+def test_stage_context_records_typed_events_and_invokes_registered_script_hook():
+    context = StageContext(OptimizedBulletPool(max_bullets=16), DummyPlayer())
+    handled = []
+    context.register_script_event_handler("boss_phase", handled.append)
+
+    context.emit_event("phase_changed", {"phase": 2})
+    assert context.handle_script_event("boss_phase", {"phase": 3}) is True
+    assert context.handle_script_event("missing", None) is False
+
+    assert handled == [{"phase": 3}]
+    assert context.timeline_events() == (
+        {"kind": "event", "type": "phase_changed", "data": {"phase": 2}},
+        {
+            "kind": "script",
+            "type": "boss_phase",
+            "data": {"phase": 3},
+            "handled": True,
+        },
+        {"kind": "script", "type": "missing", "data": None, "handled": False},
+    )
+    context.clear_authored_stage_state()
+    assert context.timeline_events() == ()

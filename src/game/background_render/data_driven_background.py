@@ -83,6 +83,9 @@ class LayerConfig:
     tile: TileConfig = field(default_factory=TileConfig)
     variants: List[LayerVariant] = field(default_factory=list)
     enabled: bool = True
+    # Optional authoring/runtime transform.  Legacy payloads omit it and
+    # therefore retain byte-for-byte quad parity.
+    transform: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -152,7 +155,15 @@ class DataDrivenBackground:
             traceback.print_exc()
             return False
 
-    def load_from_dict(self, config: dict, base_dir: str = "", announce: bool = True) -> bool:
+    def load_from_dict(
+        self,
+        config: dict,
+        base_dir: str = "",
+        announce: bool = True,
+        *,
+        frame: int = 0,
+        time: float | None = None,
+    ) -> bool:
         """
         从配置字典加载背景定义。
         
@@ -164,6 +175,17 @@ class DataDrivenBackground:
             是否加载成功
         """
         try:
+            if isinstance(config, dict) and config.get("bindings"):
+                # Evaluate through the typed document contract before parsing
+                # into the formal renderer model.  This is a copy; editor
+                # documents remain untouched by runtime playback.
+                from .document import BackgroundDocument
+
+                if config.get("type") == "pystg.background":
+                    bound_document = BackgroundDocument.from_dict(config)
+                else:
+                    bound_document = BackgroundDocument.from_legacy(config)
+                config = bound_document.evaluate_bindings(frame=frame, time=time)
             self.data = self._parse_config(config, base_dir)
             
             # 加载所有纹理
@@ -271,7 +293,12 @@ class DataDrivenBackground:
                 scroll_multiplier=layer_cfg.get("scroll_multiplier", 1.0),
                 tile=tile,
                 variants=variants,
-                enabled=layer_cfg.get("enabled", True)
+                enabled=layer_cfg.get("enabled", True),
+                transform={
+                    key: float(value)
+                    for key, value in (layer_cfg.get("transform") or {}).items()
+                    if key in {"x", "y", "scale", "rotation"}
+                },
             )
             data.layers.append(layer)
         
@@ -384,13 +411,31 @@ class DataDrivenBackground:
                 y0 = (j - y_scroll) * tile.size + offset[1]
                 y1 = (j + 1 - y_scroll) * tile.size + offset[1]
                 z = layer.z_depth
-                
+                transform = layer.transform
+                tx = float(transform.get("x", 0.0))
+                ty = float(transform.get("y", 0.0))
+                scale = float(transform.get("scale", 1.0))
+                rotation = math.radians(float(transform.get("rotation", 0.0)))
+                cos_r = math.cos(rotation)
+                sin_r = math.sin(rotation)
+                cx = (x0 + x1) * 0.5
+                cy = (y0 + y1) * 0.5
+
+                def transform_vertex(x: float, y: float) -> tuple[float, float, float]:
+                    local_x = (x - cx) * scale
+                    local_y = (y - cy) * scale
+                    return (
+                        cx + local_x * cos_r - local_y * sin_r + tx,
+                        cy + local_x * sin_r + local_y * cos_r + ty,
+                        z,
+                    )
+
                 self.quads.append({
                     'texture': tex_info.full_path,
-                    'v0': (x0, y0, z),
-                    'v1': (x1, y0, z),
-                    'v2': (x1, y1, z),
-                    'v3': (x0, y1, z),
+                    'v0': transform_vertex(x0, y0),
+                    'v1': transform_vertex(x1, y0),
+                    'v2': transform_vertex(x1, y1),
+                    'v3': transform_vertex(x0, y1),
                     'alpha': layer.alpha if alpha is None else alpha,
                     'blend_mode': layer.blend_mode
                 })
@@ -504,6 +549,7 @@ class DataDrivenBackground:
                         for var in layer.variants
                     ],
                     "enabled": layer.enabled
+                    ,"transform": dict(layer.transform)
                 }
                 for layer in self.data.layers
             ]

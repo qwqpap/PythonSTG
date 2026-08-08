@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtCore import pyqtSignal
+from src.qt_compat.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -85,6 +85,7 @@ class PatternPreviewPanel(QWidget):
             ("frame", "Frame"),
             ("duration_frames", "Duration"),
             ("active_clips", "Active Clips"),
+            ("timeline_events", "Events"),
             ("bullet_count", "Bullets"),
             ("seed", "Seed"),
             ("update_ms", "Update"),
@@ -231,7 +232,7 @@ class PatternPreviewPanel(QWidget):
         elif event == "statistics":
             for key in self.stats_labels:
                 value = payload.get(key)
-                if key == "active_clips" and isinstance(value, list):
+                if key in {"active_clips", "timeline_events"} and isinstance(value, list):
                     value = len(value)
                 if key in {"update_ms", "render_ms"} and value is not None:
                     value = f"{float(value):.3f} ms"

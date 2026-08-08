@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QLabel, QPushButton, QLineEdit, QScrollArea,
     QGridLayout, QDialog, QDialogButtonBox, QComboBox,
@@ -24,8 +24,8 @@ from PyQt5.QtWidgets import (
     QFormLayout, QFrame, QInputDialog, QMenu, QSizePolicy,
     QListWidget, QListWidgetItem, QFileDialog, QSpinBox
 )
-from PyQt5.QtCore import Qt, QSize, pyqtSignal, QMimeData
-from PyQt5.QtGui import (
+from src.qt_compat.QtCore import Qt, QSize, pyqtSignal, QMimeData
+from src.qt_compat.QtGui import (
     QPixmap, QPainter, QColor, QFont, QPen, QBrush, QIcon,
     QDrag, QImage
 )
@@ -251,7 +251,7 @@ class AliasRow(QFrame):
         menu = QMenu(self)
         clear_action = menu.addAction("清除分配")
         remove_action = menu.addAction("删除别名")
-        action = menu.exec_(self.mapToGlobal(pos))
+        action = menu.exec(self.mapToGlobal(pos))
         if action == clear_action:
             self.clear_requested.emit(self.alias_name)
         elif action == remove_action:
@@ -720,7 +720,7 @@ class EnemyAliasManager(QMainWindow):
                 return
 
         dialog = _AtlasZoneDialog(str(png_path), json_path, self)
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec() == QDialog.Accepted:
             sprites, animations = dialog.get_result()
             zones_meta = dialog.get_zones_meta()
             import json
@@ -1741,7 +1741,7 @@ def main():
     app.setFont(QFont("Microsoft YaHei UI", 9))
     window = EnemyAliasManager()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

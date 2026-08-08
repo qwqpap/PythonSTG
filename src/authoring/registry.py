@@ -9,6 +9,7 @@ from typing import Any
 from .migrations import MigrationRegistry, build_default_migration_registry
 from .resources import (
     BACKGROUND_RESOURCE_TYPE,
+    CURVE_RESOURCE_TYPE,
     PATTERN_RESOURCE_TYPE,
     RESOURCE_SCHEMA_VERSION,
     SCENE_RESOURCE_SCHEMA_VERSION,
@@ -54,6 +55,17 @@ class ResourceTypeRegistry(Mapping[str, ResourceTypeSpec]):
             raise ValueError(f"Duplicate resource type: {spec.type_name}")
         self.migrations.register_type(spec.type_name, spec.current_version)
         self._types[spec.type_name] = spec
+        return spec
+
+    def unregister(self, type_name: str) -> ResourceTypeSpec:
+        """Remove one plugin-owned type and its migration declaration."""
+        try:
+            spec = self._types.pop(type_name)
+        except KeyError as exc:
+            raise KeyError(type_name) from exc
+        unregister = getattr(self.migrations, "unregister_type", None)
+        if callable(unregister):
+            unregister(type_name)
         return spec
 
     def __getitem__(self, key: str) -> ResourceTypeSpec:
@@ -112,6 +124,7 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
         (PATTERN_RESOURCE_TYPE, "Pattern", "pattern"),
         (UI_RESOURCE_TYPE, "UI", "ui"),
         (BACKGROUND_RESOURCE_TYPE, "Background", "background"),
+        (CURVE_RESOURCE_TYPE, "Curve", "curve"),
     ):
         if type_name == SCENE_RESOURCE_TYPE:
             from src.editor.document import SceneDocument
@@ -159,6 +172,165 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
                     asset_kind=asset_kind,
                     loader=PatternDocument.from_dict,
                     compiler=compile_pattern,
+                )
+            )
+        elif type_name == CURVE_RESOURCE_TYPE:
+            from src.pattern.curves import CurveDocument
+
+            registry.register(
+                ResourceTypeSpec(
+                    type_name=type_name,
+                    display_name=display_name,
+                    asset_kind=asset_kind,
+                    loader=CurveDocument.from_dict,
+                )
+            )
+        elif type_name == UI_RESOURCE_TYPE:
+            from src.ui.document import UIDocument
+
+            def make_ui_editor(*args, **kwargs):
+                from src.editor.ui_workspace import UIWorkspace
+
+                return UIWorkspace(*args, **kwargs)
+
+            def compile_ui(document, *, viewport_width=384, viewport_height=448, **kwargs):
+                document.validate()
+                return document.get_render_elements(
+                    viewport_width=viewport_width,
+                    viewport_height=viewport_height,
+                    **kwargs,
+                )
+
+            def preview_ui(compiled, renderer=None, **kwargs):
+                elements = (
+                    compiled.get_render_elements(**kwargs)
+                    if isinstance(compiled, UIDocument)
+                    else compiled
+                )
+                if renderer is not None:
+                    render_hud = getattr(renderer, "render_hud", None)
+                    if callable(render_hud):
+                        class _CompiledHUD:
+                            def get_render_elements(self):
+                                return elements
+
+                        render_hud(_CompiledHUD())
+                        return elements
+                    for element in elements:
+                        record = dict(element)
+                        kind = record.pop("type")
+                        position = record.pop("position", (0.0, 0.0))
+                        if kind == "text":
+                            record["x"], record["y"] = position
+                            record["font_name"] = record.pop("font", "default")
+                        else:
+                            record["x"], record["y"] = position
+                        method = getattr(renderer, f"render_{kind}", None)
+                        if callable(method):
+                            method(**record)
+                return elements
+
+            def load_ui(payload):
+                if "root" in payload:
+                    return UIDocument.from_dict(payload)
+                return GenericResourceDocument.from_dict(
+                    payload,
+                    expected_type=UI_RESOURCE_TYPE,
+                    current_version=RESOURCE_SCHEMA_VERSION,
+                )
+
+            registry.register(
+                ResourceTypeSpec(
+                    type_name=type_name,
+                    display_name=display_name,
+                    asset_kind=asset_kind,
+                    loader=load_ui,
+                    editor_factory=make_ui_editor,
+                    compiler=compile_ui,
+                    preview_handler=preview_ui,
+                )
+            )
+        elif type_name == BACKGROUND_RESOURCE_TYPE:
+            from src.game.background_render.document import BackgroundDocument
+
+            def make_background_editor(*args, **kwargs):
+                from src.editor.ui_workspace import BackgroundWorkspace
+
+                return BackgroundWorkspace(*args, **kwargs)
+
+            def compile_background(document, **_kwargs):
+                """Return the typed document consumed by the formal renderer."""
+                if not isinstance(document, BackgroundDocument):
+                    raise ResourceDocumentError(
+                        "background compiler expects a BackgroundDocument"
+                    )
+                document.validate()
+                return document
+
+            def preview_background(
+                compiled,
+                renderer=None,
+                *,
+                base_dir="",
+                project=None,
+                frame=0,
+                time=None,
+                **_kwargs,
+            ):
+                """Render a background through ``DataDrivenBackground``.
+
+                Without a renderer this returns the evaluated, serializable
+                payload for transport.  With one, it follows the same
+                DataDrivenBackground path used by gameplay and returns its
+                generated quads; no Qt diagnostic drawing is substituted.
+                """
+                if isinstance(compiled, BackgroundDocument):
+                    document = compiled
+                elif isinstance(compiled, Mapping):
+                    document = BackgroundDocument.from_dict(compiled)
+                else:
+                    raise ResourceDocumentError(
+                        "background preview payload must be an object"
+                    )
+                payload = document.evaluate_bindings(frame=frame, time=time)
+                if renderer is None:
+                    return payload
+                from src.game.background_render.data_driven_background import (
+                    DataDrivenBackground,
+                )
+
+                if not base_dir and project is not None:
+                    base_dir = str(project.root / "assets" / "images" / "background")
+                background = DataDrivenBackground(renderer)
+                if not background.load_from_dict(
+                    payload, str(base_dir or ""), announce=False,
+                    frame=frame, time=time,
+                ):
+                    raise ResourceDocumentError("formal background preview failed to load")
+                background.render()
+                return background.get_render_quads()
+
+            def load_background(payload):
+                if any(
+                    key in payload
+                    for key in ("layers", "camera", "textures")
+                ):
+                    return BackgroundDocument.from_dict(payload)
+                return GenericResourceDocument.from_dict(
+                    payload,
+                    expected_type=BACKGROUND_RESOURCE_TYPE,
+                    current_version=RESOURCE_SCHEMA_VERSION,
+                )
+
+            registry.register(
+                ResourceTypeSpec(
+                    type_name=type_name,
+                    display_name=display_name,
+                    asset_kind=asset_kind,
+                    loader=load_background,
+                    editor_factory=make_background_editor,
+                    compiler=compile_background,
+                    preview_handler=preview_background,
                 )
             )
         else:

@@ -116,6 +116,14 @@ class StageContext(SpellCardContext):
         self._background_renderer = background_renderer
         self._bullet_indices: List[int] = []
         self._enemy_scripts: List[Any] = []
+        # Sparse authored-stage state. These are semantic controller records,
+        # never per-bullet callbacks or scene-tree bullet objects.
+        self._authored_node_positions: Dict[str, tuple[float, float]] = {}
+        self._authored_node_properties: Dict[str, Dict[str, Any]] = {}
+        self._timeline_events: List[Dict[str, Any]] = []
+        self._script_event_handlers: Dict[str, Any] = {}
+        self._event_bus: Any = None
+        self._event_subscriptions: list[Any] = []
 
         if not StageContext._aliases_loaded:
             StageContext.load_bullet_aliases()
@@ -546,6 +554,110 @@ class StageContext(SpellCardContext):
 
     def clear_enemy_scripts(self):
         self._enemy_scripts.clear()
+
+    # ==================== Authored StageProgram API ====================
+
+    def set_node_position(self, node_id: str, x: float, y: float) -> None:
+        if not str(node_id).strip():
+            raise ValueError("node_id must be a non-empty string")
+        values = (x, y)
+        if any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not math.isfinite(float(value)) for value in values):
+            raise ValueError("node position must contain finite numbers")
+        self._authored_node_positions[str(node_id)] = (float(x), float(y))
+
+    def set_node_property(self, node_id: str, name: str, value: Any) -> None:
+        if not str(node_id).strip() or not str(name).strip():
+            raise ValueError("node_id and property name must be non-empty strings")
+        self._authored_node_properties.setdefault(str(node_id), {})[str(name)] = value
+
+    def emit_event(self, event_type: str, data: Any) -> None:
+        self._timeline_events.append(
+            {"kind": "event", "type": str(event_type), "data": data}
+        )
+        if self._event_bus is not None:
+            self._event_bus.emit(str(event_type), data, source="stage")
+
+    def bind_event_bus(self, bus) -> None:
+        """Route validated authored actions from a typed EventBus.
+
+        External adapters only enqueue events.  This subscription is the
+        main-thread boundary where a small, schema-validated action payload is
+        applied to sparse authored stage state; it never creates bullet nodes.
+        """
+        if bus is self._event_bus:
+            return
+        for subscription in tuple(self._event_subscriptions):
+            try:
+                subscription.cancel()
+            except Exception:
+                pass
+        self._event_subscriptions = []
+        self._event_bus = bus
+        if bus is None:
+            return
+        # Authored actions may originate from the in-editor timeline or from
+        # a typed external adapter.  Both paths deliberately converge on the
+        # same schema-validating handler at the EventBus main-thread boundary;
+        # adapters never mutate stage state from their receive threads.
+        for event_type in (
+            "scene.action",
+            "adapter.local_ipc",
+            "adapter.websocket",
+            "adapter.udp",
+        ):
+            self._event_subscriptions.append(
+                bus.subscribe(event_type, self._handle_scene_action)
+            )
+
+    def _handle_scene_action(self, event: Any) -> None:
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, dict):
+            raise ValueError("scene.action payload must be an object")
+        action = payload.get("action")
+        if action == "set_node_position":
+            self.set_node_position(
+                payload.get("node_id"), payload.get("x"), payload.get("y")
+            )
+            return
+        if action == "set_node_property":
+            self.set_node_property(
+                payload.get("node_id"), payload.get("property"), payload.get("value")
+            )
+            return
+        if action == "emit_event":
+            event_type = payload.get("event_type")
+            if not isinstance(event_type, str) or not event_type.strip():
+                raise ValueError("emit_event requires a non-empty event_type")
+            self.emit_event(event_type, payload.get("data"))
+            return
+        raise ValueError(f"unsupported scene.action {action!r}")
+
+    def register_script_event_handler(self, hook: str, callback: Any) -> None:
+        if not str(hook).strip() or not callable(callback):
+            raise ValueError("script event handler needs a non-empty hook and callable")
+        self._script_event_handlers[str(hook)] = callback
+
+    def handle_script_event(self, hook: str, data: Any) -> bool:
+        name = str(hook)
+        handled = name in self._script_event_handlers
+        self._timeline_events.append(
+            {"kind": "script", "type": name, "data": data, "handled": handled}
+        )
+        if handled:
+            self._script_event_handlers[name](data)
+        return handled
+
+    def timeline_events(self) -> tuple[Dict[str, Any], ...]:
+        return tuple(self._timeline_events)
+
+    def clear_timeline_events(self) -> None:
+        self._timeline_events.clear()
+
+    def clear_authored_stage_state(self) -> None:
+        self._authored_node_positions.clear()
+        self._authored_node_properties.clear()
+        self._timeline_events.clear()
 
     # ==================== 音频 API ====================
 

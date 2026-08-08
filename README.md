@@ -366,7 +366,6 @@ async def _(event: MessageEvent):
 
 ```bash
 python -m pytest -q             # 全量
-python -m pytest -m smoke -q    # 仅快速回归
 ```
 
 ---

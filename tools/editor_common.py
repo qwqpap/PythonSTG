@@ -16,8 +16,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from PyQt5.QtGui import QPixmap, QColor, QFont, QPainter, QPen
-from PyQt5.QtCore import Qt, QRect
+from src.qt_compat.QtGui import QPixmap, QColor, QFont, QPainter, QPen
+from src.qt_compat.QtCore import Qt, QRect
 
 # ═══════════════════════════════════════════════════════════════
 # 路径常量

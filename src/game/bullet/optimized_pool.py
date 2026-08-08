@@ -143,7 +143,9 @@ class OptimizedBulletPool:
         self.data['flags'] = FLAG_RENDER_ANGLE_LOCKED
         self.data['render_scale'] = 1.0
 
-        self.free_indices = list(range(max_bullets))
+        # Stack pop should allocate low-to-high indices for deterministic
+        # authored batch order; releases still append for O(1) reuse.
+        self.free_indices = list(range(max_bullets - 1, -1, -1))
 
         # Python 层回调
         self.death_handlers: Dict[int, Callable] = {}
@@ -443,6 +445,10 @@ class OptimizedBulletPool:
             dtype=np.intp,
             count=available,
         )
+        # Preserve authored batch order in the observable pool layout.  The
+        # free-list is a stack for O(1) reuse, but callers must not see a
+        # burst's data reversed merely because slots were allocated backward.
+        use_indices.sort()
         batch_positions = position_array[:available]
         batch_angles = angle_array[:available]
         batch_speeds = speed_array[:available]
@@ -517,7 +523,11 @@ class OptimizedBulletPool:
         self.data['time_scale'][indices] = 1.0
         self.last_alive[indices] = 0
 
-        for idx in indices.tolist():
+        # ``free_indices`` is a stack whose pop order is the observable pool
+        # order for deterministic replays.  Append released slots in reverse
+        # index order so a cleared contiguous burst is allocated low-to-high
+        # again on the next replay instead of appearing reversed in a mask.
+        for idx in reversed(indices.tolist()):
             idx = int(idx)
             self.death_handlers.pop(idx, None)
             self.polar_motions.pop(idx, None)
@@ -765,7 +775,7 @@ class OptimizedBulletPool:
         self.data['alive'] = 0
         self.spawn_queue.clear()
         self.death_queue.clear()
-        self.free_indices = list(range(self.max_bullets))
+        self.free_indices = list(range(self.max_bullets - 1, -1, -1))
         self.death_handlers.clear()
         self.polar_motions.clear()
         self.emitter_callbacks.clear()

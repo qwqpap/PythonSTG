@@ -10,8 +10,8 @@ from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from PyQt5.QtCore import QObject, QProcess, QProcessEnvironment, pyqtSignal
-from PyQt5.QtWidgets import QApplication
+from src.qt_compat.QtCore import QObject, QProcess, QProcessEnvironment, pyqtSignal
+from src.qt_compat.QtWidgets import QApplication
 
 from src.core.project_context import ProjectContext
 from src.preview import PREVIEW_PROTOCOL_VERSION, encode_message

@@ -15,15 +15,15 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QLabel, QPushButton, QLineEdit, QScrollArea,
     QGridLayout, QDialog, QDialogButtonBox, QComboBox,
     QMessageBox, QStatusBar, QToolBar, QAction, QGroupBox,
     QFormLayout, QFrame, QInputDialog, QMenu, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
-from PyQt5.QtGui import QPixmap, QPainter, QColor, QFont, QPen, QBrush, QIcon
+from src.qt_compat.QtCore import Qt, QSize, pyqtSignal
+from src.qt_compat.QtGui import QPixmap, QPainter, QColor, QFont, QPen, QBrush, QIcon
 
 # 项目路径
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -45,7 +45,7 @@ from tools.editor_common import (
 class SpriteCell(QFrame):
     """
     网格中的一个 (弹幕类型, 颜色) 格子。
-    
+
     显示已分配的精灵缩略图，或"缺失"指示器。
     点击打开精灵选择器。
     """
@@ -149,7 +149,7 @@ class SpriteCell(QFrame):
         if self.sprite_name:
             clear_action = menu.addAction("清除分配")
             clear_action.triggered.connect(lambda: self.set_sprite(""))
-        menu.exec_(self.mapToGlobal(pos))
+        menu.exec(self.mapToGlobal(pos))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -159,7 +159,7 @@ class SpriteCell(QFrame):
 class SpritePickerDialog(QDialog):
     """
     弹出式精灵选取器。
-    
+
     显示所有可用的子弹精灵，支持搜索和图集过滤。
     点击精灵确认选择。
     """
@@ -367,7 +367,7 @@ class _SpriteThumbButton(QFrame):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked_name.emit(self.sprite_name)
-    
+
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked_name.emit(self.sprite_name)
@@ -384,7 +384,7 @@ class _SpriteThumbButton(QFrame):
 class AliasGridPanel(QWidget):
     """
     别名编辑的核心: 弹幕类型(行) × 颜色(列) 的网格。
-    
+
     每个格子是一个 SpriteCell，点击可以分配精灵。
     """
     cell_selected = pyqtSignal(str, str, str)  # (type, color, sprite_name)
@@ -489,7 +489,7 @@ class AliasGridPanel(QWidget):
             suggested_base=suggested_base,
             parent=self.window()
         )
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec() == QDialog.Accepted:
             new_name = dialog.selected_sprite()
             cell.set_sprite(new_name)
             self.cell_selected.emit(btype, color, new_name)
@@ -970,7 +970,7 @@ def main():
     app.setFont(QFont("Microsoft YaHei UI", 9))
     window = BulletAliasManager()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

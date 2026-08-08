@@ -123,6 +123,17 @@ def _draw_overlay(ui, controller: PatternPreviewController) -> None:
         for index, position in enumerate(controller.emitter_positions()[:8], start=1):
             label = "Emitter" if index == 1 else f"Emitter {index}"
             _draw_crosshair(ui, *position, (255, 175, 90), label)
+        stats = controller.get_stats(emit=False)
+        runner = controller.runner
+        nodes = getattr(getattr(runner, "program", None), "nodes", ())
+        states = stats.get("node_state") or {}
+        for node in nodes:
+            if node.node_type != "Boss":
+                continue
+            state = states.get(node.node_id) or {}
+            x, y = state.get("x"), state.get("y")
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                _draw_crosshair(ui, float(x), float(y), (255, 130, 180), "Boss")
 
     stats = controller.get_stats(emit=False)
     x = PANEL_X + 20
@@ -227,7 +238,6 @@ def run_window(project: ProjectContext, max_bullets: int, initial_pattern: str |
             except Exception:
                 pass
         clock = FrameClock()
-        stats_counter = 0
         while not shutdown and not window.should_close():
             dt = clock.tick(60)
             del dt
@@ -277,19 +287,6 @@ def run_window(project: ProjectContext, max_bullets: int, initial_pattern: str |
             controller.record_render_ms((time.perf_counter() - render_start) * 1000.0)
             window.swap_buffers()
 
-            stats_counter += 1
-            if stats_counter >= 15:
-                stats_counter = 0
-                _write_messages(
-                    [
-                        {
-                            "protocol_version": PREVIEW_PROTOCOL_VERSION,
-                            "request_id": None,
-                            "event": "statistics",
-                            "payload": controller.get_stats(emit=False),
-                        }
-                    ]
-                )
     finally:
         if controller is not None:
             controller.close()

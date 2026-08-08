@@ -54,6 +54,25 @@ def test_controller_supports_complete_fixed_tick_command_contract(tmp_path):
     assert controller.state == PreviewState.STOPPED
 
 
+def test_fixed_tick_publishes_authoritative_statistics_snapshot(tmp_path):
+    _pool, controller = _controller(tmp_path)
+    controller.load(PatternDocument.new("Frame feedback"))
+    controller.play()
+    controller.drain_events()
+
+    controller.update()
+
+    snapshots = [
+        event.payload
+        for event in controller.drain_events()
+        if event.event == "statistics"
+    ]
+    assert snapshots
+    assert snapshots[-1]["frame"] == 1
+    assert snapshots[-1]["mode"] == "pattern"
+    assert snapshots[-1]["resource_id"] == controller.document.id
+
+
 def test_inspector_property_reload_preserves_play_state_and_changes_program(tmp_path):
     pool, controller = _controller(tmp_path)
     document = PatternDocument.new()

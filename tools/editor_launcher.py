@@ -15,12 +15,12 @@ import sys
 import subprocess
 from pathlib import Path
 
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFrame, QStatusBar, QGridLayout
 )
-from PyQt5.QtCore import Qt, QSize, QProcess
-from PyQt5.QtGui import QFont, QColor, QPainter, QPen
+from src.qt_compat.QtCore import Qt, QSize, QProcess
+from src.qt_compat.QtGui import QFont, QColor, QPainter, QPen
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TOOLS_DIR = PROJECT_ROOT / "tools"
@@ -201,7 +201,7 @@ def main():
     app.setFont(QFont("Microsoft YaHei UI", 9))
     window = EditorLauncher()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

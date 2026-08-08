@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PyQt5.QtCore import (
+from src.qt_compat.QtCore import (
     QAbstractListModel,
     QByteArray,
     QModelIndex,
@@ -15,8 +15,8 @@ from PyQt5.QtCore import (
     Qt,
     pyqtSignal,
 )
-from PyQt5.QtGui import QColor, QFont, QPainter, QPixmap
-from PyQt5.QtWidgets import (
+from src.qt_compat.QtGui import QColor, QFont, QPainter, QPixmap
+from src.qt_compat.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QHBoxLayout,

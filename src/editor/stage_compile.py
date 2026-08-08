@@ -346,6 +346,7 @@ def compile_stage(
     patterns: list[PatternSchedule] = []
     automations: list[StageAutomation] = []
     actions: list[StageAction] = []
+    automatic_audio_stops: list[StageAction] = []
     dependency_hashes: list[str] = []
 
     ordered_tracks = sorted(scene.tracks, key=lambda item: (item.order, item.id))
@@ -462,8 +463,57 @@ def compile_stage(
                             payload_json=payload_json,
                         )
                     )
+                if (
+                    clip.kind == "Audio"
+                    and str(clip.payload.get("action", "play")) == "play"
+                    and str(clip.payload.get("bus") or clip.channel or track.channel).lower()
+                    == "bgm"
+                    and clip.duration_frames > 1
+                    and bool(clip.payload.get("auto_stop", True))
+                ):
+                    automatic_audio_stops.append(
+                        StageAction(
+                            frame=clip.end_frame,
+                            track_id=track.id,
+                            clip_id=clip.id,
+                            kind="Audio",
+                            target_id=target_id,
+                            channel=clip.channel or track.channel,
+                            track_order=track.order,
+                            clip_order=clip.order,
+                            payload_json=_json(
+                                {
+                                    "action": "stop",
+                                    "bus": str(
+                                        clip.payload.get("bus")
+                                        or clip.channel
+                                        or track.channel
+                                    ).lower(),
+                                    "fade_ms": int(clip.payload.get("end_fade_ms", 0)),
+                                    "automatic": True,
+                                }
+                            ),
+                        )
+                    )
 
     duration = scene.duration_frames
+    explicit_audio_stops = {
+        (
+            item.frame,
+            str(item.payload.get("bus") or item.channel or "se").lower(),
+        )
+        for item in actions
+        if item.kind == "Audio" and item.payload.get("action") == "stop"
+    }
+    actions.extend(
+        item
+        for item in automatic_audio_stops
+        if (
+            item.frame,
+            str(item.payload.get("bus") or item.channel or "se").lower(),
+        )
+        not in explicit_audio_stops
+    )
     canonical = _json(scene.to_dict())
     identity = "\0".join(
         (

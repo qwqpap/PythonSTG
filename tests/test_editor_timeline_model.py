@@ -251,3 +251,51 @@ def test_timeline_tracks_survive_atomic_save_and_reopen(tmp_path):
         "Property",
         "ScriptEvent",
     ]
+
+
+def test_movement_and_property_targets_must_expose_required_semantics():
+    scene, emitter, pattern = _scene_with_targets()
+    scene.tracks = [
+        TimelineTrack(
+            name="Invalid movement",
+            kind="Movement",
+            channel="position",
+            target_id=pattern.id,
+            clips=[
+                TimelineClip(
+                    name="Move",
+                    kind="Movement",
+                    start_frame=0,
+                    duration_frames=10,
+                    channel="position",
+                    keyframes=[
+                        TimelineKeyframe(0, {"x": 0.0, "y": 0.0}),
+                        TimelineKeyframe(10, {"x": 1.0, "y": 1.0}),
+                    ],
+                )
+            ],
+        )
+    ]
+    with pytest.raises(DocumentError, match="numeric x and y"):
+        scene.validate()
+
+    scene.tracks = [
+        TimelineTrack(
+            name="Invalid property",
+            kind="Property",
+            channel="missing_property",
+            target_id=emitter.id,
+            clips=[
+                TimelineClip(
+                    name="Set missing",
+                    kind="Property",
+                    start_frame=0,
+                    duration_frames=10,
+                    channel="missing_property",
+                    payload={"value": 1},
+                )
+            ],
+        )
+    ]
+    with pytest.raises(DocumentError, match="has no property 'missing_property'"):
+        scene.validate()
