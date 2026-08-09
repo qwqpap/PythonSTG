@@ -24,6 +24,7 @@ from src.authoring.variables import (
 
 if TYPE_CHECKING:
     from src.pattern import PatternProgram, PatternRunner
+    from src.game.reactions import ReactiveClip, ReactiveTimeline
 
 
 def _decode_json(value: str) -> Any:
@@ -219,6 +220,7 @@ class StageProgram:
     variable_automations: tuple[StageVariableAutomation, ...] = ()
     output_mappings: tuple[VariableOutputMapping, ...] = ()
     replay_seed: int = 0
+    reactive_clips: tuple[Any, ...] = ()
 
 
 class StageRunnerState(str, Enum):
@@ -432,6 +434,11 @@ class StageRunner:
             "initial_variables": self.initial_variable_snapshot,
         }
         self._restore_node_state()
+        self.reactive_timeline: ReactiveTimeline | None = None
+        if self.program.reactive_clips:
+            from src.game.reactions import ReactiveTimeline
+
+            self.reactive_timeline = ReactiveTimeline(self.program.reactive_clips)
 
     @staticmethod
     def _group_by_state(items):
@@ -608,6 +615,8 @@ class StageRunner:
         self.last_events = ()
         self._restore_node_state()
         self.variables.reset()
+        if self.reactive_timeline is not None:
+            self.reactive_timeline.reset(frame=self.frame)
         self.initial_variable_snapshot = self.variables.snapshot()
         self.compatibility_decision = {"policy": "reset"}
         self.replay_identity = {
@@ -654,6 +663,15 @@ class StageRunner:
         active_clip: str | None = None
         active_state_id: str | None = None
         try:
+            set_runtime_frame = getattr(context, "set_runtime_frame", None)
+            if callable(set_runtime_frame):
+                set_runtime_frame(current)
+            event_bus = getattr(context, "event_bus", None)
+            if event_bus is not None:
+                event_bus.dispatch_frame()
+            flush_lifecycle = getattr(context, "flush_lifecycle_events", None)
+            if callable(flush_lifecycle):
+                flush_lifecycle()
             active_ids = self.current_state_path
             self.variables.set_frame(current)
             self._publish_engine_snapshot(context, current)
@@ -716,6 +734,24 @@ class StageRunner:
                     self._local_frames[state_id] += 1
             self.frame += 1
             self._resolve_state_graph(context, events, dispatch=dispatch_actions)
+            if self.reactive_timeline is not None:
+                resolved_ids = set(self.current_state_path)
+                for state_id in active_ids:
+                    # State transitions are resolved before reactions.  An
+                    # exiting state's scope has already been cancelled and
+                    # must not be re-armed by ticking the stale path; a newly
+                    # entered state starts observing at the next fixed frame.
+                    if state_id not in resolved_ids:
+                        continue
+                    self.reactive_timeline.tick(
+                        state_id,
+                        current,
+                        getattr(event_bus, "last_dispatched", ()) if event_bus is not None else (),
+                        context=context,
+                        variables=self.variables,
+                        advance_scheduler=False,
+                    )
+                self.reactive_timeline.scheduler.tick(current)
             if (
                 self.state == StageRunnerState.RUNNING
                 and self.frame >= self.program.duration_frames
@@ -889,6 +925,8 @@ class StageRunner:
         self._active_states.append(state)
         self._local_frames[state.state_id] = 0
         self.variables.enter_scope("state", state.state_id)
+        if self.reactive_timeline is not None:
+            self.reactive_timeline.enter_state(state.state_id, self.frame)
         self._completed_children.discard(state.state_id)
         self._dispatch_actions(
             self._context,
@@ -940,6 +978,12 @@ class StageRunner:
             self._completed_children.discard(state.state_id)
             self._local_frames.pop(state.state_id, None)
             self.variables.exit_scope("state", state.state_id)
+            if self.reactive_timeline is not None:
+                self.reactive_timeline.exit_state(state.state_id, self.frame, "state_exit")
+            event_bus = getattr(context, "event_bus", None)
+            cancel_owner = getattr(event_bus, "cancel_owner", None)
+            if callable(cancel_owner):
+                cancel_owner(state.state_id)
             self._active_states.pop(index)
             self._active_graphs.pop(index)
 

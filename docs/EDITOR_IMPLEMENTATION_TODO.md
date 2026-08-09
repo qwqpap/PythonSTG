@@ -26,7 +26,7 @@
 | 阶段 | 状态 | 依赖 | 本阶段完成后必须存在 |
 | --- | --- | --- | --- |
 | N2 类型化变量、作用域、单一写入者 | 已完成（N2.0–N2.7） | N1 | v4 声明、运行时 store、写权限和只读 overlay |
-| N3 帧边界事件、生命周期和反应 | 未开始 | N2 | Inbox/Outbox、`LifecycleEvent`、`ReactionSpec`、`TaskScope` |
+| N3 帧边界事件、生命周期和反应 | 已完成（N3.0–N3.3） | N2 | Inbox/Outbox、`LifecycleEvent`、`ReactionSpec`、`TaskScope` |
 | N4 响应式时间线与蓝图边界 | 未开始 | N3 | `ReactiveClip`、激活规则、实例 trace、冲突可视化 |
 | N5 可展开的版本化预设 | 未开始 | N4 | 参数/插槽覆盖、虚拟展开、本地物化和迁移 |
 | N6 新手流程与上下文搜索 | 未开始 | N5 | 阶段骨架、首发预设库、Action Catalog、可用性证据 |
@@ -220,7 +220,7 @@ python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py
 
 ### N3.0 Contract 与事件模型
 
-状态：`[ ]`
+状态：`[x]`
 
 **Agent 要读**：产品愿景第 7.2、7.4、7.6、17 节；`src/game/events.py`、`src/game/adapters.py`、`src/game/stage/program.py`、`src/game/stage/context.py`、`tests/test_event_bus.py`、`tests/test_event_adapters.py`。
 
@@ -232,7 +232,7 @@ python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py
 
 ### N3.1 生命周期事实与批量路径
 
-状态：`[ ]`
+状态：`[x]`
 
 **Agent 要做**：从发射器/子弹池/对象生命周期发布 `spawned/hit/death/expired` 等事实，聚合相同来源和帧，保留 count/representative IDs；禁止每颗子弹场景节点、逐弹 Python death callback 和通用事件对象。
 
@@ -242,7 +242,7 @@ python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py
 
 ### N3.2 ReactionSpec 与 TaskScope
 
-状态：`[ ]`
+状态：`[x]`
 
 **Agent 要做**：实现事件匹配、变量 guard、cooldown、`once_per_scope`/`ignore_while_running`/`restart`/`parallel`、最大实例数和因果深度；反应启动/停止/取消统一走 `TaskScope`。状态退出优先于旧 State 的新反应。
 
@@ -252,13 +252,15 @@ python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py
 
 ### N3.3 Timeline/Background/State 接口
 
-状态：`[ ]`
+状态：`[x]`
 
 **Agent 要做**：把反应绑定到时间线的“可触发生命周期”槽位；背景切换用资源引用和生命周期，不让背景 renderer 直接监听网络或持有 Stage 内部对象；State entry/exit、Clip stop/cancel 和 Reaction owner 统一。
 
 **验收文件**：新增 `tests/test_lifecycle_timeline_hooks.py`、`tests/test_background_reactions.py`；回归 `tests/test_background_document.py`、`tests/test_background_data_driven_parity.py`、`tests/test_state_graph_runtime.py`。
 
 **阶段门槛**：事件、反应、任务取消和背景切场的 Runtime trace 全绿；否则停止，不开始 N4。
+
+**Evidence（2026-08-09）**：N3 focused gate `python -m pytest -q tests/test_lifecycle_events.py tests/test_frame_boundary_events.py tests/test_task_scopes.py tests/test_lifecycle_batching.py tests/test_reactions.py tests/test_reaction_scheduler.py tests/test_lifecycle_timeline_hooks.py tests/test_background_reactions.py` 通过 `27` 项；N2 focused gate 通过 `56` 项；完整 suite 通过 `560` 项。`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。固定 50,000 子弹 workload 的批处理 profile 产生 `1` 个 lifecycle batch、`50,000` count、`0` death handlers，耗时约 `550 ms`（Windows/Python 当前 checkout，首次 Numba 编译包含在测量内）。正式 runtime trace 覆盖死亡开花、假 Boss 受击反击、击破后资源背景切换；State exit 先取消旧 Reaction，Clip 窗口结束记录 `clip_window_end`。Native visual、Performance release threshold 和 Usability gate 仍留给 N6/N9，不作为 N3 的伪完成证据。
 
 ---
 

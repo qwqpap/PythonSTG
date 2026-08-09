@@ -17,6 +17,7 @@ from typing import Optional, Any, Dict, List
 
 from .spellcard import SpellCardContext
 from ..audio import AudioManager
+from ..events import EventBus, EventBusError, LifecycleEvent
 from ..bullet import (
     FLAG_BOUNCE_X, FLAG_BOUNCE_Y, FLAG_IS_EMITTER, FLAG_RENDER_ANGLE_LOCKED,
     CURVE_NONE, CURVE_SIN_SPEED, CURVE_SIN_ANGLE, CURVE_COS_SPEED, CURVE_LINEAR_SPEED,
@@ -105,7 +106,8 @@ class StageContext(SpellCardContext):
     def __init__(self, bullet_pool, player, enemy_manager=None,
                  laser_pool=None, item_pool=None,
                  audio_manager: Optional[AudioManager] = None,
-                 background_renderer=None):
+                 background_renderer=None,
+                 event_bus: EventBus | None = None):
         self.bullet_pool = bullet_pool
         self._player = player
         self._player_proxy = PlayerProxy(player)
@@ -121,12 +123,17 @@ class StageContext(SpellCardContext):
         self._authored_node_positions: Dict[str, tuple[float, float]] = {}
         self._authored_node_properties: Dict[str, Dict[str, Any]] = {}
         self._timeline_events: List[Dict[str, Any]] = []
+        self._background_transitions: List[Dict[str, Any]] = []
+        self._lifecycle_trace: List[LifecycleEvent] = []
+        self._runtime_frame = 0
         self._script_event_handlers: Dict[str, Any] = {}
-        self._event_bus: Any = None
+        self._event_bus: EventBus | None = None
         self._event_subscriptions: list[Any] = []
 
         if not StageContext._aliases_loaded:
             StageContext.load_bullet_aliases()
+        if event_bus is not None:
+            self.bind_event_bus(event_bus)
 
     # ==================== 子弹 API ====================
 
@@ -193,6 +200,13 @@ class StageContext(SpellCardContext):
         )
         if idx >= 0:
             self._bullet_indices.append(idx)
+            self.publish_lifecycle(
+                "bullet.spawned",
+                {"tag": int(tag), "count": 1},
+                owner=None if int(tag) == 0 else str(int(tag)),
+                count=1,
+                representative_ids=(str(int(idx)),),
+            )
         return idx
 
     def create_bullets_batch(
@@ -284,6 +298,17 @@ class StageContext(SpellCardContext):
 
         result = np.asarray(indices, dtype=np.intp)
         self._bullet_indices.extend(int(index) for index in result)
+        if result.size:
+            self.publish_lifecycle(
+                "bullet.spawned",
+                {
+                    "tag": int(tag),
+                    "count": int(result.size),
+                },
+                owner=None if int(tag) == 0 else str(int(tag)),
+                count=int(result.size),
+                representative_ids=tuple(str(int(index)) for index in result[:8]),
+            )
         return result
 
     def create_polar_bullet(self, center, orbit_radius: float, theta: float,
@@ -383,9 +408,14 @@ class StageContext(SpellCardContext):
         self.bullet_pool.clear_all()
         self._bullet_indices.clear()
 
-    def clear_bullets_by_tag(self, tag: int) -> int:
+    def clear_bullets_by_tag(self, tag: int, *, reason: str = "phase_cleared") -> int:
         """按标签消除所有子弹"""
-        self.bullet_pool.clear_by_tag(tag)
+        try:
+            return int(self.bullet_pool.clear_by_tag(tag, reason=reason))
+        except TypeError:
+            # Legacy BulletPool has no formal reason parameter; retain its
+            # compatibility behavior while formal pools keep the typed fact.
+            return int(self.bullet_pool.clear_by_tag(tag))
 
     def bullets_by_tag_to_item(self, tag: int):
         """按标签将子弹转化为道具"""
@@ -571,12 +601,113 @@ class StageContext(SpellCardContext):
             raise ValueError("node_id and property name must be non-empty strings")
         self._authored_node_properties.setdefault(str(node_id), {})[str(name)] = value
 
-    def emit_event(self, event_type: str, data: Any) -> None:
+    def emit_event(
+        self,
+        event_type: str,
+        data: Any,
+        *,
+        owner: str | None = None,
+        causal_chain=(),
+    ) -> None:
         self._timeline_events.append(
             {"kind": "event", "type": str(event_type), "data": data}
         )
         if self._event_bus is not None:
-            self._event_bus.emit(str(event_type), data, source="stage")
+            self._event_bus.emit(
+                str(event_type),
+                data,
+                source="stage",
+                owner=owner,
+                causal_chain=causal_chain,
+            )
+
+    @property
+    def event_bus(self) -> EventBus | None:
+        return self._event_bus
+
+    @property
+    def runtime_frame(self) -> int:
+        return self._runtime_frame
+
+    def set_runtime_frame(self, frame: int) -> None:
+        if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
+            raise ValueError("runtime frame must be a non-negative integer")
+        self._runtime_frame = frame
+
+    def publish_lifecycle(
+        self,
+        event_type: str,
+        payload: Any = None,
+        *,
+        source: str = "stage",
+        owner: str | None = None,
+        reason: str | None = None,
+        count: int = 1,
+        representative_ids=(),
+        causal_chain=(),
+    ) -> LifecycleEvent:
+        """Publish one sparse/batch lifecycle fact through the frame boundary."""
+
+        try:
+            if self._event_bus is not None:
+                event = self._event_bus.emit_lifecycle(
+                    str(event_type),
+                    payload,
+                    source=source,
+                    owner=owner,
+                    reason=reason,
+                    count=count,
+                    representative_ids=representative_ids,
+                    causal_chain=causal_chain,
+                )
+            else:
+                event = LifecycleEvent(
+                    type=str(event_type),
+                    source=source,
+                    frame=self._runtime_frame,
+                    payload=payload,
+                    owner=owner,
+                    reason=reason,
+                    count=count,
+                    representative_ids=tuple(representative_ids),
+                    causal_chain=tuple(causal_chain),
+                )
+        except EventBusError:
+            raise
+        self._lifecycle_trace.append(event)
+        return event
+
+    def flush_lifecycle_events(self) -> tuple[LifecycleEvent, ...]:
+        """Convert pool batches into typed events without per-bullet callbacks."""
+
+        drain = getattr(self.bullet_pool, "drain_lifecycle_batches", None)
+        if callable(drain):
+            for batch in drain():
+                payload = dict(getattr(batch, "payload", None) or {})
+                payload["count"] = int(batch.count)
+                if batch.representative_positions:
+                    payload["representative_positions"] = [
+                        [float(x), float(y)]
+                        for x, y in batch.representative_positions
+                    ]
+                self.publish_lifecycle(
+                    batch.event_type,
+                    payload,
+                    source=batch.source,
+                    owner=batch.owner,
+                    reason=batch.reason,
+                    count=int(batch.count),
+                    representative_ids=batch.representative_ids,
+                )
+        return tuple(self._lifecycle_trace)
+
+    def drain_lifecycle_events(self) -> tuple[LifecycleEvent, ...]:
+        """Return local lifecycle trace and clear it after the caller observes it."""
+
+        self.flush_lifecycle_events()
+        values = tuple(self._lifecycle_trace)
+        self._lifecycle_trace.clear()
+        return values
 
     def bind_event_bus(self, bus) -> None:
         """Route validated authored actions from a typed EventBus.
@@ -658,6 +789,8 @@ class StageContext(SpellCardContext):
         self._authored_node_positions.clear()
         self._authored_node_properties.clear()
         self._timeline_events.clear()
+        self._background_transitions.clear()
+        self._lifecycle_trace.clear()
 
     # ==================== 音频 API ====================
 
@@ -709,6 +842,39 @@ class StageContext(SpellCardContext):
         if not self._background_renderer or not name:
             return False
         return self._background_renderer.load_background(name)
+
+    def request_background_transition(
+        self,
+        resource: str,
+        *,
+        owner: str | None = None,
+        fade_frames: int = 0,
+    ) -> bool:
+        """Apply a resource-backed transition at the stage boundary.
+
+        Reactions call this typed context operation; the renderer never
+        subscribes to the EventBus and never owns a Stage/Reaction object.
+        The trace is runtime-only and is exposed to the debugger.
+        """
+
+        if not isinstance(resource, str) or not resource.strip():
+            raise ValueError("background resource must be a non-empty string")
+        if isinstance(fade_frames, bool) or not isinstance(fade_frames, int) or fade_frames < 0:
+            raise ValueError("fade_frames must be a non-negative integer")
+        result = self.set_background(resource.strip())
+        self._background_transitions.append(
+            {
+                "resource": resource.strip(),
+                "owner": owner,
+                "fade_frames": fade_frames,
+                "applied": bool(result),
+                "frame": self._runtime_frame,
+            }
+        )
+        return bool(result)
+
+    def background_transitions(self) -> tuple[Dict[str, Any], ...]:
+        return tuple(self._background_transitions)
 
     # ==================== 内部辅助 ====================
 

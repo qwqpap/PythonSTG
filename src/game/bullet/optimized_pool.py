@@ -84,6 +84,20 @@ class DeathEvent:
     handler: Optional[Callable] = None
 
 
+@dataclass(frozen=True)
+class LifecycleBatch:
+    """One data-oriented lifecycle fact for an arbitrary number of bullets."""
+
+    event_type: str
+    source: str
+    owner: str | None
+    reason: str | None
+    count: int
+    representative_ids: tuple[str, ...] = ()
+    representative_positions: tuple[tuple[float, float], ...] = ()
+    payload: dict[str, Any] | None = None
+
+
 @dataclass
 class PolarMotion:
     """极坐标运动：bullet position = center + polar(radius, theta)."""
@@ -154,6 +168,12 @@ class OptimizedBulletPool:
 
         self.spawn_queue: List[SpawnRequest] = []
         self.death_queue: List[DeathEvent] = []
+        # Formal runtime lifecycle facts are one record per (reason, owner,
+        # frame/update), never one Python object per bullet.  Legacy
+        # ``death_handlers`` remain available only for the explicitly opted-in
+        # compatibility API.
+        self.lifecycle_batches: List[LifecycleBatch] = []
+        self._termination_reasons: Dict[int, str] = {}
         self.last_alive = np.zeros(max_bullets, dtype='i4')
         self.batch_spawn_calls = 0
 
@@ -512,13 +532,21 @@ class OptimizedBulletPool:
 
     # ===== Tag 系统 =====
 
-    def _clear_mask_now(self, mask) -> np.ndarray:
+    def _clear_mask_now(
+        self,
+        mask,
+        *,
+        reason: str = "phase_cleared",
+        record: bool = True,
+    ) -> np.ndarray:
         """Clear alive bullets matching mask and return their positions."""
         indices = np.where(mask)[0].astype(np.intp)
         if indices.size == 0:
             return np.zeros((0, 2), dtype=np.float32)
 
         positions = self.data['pos'][indices].copy()
+        if record:
+            self._record_lifecycle(indices, reason=reason)
         self.data['alive'][indices] = 0
         self.data['time_scale'][indices] = 1.0
         self.last_alive[indices] = 0
@@ -530,17 +558,21 @@ class OptimizedBulletPool:
         for idx in reversed(indices.tolist()):
             idx = int(idx)
             self.death_handlers.pop(idx, None)
+            self._termination_reasons.pop(idx, None)
             self.polar_motions.pop(idx, None)
             self.emitter_callbacks.pop(idx, None)
             self.free_indices.append(idx)
 
         return positions
 
-    def clear_by_tag(self, tag: int) -> int:
+    def clear_by_tag(self, tag: int, *, reason: str = "phase_cleared") -> int:
         """按标签消除所有子弹"""
         mask = (self.data['alive'] == 1) & (self.data['tag'] == tag)
         count = int(np.count_nonzero(mask))
-        self._clear_mask_now(mask)
+        if count:
+            indices = np.where(mask)[0].astype(np.intp)
+            self._record_lifecycle(indices, reason=reason)
+        self._clear_mask_now(mask, record=False)
         return count
 
     def translate_by_tag(self, tag: int, dx: float, dy: float) -> int:
@@ -560,7 +592,10 @@ class OptimizedBulletPool:
         alive = self.data['alive'] == 1
         emitters = (self.data['flags'] & FLAG_IS_EMITTER) != 0
         protected = np.isin(self.data['tag'], tags)
-        return self._clear_mask_now(alive & ~emitters & ~protected)
+        return self._clear_mask_now(
+            alive & ~emitters & ~protected,
+            reason="bomb_cancelled",
+        )
 
     def set_time_scale_by_tag(self, tag: int, time_scale: float):
         """按标签设置时间缩放"""
@@ -574,10 +609,22 @@ class OptimizedBulletPool:
 
     # ===== 销毁 =====
 
-    def kill_bullet(self, idx: int, handler: Callable = None):
+    def kill_bullet(
+        self,
+        idx: int,
+        handler: Callable = None,
+        *,
+        reason: str = "hit_destroyed",
+    ):
         """杀死子弹"""
         if 0 <= idx < self.max_bullets and self.data['alive'][idx]:
+            # Explicit hit/cancel operations happen before the next pool
+            # update, so record the fact now.  The update collector will see
+            # ``alive == 0`` in its baseline and therefore cannot duplicate
+            # this batch.
+            self._record_lifecycle(np.asarray([idx], dtype=np.intp), reason=str(reason))
             self.data['alive'][idx] = 0
+            self.last_alive[idx] = 0
             self.polar_motions.pop(int(idx), None)
             self.emitter_callbacks.pop(idx, None)
 
@@ -585,7 +632,10 @@ class OptimizedBulletPool:
                 handler = self.death_handlers.pop(idx, None)
 
             x, y = self.data['pos'][idx]
-            self.death_queue.append(DeathEvent(idx, x, y, handler))
+            if handler is not None:
+                self.death_queue.append(DeathEvent(idx, x, y, handler))
+            if int(idx) not in self.free_indices:
+                self.free_indices.append(int(idx))
 
     # ===== 主更新 =====
 
@@ -606,12 +656,17 @@ class OptimizedBulletPool:
         died_mask = (self.last_alive == 1) & (self.data['alive'] == 0)
         died_indices = np.where(died_mask)[0]
 
+        if died_indices.size:
+            self._record_classified_deaths(died_indices)
+
         for idx in died_indices:
             x, y = self.data['pos'][idx]
             handler = self.death_handlers.pop(idx, None)
             self.polar_motions.pop(int(idx), None)
             self.emitter_callbacks.pop(idx, None)
-            self.death_queue.append(DeathEvent(idx, x, y, handler))
+            self._termination_reasons.pop(int(idx), None)
+            if handler is not None:
+                self.death_queue.append(DeathEvent(idx, x, y, handler))
             self.free_indices.append(idx)
 
     def _process_death_queue(self):
@@ -619,6 +674,94 @@ class OptimizedBulletPool:
             if event.handler:
                 event.handler(self, event)
         self.death_queue.clear()
+
+    def _record_lifecycle(
+        self,
+        indices,
+        *,
+        reason: str | None,
+        event_type: str = "bullet.terminated",
+    ) -> None:
+        """Append one bounded batch fact for ``indices``.
+
+        The pool stores only a small representative sample.  Consumers that
+        need every position must use a vectorized action over the owner/tag,
+        not a Python callback per element.
+        """
+
+        values = np.asarray(indices, dtype=np.intp)
+        if values.size == 0:
+            return
+        tags = self.data['tag'][values]
+        # A single clear operation may contain multiple owners.  Split by the
+        # typed tag while keeping each group as one batch record.
+        for tag in np.unique(tags):
+            group = values[tags == tag]
+            sample = group[:8]
+            positions = tuple(
+                (float(self.data['pos'][int(index), 0]), float(self.data['pos'][int(index), 1]))
+                for index in sample
+            )
+            owner = None if int(tag) == 0 else str(int(tag))
+            self.lifecycle_batches.append(
+                LifecycleBatch(
+                    event_type=event_type,
+                    source="bullet_pool",
+                    owner=owner,
+                    reason=reason,
+                    count=int(group.size),
+                    representative_ids=tuple(str(int(index)) for index in sample),
+                    representative_positions=positions,
+                    payload={"tag": int(tag)},
+                )
+            )
+
+    def _record_classified_deaths(self, indices) -> None:
+        values = np.asarray(indices, dtype=np.intp)
+        if values.size == 0:
+            return
+        data = self.data
+        expired = (
+            (data['max_lifetime'][values] > 0.0)
+            & (data['lifetime'][values] >= data['max_lifetime'][values])
+        )
+        outside = (
+            (data['pos'][values, 0] < -1.5)
+            | (data['pos'][values, 0] > 1.5)
+            | (data['pos'][values, 1] < -1.5)
+            | (data['pos'][values, 1] > 1.5)
+        )
+        explicit = np.array(
+            [index in self._termination_reasons for index in values], dtype=bool
+        )
+        handled = np.zeros(values.size, dtype=bool)
+        for reason, mask in (
+            ("expired", expired),
+            ("out_of_bounds", outside & ~expired),
+        ):
+            selected = values[mask & ~explicit]
+            if selected.size:
+                self._record_lifecycle(selected, reason=reason)
+                handled |= mask & ~explicit
+        explicit_values = values[explicit]
+        if explicit_values.size:
+            for reason in sorted({self._termination_reasons[int(index)] for index in explicit_values}):
+                selected = np.asarray(
+                    [index for index in explicit_values if self._termination_reasons[int(index)] == reason],
+                    dtype=np.intp,
+                )
+                self._record_lifecycle(selected, reason=reason)
+                handled |= np.isin(values, selected)
+        remaining = values[~handled]
+        if remaining.size:
+            self._record_lifecycle(remaining, reason="hit_destroyed")
+
+    def drain_lifecycle_batches(self) -> tuple[LifecycleBatch, ...]:
+        """Return and clear formal batch facts collected since the last drain."""
+
+        values = tuple(self.lifecycle_batches)
+        self.lifecycle_batches.clear()
+        return values
 
     def _process_spawn_queue(self):
         new_queue = []
@@ -772,11 +915,19 @@ class OptimizedBulletPool:
 
     def clear_all(self):
         """清空所有子弹"""
+        alive = np.where(self.data['alive'] == 1)[0].astype(np.intp)
+        if alive.size:
+            self._record_lifecycle(alive, reason="phase_cleared")
         self.data['alive'] = 0
+        # ``clear_all`` is an explicit terminal operation.  Keep the
+        # vectorized death collector from re-emitting the same bullets on the
+        # next update (the tag-clear path already does this per index).
+        self.last_alive[:] = 0
         self.spawn_queue.clear()
         self.death_queue.clear()
         self.free_indices = list(range(self.max_bullets - 1, -1, -1))
         self.death_handlers.clear()
+        self._termination_reasons.clear()
         self.polar_motions.clear()
         self.emitter_callbacks.clear()
         # 还原默认值

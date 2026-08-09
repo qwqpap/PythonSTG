@@ -451,7 +451,12 @@ class PatternRunner:
                 raise error from exc
 
     def clear_owned(self, context: Any) -> None:
-        context.clear_bullets_by_tag(self.owner_tag)
+        try:
+            context.clear_bullets_by_tag(self.owner_tag, reason="owner_cancelled")
+        except TypeError:
+            # Compatibility contexts predating the formal lifecycle reason
+            # contract still receive the same owner-scoped clear operation.
+            context.clear_bullets_by_tag(self.owner_tag)
 
     def set_owned_time_scale(self, context: Any, scale: float) -> None:
         if not math.isfinite(scale) or scale < 0:

@@ -353,6 +353,19 @@ from .program import (  # noqa: E402
     StageTransition,
     StageVariableAutomation,
 )
+from ..reactions import (  # noqa: E402
+    BackgroundTransition,
+    CancellationToken,
+    ReactionScheduler,
+    ReactionSpec,
+    ReactionTrace,
+    ReactiveClip,
+    ReactiveTimeline,
+    TaskScope,
+    TaskScopeState,
+    TaskTrace,
+    TaskWait,
+)
 
 
 __all__ = [
@@ -372,4 +385,15 @@ __all__ = [
     "StageTraceEvent",
     "StageTransition",
     "StageVariableAutomation",
+    "BackgroundTransition",
+    "CancellationToken",
+    "ReactionScheduler",
+    "ReactionSpec",
+    "ReactionTrace",
+    "ReactiveClip",
+    "ReactiveTimeline",
+    "TaskScope",
+    "TaskScopeState",
+    "TaskTrace",
+    "TaskWait",
 ]
