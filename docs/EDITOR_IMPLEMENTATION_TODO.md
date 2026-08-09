@@ -1,13 +1,15 @@
 # PySTG 下一代编辑器实施 TODO
 
-> 状态：Active；本文是仓库中唯一的未来实施清单。
+> 状态：Active；本文是仓库中唯一的未来实施清单，也是 Agent 的交接协议。
 > 产品依据：[EDITOR_PRODUCT_VISION.md](EDITOR_PRODUCT_VISION.md)  v0.3
 > 工程边界：[EDITOR_ARCHITECTURE.md](EDITOR_ARCHITECTURE.md)
-> 建立：2026-08-09
+> 建立：2026-08-09；最近整理：2026-08-09
 
 ## 0. 文档边界与已冻结基线
 
 这份文件只保留尚未完成的工作。旧路线图和 N0/N1 的长篇完成日志已经从工作协议中移除；它们的提交历史仍可从 Git 查阅，但不能重新变成 Agent 的任务清单。N0 的资源/编辑器基线清理和 N1 的 `SceneDocument` 内嵌状态图已经验收，后续 Agent 从 N2 开始，不能因某个 UI 容易演示而跳过依赖。
+
+每个任务都使用稳定的 `N<阶段>.<编号>` ID。Agent 只能领取当前依赖链上最早的未完成 ID；“看起来已经有代码”不等于任务完成，必须以该 ID 列出的行为测试和证据门禁为准。
 
 以下决定已冻结，改变它们必须先修改产品愿景并得到维护者确认：
 
@@ -45,6 +47,21 @@
 
 以下任一情况出现时立即停止扩大范围并报告：契约与产品愿景冲突；schema 变化没有无损迁移；必须逐弹回调/第二套预览/静默 fallback/绕过 Undo 才能实现；focused gate 仍为红色却要开始下一阶段；native、性能或用户门槛无法在当前环境提供；或用户改动与计划修改无法安全合并。
 
+### 1.1 Agent 交付卡（每个编号任务必须填写）
+
+每次 Agent 交付必须在提交说明或交接消息中逐项给出以下内容，不能只说“实现了”：
+
+| 字段 | 必须写明 |
+| --- | --- |
+| Task ID / 边界 | 本次只处理哪些 `N<阶段>.<编号>`，明确不处理哪些相邻任务 |
+| Read / Audit | 实际阅读的产品章节、源码入口、schema/fixture 和现有测试；`git status --short` 结果 |
+| Contract | 新增或扩展的验收测试、真实 fixture、预期红色基线；不得只测 import 或源码字符串 |
+| Implementation | 修改的 authoring/compiler/runtime/editor 文件，以及生命周期、所有权和错误路径 |
+| Verification | focused、全量、compileall、资源校验、diff-check；额外的 native/performance/usability 命令 |
+| Evidence / Blocker | 通过数量、环境、报告路径和仍缺的证据；有阻塞时保持 `[ ]` 并说明下一步 |
+
+Contract 测试一旦形成红色基线，后续实现不得编辑断言、添加 `skip`/`xfail`、吞掉异常、替换正式运行时或把运行时反馈写回作者文档。若契约确实错误，必须先停止并由维护者批准独立的 contract-revision 提交。
+
 ## 2. 通用验收门禁
 
 每个阶段的 focused command 之外，必须执行：
@@ -61,13 +78,32 @@ git diff --check
 
 证据类型必须分开记录：Structural（schema/命令/序列化）、Runtime（正式 compiler/runner/preview）、Performance（固定环境和 workload）、Native visual（真实 PySide6/GLFW/ModernGL 窗口）和 Usability（未接触 PySTG 的目标用户）。一种证据不能替代另一种。
 
+### 2.1 阶段 focused gate 索引
+
+下面的命令是阶段门禁的最小入口；任务正文列出的新增 Contract 文件必须和对应回归一起执行。没有列出的测试不能被 Agent 自行宣布为替代门禁。
+
+| 阶段 | focused gate（PowerShell） | 额外证据 |
+| --- | --- | --- |
+| N2 | `python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py tests/test_variable_editor.py tests/test_state_graph_document.py tests/test_state_graph_runtime.py tests/test_stage_program.py` | N2.6 原生窗口；N2.7 replay identity/seek trace |
+| N3 | `python -m pytest -q tests/test_lifecycle_events.py tests/test_frame_boundary_events.py tests/test_task_scopes.py tests/test_lifecycle_batching.py tests/test_reactions.py tests/test_reaction_scheduler.py tests/test_lifecycle_timeline_hooks.py tests/test_background_reactions.py` | 正式 Stage/Pattern runtime trace；高密度批处理 profile |
+| N4 | `python -m pytest -q tests/test_reactive_timeline.py tests/test_activation_rules.py tests/test_timeline_instance_trace.py tests/test_reaction_timeline_integration.py tests/test_editor_reactive_clips.py` | 时间线原生交互和 reset/replay 等价性 |
+| N5 | `python -m pytest -q tests/test_preset_descriptor.py tests/test_preset_expansion.py tests/test_preset_migration.py tests/test_preset_library.py tests/test_editor_preset_workspace.py` | 预设 workload profile；Undo/Redo/物化 trace |
+| N6 | `python -m pytest -q tests/test_action_catalog.py tests/test_contextual_search.py tests/test_beginner_workflow.py tests/test_editor_usability.py` | 原生窗口和至少 4/5 新用户 Usability 记录 |
+| N7 | `python -m pytest -q tests/test_behavior_descriptor.py tests/test_safe_capabilities.py tests/test_plugin_package_boundaries.py tests/test_behavior_plugin_integration.py tests/test_plugin_sdk.py` | headless 不导入 Qt；正式预览中的 Runtime/Tool parity |
+| N8 | `python -m pytest -q tests/test_render_graph.py tests/test_renderer_pass_plugins.py tests/test_render_graph_backend.py tests/test_renderer_pass_editor.py` | GLFW/ModernGL surface、热卸载和资源释放 |
+| N9 | `python -m pytest -q tests/test_editor_debugger.py tests/test_replay_determinism.py tests/test_runtime_profile.py tests/test_editor_next_acceptance.py` | 目标 Windows 硬件 profile、原生窗口、完整工作流和发布报告 |
+
+新增 Contract 文件只在对应 Agent 开始时创建；不要预先提交空文件，也不要把当前不存在的文件加入“已通过”证据。
+
 ## 3. 测试清理规则
 
-历史清理已经删除只服务交接流程的旧测试：`test_m4_runtime_preview_contract.py`、`test_stage1_opening_media.py`、`test_bottom_layer_smoke.py`，并将 Luna/M5-M7 文件改为行为名称。它们不应被重新添加。现有 `test_editor_authoring_integration.py`、`test_editor_regression_contracts.py`、N1 状态图测试和 Pattern/Stage/UI/背景回归均验证可观察行为，必须保留。
+历史清理已经删除只服务交接流程的旧测试：`tests/test_m4_runtime_preview_contract.py`、`tests/test_stage1_opening_media.py`、`tests/test_bottom_layer_smoke.py`，并将原 `tests/test_luna_acceptance_bundle.py`、`tests/test_m5_m7_remediation_gate.py` 改成行为覆盖文件 `tests/test_editor_authoring_integration.py`、`tests/test_editor_regression_contracts.py`。它们不应被重新添加。
 
-本次整理同时删除了 `test_declared_runtime_versions_match_the_active_acceptance_environment`：它只比较当前机器的 NumPy/Numba 版本，不验证 PySTG 行为，环境锁定应由发布/CI 负责。`test_public_editor_uses_pyside6_not_pyqt5` 等加载边界测试仍保留。未来 Contract 测试文件只在对应 Agent 开始时创建，不提前提交空占位文件。
+同一轮整理删除了 `test_declared_runtime_versions_match_the_active_acceptance_environment`：它只比较当前机器的 NumPy/Numba 版本，不验证 PySTG 行为，环境锁定应由发布/CI 负责。`test_public_editor_uses_pyside6_not_pyqt5` 等加载边界测试仍保留，因为它们验证公开入口的依赖边界。
 
-本次整理验证（2026-08-09）：完整 suite `515` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。该结果只证明当前 checkout 的 Structural/Runtime 回归，不宣称 N2 已完成，也不替代后续 native visual、Performance 或 Usability gate。
+当前没有其他可安全删除的测试：`test_editor_app_smoke.py` 虽然名字含 smoke，但验证真实窗口命令、Undo 和正式预览入口；`test_editor_m3/m4/m5/m6_integration.py` 与 `test_editor_m6_workspace.py` 验证资源保存、编译、运行、UI/背景或 Qt 崩溃回归；Pattern/Stage/UI/背景/事件/插件测试均有可观察行为断言。删除这些会降低真实覆盖，违反本清单的“不得为了变绿删除公共行为测试”规则。
+
+本次整理基线（2026-08-09）：完整 suite `515` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。该结果只证明当前 checkout 的 Structural/Runtime 回归，不宣称 N2 已完成，也不替代后续 native visual、Performance 或 Usability gate。
 
 ---
 
