@@ -44,6 +44,7 @@ def test_variable_editor_controls_stay_inside_a_narrow_dock(qapp_session):
         editor.replay_check,
         editor.behavior_output_check,
         editor.table,
+        editor.mapping_button,
     )
     right_edge = editor.rect().right()
     assert all(control.geometry().right() <= right_edge for control in controls)

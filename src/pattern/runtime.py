@@ -535,6 +535,16 @@ class PatternRunner:
         self.replay_identity["actual_trigger_frames"] = [event.frame for event in self.spawn_trace]
         return results
 
+    def reset_clip(self, context: Any | None = None) -> None:
+        """Reset this PatternRunner's owning Clip instance."""
+
+        self.reset(context)
+
+    def seek_clip(self, context: Any, frame: int) -> tuple[PatternTickResult, ...]:
+        """Clip-level alias for the deterministic pattern seek contract."""
+
+        return self.seek(context, frame)
+
     def _total_emissions(self, parameters: dict[str, Any]) -> int | None:
         loop_count = parameters["schedule.loop_count"]
         if loop_count is None:

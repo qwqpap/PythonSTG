@@ -103,7 +103,7 @@ git diff --check
 
 当前没有其他可安全删除的测试：`test_editor_app_smoke.py` 虽然名字含 smoke，但验证真实窗口命令、Undo 和正式预览入口；`test_editor_m3/m4/m5/m6_integration.py` 与 `test_editor_m6_workspace.py` 验证资源保存、编译、运行、UI/背景或 Qt 崩溃回归；Pattern/Stage/UI/背景/事件/插件测试均有可观察行为断言。删除这些会降低真实覆盖，违反本清单的“不得为了变绿删除公共行为测试”规则。
 
-本次整理基线（2026-08-09）：完整 suite `529` 项通过；N2 focused gate `52` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。N2.6 另有真实 PySide6 窗口证据：`build/visual_qa_native_qt_1480x920_final.png` 与 `build/visual_qa_native_qt_960x640_final.png`；后者在最小窗口自动将 Bottom Panel 收缩到 80px，Variables dock 仍显示 Apply、表格水平滚动条、runtime overlay、Delete 和 Bind。证据只覆盖 N2 的 Structural/Runtime/Native visual 门禁，不替代后续 Performance 或 Usability gate。
+本次整理基线（2026-08-09）：完整 suite `533` 项通过；N2 focused gate `56` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。N2.6 另有真实 PySide6 窗口证据：`build/visual_qa_native_qt_1480x920_final.png` 与 `build/visual_qa_native_qt_960x640_final.png`；后者在最小窗口自动将 Bottom Panel 收缩到 80px，Variables dock 仍显示 Apply、表格水平滚动条、runtime overlay、Delete、Bind 和 Map。证据只覆盖 N2 的 Structural/Runtime/Native visual 门禁，不替代后续 Performance 或 Usability gate。
 
 ---
 
@@ -179,31 +179,31 @@ N2.0 和 N2.1 只作为已验收契约供后续 Agent 阅读，不再领取或�
 
 **完成条件**：无 reducer 的重叠写入在 compile 阶段失败；显式 reducer 的结果在固定顺序下确定；诊断能定位两个 writer；高密度场景的变量写入仍是批量/稀疏路径。
 
-**Evidence（2026-08-09）**：N2 focused gate 中 51 项通过；`test_stage_compiler_applies_declared_reducer_in_fixed_track_order` 验证正式 compiler/StageRunner，冲突诊断包含两个 writer、路径和区间；未新增逐弹 Python 回调。
+**Evidence（2026-08-09）**：N2 focused gate 中 56 项通过；`test_stage_compiler_applies_declared_reducer_in_fixed_track_order` 验证正式 compiler/StageRunner，冲突诊断包含两个 writer、路径和区间；未新增逐弹 Python 回调。
 
 ### N2.6 编辑器变量面板和只读 overlay
 
 状态：`[x]` 文档命令、类型化属性、mapping API、候选过滤、只读 overlay 和原生 PySide6 窗口门禁已完成。
 
-**Agent 要做**：把变量声明、类型化默认值、scope、writer、reader、animatable、reducer 和 output mapping 编辑接入当前 `CommandStack`；完成绑定选择/搜索和冲突定位；运行值、写入者、frame 只在只读 overlay 显示，不修改 document 或 dirty 状态。补齐 native PySide6 窗口在 1480×920 与 960×640 的布局检查。
+**Agent 要做**：把变量声明、类型化默认值、scope、writer、reader、animatable、reducer 和 output mapping 编辑接入当前 `CommandStack`；提供可搜索的绑定选择器，候选只来自兼容类型/作用域/owner，并把 mapping 对话框的增删改作为一个 Undo 事务提交；完成绑定选择/搜索和冲突定位；运行值、写入者、frame 只在只读 overlay 显示，不修改 document 或 dirty 状态。补齐 native PySide6 窗口在 1480×920 与 960×640 的布局检查。
 
 **验收文件**：`tests/test_variable_editor.py`、新增 `tests/test_variable_editor_native.py`、`tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py`。
 
 **完成条件**：添加/编辑/删除/绑定全部可 Undo/Redo 且稳定 UUID 不变；runtime overlay 变化不改变序列化结果；绑定搜索只显示兼容类型/作用域；真实窗口可读、无控件重叠，最小窗口保留表格水平滚动和 overlay/Bind 入口，offscreen 结果不能冒充 native visual。
 
-**Evidence（2026-08-09）**：`tests/test_variable_editor.py`、`tests/test_variable_editor_native.py`、`tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py` 的 headless/offscreen 行为通过；N2 focused gate `52 passed`，完整 suite `529 passed`。真实 PySide6 `EditorMainWindow` 在 1480×920 和 960×640 均完成布局检查，证据文件为 `build/visual_qa_native_qt_1480x920_final.png`、`build/visual_qa_native_qt_960x640_final.png`；960×640 时 Bottom Panel 自适应为 80px，Variables dock 的字段、Apply、表格水平滚动条、runtime overlay、Delete、Bind 均可见且无控件重叠。测试环境为 Windows/PySide6，截图由正式 `create_window(ProjectContext)` 路径生成。
+**Evidence（2026-08-09）**：`tests/test_variable_editor.py`、`tests/test_variable_editor_native.py`、`tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py` 的 headless/offscreen 行为通过；N2 focused gate `56 passed`，完整 suite `533 passed`。变量面板的 Bind 入口打开 `VariableBindingDialog`，Map 入口打开 `VariableMappingDialog`；映射增删改通过 `CommandStack` 的单一 `Edit output mappings` 事务提交，取消或未解析引用不会静默删除作者数据。真实 PySide6 `EditorMainWindow` 在 1480×920 和 960×640 均完成布局检查，证据文件为 `build/visual_qa_native_qt_1480x920_final.png`、`build/visual_qa_native_qt_960x640_final.png`；960×640 时 Bottom Panel 自适应为 80px，Variables dock 的字段、Apply、表格水平滚动条、runtime overlay、Delete、Bind、Map 均可见且无控件重叠。测试环境为 Windows/PySide6，截图由正式 `create_window(ProjectContext)` 路径生成。
 
 ### N2.7 热重载与 seek
 
 状态：`[x]` compatibility key、兼容值恢复/丢弃决定、Stage/Pattern seek 和 replay identity 已接入；外部副作用仍按 dispatch policy 抑制。
 
-**Agent 要做**：定义变量声明变化的 compatibility key（name/type/scope/owner）；不兼容时丢弃局部运行值并从入口重放，兼容时也必须记录迁移决定；记录初始变量、资源版本、随机种子和实际触发帧。补充 Stage/State/Pattern/Clip 四层 reset/seek API。
+**Agent 要做**：定义变量声明变化的 compatibility key（name/type/scope/owner）；不兼容时丢弃局部运行值并从入口重放，兼容时也必须记录迁移决定；记录初始变量、资源版本、随机种子和实际触发帧。补充 StageRunner 的 Stage/State/Clip 层 reset/seek API，以及 PatternRunner 的 Clip 层别名；每层仍通过正式 fixed-tick runner 重放，不建立第二套预览模拟器。
 
 **验收文件**：新增 `tests/test_variable_hotreload.py`、`tests/test_variable_seek.py`、`tests/test_replay_determinism.py`；回归 `tests/test_devtools_hotreload.py`、`tests/test_preview_process.py`。
 
 **完成条件**：同一输入和 seed 的 reset+seek 与正常播放逐帧相等；改名/改类型/改 scope 不会猜测旧值；旧 preview 进程不会把 overlay 写回 authoring document；测试覆盖 stop、restart、State transition 和 hot reload。
 
-**Evidence（2026-08-09）**：`tests/test_variable_hotreload.py`、`tests/test_variable_seek.py`、`tests/test_replay_determinism.py`、`tests/test_devtools_hotreload.py`、`tests/test_preview_process.py` 通过；formal StageRunner/PatternRunner 记录初始变量、seed、program hash、compatibility decision 和实际触发帧。
+**Evidence（2026-08-09）**：`tests/test_variable_hotreload.py`、`tests/test_variable_seek.py`、`tests/test_replay_determinism.py`、`tests/test_devtools_hotreload.py`、`tests/test_preview_process.py` 通过；`test_state_and_clip_seek_replay_through_the_same_formal_runner` 覆盖 StageRunner 的 State/Clip 入口，PatternRunner 保持同一 fixed-tick `seek` 并提供 `seek_clip`/`reset_clip` 别名；formal StageRunner/PatternRunner 记录初始变量、seed、program hash、compatibility decision 和实际触发帧。
 
 **N2 focused command（每次 N2 子任务都要先跑）**：
 

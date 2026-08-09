@@ -468,6 +468,11 @@ class StageRunner:
                 for item in self._automations_by_state.get(state.state_id, ())
                 if item.start_frame <= local < item.end_frame
             )
+            active.update(
+                item.clip_id
+                for item in self._variable_automations_by_state.get(state.state_id, ())
+                if item.start_frame <= local < item.end_frame
+            )
         return tuple(sorted(active))
 
     @property
@@ -774,6 +779,102 @@ class StageRunner:
         self.pause()
         self.replay_identity["actual_trigger_frames"] = [item.frame for item in self.trace]
         return results
+
+    def reset_state(
+        self,
+        context: Any,
+        state_id: str,
+        *,
+        dispatch_actions: bool = False,
+    ) -> tuple[StageTickResult, ...]:
+        """Reset and replay until ``state_id`` is entered at local frame 0."""
+
+        return self.seek_state(
+            context,
+            state_id,
+            0,
+            dispatch_actions=dispatch_actions,
+        )
+
+    def seek_state(
+        self,
+        context: Any,
+        state_id: str,
+        frame: int,
+        *,
+        dispatch_actions: bool = False,
+    ) -> tuple[StageTickResult, ...]:
+        """Reset and replay to a deterministic local frame of one State.
+
+        ``frame`` follows :meth:`seek`: it is the number of fixed ticks
+        replayed after the State is entered, so actions scheduled on the
+        requested frame have not yet been dispatched.
+        """
+
+        if state_id not in self._states_by_id:
+            raise ValueError(f"unknown state id: {state_id}")
+        state = self._states_by_id[state_id]
+        if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
+            raise ValueError("state frame must be a non-negative integer")
+        if state.duration_frames > 0 and frame >= state.duration_frames:
+            raise ValueError("state frame must be less than the state duration")
+        self.reset(context)
+        self.start(context, reset=False, dispatch_actions=dispatch_actions)
+        results: list[StageTickResult] = []
+        while state_id not in self.current_state_path:
+            if self.state != StageRunnerState.RUNNING:
+                raise ValueError(f"state {state_id!r} was not reached during replay")
+            results.append(self.tick(context, dispatch_actions=dispatch_actions))
+        while self._local_frames.get(state_id, 0) < frame:
+            if self.state != StageRunnerState.RUNNING or state_id not in self.current_state_path:
+                raise ValueError(f"state {state_id!r} ended before local frame {frame}")
+            results.append(self.tick(context, dispatch_actions=dispatch_actions))
+        self.pause()
+        self.replay_identity["actual_trigger_frames"] = [item.frame for item in self.trace]
+        return tuple(results)
+
+    def reset_clip(
+        self,
+        context: Any,
+        clip_id: str,
+        *,
+        dispatch_actions: bool = False,
+    ) -> tuple[StageTickResult, ...]:
+        """Reset and replay until a declared clip's start frame."""
+
+        return self.seek_clip(context, clip_id, 0, dispatch_actions=dispatch_actions)
+
+    def seek_clip(
+        self,
+        context: Any,
+        clip_id: str,
+        frame: int,
+        *,
+        dispatch_actions: bool = False,
+    ) -> tuple[StageTickResult, ...]:
+        """Reset and replay to a local frame within a compiled clip."""
+
+        windows: list[tuple[str, int, int]] = []
+        for item in (*self.program.patterns, *self.program.automations, *self.program.variable_automations):
+            if item.clip_id == clip_id:
+                windows.append((item.state_id, item.start_frame, item.end_frame))
+        for item in self.program.actions:
+            if item.clip_id == clip_id:
+                windows.append((item.state_id, item.frame, item.frame + 1))
+        if not windows:
+            raise ValueError(f"unknown clip id: {clip_id}")
+        state_id, start_frame, end_frame = sorted(windows)[0]
+        length = max(1, end_frame - start_frame)
+        if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
+            raise ValueError("clip frame must be a non-negative integer")
+        if frame >= length:
+            raise ValueError("clip frame must be less than the clip duration")
+        return self.seek_state(
+            context,
+            state_id,
+            start_frame + frame,
+            dispatch_actions=dispatch_actions,
+        )
 
     def _enter_state(
         self,

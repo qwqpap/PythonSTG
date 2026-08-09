@@ -47,3 +47,21 @@ def test_stage_seek_replays_variable_actions_even_when_external_dispatch_is_disa
         (item.frame, item.kind, item.value) for item in normal.trace
     ]
     assert replay.replay_identity["actual_trigger_frames"] == [item.frame for item in replay.trace]
+
+
+def test_state_and_clip_seek_replay_through_the_same_formal_runner(tmp_path):
+    program = _program(tmp_path)
+    state_id = program.state_graph.initial_state_id
+    clip_id = program.variable_automations[0].clip_id
+    runner = StageRunner(program)
+
+    state_results = runner.seek_state(object(), state_id, 2)
+    assert len(state_results) == 2
+    assert runner.current_state_path == (state_id,)
+    assert runner.frame == 2
+    assert clip_id in runner.active_clip_ids
+
+    clip_results = runner.reset_clip(object(), clip_id)
+    assert len(clip_results) == 2
+    assert runner.current_state_path == (state_id,)
+    assert clip_id in runner.active_clip_ids

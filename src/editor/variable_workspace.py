@@ -33,6 +33,7 @@ class VariableEditor(QWidget):
     editVariableRequested = pyqtSignal(str, object)
     deleteVariableRequested = pyqtSignal(str)
     bindingRequested = pyqtSignal(str)
+    mappingRequested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -169,6 +170,11 @@ class VariableEditor(QWidget):
         bind.setObjectName("variableBind")
         bind.clicked.connect(self._binding_requested)
         footer.addWidget(bind)
+        self.mapping_button = QPushButton("Map")
+        self.mapping_button.setObjectName("variableMappings")
+        self.mapping_button.setToolTip("Edit Behavior output mappings")
+        self.mapping_button.clicked.connect(self.mappingRequested)
+        footer.addWidget(self.mapping_button)
         layout.addLayout(footer)
 
     def set_document(self, document: SceneDocument | None, *, state_id: str | None = None) -> None:

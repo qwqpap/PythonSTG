@@ -27,6 +27,7 @@ from src.qt_compat.QtWidgets import (
     QComboBox,
     QDockWidget,
     QDoubleSpinBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -68,6 +69,7 @@ from src.core.project_context import ProjectContext
 from src.authoring.coordinates import CoordinateSpace
 from src.authoring.registry import build_default_resource_type_registry
 from src.authoring.resources import ResourceDocumentError, ResourceReference
+from src.authoring.variables import VariableOutputMapping, VariableRef
 from src.game.background_render.document import BackgroundDocument
 from src.pattern import PatternDocument
 from src.ui.document import UIDocument
@@ -134,11 +136,16 @@ from .timeline_commands import (
 )
 from .timeline_workspace import TimelineEditor
 from .variable_workspace import VariableEditor
+from .variable_mapping_workspace import VariableBindingDialog, VariableMappingDialog
 from .variable_commands import (
+    AddOutputMappingCommand,
     AddVariableCommand,
+    RemoveOutputMappingCommand,
     RemoveVariableCommand,
     SetVariablePropertiesCommand,
+    SetOutputMappingPropertiesCommand,
     compatible_variable_bindings,
+    find_variable,
 )
 from .state_graph_commands import (
     AddStateCommand,
@@ -1921,6 +1928,7 @@ class EditorMainWindow(QMainWindow):
         self.variables.editVariableRequested.connect(self._variable_edit_requested)
         self.variables.deleteVariableRequested.connect(self._variable_delete_requested)
         self.variables.bindingRequested.connect(self._variable_binding_requested)
+        self.variables.mappingRequested.connect(self._variable_mapping_requested)
         variables_dock = QDockWidget("Variables", self)
         self.variables_dock = variables_dock
         variables_dock.setObjectName("variablesDock")
@@ -2912,15 +2920,9 @@ class EditorMainWindow(QMainWindow):
     def _variable_binding_requested(self, variable_id: str) -> None:
         if not isinstance(self.session.document, SceneDocument):
             return
-        variable = next(
-            (item for item in self.session.document.variables if item.id == variable_id),
-            None,
-        )
+        variable = find_variable(self.session.document, variable_id)
         if variable is None:
             return
-        # The catalog is intentionally data driven; the panel can use this
-        # result to populate a binding picker without exposing incompatible
-        # scopes or types.
         candidates = compatible_variable_bindings(
             self.session.document,
             type_id=variable.type,
@@ -2929,7 +2931,105 @@ class EditorMainWindow(QMainWindow):
             exclude_id=variable.id,
         )
         self.session.editor_context["variable_binding_candidates"] = tuple(item.id for item in candidates)
+        picker = VariableBindingDialog(candidates, parent=self)
+        if picker.exec() != QDialog.Accepted or picker.selected_id is None:
+            return
+        selected = find_variable(self.session.document, picker.selected_id)
+        if selected is None:
+            return
+        # A binding is an editor selection, not a document mutation.  The
+        # selected reference is consumed by the owning pattern/behavior tool;
+        # choosing it must not create a dirty document or an undo entry.
+        self.session.editor_context["selected_binding_id"] = selected.id
+        self.statusBar().showMessage(
+            f"Binding candidate: {selected.name} ({selected.scope}, {selected.type})",
+            5000,
+        )
+
+    @staticmethod
+    def _variable_specs(document: SceneDocument) -> tuple:
+        values = list(document.variables)
+        values.extend(variable for state in document.state_graph.walk_states() for variable in state.variables)
+        return tuple(values)
+
+    @staticmethod
+    def _mapping_collection(document: SceneDocument, state_id: str | None):
+        if state_id:
+            state = document.state_graph.find_state(state_id)
+            if state is None:
+                raise DocumentError(f"State does not exist: {state_id}")
+            return state.output_mappings
+        return document.output_mappings
+
+    def _variable_mapping_requested(self) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        state_id = str(self.session.editor_context.get("selected_state_id") or "") or None
+        try:
+            mappings = tuple(self._mapping_collection(self.session.document, state_id))
+        except DocumentError as exc:
+            self._show_error("Output mappings unavailable", exc)
+            return
+        dialog = VariableMappingDialog(
+            self._variable_specs(self.session.document),
+            mappings,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            self._apply_variable_mapping_changes(dialog.mappings, state_id=state_id)
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Output mapping failed", exc)
+            return
         self._refresh()
+        self._sync_active_stage_preview()
+
+    def _apply_variable_mapping_changes(
+        self,
+        mappings: tuple[VariableOutputMapping, ...],
+        *,
+        state_id: str | None,
+    ) -> None:
+        """Commit one mapping dialog result as one undoable transaction."""
+
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        existing = tuple(self._mapping_collection(self.session.document, state_id))
+        old_by_id = {item.id: item for item in existing}
+        new_by_id = {item.id: item for item in mappings}
+        commands = []
+        for mapping_id in sorted(set(old_by_id).difference(new_by_id)):
+            commands.append(RemoveOutputMappingCommand(self.session.document, mapping_id))
+        for mapping_id in sorted(set(new_by_id).difference(old_by_id)):
+            commands.append(
+                AddOutputMappingCommand(
+                    self.session.document,
+                    new_by_id[mapping_id],
+                    state_id=state_id,
+                )
+            )
+        for mapping_id in sorted(set(old_by_id).intersection(new_by_id)):
+            old = old_by_id[mapping_id]
+            new = new_by_id[mapping_id]
+            if old.to_dict() == new.to_dict():
+                continue
+            commands.append(
+                SetOutputMappingPropertiesCommand(
+                    self.session.document,
+                    mapping_id,
+                    {
+                        "source": new.source.to_dict(),
+                        "target": new.target.to_dict(),
+                        "operation": new.operation,
+                    },
+                )
+            )
+        if not commands:
+            return
+        with self.session.commands.transaction("Edit output mappings"):
+            for command in commands:
+                self.session.apply(command)
 
     def _state_graph_add_state(self, graph_id: str) -> None:
         if not isinstance(self.session.document, SceneDocument):
