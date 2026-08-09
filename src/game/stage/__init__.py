@@ -346,8 +346,11 @@ from .program import (  # noqa: E402
     StageRunner,
     StageRunnerState,
     StageRuntimeError,
+    StageState,
+    StageStateGraph,
     StageTickResult,
     StageTraceEvent,
+    StageTransition,
 )
 
 
@@ -362,6 +365,9 @@ __all__ = [
     "StageRunner",
     "StageRunnerState",
     "StageRuntimeError",
+    "StageState",
+    "StageStateGraph",
     "StageTickResult",
     "StageTraceEvent",
+    "StageTransition",
 ]

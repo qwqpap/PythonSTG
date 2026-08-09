@@ -95,7 +95,10 @@ and `protocol_error` events.
 
 Statistics include state, frame, live bullet count, pool capacity, seed,
 pause state, update time, render time, program hash, player position, gizmo
-state, reload status, and the last error.
+state, reload status, and the last error. Stage mode additionally reports
+`state_path` (stable State UUIDs), `state_path_names`, State-local
+`active_clips`, and the read-only runtime `node_state`; these fields are
+feedback only and are never merged into the authoring document.
 
 `load`, `set-property`, and `set-seed` compile a prospective document before
 touching the active runner. If parsing or compilation fails, the current

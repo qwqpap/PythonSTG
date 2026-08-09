@@ -87,6 +87,7 @@ class PatternPreviewPanel(QWidget):
             ("state", "State"),
             ("frame", "Frame"),
             ("duration_frames", "Duration"),
+            ("state_path_names", "State Path"),
             ("active_clips", "Active Clips"),
             ("timeline_events", "Events"),
             ("bullet_count", "Bullets"),
@@ -253,6 +254,8 @@ class PatternPreviewPanel(QWidget):
         elif event == "statistics":
             for key in self.stats_labels:
                 value = payload.get(key)
+                if key == "state_path_names" and isinstance(value, list):
+                    value = " / ".join(str(item) for item in value) or "—"
                 if key in {"active_clips", "timeline_events"} and isinstance(value, list):
                     value = len(value)
                 if key in {"update_ms", "render_ms"} and value is not None:

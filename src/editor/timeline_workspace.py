@@ -384,6 +384,7 @@ class TimelineEditor(QWidget):
         super().__init__(parent)
         self.setObjectName("timelineEditor")
         self.document: SceneDocument | None = None
+        self.state_id: str | None = None
         self.selected_track_id: str | None = None
         self.selected_clip_id: str | None = None
         self.playhead_frame = 0
@@ -491,10 +492,15 @@ class TimelineEditor(QWidget):
         self,
         document: SceneDocument,
         *,
+        state_id: str | None = None,
         selected_clip_id: str | None = None,
         zoom: float | None = None,
     ) -> None:
         self.document = document
+        selected_state_id = state_id or document.state_graph.initial_state_id
+        if document.state_graph.find_state(selected_state_id) is None:
+            selected_state_id = document.state_graph.initial_state_id
+        self.state_id = selected_state_id
         self.selected_clip_id = selected_clip_id
         if zoom is not None:
             self.pixels_per_frame = min(
@@ -505,6 +511,7 @@ class TimelineEditor(QWidget):
 
     def clear_document(self) -> None:
         self.document = None
+        self.state_id = None
         self.selected_track_id = None
         self.selected_clip_id = None
         self.playhead_frame = 0
@@ -557,7 +564,7 @@ class TimelineEditor(QWidget):
         if self.document is None or not self.selected_track_id:
             return
         track = next(
-            (item for item in self.document.tracks if item.id == self.selected_track_id),
+            (item for item in self.tracks if item.id == self.selected_track_id),
             None,
         )
         if track is not None:
@@ -581,7 +588,7 @@ class TimelineEditor(QWidget):
     def _nudge_clip(self, clip_id: str, delta: int) -> None:
         if self.document is None:
             return
-        for track in self.document.tracks:
+        for track in self.tracks:
             for clip in track.clips:
                 if clip.id == clip_id:
                     self.clipGeometryRequested.emit(
@@ -604,15 +611,27 @@ class TimelineEditor(QWidget):
             x = TRACK_HEADER_WIDTH + self.playhead_frame * self.pixels_per_frame
             item.setLine(x, 0, x, self.view.graphics_scene.sceneRect().height())
 
+    @property
+    def tracks(self) -> list[TimelineTrack]:
+        if self.document is None:
+            return []
+        state = self.document.state_graph.find_state(self.state_id or "")
+        return state.tracks if state is not None else self.document.tracks
+
     def _rebuild(self) -> None:
         scene = self.view.graphics_scene
         scene.clear()
         self.view.pixels_per_frame = self.pixels_per_frame
         self.view.snap_frames = self.snap_spin.value()
         document = self.document
-        tracks = document.tracks if document is not None else []
+        tracks = self.tracks
         self.view.track_ids = [track.id for track in tracks]
-        duration = max(document.duration_frames if document is not None else 0, 3600)
+        state = (
+            document.state_graph.find_state(self.state_id or "")
+            if document is not None
+            else None
+        )
+        duration = max(state.timeline_duration_frames if state is not None else 0, 3600)
         width = TRACK_HEADER_WIDTH + duration * self.pixels_per_frame + 120
         height = max(120.0, RULER_HEIGHT + max(1, len(tracks)) * TRACK_HEIGHT)
         scene.setSceneRect(0, 0, width, height)

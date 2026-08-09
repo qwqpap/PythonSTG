@@ -1,4 +1,4 @@
-# 作者资源契约（M0）
+# 作者资源契约
 
 本文冻结 Godot 式编辑器 Phase 0 使用的最小公共协议。弹幕配方、时间轴、UI
 布局和背景的领域字段将在后续阶段分别定义；它们不得绕过这里的身份、版本、引用、
@@ -24,7 +24,7 @@ M0 注册以下类型：
 
 | `type` | 资源浏览器类别 | 领域正文冻结阶段 |
 |---|---|---|
-| `pystg.scene` | Scene | 已有 v1，Phase 4 扩展时间轴 |
+| `pystg.scene` | Scene | v3：内嵌分层状态图与 State 局部时间线 |
 | `pystg.pattern` | Pattern | Phase 1 |
 | `pystg.ui` | UI | Phase 6 |
 | `pystg.background` | Background | Phase 6 |
@@ -65,7 +65,54 @@ res://game_content/patterns/star-ring.pystg.json
 4. 必须有输入 fixture、迁移结果和 round-trip 测试；
 5. 遇到未来版本或缺失迁移路径时给出可操作错误，不能猜测降级。
 
-旧无版本场景通过已注册的 `pystg.scene` v0→v1 迁移进入当前模型。
+旧无版本场景通过已注册的 `pystg.scene` v0→v1→v2→v3 迁移进入当前模型。
+v2 的顶层 `tracks` 会原样迁入一个确定性 UUID 的 `Default` State；Track、Clip、
+Keyframe 的 ID、顺序、时长和 payload 不改变。v3 保存后不再写第二份顶层
+`tracks`。
+
+## Scene v3 状态图正文
+
+`SceneDocument` 是保存、Undo/Redo 和编译的唯一真源；`state_graph` 是它的内嵌
+子结构，不是另一种 Flow/State/Sequence 文件：
+
+```json
+{
+  "schema_version": 3,
+  "type": "pystg.scene",
+  "state_graph": {
+    "id": "e0f36a27-e0c4-5a99-b044-ad01a3ebfceb",
+    "name": "StageFlow",
+    "initial_state_id": "d71b4d73-9ecd-5707-a48b-2cbc0c9ca03e",
+    "states": [
+      {
+        "id": "d71b4d73-9ecd-5707-a48b-2cbc0c9ca03e",
+        "name": "Default",
+        "order": 0,
+        "duration_frames": 240,
+        "entry_actions": [],
+        "exit_actions": [],
+        "tracks": [],
+        "transitions": [],
+        "child_graph": null
+      }
+    ]
+  }
+}
+```
+
+- 每个 State 直接拥有入口/退出稀疏动作、局部 Timeline、同级 Transition 和可选
+  `child_graph`；所有对象继续使用全 Scene 唯一的稳定 UUID。
+- `after` 转移的 `after_frames` 是 State 局部帧且必须大于零；`complete` 转移的
+  `after_frames` 必须为 `null`。本版本不提前包含变量条件或事件转移。
+- Composite State 进入时自动进入子图的 `initial_state_id`；父 State 退出时按
+  子级到父级的顺序取消整个活动子树。
+- StageFlow 与 PhaseFlow 是根图和子图的编辑器上下文名称，使用同一个 schema、
+  compiler、runner、CommandStack 和调试反馈。
+- 运行实例、当前 State path 和局部帧只存在于 `StageRunner`/Preview stats；它们
+  不写回 `SceneDocument`，也不制造 dirty。
+- 完整 JSON 约束见 `docs/schemas/pystg-scene-v3.schema.json`；v2/v3 迁移样本见
+  `docs/schemas/fixtures/scene-v2.pystg.json` 与
+  `docs/schemas/fixtures/scene-v3.pystg.json`。
 
 ## 坐标
 

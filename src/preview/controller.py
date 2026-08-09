@@ -476,7 +476,14 @@ class PatternPreviewController:
         start = time.perf_counter()
         self.runner.reset(self.context)
         self.frame = 0
-        self.runner.start(self.context, reset=False)
+        if isinstance(self.runner, StageRunner):
+            self.runner.start(
+                self.context,
+                reset=False,
+                dispatch_actions=False,
+            )
+        else:
+            self.runner.start(self.context, reset=False)
         try:
             for _ in range(frame):
                 self._advance_one(dispatch_actions=False)
@@ -623,6 +630,12 @@ class PatternPreviewController:
             ),
             "active_clips": (
                 list(stage_runner.active_clip_ids) if stage_runner is not None else []
+            ),
+            "state_path": (
+                list(stage_runner.current_state_path) if stage_runner is not None else []
+            ),
+            "state_path_names": (
+                list(stage_runner.current_state_names) if stage_runner is not None else []
             ),
             "node_state": (
                 copy.deepcopy(stage_runner.node_state) if stage_runner is not None else {}

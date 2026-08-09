@@ -47,6 +47,7 @@ class StageKeyframe:
 
 @dataclass(frozen=True)
 class StageAutomation:
+    state_id: str
     track_id: str
     clip_id: str
     kind: str
@@ -71,6 +72,7 @@ class StageAutomation:
 
 @dataclass(frozen=True)
 class StageAction:
+    state_id: str
     frame: int
     track_id: str
     clip_id: str
@@ -92,6 +94,7 @@ class StageAction:
 
 @dataclass(frozen=True)
 class PatternSchedule:
+    state_id: str
     track_id: str
     clip_id: str
     target_id: str | None
@@ -116,6 +119,46 @@ class PatternSchedule:
 
 
 @dataclass(frozen=True)
+class StageTransition:
+    transition_id: str
+    source_state_id: str
+    target_state_id: str
+    trigger: str
+    after_frames: int | None
+    priority: int
+    order: int
+
+    @property
+    def order_key(self) -> tuple[int, int, str]:
+        return (-self.priority, self.order, self.transition_id)
+
+
+@dataclass(frozen=True)
+class StageState:
+    state_id: str
+    name: str
+    duration_frames: int
+    entry_actions: tuple[StageAction, ...]
+    exit_actions: tuple[StageAction, ...]
+    transitions: tuple[StageTransition, ...]
+    child_graph: "StageStateGraph | None" = None
+
+
+@dataclass(frozen=True)
+class StageStateGraph:
+    graph_id: str
+    name: str
+    initial_state_id: str
+    states: tuple[StageState, ...]
+
+    def state(self, state_id: str) -> StageState:
+        try:
+            return next(item for item in self.states if item.state_id == state_id)
+        except StopIteration as exc:
+            raise KeyError(state_id) from exc
+
+
+@dataclass(frozen=True)
 class StageProgram:
     resource_id: str
     schema_version: int
@@ -127,6 +170,7 @@ class StageProgram:
     patterns: tuple[PatternSchedule, ...]
     automations: tuple[StageAutomation, ...]
     actions: tuple[StageAction, ...]
+    state_graph: StageStateGraph
 
 
 class StageRunnerState(str, Enum):
@@ -145,11 +189,20 @@ class StageRuntimeError(RuntimeError):
         message: str,
         *,
         clip_id: str | None = None,
+        state_id: str | None = None,
+        transition_id: str | None = None,
     ) -> None:
         self.resource_id = resource_id
         self.frame = frame
         self.clip_id = clip_id
-        self.path = f"clips.{clip_id}" if clip_id else "runtime"
+        self.state_id = state_id
+        self.transition_id = transition_id
+        if transition_id is not None:
+            self.path = f"states.{state_id}.transitions.{transition_id}"
+        elif clip_id is not None:
+            self.path = f"states.{state_id}.clips.{clip_id}"
+        else:
+            self.path = "runtime"
         self.detail = message
         super().__init__(f"{resource_id} at frame {frame}: {message}")
 
@@ -163,6 +216,9 @@ class StageTraceEvent:
     target_id: str | None
     channel: str
     value_json: str
+    state_id: str | None = None
+    local_frame: int | None = None
+    transition_id: str | None = None
 
     @property
     def value(self) -> Any:
@@ -179,6 +235,7 @@ class StageTickResult:
 
 @dataclass
 class _ActivePattern:
+    state_id: str
     schedule: PatternSchedule
     loop_index: int
     end_frame: int
@@ -266,7 +323,7 @@ def _ease(mode: str, amount: float) -> float:
 
 
 class StageRunner:
-    """Execute one immutable StageProgram at a fixed document tick rate."""
+    """Execute one immutable, hierarchical StageProgram at a fixed tick rate."""
 
     def __init__(self, program: StageProgram) -> None:
         self.program = program
@@ -276,34 +333,68 @@ class StageRunner:
         self.node_state: dict[str, dict[str, Any]] = {}
         self.trace: list[StageTraceEvent] = []
         self.last_events: tuple[StageTraceEvent, ...] = ()
-        self._active_patterns: dict[tuple[str, int], _ActivePattern] = {}
+        self._active_patterns: dict[tuple[str, str, int], _ActivePattern] = {}
         self._context: Any | None = None
         self._audio_started = False
         self._audio_paused = False
         self._active_audio_clip_id: str | None = None
+        self._active_audio_state_id: str | None = None
+        self._graphs_by_id: dict[str, StageStateGraph] = {}
+        self._states_by_id: dict[str, StageState] = {}
+        self._state_graph_by_state: dict[str, StageStateGraph] = {}
+        self._index_graph(program.state_graph)
+        self._patterns_by_state = self._group_by_state(program.patterns)
+        self._automations_by_state = self._group_by_state(program.automations)
+        self._actions_by_state = self._group_by_state(program.actions)
         self._automation_values = {
             item.clip_id: tuple(keyframe.value for keyframe in item.keyframes)
             for item in program.automations
         }
+        self._active_graphs: list[StageStateGraph] = []
+        self._active_states: list[StageState] = []
+        self._local_frames: dict[str, int] = {}
+        self._completed_children: set[str] = set()
         self._restore_node_state()
+
+    @staticmethod
+    def _group_by_state(items):
+        grouped: dict[str, list[Any]] = {}
+        for item in items:
+            grouped.setdefault(item.state_id, []).append(item)
+        return {key: tuple(value) for key, value in grouped.items()}
+
+    def _index_graph(self, graph: StageStateGraph) -> None:
+        self._graphs_by_id[graph.graph_id] = graph
+        for state in graph.states:
+            self._states_by_id[state.state_id] = state
+            self._state_graph_by_state[state.state_id] = graph
+            if state.child_graph is not None:
+                self._index_graph(state.child_graph)
+
+    @property
+    def current_state_path(self) -> tuple[str, ...]:
+        return tuple(item.state_id for item in self._active_states)
+
+    @property
+    def current_state_names(self) -> tuple[str, ...]:
+        return tuple(item.name for item in self._active_states)
 
     @property
     def active_clip_ids(self) -> tuple[str, ...]:
         active = {item.schedule.clip_id for item in self._active_patterns.values()}
         if self._active_audio_clip_id is not None:
             active.add(self._active_audio_clip_id)
-        active.update(
-            item.clip_id
-            for item in self.program.automations
-            if item.start_frame <= self.frame < item.end_frame
-        )
+        for state in self._active_states:
+            local = self._local_frames.get(state.state_id, 0)
+            active.update(
+                item.clip_id
+                for item in self._automations_by_state.get(state.state_id, ())
+                if item.start_frame <= local < item.end_frame
+            )
         return tuple(sorted(active))
 
     def _restore_node_state(self) -> None:
-        self.node_state = {
-            item.node_id: item.properties
-            for item in self.program.nodes
-        }
+        self.node_state = {item.node_id: item.properties for item in self.program.nodes}
 
     def start(
         self,
@@ -311,12 +402,23 @@ class StageRunner:
         *,
         reset: bool = True,
         clear_owned: bool = True,
+        dispatch_actions: bool = True,
     ) -> None:
         if context is not None:
             self._context = context
         if reset:
             self.reset(context, clear_owned=clear_owned)
         self.state = StageRunnerState.RUNNING
+        if not self._active_states:
+            events: list[StageTraceEvent] = []
+            self._enter_state(
+                self.program.state_graph,
+                self.program.state_graph.initial_state_id,
+                events,
+                dispatch=dispatch_actions,
+            )
+            self.trace.extend(events)
+            self.last_events = tuple(events)
 
     def pause(self) -> None:
         if self.state == StageRunnerState.RUNNING:
@@ -348,6 +450,10 @@ class StageRunner:
         clear_state = getattr(self._context, "clear_authored_stage_state", None)
         if callable(clear_state):
             clear_state()
+        self._active_graphs.clear()
+        self._active_states.clear()
+        self._local_frames.clear()
+        self._completed_children.clear()
         self.frame = 0
         self.state = StageRunnerState.STOPPED
         self.last_error = None
@@ -369,58 +475,86 @@ class StageRunner:
         if self.state != StageRunnerState.RUNNING:
             return StageTickResult(current, self.state)
         if current >= self.program.duration_frames:
-            self._finish(context)
-            return StageTickResult(current, self.state)
+            events: list[StageTraceEvent] = []
+            self._finish(context, events=events, dispatch=dispatch_actions)
+            self.trace.extend(events)
+            self.last_events = tuple(events)
+            return StageTickResult(current, self.state, tuple(events))
 
         events: list[StageTraceEvent] = []
         spawned_count = 0
         active_clip: str | None = None
+        active_state_id: str | None = None
         try:
-            self._expire_patterns(context, current, events)
-            self._apply_automations(context, current, events)
-            self._start_patterns(context, current, events)
-            self._dispatch_actions(context, current, events, dispatch=dispatch_actions)
+            active_ids = self.current_state_path
+            for state_id in active_ids:
+                local = self._local_frames[state_id]
+                self._expire_patterns(context, state_id, local, current, events)
+                self._apply_automations(context, state_id, local, current, events)
+                self._start_patterns(context, state_id, local, current, events)
+                self._dispatch_actions(
+                    context,
+                    self._actions_by_state.get(state_id, ()),
+                    local,
+                    current,
+                    events,
+                    dispatch=dispatch_actions,
+                )
+            depth_order = {state_id: index for index, state_id in enumerate(active_ids)}
             for key in sorted(
                 self._active_patterns,
-                key=lambda value: self._active_patterns[value].schedule.order_key,
+                key=lambda value: (
+                    depth_order.get(value[0], 10_000),
+                    self._active_patterns[value].schedule.order_key,
+                ),
             ):
                 item = self._active_patterns[key]
                 active_clip = item.schedule.clip_id
+                active_state_id = item.state_id
                 target_state = self.node_state.get(item.schedule.target_id or "", {})
                 if target_state.get("enabled", True) is False:
                     continue
-                result = item.runner.tick(
-                    _PatternContext(context, self, item.schedule)
-                )
+                result = item.runner.tick(_PatternContext(context, self, item.schedule))
                 if result.event is not None:
                     spawned_count += result.spawned_count
-                    event = result.event
-                    trace = self._trace_event(
-                        current,
-                        "pattern_spawn",
-                        item.schedule.track_id,
-                        item.schedule.clip_id,
-                        item.schedule.target_id,
-                        item.schedule.channel,
-                        {
-                            "loop_index": item.loop_index,
-                            "pattern_loop_index": event.loop_index,
-                            "burst_index": event.burst_index,
-                            "requested_count": event.requested_count,
-                            "spawned_count": event.spawned_count,
-                            "spawn_hash": self._spawn_hash(event),
-                        },
+                    pattern_event = result.event
+                    events.append(
+                        self._trace_event(
+                            current,
+                            "pattern_spawn",
+                            item.schedule.track_id,
+                            item.schedule.clip_id,
+                            item.schedule.target_id,
+                            item.schedule.channel,
+                            {
+                                "loop_index": item.loop_index,
+                                "pattern_loop_index": pattern_event.loop_index,
+                                "burst_index": pattern_event.burst_index,
+                                "requested_count": pattern_event.requested_count,
+                                "spawned_count": pattern_event.spawned_count,
+                                "spawn_hash": self._spawn_hash(pattern_event),
+                            },
+                            state_id=item.state_id,
+                            local_frame=self._local_frames.get(item.state_id, 0),
+                        )
                     )
-                    events.append(trace)
+            for state_id in active_ids:
+                if state_id in self._local_frames:
+                    self._local_frames[state_id] += 1
             self.frame += 1
-            if self.frame >= self.program.duration_frames:
-                self._finish(context, events=events)
+            self._resolve_state_graph(context, events, dispatch=dispatch_actions)
+            if (
+                self.state == StageRunnerState.RUNNING
+                and self.frame >= self.program.duration_frames
+            ):
+                self._finish(context, events=events, dispatch=dispatch_actions)
         except Exception as exc:
             error = StageRuntimeError(
                 self.program.resource_id,
                 current,
                 str(exc),
                 clip_id=active_clip,
+                state_id=active_state_id,
             )
             self.last_error = error
             self.state = StageRunnerState.ERROR
@@ -444,16 +578,171 @@ class StageRunner:
             for _ in range(frames)
         )
 
-    def _finish(self, context: Any, *, events: list[StageTraceEvent] | None = None) -> None:
-        target = events if events is not None else []
-        self._expire_patterns(context, self.program.duration_frames, target, force=True)
+    def _enter_state(
+        self,
+        graph: StageStateGraph,
+        state_id: str,
+        events: list[StageTraceEvent],
+        *,
+        dispatch: bool,
+    ) -> None:
+        state = graph.state(state_id)
+        self._active_graphs.append(graph)
+        self._active_states.append(state)
+        self._local_frames[state.state_id] = 0
+        self._completed_children.discard(state.state_id)
+        self._dispatch_actions(
+            self._context,
+            state.entry_actions,
+            0,
+            self.frame,
+            events,
+            dispatch=dispatch,
+            match_frame=False,
+        )
+        if state.child_graph is not None:
+            self._enter_state(
+                state.child_graph,
+                state.child_graph.initial_state_id,
+                events,
+                dispatch=dispatch,
+            )
+
+    def _exit_from_depth(
+        self,
+        context: Any,
+        depth: int,
+        events: list[StageTraceEvent],
+        *,
+        dispatch: bool,
+    ) -> None:
+        for index in range(len(self._active_states) - 1, depth - 1, -1):
+            state = self._active_states[index]
+            local = self._local_frames.get(state.state_id, 0)
+            self._expire_patterns(
+                context,
+                state.state_id,
+                local,
+                self.frame,
+                events,
+                force=True,
+            )
+            self._dispatch_actions(
+                context,
+                state.exit_actions,
+                local,
+                self.frame,
+                events,
+                dispatch=dispatch,
+                match_frame=False,
+            )
+            if self._active_audio_state_id == state.state_id:
+                self._stop_audio()
+            self._completed_children.discard(state.state_id)
+            self._local_frames.pop(state.state_id, None)
+            self._active_states.pop(index)
+            self._active_graphs.pop(index)
+
+    def _state_complete(self, state: StageState) -> bool:
+        local_done = self._local_frames.get(state.state_id, 0) >= state.duration_frames
+        child_done = (
+            state.child_graph is None or state.state_id in self._completed_children
+        )
+        return local_done and child_done
+
+    def _resolve_state_graph(
+        self,
+        context: Any,
+        events: list[StageTraceEvent],
+        *,
+        dispatch: bool,
+    ) -> None:
+        depth = len(self._active_states) - 1
+        while depth >= 0 and self._active_states:
+            if depth >= len(self._active_states):
+                depth = len(self._active_states) - 1
+            state = self._active_states[depth]
+            graph = self._active_graphs[depth]
+            local = self._local_frames.get(state.state_id, 0)
+            completed = self._state_complete(state)
+            eligible = [
+                transition
+                for transition in state.transitions
+                if (
+                    transition.trigger == "after"
+                    and local >= int(transition.after_frames or 0)
+                )
+                or (transition.trigger == "complete" and completed)
+            ]
+            if eligible:
+                transition = min(eligible, key=lambda item: item.order_key)
+                source_id = state.state_id
+                self._exit_from_depth(
+                    context,
+                    depth,
+                    events,
+                    dispatch=dispatch,
+                )
+                events.append(
+                    self._trace_event(
+                        self.frame,
+                        "state_transition",
+                        graph.graph_id,
+                        transition.transition_id,
+                        transition.target_state_id,
+                        "state",
+                        {
+                            "source_state_id": source_id,
+                            "target_state_id": transition.target_state_id,
+                            "trigger": transition.trigger,
+                            "local_frame": local,
+                        },
+                        state_id=source_id,
+                        local_frame=local,
+                        transition_id=transition.transition_id,
+                    )
+                )
+                self._enter_state(
+                    graph,
+                    transition.target_state_id,
+                    events,
+                    dispatch=dispatch,
+                )
+                depth -= 1
+                continue
+            if not state.transitions and completed:
+                self._exit_from_depth(
+                    context,
+                    depth,
+                    events,
+                    dispatch=dispatch,
+                )
+                if depth == 0:
+                    self._stop_audio()
+                    self.state = StageRunnerState.FINISHED
+                    return
+                parent = self._active_states[depth - 1]
+                self._completed_children.add(parent.state_id)
+            depth -= 1
+
+    def _finish(
+        self,
+        context: Any,
+        *,
+        events: list[StageTraceEvent],
+        dispatch: bool,
+    ) -> None:
+        if self._active_states:
+            self._exit_from_depth(context, 0, events, dispatch=dispatch)
         self._stop_audio()
         self.state = StageRunnerState.FINISHED
 
     def _expire_patterns(
         self,
         context: Any,
-        frame: int,
+        state_id: str,
+        local_frame: int,
+        global_frame: int,
         events: list[StageTraceEvent],
         *,
         force: bool = False,
@@ -461,55 +750,57 @@ class StageRunner:
         expired = [
             key
             for key, item in self._active_patterns.items()
-            if force or item.end_frame <= frame
+            if item.state_id == state_id and (force or item.end_frame <= local_frame)
         ]
         for key in sorted(expired):
             item = self._active_patterns.pop(key)
             item.runner.stop(context, clear_owned=True)
             events.append(
                 self._trace_event(
-                    frame,
+                    global_frame,
                     "pattern_stop",
                     item.schedule.track_id,
                     item.schedule.clip_id,
                     item.schedule.target_id,
                     item.schedule.channel,
                     {"loop_index": item.loop_index},
+                    state_id=state_id,
+                    local_frame=local_frame,
                 )
             )
 
     def _start_patterns(
         self,
         context: Any,
-        frame: int,
+        state_id: str,
+        local_frame: int,
+        global_frame: int,
         events: list[StageTraceEvent],
     ) -> None:
-        for schedule in self.program.patterns:
-            relative = frame - schedule.start_frame
+        for schedule in self._patterns_by_state.get(state_id, ()):
+            relative = local_frame - schedule.start_frame
             if relative < 0 or relative % schedule.duration_frames:
                 continue
             loop_index = relative // schedule.duration_frames
             if loop_index >= schedule.loop_count:
                 continue
-            key = (schedule.clip_id, loop_index)
+            key = (state_id, schedule.clip_id, loop_index)
             if key in self._active_patterns:
                 continue
             from src.pattern import PatternRunner
 
             runner = PatternRunner(schedule.program)
-            runner.start(
-                _PatternContext(context, self, schedule),
-                reset=False,
-            )
+            runner.start(_PatternContext(context, self, schedule), reset=False)
             self._active_patterns[key] = _ActivePattern(
+                state_id=state_id,
                 schedule=schedule,
                 loop_index=loop_index,
-                end_frame=frame + schedule.duration_frames,
+                end_frame=local_frame + schedule.duration_frames,
                 runner=runner,
             )
             events.append(
                 self._trace_event(
-                    frame,
+                    global_frame,
                     "pattern_start",
                     schedule.track_id,
                     schedule.clip_id,
@@ -520,24 +811,24 @@ class StageRunner:
                         "pattern_id": schedule.program.resource_id,
                         "resource": schedule.resource_uri,
                     },
+                    state_id=state_id,
+                    local_frame=local_frame,
                 )
             )
 
     def _apply_automations(
         self,
         context: Any,
-        frame: int,
+        state_id: str,
+        local_frame: int,
+        global_frame: int,
         events: list[StageTraceEvent],
     ) -> None:
         winners: dict[tuple[str, str], tuple[StageAutomation, Any, int]] = {}
-        for item in self.program.automations:
-            if not item.start_frame <= frame < item.end_frame:
+        for item in self._automations_by_state.get(state_id, ()):
+            if not item.start_frame <= local_frame < item.end_frame:
                 continue
-            local = (frame - item.start_frame) % item.duration_frames
-            # Clips use a half-open runtime span, but authoring keyframes may
-            # intentionally place the destination at duration_frames. Sample
-            # that endpoint on the final live frame so the authored value is
-            # actually reached before a loop restarts or the clip ends.
+            local = (local_frame - item.start_frame) % item.duration_frames
             if (
                 local == item.duration_frames - 1
                 and item.keyframes
@@ -556,29 +847,35 @@ class StageRunner:
         for item, value, conflict_count in sorted(
             winners.values(), key=lambda entry: entry[0].order_key
         ):
-            state = self.node_state.setdefault(item.target_id, {})
+            node = self.node_state.setdefault(item.target_id, {})
             if item.kind == "Movement":
-                if not isinstance(value, dict) or not _number(value.get("x")) or not _number(value.get("y")):
+                if (
+                    not isinstance(value, dict)
+                    or not _number(value.get("x"))
+                    or not _number(value.get("y"))
+                ):
                     raise ValueError("Movement automation must evaluate to numeric x/y")
-                state["x"] = float(value["x"])
-                state["y"] = float(value["y"])
+                node["x"] = float(value["x"])
+                node["y"] = float(value["y"])
                 hook = getattr(context, "set_node_position", None)
                 if callable(hook):
-                    hook(item.target_id, state["x"], state["y"])
+                    hook(item.target_id, node["x"], node["y"])
             else:
-                state[item.property_name] = value
+                node[item.property_name] = value
                 hook = getattr(context, "set_node_property", None)
                 if callable(hook):
                     hook(item.target_id, item.property_name, value)
             events.append(
                 self._trace_event(
-                    frame,
+                    global_frame,
                     item.kind.lower(),
                     item.track_id,
                     item.clip_id,
                     item.target_id,
                     item.channel,
                     {"value": value, "conflict_count": conflict_count},
+                    state_id=state_id,
+                    local_frame=local_frame,
                 )
             )
 
@@ -594,21 +891,23 @@ class StageRunner:
                 continue
             left = frames[index - 1]
             span = max(1, right.frame - left.frame)
-            amount = (local_frame - left.frame) / span
-            amount = _ease(left.interpolation, amount)
+            amount = _ease(left.interpolation, (local_frame - left.frame) / span)
             return _interpolate(values[index - 1], values[index], amount)
         return values[-1]
 
     def _dispatch_actions(
         self,
         context: Any,
-        frame: int,
+        actions: tuple[StageAction, ...],
+        local_frame: int,
+        global_frame: int,
         events: list[StageTraceEvent],
         *,
         dispatch: bool,
+        match_frame: bool = True,
     ) -> None:
-        for item in self.program.actions:
-            if item.frame != frame:
+        for item in actions:
+            if match_frame and item.frame != local_frame:
                 continue
             payload = item.payload
             if dispatch:
@@ -618,27 +917,31 @@ class StageRunner:
                         item.channel,
                         payload,
                         clip_id=item.clip_id,
+                        state_id=item.state_id,
                     )
                 elif item.kind == "Event":
                     hook = getattr(context, "emit_event", None)
                     if callable(hook):
-                        hook(str(payload.get("event_type") or ""), payload.get("data", {}))
+                        hook(
+                            str(payload.get("event_type") or ""),
+                            payload.get("data", {}),
+                        )
                 elif item.kind == "ScriptEvent":
-                    # This is a typed host hook only. StageProgram never imports,
-                    # evaluates, or executes arbitrary source text.
                     hook = getattr(context, "handle_script_event", None)
                     if callable(hook):
                         name = str(payload.get("hook") or payload.get("script") or "")
                         hook(name, payload.get("data", payload.get("payload", {})))
             events.append(
                 self._trace_event(
-                    frame,
+                    global_frame,
                     item.kind.lower(),
                     item.track_id,
                     item.clip_id,
                     item.target_id,
                     item.channel,
                     payload,
+                    state_id=item.state_id,
+                    local_frame=local_frame,
                 )
             )
 
@@ -649,6 +952,7 @@ class StageRunner:
         payload: dict[str, Any],
         *,
         clip_id: str | None = None,
+        state_id: str | None = None,
     ) -> None:
         action = str(payload.get("action", "play"))
         bus = str(payload.get("bus") or channel or "se").lower()
@@ -663,6 +967,7 @@ class StageRunner:
                 self._audio_started = True
                 self._audio_paused = False
                 self._active_audio_clip_id = clip_id
+                self._active_audio_state_id = state_id
             elif bus == "danmaku_se" and hasattr(context, "play_danmaku_se"):
                 context.play_danmaku_se(name, payload.get("volume"))
             else:
@@ -674,6 +979,7 @@ class StageRunner:
             self._audio_started = False
             self._audio_paused = False
             self._active_audio_clip_id = None
+            self._active_audio_state_id = None
         elif action == "pause":
             context.pause_bgm()
             if self._audio_started:
@@ -684,36 +990,34 @@ class StageRunner:
                 self._audio_paused = False
 
     def _stop_audio(self) -> None:
-        if not self._audio_started:
-            self._audio_paused = False
-            self._active_audio_clip_id = None
-            return
-        hook = getattr(self._context, "stop_bgm", None)
-        if callable(hook):
-            hook(0)
+        if self._audio_started:
+            hook = getattr(self._context, "stop_bgm", None)
+            if callable(hook):
+                hook(0)
         self._audio_started = False
         self._audio_paused = False
         self._active_audio_clip_id = None
+        self._active_audio_state_id = None
 
     def restore_audio_state(self, context: Any | None = None) -> None:
-        """Reconstruct persistent BGM state after side-effect-free seeking."""
+        """Reconstruct persistent BGM state from the deterministic Stage trace."""
 
         if context is not None:
             self._context = context
         self._stop_audio()
         if self.state == StageRunnerState.FINISHED:
             return
-        state: tuple[str, dict[str, Any], str, str] | None = None
-        for item in self.program.actions:
-            if item.kind != "Audio" or item.frame >= self.frame:
+        state: tuple[str, dict[str, Any], str, str, str | None] | None = None
+        for item in self.trace:
+            if item.kind != "audio":
                 continue
-            payload = item.payload
+            payload = dict(item.value)
             bus = str(payload.get("bus") or item.channel or "se").lower()
             if bus != "bgm":
                 continue
             action = str(payload.get("action", "play"))
             if action == "play":
-                state = ("play", payload, item.channel, item.clip_id)
+                state = ("play", payload, item.channel, item.clip_id, item.state_id)
             elif action == "stop":
                 if (
                     payload.get("automatic") is True
@@ -723,17 +1027,18 @@ class StageRunner:
                     continue
                 state = None
             elif action == "pause" and state is not None:
-                state = ("pause", state[1], state[2], state[3])
+                state = ("pause", state[1], state[2], state[3], state[4])
             elif action == "resume" and state is not None:
-                state = ("play", state[1], state[2], state[3])
+                state = ("play", state[1], state[2], state[3], state[4])
         if state is None or self._context is None:
             return
-        mode, payload, channel, clip_id = state
+        mode, payload, channel, clip_id, state_id = state
         self._dispatch_audio(
             self._context,
             channel,
             payload,
             clip_id=clip_id,
+            state_id=state_id,
         )
         if mode == "pause":
             hook = getattr(self._context, "pause_bgm", None)
@@ -750,6 +1055,10 @@ class StageRunner:
         target_id: str | None,
         channel: str,
         value: Any,
+        *,
+        state_id: str | None = None,
+        local_frame: int | None = None,
+        transition_id: str | None = None,
     ) -> StageTraceEvent:
         return StageTraceEvent(
             frame=frame,
@@ -765,6 +1074,9 @@ class StageRunner:
                 separators=(",", ":"),
                 allow_nan=False,
             ),
+            state_id=state_id,
+            local_frame=local_frame,
+            transition_id=transition_id,
         )
 
     @staticmethod
@@ -792,6 +1104,9 @@ __all__ = [
     "StageRunner",
     "StageRunnerState",
     "StageRuntimeError",
+    "StageState",
+    "StageStateGraph",
     "StageTickResult",
     "StageTraceEvent",
+    "StageTransition",
 ]

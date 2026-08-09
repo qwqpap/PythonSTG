@@ -21,7 +21,7 @@
 | 阶段 | 状态 | 依赖 | 主要结果 |
 | --- | --- | --- | --- |
 | N0 基线重置 | [x] | 当前仓库 | 清理旧路线图和历史元门禁 |
-| N1 分层状态图 | [ ] | N0 | `SceneDocument` 内嵌 `StateGraphSpec` |
+| N1 分层状态图 | [x] | N0 | `SceneDocument` 内嵌 `StateGraphSpec` |
 | N2 类型化变量 | [ ] | N1 | 作用域、写权限、迁移和运行时变量存储 |
 | N3 帧边界事件与反应运行时 | [ ] | N2 | Inbox/Outbox、LifecycleEvent、ReactionSpec、TaskScope |
 | N4 响应式时间线 | [ ] | N3 | ReactiveClip、运行实例 trace、冲突可视化 |
@@ -180,14 +180,14 @@ python -m pytest -q tests/test_editor_regression_contracts.py tests/test_editor_
 
 ### Agent 要做
 
-- [ ] **N1.0 Contract pass**：先创建含真实断言的 `tests/test_state_graph_document.py`、`tests/test_state_graph_runtime.py`、`tests/test_state_graph_editor.py`，记录预期红色基线。
-- [ ] **N1.1 模型**：增加 `StateGraphSpec`、`StateSpec`、`TransitionSpec` 和层级所有权；校验唯一 UUID、唯一初始状态、同级转移、目标存在、子图递归、无悬挂 timeline owner 和有限深度。
-- [ ] **N1.2 Scene v2→v3 迁移**：现有 `SceneDocument.tracks` 迁入隐式默认 State 或明确兼容父时间线；Track/Clip/Keyframe ID、顺序、时长、payload 和引用必须原样保留；保存后使用 v3，旧文件仍可加载。
-- [ ] **N1.3 编译**：`SceneDocument -> StageProgram` 编译状态层级、局部时间线、入口/退出和转移；诊断必须包含 Scene/State/Transition UUID 与属性路径。
-- [ ] **N1.4 运行时**：实现确定性的进入、退出、父级取消和复位；Composite State 进入初始子状态，父状态退出取消整个子树；本阶段只实现状态生命周期和明确的时间/完成转移，不提前发明 N3 的反应队列。
-- [ ] **N1.5 编辑器**：增加 StageFlow/PhaseFlow 上下文视图；创建、重命名、复制、删除、移动 State 和编辑 Transition 全部通过 CommandStack；选中 State 时显示它自己的局部时间线；Undo/Redo 必须恢复相同 UUID。
-- [ ] **N1.6 预览反馈**：正式 Stage preview 报告当前状态路径；切换文档、停止和热重载不会把 runtime state 写回文档；owner scene 继续独占 playhead/overlay。
-- [ ] **N1.7 文档**：增加 scene v3 schema、迁移 fixture 和作者说明；不要复刻运行时内部对象结构。
+- [x] **N1.0 Contract pass**：先创建含真实断言的 `tests/test_state_graph_document.py`、`tests/test_state_graph_runtime.py`、`tests/test_state_graph_editor.py`，记录预期红色基线。
+- [x] **N1.1 模型**：增加 `StateGraphSpec`、`StateSpec`、`TransitionSpec` 和层级所有权；校验唯一 UUID、唯一初始状态、同级转移、目标存在、子图递归、无悬挂 timeline owner 和有限深度。
+- [x] **N1.2 Scene v2→v3 迁移**：现有 `SceneDocument.tracks` 迁入隐式默认 State 或明确兼容父时间线；Track/Clip/Keyframe ID、顺序、时长、payload 和引用必须原样保留；保存后使用 v3，旧文件仍可加载。
+- [x] **N1.3 编译**：`SceneDocument -> StageProgram` 编译状态层级、局部时间线、入口/退出和转移；诊断必须包含 Scene/State/Transition UUID 与属性路径。
+- [x] **N1.4 运行时**：实现确定性的进入、退出、父级取消和复位；Composite State 进入初始子状态，父状态退出取消整个子树；本阶段只实现状态生命周期和明确的时间/完成转移，不提前发明 N3 的反应队列。
+- [x] **N1.5 编辑器**：增加 StageFlow/PhaseFlow 上下文视图；创建、重命名、复制、删除、移动 State 和编辑 Transition 全部通过 CommandStack；选中 State 时显示它自己的局部时间线；Undo/Redo 必须恢复相同 UUID。
+- [x] **N1.6 预览反馈**：正式 Stage preview 报告当前状态路径；切换文档、停止和热重载不会把 runtime state 写回文档；owner scene 继续独占 playhead/overlay。
+- [x] **N1.7 文档**：增加 scene v3 schema、迁移 fixture 和作者说明；不要复刻运行时内部对象结构。
 
 ### 允许修改
 
@@ -216,7 +216,7 @@ python -m pytest -q tests/test_state_graph_document.py tests/test_state_graph_ru
 
 ### Evidence
 
-未开始。
+2026-08-09：Contract commit `d2852f9` 保存了预期红色基线；N1 指定 focused gate 为 `41 passed`，连同原生 preview process 回归为 `47 passed`，完整 suite 为 `503 passed`。`compileall`、`git diff --check` 通过；资源校验为 73 JSON、16 sprite configs、745 sprites、142 images、0 errors、0 warnings。Structural 证据覆盖 Scene v2→v3 确定性迁移、v3 schema/fixture/round-trip、全 Scene UUID、递归深度、命令 Undo/Redo 与局部 Timeline；Runtime 证据覆盖正式 worker 中 `Intro@1 → Boss@2`、父子退出/取消、reset/replay、owner-only overlay 且文档和 dirty 不变。Native visual 使用 Windows、PySide6 6.8.1.1、960×640：States/Transitions 两页无需滚动即可操作，完成创建、重命名、复制、删除、Transition 名称/目标/45 帧触发编辑及 Undo→Redo→Undo 同 UUID；截图为 `n1-native-960x640-formal-preview-state-v2.png` 与 `n1-native-960x640-transitions-final.png`。正式 GLFW/ModernGL Pattern renderer 实测 frame 1、24/2048 bullets，`tools/scene_editor.py` 与 `main.py` 均打开真实窗口并正常关闭为 0；未开始 N2。
 
 ---
 

@@ -18,6 +18,9 @@ from src.game.stage.program import (
     StageKeyframe,
     StageNode,
     StageProgram,
+    StageState,
+    StageStateGraph,
+    StageTransition,
 )
 from src.pattern import (
     PatternCompileError,
@@ -25,12 +28,21 @@ from src.pattern import (
     PatternDocument,
 )
 
-from .document import EditorNode, SceneDocument, TimelineClip, TimelineTrack
+from .document import (
+    EditorNode,
+    SceneDocument,
+    StateActionSpec,
+    StateGraphSpec,
+    StateGraphValidationError,
+    StateSpec,
+    TimelineClip,
+    TimelineTrack,
+)
 from .node_types import NODE_TYPE_REGISTRY
 from .pattern_commands import pattern_with_property
 
 
-STAGE_PROGRAM_VERSION = 1
+STAGE_PROGRAM_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -44,6 +56,8 @@ class StageCompileDiagnostic:
     path: str
     message: str
     referenced_path: str | None = None
+    state_id: str | None = None
+    transition_id: str | None = None
 
 
 class StageCompileError(ValueError):
@@ -74,6 +88,8 @@ def _failure(
     track: TimelineTrack | None = None,
     clip: TimelineClip | None = None,
     node: EditorNode | None = None,
+    state: StateSpec | None = None,
+    transition_id: str | None = None,
     referenced_path: str | None = None,
 ) -> StageCompileError:
     return StageCompileError(
@@ -88,6 +104,8 @@ def _failure(
                 path=path,
                 message=message,
                 referenced_path=referenced_path,
+                state_id=state.id if state is not None else None,
+                transition_id=transition_id,
             ),
         )
     )
@@ -152,17 +170,20 @@ def _load_pattern(
     track: TimelineTrack,
     clip: TimelineClip,
     target: EditorNode | None,
+    state: StateSpec,
+    state_path: str,
 ) -> tuple[str, PatternDocument]:
     value = _pattern_resource(target, clip)
     if not value:
         raise _failure(
             scene,
             "missing_pattern_resource",
-            f"tracks.{track.id}.clips.{clip.id}.payload.pattern",
+            f"{state_path}.tracks.{track.id}.clips.{clip.id}.payload.pattern",
             "Assign a Pattern resource on the clip or target PatternInstance.",
             track=track,
             clip=clip,
             node=target,
+            state=state,
         )
     try:
         reference = ResourceReference.parse(value)
@@ -180,11 +201,12 @@ def _load_pattern(
         raise _failure(
             scene,
             "invalid_pattern_resource",
-            f"tracks.{track.id}.clips.{clip.id}.payload.pattern",
+            f"{state_path}.tracks.{track.id}.clips.{clip.id}.payload.pattern",
             str(exc),
             track=track,
             clip=clip,
             node=target,
+            state=state,
         ) from exc
     return reference.uri, document
 
@@ -207,6 +229,8 @@ def _compile_automation(
     track: TimelineTrack,
     clip: TimelineClip,
     target_id: str,
+    state: StateSpec,
+    state_path: str,
 ) -> StageAutomation:
     try:
         if clip.keyframes:
@@ -247,10 +271,11 @@ def _compile_automation(
         raise _failure(
             scene,
             "invalid_automation",
-            f"tracks.{track.id}.clips.{clip.id}",
+            f"{state_path}.tracks.{track.id}.clips.{clip.id}",
             str(exc),
             track=track,
             clip=clip,
+            state=state,
         ) from exc
 
     property_name = (
@@ -262,12 +287,14 @@ def _compile_automation(
         raise _failure(
             scene,
             "missing_property",
-            f"tracks.{track.id}.clips.{clip.id}.payload.property",
+            f"{state_path}.tracks.{track.id}.clips.{clip.id}.payload.property",
             "Property clip needs payload.property or a non-empty channel.",
             track=track,
             clip=clip,
+            state=state,
         )
     return StageAutomation(
+        state_id=state.id,
         track_id=track.id,
         clip_id=clip.id,
         kind=clip.kind,
@@ -283,6 +310,71 @@ def _compile_automation(
     )
 
 
+def _compile_state_action(
+    state: StateSpec,
+    action: StateActionSpec,
+) -> StageAction:
+    return StageAction(
+        state_id=state.id,
+        frame=0,
+        track_id=state.id,
+        clip_id=action.id,
+        kind=action.kind,
+        target_id=action.target_id,
+        channel=action.channel,
+        track_order=action.order,
+        clip_order=action.order,
+        payload_json=_json(deepcopy(action.payload)),
+    )
+
+
+def _compile_state_graph(graph: StateGraphSpec) -> StageStateGraph:
+    runtime_states: list[StageState] = []
+    for state in sorted(graph.states, key=lambda item: (item.order, item.id)):
+        runtime_states.append(
+            StageState(
+                state_id=state.id,
+                name=state.name,
+                duration_frames=state.timeline_duration_frames,
+                entry_actions=tuple(
+                    _compile_state_action(state, item)
+                    for item in sorted(
+                        state.entry_actions, key=lambda value: (value.order, value.id)
+                    )
+                ),
+                exit_actions=tuple(
+                    _compile_state_action(state, item)
+                    for item in sorted(
+                        state.exit_actions, key=lambda value: (value.order, value.id)
+                    )
+                ),
+                transitions=tuple(
+                    StageTransition(
+                        transition_id=item.id,
+                        source_state_id=state.id,
+                        target_state_id=item.target_state_id,
+                        trigger=item.trigger,
+                        after_frames=item.after_frames,
+                        priority=item.priority,
+                        order=index,
+                    )
+                    for index, item in enumerate(state.transitions)
+                ),
+                child_graph=(
+                    _compile_state_graph(state.child_graph)
+                    if state.child_graph is not None
+                    else None
+                ),
+            )
+        )
+    return StageStateGraph(
+        graph_id=graph.id,
+        name=graph.name,
+        initial_state_id=graph.initial_state_id,
+        states=tuple(runtime_states),
+    )
+
+
 def compile_stage(
     project: ProjectContext,
     scene: SceneDocument,
@@ -295,6 +387,16 @@ def compile_stage(
     try:
         scene.validate()
         NODE_TYPE_REGISTRY.validate_tree(scene.root)
+    except StateGraphValidationError as exc:
+        state = scene.state_graph.find_state(exc.state_id or "")
+        raise _failure(
+            scene,
+            "invalid_state_graph",
+            exc.path,
+            exc.detail,
+            state=state,
+            transition_id=exc.transition_id,
+        ) from exc
     except Exception as exc:
         raise _failure(
             scene,
@@ -307,7 +409,7 @@ def compile_stage(
             scene,
             "unsupported_tick_rate",
             "root.properties.tick_rate",
-            "StageProgram v1 requires the formal 60 Hz pattern runtime.",
+            "StageProgram v2 requires the formal 60 Hz pattern runtime.",
         )
 
     nodes, parents = _node_maps(scene.root)
@@ -349,8 +451,15 @@ def compile_stage(
     automatic_audio_stops: list[StageAction] = []
     dependency_hashes: list[str] = []
 
-    ordered_tracks = sorted(scene.tracks, key=lambda item: (item.order, item.id))
-    for track in ordered_tracks:
+    ordered_tracks = [
+        (state_index, state, state_path, track)
+        for state_index, (state, state_path) in enumerate(
+            scene.state_graph.iter_states_with_paths()
+        )
+        for track in state.tracks
+    ]
+    ordered_tracks.sort(key=lambda item: (item[0], item[3].order, item[3].id))
+    for _state_index, state, state_path, track in ordered_tracks:
         if track.muted:
             continue
         for clip in sorted(track.clips, key=lambda item: (item.order, item.id)):
@@ -363,19 +472,34 @@ def compile_stage(
                     raise _failure(
                         scene,
                         "missing_target",
-                        f"tracks.{track.id}.clips.{clip.id}.target_id",
+                        f"{state_path}.tracks.{track.id}.clips.{clip.id}.target_id",
                         f"{clip.kind} clip target does not exist.",
                         track=track,
                         clip=clip,
+                        state=state,
                     )
                 automations.append(
-                    _compile_automation(scene, track, clip, target_id)
+                    _compile_automation(
+                        scene,
+                        track,
+                        clip,
+                        target_id,
+                        state,
+                        state_path,
+                    )
                 )
                 continue
 
             if clip.kind == "Pattern":
                 resource_uri, document = _load_pattern(
-                    project, store, scene, track, clip, target
+                    project,
+                    store,
+                    scene,
+                    track,
+                    clip,
+                    target,
+                    state,
+                    state_path,
                 )
                 position_node = _position_node(target, parents)
                 if position_node is not None:
@@ -394,6 +518,7 @@ def compile_stage(
                             track=track,
                             clip=clip,
                             node=position_node,
+                            state=state,
                         ) from exc
                 try:
                     program = compiler.compile(
@@ -410,9 +535,13 @@ def compile_stage(
                             track_id=track.id,
                             clip_id=clip.id,
                             node_id=target_id,
-                            path=f"tracks.{track.id}.clips.{clip.id}.payload.pattern",
+                            path=(
+                                f"{state_path}.tracks.{track.id}.clips."
+                                f"{clip.id}.payload.pattern"
+                            ),
                             referenced_path=item.path,
                             message=item.message,
+                            state_id=state.id,
                         )
                         for item in exc.diagnostics
                     )
@@ -420,6 +549,7 @@ def compile_stage(
                 dependency_hashes.append(program.content_hash)
                 patterns.append(
                     PatternSchedule(
+                        state_id=state.id,
                         track_id=track.id,
                         clip_id=clip.id,
                         target_id=target_id,
@@ -444,14 +574,16 @@ def compile_stage(
                     raise _failure(
                         scene,
                         "invalid_action_payload",
-                        f"tracks.{track.id}.clips.{clip.id}.payload",
+                        f"{state_path}.tracks.{track.id}.clips.{clip.id}.payload",
                         str(exc),
                         track=track,
                         clip=clip,
+                        state=state,
                     ) from exc
                 for loop_index in range(clip.loop_count):
                     actions.append(
                         StageAction(
+                            state_id=state.id,
                             frame=clip.start_frame + loop_index * clip.duration_frames,
                             track_id=track.id,
                             clip_id=clip.id,
@@ -473,6 +605,7 @@ def compile_stage(
                 ):
                     automatic_audio_stops.append(
                         StageAction(
+                            state_id=state.id,
                             frame=clip.end_frame,
                             track_id=track.id,
                             clip_id=clip.id,
@@ -499,6 +632,7 @@ def compile_stage(
     duration = scene.duration_frames
     explicit_audio_stops = {
         (
+            item.state_id,
             item.frame,
             str(item.payload.get("bus") or item.channel or "se").lower(),
         )
@@ -509,6 +643,7 @@ def compile_stage(
         item
         for item in automatic_audio_stops
         if (
+            item.state_id,
             item.frame,
             str(item.payload.get("bus") or item.channel or "se").lower(),
         )
@@ -534,21 +669,22 @@ def compile_stage(
         patterns=tuple(
             sorted(
                 patterns,
-                key=lambda item: (item.start_frame, *item.order_key),
+                key=lambda item: (item.state_id, item.start_frame, *item.order_key),
             )
         ),
         automations=tuple(
             sorted(
                 automations,
-                key=lambda item: (item.start_frame, *item.order_key),
+                key=lambda item: (item.state_id, item.start_frame, *item.order_key),
             )
         ),
         actions=tuple(
             sorted(
                 actions,
-                key=lambda item: (item.frame, *item.order_key),
+                key=lambda item: (item.state_id, item.frame, *item.order_key),
             )
         ),
+        state_graph=_compile_state_graph(scene.state_graph),
     )
 
 

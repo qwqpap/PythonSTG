@@ -229,6 +229,71 @@ def migrate_scene_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _legacy_state_duration(data: dict[str, Any], tracks: list[Any]) -> int:
+    metadata = data.get("metadata")
+    authored = metadata.get("duration_frames", 0) if isinstance(metadata, dict) else 0
+    if isinstance(authored, bool) or not isinstance(authored, int) or authored < 0:
+        authored = 0
+    duration = authored
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        for clip in track.get("clips", []):
+            if not isinstance(clip, dict):
+                continue
+            start = clip.get("start_frame", 0)
+            span = clip.get("duration_frames", 0)
+            loops = clip.get("loop_count", 1)
+            if any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in (start, span, loops)
+            ):
+                continue
+            if start >= 0 and span >= 0 and loops >= 0:
+                duration = max(duration, start + span * loops)
+    return duration
+
+
+def migrate_scene_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
+    """Move the v2 top-level timeline into one deterministic default State."""
+
+    migrated = copy.deepcopy(data)
+    tracks = migrated.pop("tracks", [])
+    if not isinstance(tracks, list):
+        raise MigrationError("scene.tracks must be an array")
+    if "state_graph" in migrated:
+        if tracks:
+            raise MigrationError(
+                "scene schema 2 cannot contain both tracks and state_graph"
+            )
+        migrated["schema_version"] = 3
+        return migrated
+
+    document_id = str(migrated.get("id") or "")
+    graph_id = _derived_id(document_id, "state-graph:root")
+    state_id = _derived_id(document_id, "state:default")
+    migrated["state_graph"] = {
+        "id": graph_id,
+        "name": "StageFlow",
+        "initial_state_id": state_id,
+        "states": [
+            {
+                "id": state_id,
+                "name": "Default",
+                "order": 0,
+                "duration_frames": _legacy_state_duration(migrated, tracks),
+                "entry_actions": [],
+                "exit_actions": [],
+                "tracks": tracks,
+                "transitions": [],
+                "child_graph": None,
+            }
+        ],
+    }
+    migrated["schema_version"] = 3
+    return migrated
+
+
 def build_default_migration_registry() -> MigrationRegistry:
     registry = MigrationRegistry()
     for resource_type in AUTHORING_RESOURCE_TYPES:
@@ -238,4 +303,5 @@ def build_default_migration_registry() -> MigrationRegistry:
         )
     registry.register(SCENE_RESOURCE_TYPE, 0, migrate_legacy_scene_v0)
     registry.register(SCENE_RESOURCE_TYPE, 1, migrate_scene_v1_to_v2)
+    registry.register(SCENE_RESOURCE_TYPE, 2, migrate_scene_v2_to_v3)
     return registry

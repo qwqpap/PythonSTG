@@ -77,9 +77,11 @@ from .document import (
     DocumentError,
     EditorNode,
     SceneDocument,
+    StateSpec,
     TimelineClip,
     TimelineKeyframe,
     TimelineTrack,
+    TransitionSpec,
 )
 from .node_types import (
     NODE_TYPES,
@@ -128,8 +130,21 @@ from .timeline_commands import (
     find_clip,
     find_track,
     require_track,
+    timeline_tracks,
 )
 from .timeline_workspace import TimelineEditor
+from .state_graph_commands import (
+    AddStateCommand,
+    AddTransitionCommand,
+    DuplicateStateCommand,
+    MoveStateCommand,
+    RemoveStateCommand,
+    RemoveTransitionCommand,
+    RenameStateCommand,
+    SetTransitionPropertiesCommand,
+    graph_for_state,
+)
+from .state_graph_workspace import StateGraphEditor
 from .plugin_sdk import PluginRegistry as SDKPluginRegistry
 from .i18n import (
     LANGUAGE_CHINESE,
@@ -147,6 +162,17 @@ from .workbench import (
 APP_NAME = "PySTG Editor"
 RESOURCE_FILTER = "PySTG Resources (*.pystg.json);;JSON (*.json)"
 SCENE_FILTER = RESOURCE_FILTER
+
+
+def _scene_has_stage_content(document: SceneDocument) -> bool:
+    return any(
+        state.tracks
+        or state.entry_actions
+        or state.exit_actions
+        or state.transitions
+        or state.child_graph is not None
+        for state in document.state_graph.walk_states()
+    )
 
 
 def build_preview_command(
@@ -1777,6 +1803,37 @@ class EditorMainWindow(QMainWindow):
         tree_dock.setMinimumWidth(220)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
+        self.state_graph = StateGraphEditor()
+        self.state_graph.stateSelected.connect(self._state_graph_state_selected)
+        self.state_graph.addStateRequested.connect(self._state_graph_add_state)
+        self.state_graph.renameStateRequested.connect(self._state_graph_rename_state)
+        self.state_graph.duplicateStateRequested.connect(
+            self._state_graph_duplicate_state
+        )
+        self.state_graph.deleteStateRequested.connect(self._state_graph_delete_state)
+        self.state_graph.moveStateRequested.connect(self._state_graph_move_state)
+        self.state_graph.addTransitionRequested.connect(
+            self._state_graph_add_transition
+        )
+        self.state_graph.editTransitionRequested.connect(
+            self._state_graph_edit_transition
+        )
+        self.state_graph.deleteTransitionRequested.connect(
+            self._state_graph_delete_transition
+        )
+        state_graph_dock = QDockWidget("State Flow", self)
+        self.state_graph_dock = state_graph_dock
+        state_graph_dock.setObjectName("stateGraphDock")
+        state_graph_dock.setWidget(self.state_graph)
+        state_graph_dock.setMinimumWidth(240)
+        self.addDockWidget(Qt.LeftDockWidgetArea, state_graph_dock)
+        self.splitDockWidget(tree_dock, state_graph_dock, Qt.Vertical)
+        self.resizeDocks(
+            [tree_dock, state_graph_dock],
+            [180, 320],
+            Qt.Vertical,
+        )
+
         self.inspector = InspectorPanel()
         self.inspector.node_registry = self.node_type_registry
         self.inspector.renameRequested.connect(self.rename_node)
@@ -1962,7 +2019,7 @@ class EditorMainWindow(QMainWindow):
         self.document_manager.activate(session)
         if isinstance(session.document, SceneDocument):
             self.viewport = self.central_tabs.widget(index)
-            if session.document.tracks:
+            if _scene_has_stage_content(session.document):
                 self.preview_panel.set_resource(
                     session.resource_uri or f"unsaved://{session.document.id}"
                 )
@@ -2303,6 +2360,15 @@ class EditorMainWindow(QMainWindow):
                 self.viewport = widget
                 widget.rebuild(document)
                 widget.select_node(self._selected_id)
+            selected_state_id = str(
+                self.session.editor_context.get("selected_state_id")
+                or document.state_graph.initial_state_id
+            )
+            selected_state = document.state_graph.find_state(selected_state_id)
+            if selected_state is None:
+                selected_state_id = document.state_graph.initial_state_id
+                selected_state = document.state_graph.initial_state
+            self.session.editor_context["selected_state_id"] = selected_state_id
             selected_clip_id = self.session.editor_context.get("selected_clip_id")
             selected_track_id = self.session.editor_context.get("selected_track_id")
             clip_result = (
@@ -2311,10 +2377,12 @@ class EditorMainWindow(QMainWindow):
                 else None
             )
             track_result = (
-                find_track(document, str(selected_track_id))
+                find_track(document, str(selected_track_id), selected_state_id)
                 if selected_track_id
                 else None
             )
+            if clip_result is not None and clip_result[0] not in selected_state.tracks:
+                clip_result = None
             if clip_result is not None:
                 self.inspector.set_timeline_clip(
                     clip_result[0],
@@ -2332,6 +2400,7 @@ class EditorMainWindow(QMainWindow):
                 self.inspector.set_node(self.session.node(self._selected_id))
             self.timeline.set_document(
                 document,
+                state_id=selected_state_id,
                 selected_clip_id=(clip_result[1].id if clip_result is not None else None),
                 zoom=float(self.session.editor_context.get("timeline_zoom", 0.25)),
             )
@@ -2348,11 +2417,22 @@ class EditorMainWindow(QMainWindow):
             self.timeline.set_active_clips(
                 stored_active if isinstance(stored_active, (list, tuple, set)) else ()
             )
+            runtime_path = self.session.editor_context.get("runtime_state_path", ())
+            self.state_graph.set_document(
+                document,
+                selected_state_id=selected_state_id,
+                active_state_path=(
+                    runtime_path
+                    if isinstance(runtime_path, (list, tuple, set))
+                    else ()
+                ),
+            )
         else:
             self.tree.blockSignals(True)
             self.tree.clear()
             self.tree.blockSignals(False)
             self.tree.setEnabled(False)
+            self.state_graph.clear_document()
             if isinstance(document, UIDocument):
                 self.inspector.set_ui_node(None)
                 if isinstance(widget, UIWorkspace):
@@ -2708,6 +2788,192 @@ class EditorMainWindow(QMainWindow):
             select_id=node_id,
         )
 
+    def _state_graph_state_selected(self, state_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        state = self.session.document.state_graph.find_state(state_id)
+        if state is None:
+            return
+        previous = self.session.editor_context.get("selected_state_id")
+        playheads = self.session.editor_context.setdefault(
+            "timeline_playheads_by_state", {}
+        )
+        if isinstance(playheads, dict) and previous:
+            playheads[str(previous)] = int(self.timeline.playhead_frame)
+        self.session.editor_context["selected_state_id"] = state.id
+        self.session.editor_context.pop("selected_track_id", None)
+        self.session.editor_context.pop("selected_clip_id", None)
+        frame = int(playheads.get(state.id, 0)) if isinstance(playheads, dict) else 0
+        self.session.editor_context["timeline_playhead"] = frame
+        self._refresh()
+
+    def _state_graph_add_state(self, graph_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        graph = self.session.document.state_graph.find_graph(graph_id)
+        if graph is None:
+            return
+        state = StateSpec(
+            name=f"State {len(graph.states) + 1}",
+            order=len(graph.states),
+            duration_frames=60,
+        )
+        try:
+            self.session.apply(
+                AddStateCommand(self.session.document, graph.id, state)
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Add State failed", exc)
+            return
+        self.session.editor_context["selected_state_id"] = state.id
+        self.session.editor_context.pop("selected_track_id", None)
+        self.session.editor_context.pop("selected_clip_id", None)
+        self._log(f"Added State {state.name}")
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _state_graph_rename_state(self, state_id: str, name: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                RenameStateCommand(self.session.document, state_id, name),
+                coalesce=True,
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Rename State failed", exc)
+            self._refresh()
+            return
+        self.session.editor_context["selected_state_id"] = state_id
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _state_graph_duplicate_state(self, state_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        command = DuplicateStateCommand(self.session.document, state_id)
+        try:
+            self.session.apply(command)
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Duplicate State failed", exc)
+            return
+        if command.duplicated_state is not None:
+            self.session.editor_context["selected_state_id"] = (
+                command.duplicated_state.id
+            )
+        self.session.editor_context.pop("selected_track_id", None)
+        self.session.editor_context.pop("selected_clip_id", None)
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _state_graph_delete_state(self, state_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        graph = self.session.document.state_graph.graph_for_state(state_id)
+        if graph is None:
+            return
+        try:
+            self.session.apply(RemoveStateCommand(self.session.document, state_id))
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Delete State failed", exc)
+            return
+        self.session.editor_context["selected_state_id"] = graph.initial_state_id
+        self.session.editor_context.pop("selected_track_id", None)
+        self.session.editor_context.pop("selected_clip_id", None)
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _state_graph_move_state(self, state_id: str, delta: int) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        graph = self.session.document.state_graph.graph_for_state(state_id)
+        state = self.session.document.state_graph.find_state(state_id)
+        if graph is None or state is None:
+            return
+        current = graph.states.index(state)
+        target = max(0, min(current + int(delta), len(graph.states) - 1))
+        if target == current:
+            return
+        try:
+            self.session.apply(
+                MoveStateCommand(self.session.document, state_id, target)
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Move State failed", exc)
+            return
+        self.session.editor_context["selected_state_id"] = state_id
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _state_graph_add_transition(
+        self,
+        source_state_id: str,
+        target_state_id: str,
+        trigger: str,
+        after_frames: int,
+    ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        target = self.session.document.state_graph.find_state(target_state_id)
+        if target is None:
+            return
+        transition = TransitionSpec(
+            name=f"To {target.name}",
+            target_state_id=target.id,
+            trigger=trigger,
+            after_frames=(int(after_frames) if trigger == "after" else None),
+        )
+        try:
+            self.session.apply(
+                AddTransitionCommand(
+                    self.session.document,
+                    source_state_id,
+                    transition,
+                )
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Add transition failed", exc)
+            return
+        self.session.editor_context["selected_state_id"] = source_state_id
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _state_graph_edit_transition(
+        self,
+        transition_id: str,
+        values: dict[str, object],
+    ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                SetTransitionPropertiesCommand(
+                    self.session.document,
+                    transition_id,
+                    values,
+                ),
+                coalesce=True,
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Edit transition failed", exc)
+            self._refresh()
+            return
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _state_graph_delete_transition(self, transition_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(
+                RemoveTransitionCommand(self.session.document, transition_id)
+            )
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Delete transition failed", exc)
+            return
+        self._refresh()
+        self._sync_active_stage_preview()
+
     def _timeline_default_target(self, kind: str) -> EditorNode | None:
         if not isinstance(self.session.document, SceneDocument):
             return None
@@ -2773,18 +3039,24 @@ class EditorMainWindow(QMainWindow):
             "Property": "enabled",
             "ScriptEvent": "script",
         }
+        state_id = str(
+            self.session.editor_context.get("selected_state_id")
+            or self.session.document.state_graph.initial_state_id
+        )
+        selected_tracks = timeline_tracks(self.session.document, state_id)
         track = TimelineTrack(
             name=f"{kind} Track",
             kind=kind,
             channel=channels[kind],
             target_id=target.id if target is not None else None,
-            order=len(self.session.document.tracks),
+            order=len(selected_tracks),
         )
         try:
             self.session.apply(
                 AddTrackCommand(
                     self.session.document,
                     track,
+                    state_id=state_id,
                     label=f"Add {kind} track",
                 )
             )
@@ -2860,8 +3132,13 @@ class EditorMainWindow(QMainWindow):
             return
         try:
             track = require_track(self.session.document, track_id)
-            current = self.session.document.tracks.index(track)
-            target = max(0, min(current + int(delta), len(self.session.document.tracks) - 1))
+            state_id = str(
+                self.session.editor_context.get("selected_state_id")
+                or self.session.document.state_graph.initial_state_id
+            )
+            selected_tracks = timeline_tracks(self.session.document, state_id)
+            current = selected_tracks.index(track)
+            target = max(0, min(current + int(delta), len(selected_tracks) - 1))
             if target == current:
                 return
             self.session.apply(
@@ -3536,6 +3813,7 @@ class EditorMainWindow(QMainWindow):
 
     def _clear_stage_runtime_feedback(self) -> None:
         self.timeline.set_active_clips(())
+        self.state_graph.set_active_state_path(())
         owner = self._active_stage_session
         if owner is not None:
             # Keep the document-local playhead coherent even when the preview
@@ -3543,6 +3821,7 @@ class EditorMainWindow(QMainWindow):
             # snapshot will also carry frame=0).
             owner.editor_context["timeline_playhead"] = 0
             owner.editor_context["timeline_active_clips"] = []
+            owner.editor_context["runtime_state_path"] = []
         for widget in self._document_widgets.values():
             if isinstance(widget, SceneViewport):
                 widget.clear_runtime_state()
@@ -3572,14 +3851,17 @@ class EditorMainWindow(QMainWindow):
         if (
             session is not None
             and isinstance(session.document, SceneDocument)
-            and session.document.tracks
+            and _scene_has_stage_content(session.document)
         ):
             self._launch_active_stage_preview(session)
             return
         self._launch_active_pattern_preview()
 
     def _launch_active_stage_preview(self, session: ManagedDocument) -> None:
-        if not isinstance(session.document, SceneDocument) or not session.document.tracks:
+        if (
+            not isinstance(session.document, SceneDocument)
+            or not _scene_has_stage_content(session.document)
+        ):
             self.preview_panel.handle_issue(
                 {
                     "code": "no_stage_timeline",
@@ -4442,7 +4724,7 @@ class EditorMainWindow(QMainWindow):
         if (
             session is None
             or not isinstance(session.document, SceneDocument)
-            or not session.document.tracks
+            or not _scene_has_stage_content(session.document)
             or not self._pattern_preview_client.is_running
             or self._active_stage_session is not session
             or self._preview_mode != "stage"
@@ -4515,6 +4797,13 @@ class EditorMainWindow(QMainWindow):
             session.editor_context["timeline_active_clips"] = list(active_clips)
             if self.document_manager.active is session:
                 self.timeline.set_active_clips(active_clips)
+        state_path = payload.get("state_path")
+        if isinstance(state_path, list):
+            session.editor_context["runtime_state_path"] = [
+                str(value) for value in state_path
+            ]
+            if self.document_manager.active is session:
+                self.state_graph.set_active_state_path(state_path)
         widget = self._document_widgets.get(session.document.id)
         state = str(payload.get("state") or self._preview_state)
         node_state = payload.get("node_state")
@@ -4523,6 +4812,9 @@ class EditorMainWindow(QMainWindow):
                 widget.set_runtime_state(node_state)
             elif state in {"stopped", "unloaded", "error"}:
                 widget.clear_runtime_state()
+                session.editor_context["runtime_state_path"] = []
+                if self.document_manager.active is session:
+                    self.state_graph.set_active_state_path(())
 
     def _handle_pattern_preview_issue(self, issue: dict) -> None:
         self.preview_panel.handle_issue(issue)
@@ -4576,7 +4868,10 @@ class EditorMainWindow(QMainWindow):
             self._active_pattern_resource = self.session.resource_uri or ""
             self._launch_active_pattern_preview()
             return
-        if isinstance(self.session.document, SceneDocument) and self.session.document.tracks:
+        if (
+            isinstance(self.session.document, SceneDocument)
+            and _scene_has_stage_content(self.session.document)
+        ):
             self._launch_active_stage_preview(self.session)
             return
         node = self.session.node(self._selected_id)

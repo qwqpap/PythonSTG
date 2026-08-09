@@ -75,6 +75,9 @@ TIMELINE_CLIP_KINDS = frozenset(
 TIMELINE_INTERPOLATIONS = frozenset(
     {"step", "linear", "ease_in", "ease_out", "ease_in_out"}
 )
+STATE_ACTION_KINDS = frozenset({"Audio", "Event", "ScriptEvent"})
+STATE_TRANSITION_TRIGGERS = frozenset({"after", "complete"})
+MAX_STATE_GRAPH_DEPTH = 8
 
 
 @dataclass
@@ -405,17 +408,658 @@ class TimelineTrack:
         return track
 
 
+class StateGraphValidationError(DocumentError):
+    """A state-graph validation failure with compiler-addressable ownership."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str,
+        state_id: str | None = None,
+        transition_id: str | None = None,
+    ) -> None:
+        self.path = path
+        self.state_id = state_id
+        self.transition_id = transition_id
+        self.detail = message
+        super().__init__(f"{path}: {message}")
+
+
+def _claim_object_id(
+    value: Any,
+    ids: set[str],
+    *,
+    path: str,
+    state_id: str | None = None,
+    transition_id: str | None = None,
+) -> str:
+    object_id = _valid_id(value, f"{path}.id")
+    if object_id in ids:
+        raise StateGraphValidationError(
+            f"Duplicate document object id: {object_id}",
+            path=f"{path}.id",
+            state_id=state_id,
+            transition_id=transition_id,
+        )
+    ids.add(object_id)
+    return object_id
+
+
 @dataclass
+class StateActionSpec:
+    name: str
+    kind: str
+    channel: str
+    id: str = field(default_factory=new_document_id)
+    target_id: str | None = None
+    order: int = 0
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def validate(self, *, path: str = "state_action") -> None:
+        self.id = _valid_id(self.id, f"{path}.id")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise StateGraphValidationError(
+                "state action name must be a non-empty string", path=f"{path}.name"
+            )
+        if self.kind not in STATE_ACTION_KINDS:
+            raise StateGraphValidationError(
+                f"state action kind is unsupported: {self.kind!r}",
+                path=f"{path}.kind",
+            )
+        if not isinstance(self.channel, str) or not self.channel.strip():
+            raise StateGraphValidationError(
+                "state action channel must be a non-empty string",
+                path=f"{path}.channel",
+            )
+        self.target_id = _optional_id(self.target_id, f"{path}.target_id")
+        if isinstance(self.order, bool) or not isinstance(self.order, int) or self.order < 0:
+            raise StateGraphValidationError(
+                "state action order must be a non-negative integer",
+                path=f"{path}.order",
+            )
+        self.payload = _json_object(self.payload, f"{path}.payload")
+        try:
+            TimelineClip(
+                name=self.name,
+                kind=self.kind,
+                start_frame=0,
+                duration_frames=1,
+                channel=self.channel,
+                target_id=self.target_id,
+                order=self.order,
+                payload=deepcopy(self.payload),
+            ).validate()
+        except DocumentError as exc:
+            raise StateGraphValidationError(str(exc), path=f"{path}.payload") from exc
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        return {
+            "id": self.id,
+            "name": self.name,
+            "kind": self.kind,
+            "target_id": self.target_id,
+            "channel": self.channel,
+            "order": self.order,
+            "payload": deepcopy(self.payload),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StateActionSpec":
+        if not isinstance(data, dict):
+            raise DocumentError("state action must be an object")
+        action = cls(
+            id=data.get("id") or new_document_id(),
+            name=data.get("name", ""),
+            kind=data.get("kind", ""),
+            target_id=data.get("target_id"),
+            channel=data.get("channel", ""),
+            order=data.get("order", 0),
+            payload=_json_object(data.get("payload", {}), "state_action.payload"),
+        )
+        action.validate()
+        return action
+
+
+@dataclass
+class TransitionSpec:
+    name: str
+    target_state_id: str
+    trigger: str
+    id: str = field(default_factory=new_document_id)
+    after_frames: int | None = None
+    priority: int = 0
+
+    def validate(
+        self,
+        *,
+        sibling_ids: set[str],
+        source_state_id: str,
+        path: str,
+    ) -> None:
+        self.id = _valid_id(self.id, f"{path}.id")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise StateGraphValidationError(
+                "transition name must be a non-empty string",
+                path=f"{path}.name",
+                state_id=source_state_id,
+                transition_id=self.id,
+            )
+        self.target_state_id = _valid_id(
+            self.target_state_id, f"{path}.target_state_id"
+        )
+        if self.target_state_id not in sibling_ids:
+            raise StateGraphValidationError(
+                "transition target must be a sibling State in the same graph",
+                path=f"{path}.target_state_id",
+                state_id=source_state_id,
+                transition_id=self.id,
+            )
+        if self.trigger not in STATE_TRANSITION_TRIGGERS:
+            raise StateGraphValidationError(
+                "transition trigger must be 'after' or 'complete'",
+                path=f"{path}.trigger",
+                state_id=source_state_id,
+                transition_id=self.id,
+            )
+        if self.trigger == "after":
+            if (
+                isinstance(self.after_frames, bool)
+                or not isinstance(self.after_frames, int)
+                or self.after_frames <= 0
+            ):
+                raise StateGraphValidationError(
+                    "after transition after_frames must be a positive integer",
+                    path=f"{path}.after_frames",
+                    state_id=source_state_id,
+                    transition_id=self.id,
+                )
+        elif self.after_frames is not None:
+            raise StateGraphValidationError(
+                "complete transition after_frames must be null",
+                path=f"{path}.after_frames",
+                state_id=source_state_id,
+                transition_id=self.id,
+            )
+        if isinstance(self.priority, bool) or not isinstance(self.priority, int):
+            raise StateGraphValidationError(
+                "transition priority must be an integer",
+                path=f"{path}.priority",
+                state_id=source_state_id,
+                transition_id=self.id,
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "target_state_id": self.target_state_id,
+            "trigger": self.trigger,
+            "after_frames": self.after_frames,
+            "priority": self.priority,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TransitionSpec":
+        if not isinstance(data, dict):
+            raise DocumentError("transition must be an object")
+        return cls(
+            id=data.get("id") or new_document_id(),
+            name=data.get("name", ""),
+            target_state_id=data.get("target_state_id", ""),
+            trigger=data.get("trigger", ""),
+            after_frames=data.get("after_frames"),
+            priority=data.get("priority", 0),
+        )
+
+
+@dataclass
+class StateSpec:
+    name: str
+    id: str = field(default_factory=new_document_id)
+    order: int = 0
+    duration_frames: int = 0
+    entry_actions: list[StateActionSpec] = field(default_factory=list)
+    exit_actions: list[StateActionSpec] = field(default_factory=list)
+    tracks: list[TimelineTrack] = field(default_factory=list)
+    transitions: list[TransitionSpec] = field(default_factory=list)
+    child_graph: "StateGraphSpec | None" = None
+
+    @property
+    def timeline_duration_frames(self) -> int:
+        return max(
+            [self.duration_frames, 0]
+            + [clip.end_frame for track in self.tracks for clip in track.clips]
+        )
+
+    @property
+    def nominal_duration_frames(self) -> int:
+        local = max(
+            self.timeline_duration_frames,
+            max(
+                (
+                    transition.after_frames or 0
+                    for transition in self.transitions
+                    if transition.trigger == "after"
+                ),
+                default=0,
+            ),
+        )
+        if self.child_graph is not None:
+            local = max(local, self.child_graph.nominal_duration_frames)
+        return local
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "order": self.order,
+            "duration_frames": self.duration_frames,
+            "entry_actions": [item.to_dict() for item in self.entry_actions],
+            "exit_actions": [item.to_dict() for item in self.exit_actions],
+            "tracks": [track.to_dict() for track in self.tracks],
+            "transitions": [item.to_dict() for item in self.transitions],
+            "child_graph": self.child_graph.to_dict() if self.child_graph else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StateSpec":
+        if not isinstance(data, dict):
+            raise DocumentError("state must be an object")
+        child_data = data.get("child_graph")
+        return cls(
+            id=data.get("id") or new_document_id(),
+            name=data.get("name", ""),
+            order=data.get("order", 0),
+            duration_frames=data.get("duration_frames", 0),
+            entry_actions=[
+                StateActionSpec.from_dict(item)
+                for item in data.get("entry_actions", [])
+            ],
+            exit_actions=[
+                StateActionSpec.from_dict(item)
+                for item in data.get("exit_actions", [])
+            ],
+            tracks=[TimelineTrack.from_dict(item) for item in data.get("tracks", [])],
+            transitions=[
+                TransitionSpec.from_dict(item)
+                for item in data.get("transitions", [])
+            ],
+            child_graph=(
+                StateGraphSpec.from_dict(child_data)
+                if child_data is not None
+                else None
+            ),
+        )
+
+
+@dataclass
+class StateGraphSpec:
+    name: str
+    initial_state_id: str
+    states: list[StateSpec]
+    id: str = field(default_factory=new_document_id)
+
+    @property
+    def initial_state(self) -> StateSpec:
+        state = next(
+            (item for item in self.states if item.id == self.initial_state_id),
+            None,
+        )
+        if state is None:
+            raise StateGraphValidationError(
+                "initial_state_id must identify exactly one State in this graph",
+                path="state_graph.initial_state_id",
+            )
+        return state
+
+    @property
+    def nominal_duration_frames(self) -> int:
+        return sum(state.nominal_duration_frames for state in self.states)
+
+    def walk_states(self) -> Iterable[StateSpec]:
+        for state in self.states:
+            yield state
+            if state.child_graph is not None:
+                yield from state.child_graph.walk_states()
+
+    def walk_graphs(self) -> Iterable["StateGraphSpec"]:
+        yield self
+        for state in self.states:
+            if state.child_graph is not None:
+                yield from state.child_graph.walk_graphs()
+
+    def walk_objects(self) -> Iterable[Any]:
+        yield self
+        for state in self.states:
+            yield state
+            yield from state.entry_actions
+            yield from state.exit_actions
+            for track in state.tracks:
+                yield track
+                for clip in track.clips:
+                    yield clip
+                    yield from clip.keyframes
+            yield from state.transitions
+            if state.child_graph is not None:
+                yield from state.child_graph.walk_objects()
+
+    def find_state(self, state_id: str) -> StateSpec | None:
+        return next((state for state in self.walk_states() if state.id == state_id), None)
+
+    def find_graph(self, graph_id: str) -> "StateGraphSpec | None":
+        return next((graph for graph in self.walk_graphs() if graph.id == graph_id), None)
+
+    def graph_for_state(self, state_id: str) -> "StateGraphSpec | None":
+        for graph in self.walk_graphs():
+            if any(state.id == state_id for state in graph.states):
+                return graph
+        return None
+
+    def state_path(self, state_id: str) -> tuple[StateSpec, ...]:
+        def visit(graph: StateGraphSpec, prefix: tuple[StateSpec, ...]):
+            for state in graph.states:
+                path = (*prefix, state)
+                if state.id == state_id:
+                    return path
+                if state.child_graph is not None:
+                    found = visit(state.child_graph, path)
+                    if found:
+                        return found
+            return ()
+
+        return visit(self, ())
+
+    def iter_states_with_paths(self) -> Iterable[tuple[StateSpec, str]]:
+        def visit(graph: StateGraphSpec, graph_path: str):
+            for state in graph.states:
+                state_path = f"{graph_path}.states.{state.id}"
+                yield state, state_path
+                if state.child_graph is not None:
+                    yield from visit(state.child_graph, f"{state_path}.child_graph")
+
+        yield from visit(self, "state_graph")
+
+    def validate(
+        self,
+        *,
+        ids: set[str] | None = None,
+        depth: int = 0,
+        path: str = "state_graph",
+    ) -> None:
+        if depth >= MAX_STATE_GRAPH_DEPTH:
+            raise StateGraphValidationError(
+                f"state graph depth must be below {MAX_STATE_GRAPH_DEPTH}",
+                path=path,
+            )
+        claimed = ids if ids is not None else set()
+        self.id = _claim_object_id(self.id, claimed, path=path)
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise StateGraphValidationError(
+                "state graph name must be a non-empty string", path=f"{path}.name"
+            )
+        if not isinstance(self.states, list) or not self.states:
+            raise StateGraphValidationError(
+                "state graph states must be a non-empty array", path=f"{path}.states"
+            )
+        sibling_ids: set[str] = set()
+        for state in self.states:
+            if not isinstance(state, StateSpec):
+                raise StateGraphValidationError(
+                    "state graph entries must be StateSpec values",
+                    path=f"{path}.states",
+                )
+            state.id = _valid_id(state.id, f"{path}.states.id")
+            if state.id in sibling_ids:
+                raise StateGraphValidationError(
+                    f"Duplicate document object id: {state.id}",
+                    path=f"{path}.states.{state.id}.id",
+                    state_id=state.id,
+                )
+            sibling_ids.add(state.id)
+        self.initial_state_id = _valid_id(
+            self.initial_state_id, f"{path}.initial_state_id"
+        )
+        if self.initial_state_id not in sibling_ids:
+            raise StateGraphValidationError(
+                "initial_state_id must identify exactly one State in this graph",
+                path=f"{path}.initial_state_id",
+            )
+
+        for state in self.states:
+            state_path = f"{path}.states.{state.id}"
+            state.id = _claim_object_id(
+                state.id, claimed, path=state_path, state_id=state.id
+            )
+            if not isinstance(state.name, str) or not state.name.strip():
+                raise StateGraphValidationError(
+                    "state name must be a non-empty string",
+                    path=f"{state_path}.name",
+                    state_id=state.id,
+                )
+            if (
+                isinstance(state.order, bool)
+                or not isinstance(state.order, int)
+                or state.order < 0
+            ):
+                raise StateGraphValidationError(
+                    "state order must be a non-negative integer",
+                    path=f"{state_path}.order",
+                    state_id=state.id,
+                )
+            if (
+                isinstance(state.duration_frames, bool)
+                or not isinstance(state.duration_frames, int)
+                or state.duration_frames < 0
+            ):
+                raise StateGraphValidationError(
+                    "state duration_frames must be a non-negative integer",
+                    path=f"{state_path}.duration_frames",
+                    state_id=state.id,
+                )
+            for collection_name in ("entry_actions", "exit_actions"):
+                collection = getattr(state, collection_name)
+                if not isinstance(collection, list):
+                    raise StateGraphValidationError(
+                        f"state {collection_name} must be an array",
+                        path=f"{state_path}.{collection_name}",
+                        state_id=state.id,
+                    )
+                for action in collection:
+                    if not isinstance(action, StateActionSpec):
+                        raise StateGraphValidationError(
+                            f"state {collection_name} entries must be StateActionSpec values",
+                            path=f"{state_path}.{collection_name}",
+                            state_id=state.id,
+                        )
+                    action_path = f"{state_path}.{collection_name}.{action.id}"
+                    action.validate(path=action_path)
+                    action.id = _claim_object_id(
+                        action.id,
+                        claimed,
+                        path=action_path,
+                        state_id=state.id,
+                    )
+            if not isinstance(state.tracks, list):
+                raise StateGraphValidationError(
+                    "state tracks must be an array",
+                    path=f"{state_path}.tracks",
+                    state_id=state.id,
+                )
+            for track in state.tracks:
+                if not isinstance(track, TimelineTrack):
+                    raise StateGraphValidationError(
+                        "state tracks entries must be TimelineTrack values",
+                        path=f"{state_path}.tracks",
+                        state_id=state.id,
+                    )
+                track.validate()
+                track_path = f"{state_path}.tracks.{track.id}"
+                track.id = _claim_object_id(
+                    track.id, claimed, path=track_path, state_id=state.id
+                )
+                for clip in track.clips:
+                    clip_path = f"{track_path}.clips.{clip.id}"
+                    clip.id = _claim_object_id(
+                        clip.id, claimed, path=clip_path, state_id=state.id
+                    )
+                    for keyframe in clip.keyframes:
+                        keyframe_path = f"{clip_path}.keyframes.{keyframe.id}"
+                        keyframe.id = _claim_object_id(
+                            keyframe.id,
+                            claimed,
+                            path=keyframe_path,
+                            state_id=state.id,
+                        )
+            if not isinstance(state.transitions, list):
+                raise StateGraphValidationError(
+                    "state transitions must be an array",
+                    path=f"{state_path}.transitions",
+                    state_id=state.id,
+                )
+            for transition in state.transitions:
+                if not isinstance(transition, TransitionSpec):
+                    raise StateGraphValidationError(
+                        "state transitions entries must be TransitionSpec values",
+                        path=f"{state_path}.transitions",
+                        state_id=state.id,
+                    )
+                transition_path = f"{state_path}.transitions.{transition.id}"
+                transition.validate(
+                    sibling_ids=sibling_ids,
+                    source_state_id=state.id,
+                    path=transition_path,
+                )
+                transition.id = _claim_object_id(
+                    transition.id,
+                    claimed,
+                    path=transition_path,
+                    state_id=state.id,
+                    transition_id=transition.id,
+                )
+            if state.child_graph is not None:
+                if not isinstance(state.child_graph, StateGraphSpec):
+                    raise StateGraphValidationError(
+                        "state child_graph must be a StateGraphSpec or null",
+                        path=f"{state_path}.child_graph",
+                        state_id=state.id,
+                    )
+                state.child_graph.validate(
+                    ids=claimed,
+                    depth=depth + 1,
+                    path=f"{state_path}.child_graph",
+                )
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        return {
+            "id": self.id,
+            "name": self.name,
+            "initial_state_id": self.initial_state_id,
+            "states": [state.to_dict() for state in self.states],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StateGraphSpec":
+        if not isinstance(data, dict):
+            raise DocumentError("state_graph must be an object")
+        return cls(
+            id=data.get("id") or new_document_id(),
+            name=data.get("name", ""),
+            initial_state_id=data.get("initial_state_id", ""),
+            states=[StateSpec.from_dict(item) for item in data.get("states", [])],
+        )
+
+
+@dataclass(init=False)
 class SceneDocument:
+    """Scene v3 authoring root with one embedded StateGraph source of truth."""
+
     name: str
     root: EditorNode
-    id: str = field(default_factory=new_document_id)
-    schema_version: int = CURRENT_SCHEMA_VERSION
-    type: str = SCENE_DOCUMENT_TYPE
-    symbol_name: str | None = None
-    tracks: list[TimelineTrack] = field(default_factory=list)
-    timeline: list[TimelineEvent] = field(default_factory=list, repr=False)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    id: str
+    schema_version: int
+    type: str
+    symbol_name: str | None
+    state_graph: StateGraphSpec
+    timeline: list[TimelineEvent]
+    metadata: dict[str, Any]
+
+    def __init__(
+        self,
+        name: str,
+        root: EditorNode,
+        id: str | None = None,
+        schema_version: int = CURRENT_SCHEMA_VERSION,
+        type: str = SCENE_DOCUMENT_TYPE,
+        symbol_name: str | None = None,
+        tracks: list[TimelineTrack] | None = None,
+        timeline: list[TimelineEvent] | None = None,
+        metadata: dict[str, Any] | None = None,
+        state_graph: StateGraphSpec | None = None,
+    ) -> None:
+        self.name = name
+        self.root = root
+        self.id = id or new_document_id()
+        self.schema_version = schema_version
+        self.type = type
+        self.symbol_name = symbol_name
+        self.timeline = list(timeline or [])
+        self.metadata = dict(metadata or {})
+        supplied_tracks = list(tracks or [])
+        if state_graph is None:
+            try:
+                namespace = uuid.UUID(str(self.id))
+            except (ValueError, AttributeError, TypeError):
+                namespace = uuid.NAMESPACE_URL
+            graph_id = str(uuid.uuid5(namespace, "state-graph:root"))
+            state_id = str(uuid.uuid5(namespace, "state:default"))
+            authored_duration = self.metadata.get("duration_frames", 0)
+            duration = (
+                authored_duration
+                if isinstance(authored_duration, int)
+                and not isinstance(authored_duration, bool)
+                and authored_duration >= 0
+                else 0
+            )
+            state_graph = StateGraphSpec(
+                id=graph_id,
+                name="StageFlow",
+                initial_state_id=state_id,
+                states=[
+                    StateSpec(
+                        id=state_id,
+                        name="Default",
+                        duration_frames=duration,
+                        tracks=supplied_tracks,
+                    )
+                ],
+            )
+        elif supplied_tracks:
+            if state_graph.initial_state.tracks:
+                raise DocumentError(
+                    "SceneDocument cannot receive both state_graph tracks and tracks"
+                )
+            state_graph.initial_state.tracks = supplied_tracks
+        self.state_graph = state_graph
+
+    @property
+    def tracks(self) -> list[TimelineTrack]:
+        """Compatibility view of the root graph's initial State timeline.
+
+        Scene v3 never serializes a second top-level copy. New code should use
+        an explicit State id; legacy callers continue to mutate the exact list
+        owned by the initial State.
+        """
+
+        return self.state_graph.initial_state.tracks
+
+    @tracks.setter
+    def tracks(self, value: list[TimelineTrack]) -> None:
+        if not isinstance(value, list):
+            raise DocumentError("document.tracks must be an array")
+        self.state_graph.initial_state.tracks = value
 
     @property
     def coordinate_space(self) -> CoordinateSpace:
@@ -439,10 +1083,7 @@ class SceneDocument:
     def duration_frames(self) -> int:
         authored = self.metadata.get("duration_frames", 0)
         authored = authored if isinstance(authored, int) and not isinstance(authored, bool) else 0
-        return max(
-            [authored, 0]
-            + [clip.end_frame for track in self.tracks for clip in track.clips]
-        )
+        return max(authored, 0, self.state_graph.nominal_duration_frames)
 
     def _promote_legacy_timeline(self) -> None:
         if not self.timeline:
@@ -503,59 +1144,62 @@ class SceneDocument:
             ids.add(node.id)
         node_ids = {node.id for node in self.root.walk()}
         nodes_by_id = {node.id: node for node in self.root.walk()}
-        for track in self.tracks:
-            if not isinstance(track, TimelineTrack):
-                raise DocumentError("document.tracks entries must be TimelineTrack values")
-            track.validate()
-            if track.id in ids:
-                raise DocumentError(f"Duplicate document object id: {track.id}")
-            ids.add(track.id)
-            if track.target_id is not None and track.target_id not in node_ids:
-                raise DocumentError(f"track.target_id does not exist: {track.target_id}")
-            for clip in track.clips:
-                if clip.id in ids:
-                    raise DocumentError(f"Duplicate document object id: {clip.id}")
-                ids.add(clip.id)
-                if clip.target_id is not None and clip.target_id not in node_ids:
-                    raise DocumentError(f"clip.target_id does not exist: {clip.target_id}")
-                effective_target = clip.target_id or track.target_id
-                if clip.kind in {"Movement", "Property"} and effective_target is None:
-                    raise DocumentError(f"{clip.kind} clip needs a track or clip target_id")
-                target_node = nodes_by_id.get(effective_target or "")
-                if clip.kind == "Movement" and target_node is not None:
-                    x = target_node.properties.get("x")
-                    y = target_node.properties.get("y")
+        if not isinstance(self.state_graph, StateGraphSpec):
+            raise DocumentError("document.state_graph must be a StateGraphSpec")
+        self.state_graph.validate(ids=ids)
+        for state, state_path in self.state_graph.iter_states_with_paths():
+            for collection_name in ("entry_actions", "exit_actions"):
+                for action in getattr(state, collection_name):
+                    if action.target_id is not None and action.target_id not in node_ids:
+                        raise StateGraphValidationError(
+                            f"state action target_id does not exist: {action.target_id}",
+                            path=f"{state_path}.{collection_name}.{action.id}.target_id",
+                            state_id=state.id,
+                        )
+            for track in state.tracks:
+                if track.target_id is not None and track.target_id not in node_ids:
+                    raise DocumentError(f"track.target_id does not exist: {track.target_id}")
+                for clip in track.clips:
+                    if clip.target_id is not None and clip.target_id not in node_ids:
+                        raise DocumentError(f"clip.target_id does not exist: {clip.target_id}")
+                    effective_target = clip.target_id or track.target_id
+                    if clip.kind in {"Movement", "Property"} and effective_target is None:
+                        raise DocumentError(
+                            f"{clip.kind} clip needs a track or clip target_id"
+                        )
+                    target_node = nodes_by_id.get(effective_target or "")
+                    if clip.kind == "Movement" and target_node is not None:
+                        x = target_node.properties.get("x")
+                        y = target_node.properties.get("y")
+                        if (
+                            isinstance(x, bool)
+                            or not isinstance(x, (int, float))
+                            or isinstance(y, bool)
+                            or not isinstance(y, (int, float))
+                        ):
+                            raise DocumentError(
+                                "Movement clip target must expose numeric x and y properties"
+                            )
+                    if clip.kind == "Property" and target_node is not None:
+                        property_name = str(
+                            clip.payload.get("property") or clip.channel
+                        ).strip()
+                        if not property_name:
+                            raise DocumentError(
+                                "Property clip needs a property name or channel"
+                            )
+                        if property_name not in target_node.properties:
+                            raise DocumentError(
+                                f"Property clip target has no property {property_name!r}"
+                            )
                     if (
-                        isinstance(x, bool)
-                        or not isinstance(x, (int, float))
-                        or isinstance(y, bool)
-                        or not isinstance(y, (int, float))
+                        clip.kind == "Pattern"
+                        and effective_target is None
+                        and not str(clip.payload.get("pattern") or "").strip()
                     ):
                         raise DocumentError(
-                            "Movement clip target must expose numeric x and y properties"
+                            "Pattern clip needs a track/clip target_id or payload.pattern"
                         )
-                if clip.kind == "Property" and target_node is not None:
-                    property_name = str(
-                        clip.payload.get("property") or clip.channel
-                    ).strip()
-                    if not property_name:
-                        raise DocumentError("Property clip needs a property name or channel")
-                    if property_name not in target_node.properties:
-                        raise DocumentError(
-                            f"Property clip target has no property {property_name!r}"
-                        )
-                if (
-                    clip.kind == "Pattern"
-                    and effective_target is None
-                    and not str(clip.payload.get("pattern") or "").strip()
-                ):
-                    raise DocumentError(
-                        "Pattern clip needs a track/clip target_id or payload.pattern"
-                    )
-                for keyframe in clip.keyframes:
-                    if keyframe.id in ids:
-                        raise DocumentError(f"Duplicate document object id: {keyframe.id}")
-                    ids.add(keyframe.id)
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -566,7 +1210,7 @@ class SceneDocument:
             "name": self.name,
             "metadata": self.metadata,
             "root": self.root.to_dict(),
-            "tracks": [track.to_dict() for track in self.tracks],
+            "state_graph": self.state_graph.to_dict(),
         }
         if self.symbol_name is not None:
             payload["symbol_name"] = self.symbol_name
@@ -583,7 +1227,7 @@ class SceneDocument:
             symbol_name=migrated.get("symbol_name"),
             metadata=_json_object(migrated.get("metadata", {}), "document.metadata"),
             root=EditorNode.from_dict(migrated["root"]),
-            tracks=[TimelineTrack.from_dict(item) for item in migrated.get("tracks", [])],
+            state_graph=StateGraphSpec.from_dict(migrated["state_graph"]),
         )
         document.validate()
         return document

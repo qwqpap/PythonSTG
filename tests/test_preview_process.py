@@ -1,9 +1,10 @@
 import json
+from enum import Enum
 
 from PyQt5.QtCore import QProcess
 
 from src.core.project_context import ProjectContext
-from src.editor.preview_process import PatternPreviewProcess
+from src.editor.preview_process import PatternPreviewProcess, _qt_enum_value
 from src.editor.document import SceneDocument, TimelineClip, TimelineTrack
 from src.editor.node_types import make_default_root
 from src.pattern import PatternDocument
@@ -23,6 +24,14 @@ def _matching(client, request_id):
         if message.get("request_id") == request_id
         and message.get("event") == "response"
     ]
+
+
+def test_qprocess_enum_values_support_pyside_and_pyqt_representations():
+    class PySideStyleExitStatus(Enum):
+        NORMAL = 0
+
+    assert _qt_enum_value(PySideStyleExitStatus.NORMAL) == 0
+    assert _qt_enum_value(QProcess.NormalExit) == 0
 
 
 def test_qprocess_headless_worker_handshake_commands_and_clean_shutdown(tmp_path, qapp_session):

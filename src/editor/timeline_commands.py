@@ -19,8 +19,49 @@ class TimelineMutationError(ValueError):
     """Raised when a timeline command cannot find or safely mutate its target."""
 
 
-def find_track(document: SceneDocument, track_id: str) -> TimelineTrack | None:
-    return next((track for track in document.tracks if track.id == track_id), None)
+def timeline_tracks(
+    document: SceneDocument,
+    state_id: str | None = None,
+) -> list[TimelineTrack]:
+    if state_id is None:
+        return document.tracks
+    state = document.state_graph.find_state(state_id)
+    if state is None:
+        raise TimelineMutationError(f"Timeline State does not exist: {state_id}")
+    return state.tracks
+
+
+def _track_collections(document: SceneDocument):
+    for state in document.state_graph.walk_states():
+        yield state.id, state.tracks
+
+
+def find_track(
+    document: SceneDocument,
+    track_id: str,
+    state_id: str | None = None,
+) -> TimelineTrack | None:
+    collections = (
+        ((state_id, timeline_tracks(document, state_id)),)
+        if state_id is not None
+        else _track_collections(document)
+    )
+    for _owner_id, tracks in collections:
+        track = next((item for item in tracks if item.id == track_id), None)
+        if track is not None:
+            return track
+    return None
+
+
+def _track_location(
+    document: SceneDocument,
+    track_id: str,
+) -> tuple[str, list[TimelineTrack], TimelineTrack, int] | None:
+    for state_id, tracks in _track_collections(document):
+        for index, track in enumerate(tracks):
+            if track.id == track_id:
+                return state_id, tracks, track, index
+    return None
 
 
 def require_track(document: SceneDocument, track_id: str) -> TimelineTrack:
@@ -34,10 +75,11 @@ def find_clip(
     document: SceneDocument,
     clip_id: str,
 ) -> tuple[TimelineTrack, TimelineClip, int] | None:
-    for track in document.tracks:
-        for index, clip in enumerate(track.clips):
-            if clip.id == clip_id:
-                return track, clip, index
+    for _state_id, tracks in _track_collections(document):
+        for track in tracks:
+            for index, clip in enumerate(track.clips):
+                if clip.id == clip_id:
+                    return track, clip, index
     return None
 
 
@@ -65,22 +107,24 @@ class AddTrackCommand:
     document: SceneDocument
     track: TimelineTrack
     index: int | None = None
+    state_id: str | None = None
     label: str = "Add timeline track"
     _inserted_index: int | None = field(default=None, init=False, repr=False)
 
     def execute(self) -> None:
         if find_track(self.document, self.track.id) is not None:
             raise TimelineMutationError(f"Duplicate timeline track id: {self.track.id}")
-        target = len(self.document.tracks) if self.index is None else int(self.index)
-        target = max(0, min(target, len(self.document.tracks)))
-        self.document.tracks.insert(target, self.track)
+        tracks = timeline_tracks(self.document, self.state_id)
+        target = len(tracks) if self.index is None else int(self.index)
+        target = max(0, min(target, len(tracks)))
+        tracks.insert(target, self.track)
         self._inserted_index = target
 
     def undo(self) -> None:
-        track = find_track(self.document, self.track.id)
-        if track is None:
+        location = _track_location(self.document, self.track.id)
+        if location is None:
             raise TimelineMutationError("Cannot undo track add; track is missing")
-        self.document.tracks.remove(track)
+        location[1].remove(location[2])
 
 
 @dataclass
@@ -90,19 +134,24 @@ class RemoveTrackCommand:
     label: str = "Delete timeline track"
     _track: TimelineTrack | None = field(default=None, init=False, repr=False)
     _index: int | None = field(default=None, init=False, repr=False)
+    _state_id: str | None = field(default=None, init=False, repr=False)
 
     def execute(self) -> None:
-        track = require_track(self.document, self.track_id)
-        index = self.document.tracks.index(track)
-        self.document.tracks.pop(index)
+        location = _track_location(self.document, self.track_id)
+        if location is None:
+            raise TimelineMutationError(f"Timeline track does not exist: {self.track_id}")
+        _state_id, tracks, track, index = location
+        tracks.pop(index)
         if self._track is None:
             self._track = track
             self._index = index
+            self._state_id = _state_id
 
     def undo(self) -> None:
-        if self._track is None or self._index is None:
+        if self._track is None or self._index is None or self._state_id is None:
             raise TimelineMutationError("Cannot undo track delete before execution")
-        self.document.tracks.insert(min(self._index, len(self.document.tracks)), self._track)
+        tracks = timeline_tracks(self.document, self._state_id)
+        tracks.insert(min(self._index, len(tracks)), self._track)
 
 
 @dataclass
@@ -153,26 +202,35 @@ class MoveTrackCommand:
     label: str = "Reorder timeline track"
     _previous_tracks: list[TimelineTrack] | None = field(default=None, init=False, repr=False)
     _previous_orders: dict[str, int] | None = field(default=None, init=False, repr=False)
+    _state_id: str | None = field(default=None, init=False, repr=False)
 
     def execute(self) -> None:
-        track = require_track(self.document, self.track_id)
+        location = _track_location(self.document, self.track_id)
+        if location is None:
+            raise TimelineMutationError(f"Timeline track does not exist: {self.track_id}")
+        state_id, tracks, track, old_index = location
         if self._previous_tracks is None:
-            self._previous_tracks = list(self.document.tracks)
-            self._previous_orders = {item.id: item.order for item in self.document.tracks}
-        old_index = self.document.tracks.index(track)
-        target = max(0, min(int(self.target_index), len(self.document.tracks) - 1))
+            self._state_id = state_id
+            self._previous_tracks = list(tracks)
+            self._previous_orders = {item.id: item.order for item in tracks}
+        target = max(0, min(int(self.target_index), len(tracks) - 1))
         if target == old_index:
             return
-        self.document.tracks.pop(old_index)
-        self.document.tracks.insert(target, track)
-        for order, item in enumerate(self.document.tracks):
+        tracks.pop(old_index)
+        tracks.insert(target, track)
+        for order, item in enumerate(tracks):
             item.order = order
 
     def undo(self) -> None:
-        if self._previous_tracks is None or self._previous_orders is None:
+        if (
+            self._previous_tracks is None
+            or self._previous_orders is None
+            or self._state_id is None
+        ):
             raise TimelineMutationError("Cannot undo track reorder before execution")
-        self.document.tracks[:] = self._previous_tracks
-        for item in self.document.tracks:
+        tracks = timeline_tracks(self.document, self._state_id)
+        tracks[:] = self._previous_tracks
+        for item in tracks:
             item.order = self._previous_orders[item.id]
 
 

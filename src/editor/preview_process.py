@@ -17,6 +17,12 @@ from src.core.project_context import ProjectContext
 from src.preview import PREVIEW_PROTOCOL_VERSION, encode_message
 
 
+def _qt_enum_value(value) -> int:
+    """Return an integer for both PyQt integer enums and PySide Enum values."""
+
+    return int(getattr(value, "value", value))
+
+
 class PatternPreviewProcess(QObject):
     MAX_STDOUT_LINE_BYTES = 64 * 1024
     MAX_STDERR_FORWARD_BYTES = 64 * 1024
@@ -207,18 +213,22 @@ class PatternPreviewProcess(QObject):
         if self._stopping:
             return
         message = self.process.errorString() if self.process is not None else "process error"
-        self._protocol_issue("process_error", message, qt_error=int(error))
+        self._protocol_issue("process_error", message, qt_error=_qt_enum_value(error))
 
     def _finished(self, exit_code: int, exit_status) -> None:
         self._read_stdout()
         self._read_stderr()
-        normal = int(exit_status) == int(QProcess.NormalExit) and exit_code == 0
+        status_value = _qt_enum_value(exit_status)
+        normal = (
+            status_value == _qt_enum_value(QProcess.NormalExit)
+            and exit_code == 0
+        )
         if not normal and not self._stopping:
             self._protocol_issue(
                 "process_crashed",
                 f"preview exited with code {exit_code}",
                 exit_code=exit_code,
-                exit_status=int(exit_status),
+                exit_status=status_value,
             )
         self.ready = False
         self.readyChanged.emit(False)
