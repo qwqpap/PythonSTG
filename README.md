@@ -149,7 +149,8 @@ flowchart TB
 | [作者资源契约](docs/AUTHORING_RESOURCE_CONTRACTS.md) | M0 资源头、引用、迁移、坐标、时间和注册表协议 |
 | [弹幕资源与正式运行时契约](docs/PATTERN_RESOURCE_CONTRACT.md) | M1 PatternDocument、不可变 IR、批量 runner 与预览/游戏同源边界 |
 | [正式预览控制器与协议](docs/PREVIEW_CONTROLLER_PROTOCOL.md) | M2 命令、NDJSON/QProcess、错误保留与外部正式预览边界 |
-| [编辑器长期路线 TODO](docs/EDITOR_ROADMAP_TODO.md) | 分阶段任务、依赖、Gate 与完成证据 |
+| [编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) | 下一代分阶段任务、Agent 边界、验收文件与 Gate |
+| [编辑器产品愿景](docs/EDITOR_PRODUCT_VISION.md) | 目标工作流、状态图/时间线/行为边界、预设与扩展方向 |
 
 也可以本地启动 VitePress 文档站点：
 

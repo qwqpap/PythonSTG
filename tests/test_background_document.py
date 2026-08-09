@@ -1,10 +1,9 @@
-"""E6.2 frozen acceptance: unified BackgroundDocument and legacy import.
+"""Unified BackgroundDocument and legacy-import regression contract.
 
 These tests lock the single background document contract: the typed envelope
 wraps exactly the existing shipped fields (name/description/textures/camera/
 fog/scroll/layers), legacy JSON imports without semantic drift, and the
-runtime renderer consumes the document with field-identical quads. Do not
-edit, skip, or xfail them.
+runtime renderer consumes the document with field-identical quads.
 """
 
 import json

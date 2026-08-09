@@ -1,8 +1,7 @@
-"""Frozen Luna handoff acceptance bundle for the M4/M6 editor gaps.
+"""Cross-domain editor authoring and formal-preview integration regressions.
 
-This file is written before the next implementation pass.  It is deliberately
-small enough to run as one command, but it exercises the public behavior that
-was missing from the previous audit:
+These tests exercise public behavior across the scene, UI, background,
+preview, and plugin boundaries:
 
 * formal StageRunner statistics move the owner viewport and timeline;
 * the Qt host remains a foreign-window host, not a gameplay renderer;
@@ -11,15 +10,10 @@ was missing from the previous audit:
 * UI/background previews call the formal renderer path;
 * frame-driven background bindings are observable and reversible; and
 * closing the editor deactivates SDK plugins.
-
-The existing M4 and M5-M7 frozen files remain untouched.  A future
-implementation must make every assertion here pass as written; it may not
-edit, skip, xfail, or weaken this file to obtain a green result.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -41,15 +35,6 @@ from src.qt_compat.QtCore import QPointF, Qt
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-ROADMAP = REPOSITORY / "docs" / "EDITOR_ROADMAP_TODO.md"
-
-
-def _git_blob_sha1(path: Path) -> str:
-    data = path.read_bytes()
-    return hashlib.sha1(
-        f"blob {len(data)}\0".encode("ascii") + data,
-        usedforsecurity=False,
-    ).hexdigest()
 
 
 def _project(tmp_path: Path) -> ProjectContext:
@@ -206,12 +191,6 @@ class _BackgroundRenderer:
         self.camera.fog_start = start
         self.camera.fog_end = end
         self.camera.fog_enabled = enabled
-
-
-def test_luna_acceptance_bundle_blob_matches_roadmap() -> None:
-    blob = _git_blob_sha1(Path(__file__))
-    roadmap = ROADMAP.read_text(encoding="utf-8")
-    assert f"Luna acceptance bundle blob: `{blob}`" in roadmap
 
 
 def test_formal_preview_host_is_foreign_window_only() -> None:

@@ -1,6 +1,6 @@
 """Unified BackgroundDocument consumed by editor and runtime.
 
-M6 frozen contract (see docs/EDITOR_ROADMAP_TODO.md):
+Established background-document contract:
 
 - The typed ``pystg.background`` envelope wraps exactly the existing shipped
   fields — ``name``, ``description``, ``textures``, ``camera``, ``fog``,

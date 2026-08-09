@@ -1,6 +1,6 @@
 """M6 workspace regression: opening UI/background documents in the editor.
 
-These are supplementary (non-frozen) tests locking the M6 editor panels:
+These tests preserve the M6 editor panels:
 opening a UI document must not crash Qt inside the tab-switch signal slot
 (regression: 0xC0000409 during a synchronous tree/scene rebuild), and the
 background layer summary must populate.

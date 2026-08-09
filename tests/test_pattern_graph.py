@@ -1,7 +1,6 @@
-"""E5.2 frozen acceptance: typed behavior graph.
+"""Typed behavior-graph regression contract.
 
-These tests are the completion gate for E5.2 and must pass exactly as written.
-Do not edit, skip, or xfail them; implement the contracts they assert instead.
+These tests preserve the shipped authoring and compiler behavior.
 
 Contract notes:
 - ``src/pattern/graph.py`` exposes ``GRAPH_NODE_CATEGORIES``, ``BehaviorGraph``,

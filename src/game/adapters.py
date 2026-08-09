@@ -1,6 +1,6 @@
 """Event adapters: external input normalized into the typed EventBus.
 
-M7 frozen contract (see docs/EDITOR_ROADMAP_TODO.md):
+Established event-adapter contract:
 
 - ``EventAdapter`` is abstract with ``start(bus)`` / ``stop()`` (idempotent),
   ``health() -> dict``, and ``name``.

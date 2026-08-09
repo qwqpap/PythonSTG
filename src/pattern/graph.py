@@ -1,6 +1,6 @@
 """Typed behavior graph documents for the shared pattern resource.
 
-M5 frozen contract:
+Established behavior-graph contract:
 - Categories are exactly: source, shape, aim, schedule, motion, modifier,
   condition, event, script.
 - Nodes have single typed input/output ports:

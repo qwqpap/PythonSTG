@@ -1,8 +1,6 @@
-"""E7.4 frozen acceptance: autosave, recovery, layout, and fixtures.
+"""Autosave, recovery, layout, and migration-fixture regressions.
 
-These tests are the completion gate for E7.4 and must pass exactly as
-written. Do not edit, skip, or xfail them; implement the contracts in
-``docs/EDITOR_ROADMAP_TODO.md`` (M7 frozen contracts) instead.
+These tests preserve the shipped editor hardening behavior.
 
 Contract summary:
 - ``ResourceStore.autosave(document, path)`` writes an atomic sidecar

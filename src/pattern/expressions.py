@@ -1,6 +1,6 @@
 """Restricted whitelisted expression AST for data-authored bindings.
 
-This module implements the M5 frozen contract for expressions:
+This module implements the established expression contract:
 
 - ``EXPRESSION_VARIABLES`` is exactly the declared variable set.
 - The whitelist covers numeric literals, ``+ - * / // % **``, unary minus,

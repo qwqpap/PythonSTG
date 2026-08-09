@@ -1,6 +1,6 @@
 """Typed UI authoring documents with anchors, containers, and bindings.
 
-M6 frozen contract (see docs/EDITOR_ROADMAP_TODO.md):
+Established UI authoring contract:
 
 - ``UIDocument`` carries the typed ``pystg.ui`` envelope plus a ``root`` tree
   of ``UIDocumentNode`` values with stable UUIDs.

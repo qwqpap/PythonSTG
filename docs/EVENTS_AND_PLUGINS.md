@@ -1,7 +1,7 @@
 # Events, adapters, and plugin security boundaries
 
-M7 contracts and non-goals. See `EDITOR_ROADMAP_TODO.md` for the frozen
-acceptance gates.
+Current event, adapter, and plugin boundaries. Future migrations and gates are
+tracked in `EDITOR_IMPLEMENTATION_TODO.md`.
 
 ## EventBus (`src/game/events.py`)
 

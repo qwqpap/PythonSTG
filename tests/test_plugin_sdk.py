@@ -1,8 +1,6 @@
-"""E7.3 frozen acceptance: plugin manifest, registration, and isolation.
+"""Plugin manifest, registration, and isolation regression contract.
 
-These tests are the completion gate for E7.3 and must pass exactly as
-written. Do not edit, skip, or xfail them; implement the contracts in
-``docs/EDITOR_ROADMAP_TODO.md`` (M7 frozen contracts) instead.
+These tests preserve the shipped plugin SDK behavior.
 
 Contract summary:
 - ``src/editor/plugin_sdk.py`` exposes ``PLUGIN_API_VERSION``,

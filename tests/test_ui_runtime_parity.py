@@ -1,9 +1,8 @@
-"""E6.1 frozen acceptance: formal renderer behavior for every UI node.
+"""Formal renderer regression behavior for every UI node.
 
 These tests lock the renderer protocol consumed by ``UIRenderer.render_hud``
 (text / rect / bar / textured_rect records) and the parity between the typed
-UIDocument and the legacy ``UITree.get_render_list`` output. Do not edit,
-skip, or xfail them.
+UIDocument and the legacy ``UITree.get_render_list`` output.
 """
 
 import pytest

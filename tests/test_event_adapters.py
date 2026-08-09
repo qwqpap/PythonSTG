@@ -1,9 +1,6 @@
-"""E7.2 frozen acceptance: EventAdapter lifecycle, health, and schemas.
+"""EventAdapter lifecycle, health, and schema regression contract.
 
-These tests are the completion gate for E7.2 (and the E7.1 emoji refactor)
-and must pass exactly as written. Do not edit, skip, or xfail them;
-implement the contracts in ``docs/EDITOR_ROADMAP_TODO.md`` (M7 frozen
-contracts) instead.
+These tests preserve the shipped adapter and emoji transport behavior.
 
 Contract summary:
 - ``EventAdapter`` is abstract: ``start(bus)`` / ``stop()`` (idempotent),

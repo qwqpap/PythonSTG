@@ -1,8 +1,6 @@
-"""E6.1 frozen acceptance: typed UI documents, anchors, containers, bindings.
+"""Typed UI document regression contract: layout, containers, and bindings.
 
-These tests are the completion gate for the UI document half of E6.1 and must
-pass exactly as written. Do not edit, skip, or xfail them; implement the
-contracts in ``docs/EDITOR_ROADMAP_TODO.md`` (M6 frozen contracts) instead.
+These tests preserve the shipped authoring and renderer behavior.
 
 Contract summary:
 - ``src/ui/document.py`` exposes ``UIDocument``, ``UIDocumentNode``,
@@ -12,7 +10,7 @@ Contract summary:
 - Legacy UINode trees without a typed header load via ``from_dict`` with an
   auto-generated envelope.
 - ``calculate_layout(viewport_width, viewport_height)`` computes absolute
-  rectangles per the anchor/container rules in the roadmap.
+  rectangles per the established anchor/container rules.
 """
 
 import json

@@ -1,6 +1,6 @@
 """Reusable Curve authoring resources and interpolation semantics.
 
-M5 frozen contract:
+Established curve-resource contract:
 - Resource type ``pystg.curve`` with the common envelope.
 - ``CurveKeyframe(frame: int, value: float)`` with strictly increasing frames.
 - ``evaluate(frame)`` returns ``default`` below the first keyframe and the

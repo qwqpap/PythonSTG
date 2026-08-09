@@ -1,6 +1,6 @@
 """ScriptBehavior: sparse controller/emitter scripts with typed context APIs.
 
-M5 frozen contract:
+Established ScriptBehavior contract:
 - ``SCRIPT_HOOKS`` is exactly ``("load", "start", "update", "on_event", "stop")``.
 - ``PatternDocument.script`` is ``None`` or a ``ScriptBehavior`` whose
   ``resource_uri`` points at a Python module implementing any of the hooks.

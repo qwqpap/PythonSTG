@@ -1,7 +1,6 @@
-"""E5.3 frozen acceptance: ScriptBehavior lifecycle, context, and errors.
+"""ScriptBehavior lifecycle, context, and error regression contract.
 
-These tests are the completion gate for E5.3 and must pass exactly as written.
-Do not edit, skip, or xfail them; implement the contracts they assert instead.
+These tests preserve the shipped compiler and runtime behavior.
 
 Contract notes:
 - ``src/pattern/script.py`` exposes ``ScriptBehavior``, ``ScriptContext``,

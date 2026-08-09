@@ -1,8 +1,6 @@
-"""E5.1 frozen acceptance: restricted expression AST and property bindings.
+"""Restricted expression and property-binding regression contract.
 
-These tests are the completion gate for the expression/binding half of E5.1
-and must pass exactly as written. Do not edit, skip, or xfail them; implement
-the contracts they assert instead.
+These tests preserve the shipped authoring and runtime behavior.
 
 Contract notes:
 - ``src/pattern/expressions.py`` exposes ``EXPRESSION_VARIABLES``,

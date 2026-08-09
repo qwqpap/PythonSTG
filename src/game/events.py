@@ -1,6 +1,6 @@
 """Main-thread typed runtime EventBus.
 
-M7 frozen contract (see docs/EDITOR_ROADMAP_TODO.md):
+Established EventBus contract:
 
 - ``Event`` is a frozen dataclass with ``type``, ``source``, ``frame``, and
   ``payload``.

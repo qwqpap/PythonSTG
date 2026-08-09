@@ -1,8 +1,6 @@
-"""E5.1 frozen acceptance: reusable Curve resources, keyframes, interpolation.
+"""Curve-resource regression contract: keyframes and interpolation.
 
-These tests are the completion gate for the Curve-resource half of E5.1 and
-must pass exactly as written. Do not edit, skip, or xfail them to make the
-suite green; implement the contracts they assert instead.
+These tests preserve the shipped authoring and runtime behavior.
 
 Contract notes:
 - Resource type name is ``pystg.curve``.

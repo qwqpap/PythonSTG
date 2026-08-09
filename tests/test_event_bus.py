@@ -1,8 +1,7 @@
-"""E7.1 frozen acceptance: typed runtime EventBus.
+"""Typed runtime EventBus regression contract.
 
-These tests are the completion gate for E7.1 and must pass exactly as
-written. Do not edit, skip, or xfail them; implement the contracts in
-``docs/EDITOR_ROADMAP_TODO.md`` (M7 frozen contracts) instead.
+These tests preserve the currently shipped EventBus behavior. A future
+frame-boundary migration is planned in ``docs/EDITOR_IMPLEMENTATION_TODO.md``.
 
 Contract summary:
 - ``src/game/events.py`` exposes ``Event``, ``EventBus``, ``Subscription``,

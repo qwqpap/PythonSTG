@@ -31,7 +31,7 @@ def test_qprocess_headless_worker_handshake_commands_and_clean_shutdown(tmp_path
     issues = []
     client.protocolError.connect(issues.append)
 
-    assert client.start(headless=True, max_bullets=64)
+    assert client.start(headless=True, max_bullets=4096)
     assert client.process is not None
     environment = client.process.processEnvironment()
     assert environment.value("PYTHONIOENCODING") == "utf-8"
@@ -51,6 +51,8 @@ def test_qprocess_headless_worker_handshake_commands_and_clean_shutdown(tmp_path
     stats = _matching(client, stats_id)[0]["payload"]["result"]
     assert stats["frame"] == 1
     assert stats["bullet_count"] == 24
+    assert stats["max_bullets"] == 4096
+    assert stats["max_bullets"] > 600
     assert issues == []
 
     client.stop()

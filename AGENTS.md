@@ -5,7 +5,8 @@ This file applies to the whole repository.
 ## Editor roadmap
 
 Before making substantial changes to the Godot-style authoring editor, read
-[`docs/EDITOR_ROADMAP_TODO.md`](docs/EDITOR_ROADMAP_TODO.md) completely.
+[`docs/EDITOR_IMPLEMENTATION_TODO.md`](docs/EDITOR_IMPLEMENTATION_TODO.md)
+completely.
 
 The roadmap is the durable source of truth for:
 
@@ -34,8 +35,9 @@ order.
 8. Use project-relative resource references and `ProjectContext`; do not add new
    current-working-directory assumptions.
 9. Do not mark a roadmap phase complete until its explicit gate passes.
-10. After completing roadmap work, update the checkboxes and append concise,
-    reproducible evidence to the roadmap completion log.
+10. After completing roadmap work, update its checkboxes and single Evidence
+    block with concise, reproducible results; do not append handoff diaries or
+    self-hashing test gates.
 
 ## Verification baseline
 

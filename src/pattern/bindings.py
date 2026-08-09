@@ -1,6 +1,6 @@
 """Property bindings: constants, curves, variables, and expressions.
 
-M5 frozen contract:
+Established property-binding contract:
 - ``BindingSpec(path, kind, value)`` with ``kind`` in ``constant`` /
   ``curve`` / ``variable`` / ``expression``.
 - ``PathDocument.bindings`` stores these; curve values are ``res://``
