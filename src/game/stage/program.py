@@ -466,6 +466,13 @@ class StageRunner:
     @property
     def active_clip_ids(self) -> tuple[str, ...]:
         active = {item.schedule.clip_id for item in self._active_patterns.values()}
+        if getattr(self, "reactive_timeline", None) is not None:
+            for state_id in self.current_state_path:
+                local = self._local_frames.get(state_id, self.frame)
+                active.update(
+                    item.clip_id
+                    for item in self.reactive_timeline.armed_clips(state_id, local)
+                )
         if self._active_audio_clip_id is not None:
             active.add(self._active_audio_clip_id)
         for state in self._active_states:
@@ -481,6 +488,24 @@ class StageRunner:
                 if item.start_frame <= local < item.end_frame
             )
         return tuple(sorted(active))
+
+    @property
+    def active_reactive_instances(self) -> tuple[dict[str, Any], ...]:
+        if self.reactive_timeline is None:
+            return ()
+        return self.reactive_timeline.active_instances
+
+    @property
+    def reactive_trace(self) -> tuple[Any, ...]:
+        if self.reactive_timeline is None:
+            return ()
+        return tuple(self.reactive_timeline.scheduler.trace)
+
+    @property
+    def reactive_overlay(self) -> dict[str, Any]:
+        if self.reactive_timeline is None:
+            return {"active_instances": [], "trace": [], "diagnostics": []}
+        return self.reactive_timeline.overlay
 
     @property
     def variable_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
@@ -750,6 +775,8 @@ class StageRunner:
                         context=context,
                         variables=self.variables,
                         advance_scheduler=False,
+                        action_resolver=getattr(context, "resolve_reaction_action", None),
+                        local_frame=self._local_frames.get(state_id, current),
                     )
                 self.reactive_timeline.scheduler.tick(current)
             if (

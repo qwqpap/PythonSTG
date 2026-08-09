@@ -30,6 +30,7 @@ from src.game.stage.program import (
     StageTransition,
     StageVariableAutomation,
 )
+from src.game.reactions import ActivationRule, ReactionSpec, ReactiveClip
 from src.pattern import (
     PatternCompileError,
     PatternCompiler,
@@ -638,6 +639,53 @@ def _compile_state_action(
     )
 
 
+def _compile_reactive_clip(
+    scene: SceneDocument,
+    track: TimelineTrack,
+    clip: TimelineClip,
+    state: StateSpec,
+    state_path: str,
+) -> ReactiveClip:
+    path = f"{state_path}.tracks.{track.id}.clips.{clip.id}.payload"
+    try:
+        reaction_payload = clip.payload.get("reaction")
+        reaction = ReactionSpec.from_dict(reaction_payload)
+        activation_payload = clip.payload.get("activation")
+        activation = (
+            ActivationRule.from_dict(activation_payload)
+            if activation_payload is not None
+            else None
+        )
+        owner_id = clip.payload.get("owner_id")
+        scope = str(clip.payload.get("scope", "state"))
+        return ReactiveClip(
+            clip.id,
+            reaction,
+            state_id=state.id,
+            start_frame=clip.start_frame,
+            end_frame=clip.end_frame,
+            owner_id=owner_id,
+            activation=activation,
+            scope=scope,
+        )
+    except (TypeError, ValueError) as exc:
+        detail = str(exc)
+        field_path = path
+        if "activation" in detail:
+            field_path = f"{path}.activation"
+        elif "reaction" in detail or "event" in detail or "action" in detail:
+            field_path = f"{path}.reaction"
+        raise _failure(
+            scene,
+            "invalid_reactive_clip",
+            field_path,
+            detail,
+            track=track,
+            clip=clip,
+            state=state,
+        ) from exc
+
+
 def _compile_state_graph(graph: StateGraphSpec) -> StageStateGraph:
     runtime_states: list[StageState] = []
     for state in sorted(graph.states, key=lambda item: (item.order, item.id)):
@@ -759,6 +807,7 @@ def compile_stage(
     automations: list[StageAutomation] = []
     variable_automations: list[StageVariableAutomation] = []
     actions: list[StageAction] = []
+    reactive_clips: list[ReactiveClip] = []
     automatic_audio_stops: list[StageAction] = []
     dependency_hashes: list[str] = []
 
@@ -884,6 +933,12 @@ def compile_stage(
                         base_origin=program.origin,
                         program=program,
                     )
+                )
+                continue
+
+            if clip.kind == "Reactive":
+                reactive_clips.append(
+                    _compile_reactive_clip(scene, track, clip, state, state_path)
                 )
                 continue
 
@@ -1028,6 +1083,16 @@ def compile_stage(
             if isinstance(scene.metadata.get("seed", 0), int)
             and not isinstance(scene.metadata.get("seed", 0), bool)
             else 0
+        ),
+        reactive_clips=tuple(
+            sorted(
+                reactive_clips,
+                key=lambda item: (
+                    item.state_id or "",
+                    item.start_frame,
+                    item.clip_id,
+                ),
+            )
         ),
     )
 

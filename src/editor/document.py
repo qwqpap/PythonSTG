@@ -100,6 +100,7 @@ TIMELINE_CLIP_KINDS = frozenset(
         "Property",
         "ScriptEvent",
         "Variable",
+        "Reactive",
     }
 )
 TIMELINE_INTERPOLATIONS = frozenset(
@@ -344,6 +345,19 @@ class TimelineClip:
                 raise DocumentError("Variable clip operation is unsupported")
             if not self.keyframes and operation != "reset" and "value" not in self.payload:
                 raise DocumentError("Variable clip needs keyframes or payload.value")
+        elif self.kind == "Reactive":
+            activation = self.payload.get("activation")
+            reaction = self.payload.get("reaction")
+            if not isinstance(reaction, dict):
+                raise DocumentError("Reactive clip needs payload.reaction object")
+            try:
+                from src.game.reactions import ActivationRule, ReactionSpec
+
+                if activation is not None:
+                    ActivationRule.from_dict(activation)
+                ReactionSpec.from_dict(reaction)
+            except (TypeError, ValueError) as exc:
+                raise DocumentError(f"Reactive clip payload is invalid: {exc}") from exc
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()

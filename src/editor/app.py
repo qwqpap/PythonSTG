@@ -1131,6 +1131,31 @@ class InspectorPanel(QScrollArea):
         kind = QLineEdit(clip.kind)
         kind.setReadOnly(True)
         self._form.addRow("Kind", kind)
+        if clip.kind == "Reactive":
+            activation = clip.payload.get("activation")
+            reaction = clip.payload.get("reaction")
+            activation_kind = (
+                str(activation.get("kind"))
+                if isinstance(activation, dict) and activation.get("kind")
+                else "event"
+            )
+            activation_label = QLabel(activation_kind)
+            activation_label.setObjectName("timelineReactiveActivation")
+            self._form.addRow("Activation", activation_label)
+            reaction_id = (
+                str(reaction.get("id"))
+                if isinstance(reaction, dict) and reaction.get("id")
+                else ""
+            )
+            reaction_label = QLabel(reaction_id or "(inline reaction)")
+            reaction_label.setObjectName("timelineReactiveReaction")
+            self._form.addRow("Reaction", reaction_label)
+            scope_label = QLabel(str(clip.payload.get("scope", "state")))
+            scope_label.setObjectName("timelineReactiveScope")
+            self._form.addRow("Scope", scope_label)
+            owner_label = QLabel(str(clip.payload.get("owner_id") or "(track/state)"))
+            owner_label.setObjectName("timelineReactiveOwner")
+            self._form.addRow("Owner", owner_label)
 
         for label, key, value, minimum in (
             ("Start [frame]", "start_frame", clip.start_frame, 0),
@@ -1921,6 +1946,9 @@ class EditorMainWindow(QMainWindow):
         )
         self.timeline.trackSelected.connect(self._timeline_track_selected)
         self.timeline.clipSelected.connect(self._timeline_clip_selected)
+        self.timeline.reactiveNavigateRequested.connect(
+            self._timeline_reactive_navigate
+        )
         self.timeline.playheadChanged.connect(self._timeline_playhead_changed)
         self.timeline.zoomChanged.connect(self._timeline_zoom_changed)
         self.variables = VariableEditor()
@@ -2464,6 +2492,10 @@ class EditorMainWindow(QMainWindow):
             )
             self.timeline.set_active_clips(
                 stored_active if isinstance(stored_active, (list, tuple, set)) else ()
+            )
+            stored_reactive = self.session.editor_context.get("reactive_overlay", {})
+            self.timeline.set_reactive_overlay(
+                stored_reactive if isinstance(stored_reactive, dict) else {}
             )
             runtime_path = self.session.editor_context.get("runtime_state_path", ())
             self.state_graph.set_document(
@@ -3262,6 +3294,7 @@ class EditorMainWindow(QMainWindow):
             "Event": "event",
             "Property": "enabled",
             "ScriptEvent": "script",
+            "Reactive": "reaction",
         }
         state_id = str(
             self.session.editor_context.get("selected_state_id")
@@ -3306,6 +3339,15 @@ class EditorMainWindow(QMainWindow):
             track,
             list(self.session.document.root.walk()),
         )
+
+    def _timeline_reactive_navigate(self, target: str, resource_id: str) -> None:
+        """Remember a local reaction/behavior target without merging views."""
+
+        self.session.editor_context["reactive_navigation"] = {
+            "target": str(target),
+            "resource_id": str(resource_id),
+        }
+        self._log(f"Navigate to {target} {resource_id}")
 
     def _timeline_track_properties_requested(
         self,
@@ -3440,6 +3482,19 @@ class EditorMainWindow(QMainWindow):
             }
         elif track.kind == "ScriptEvent":
             payload = {"hook": "on_timeline_event", "data": {}}
+        elif track.kind == "Reactive":
+            payload = {
+                "activation": {
+                    "kind": "on_event",
+                    "event_type": "boss.hit",
+                },
+                "reaction": {
+                    "id": f"reaction-{track.id[:8]}",
+                    "event_type": "boss.hit",
+                    "action": "reaction.action",
+                    "once_per_scope": False,
+                },
+            }
         clip = TimelineClip(
             name=f"{track.kind} Clip",
             kind=track.kind,
@@ -4037,6 +4092,7 @@ class EditorMainWindow(QMainWindow):
 
     def _clear_stage_runtime_feedback(self) -> None:
         self.timeline.set_active_clips(())
+        self.timeline.set_reactive_overlay({})
         self.state_graph.set_active_state_path(())
         owner = self._active_stage_session
         if owner is not None:
@@ -4046,6 +4102,11 @@ class EditorMainWindow(QMainWindow):
             owner.editor_context["timeline_playhead"] = 0
             owner.editor_context["timeline_active_clips"] = []
             owner.editor_context["runtime_state_path"] = []
+            owner.editor_context["reactive_overlay"] = {
+                "active_instances": [],
+                "trace": [],
+                "diagnostics": [],
+            }
         for widget in self._document_widgets.values():
             if isinstance(widget, SceneViewport):
                 widget.clear_runtime_state()
@@ -5036,6 +5097,11 @@ class EditorMainWindow(QMainWindow):
             session.editor_context["runtime_variables"] = variable_snapshot
             if self.document_manager.active is session and hasattr(self, "variables"):
                 self.variables.set_runtime_overlay(variable_snapshot)
+        reactive_overlay = payload.get("reactive_overlay")
+        if isinstance(reactive_overlay, dict):
+            session.editor_context["reactive_overlay"] = reactive_overlay
+            if self.document_manager.active is session:
+                self.timeline.set_reactive_overlay(reactive_overlay)
         widget = self._document_widgets.get(session.document.id)
         state = str(payload.get("state") or self._preview_state)
         node_state = payload.get("node_state")
@@ -5045,8 +5111,14 @@ class EditorMainWindow(QMainWindow):
             elif state in {"stopped", "unloaded", "error"}:
                 widget.clear_runtime_state()
                 session.editor_context["runtime_state_path"] = []
+                session.editor_context["reactive_overlay"] = {
+                    "active_instances": [],
+                    "trace": [],
+                    "diagnostics": [],
+                }
                 if self.document_manager.active is session:
                     self.state_graph.set_active_state_path(())
+                    self.timeline.set_reactive_overlay(session.editor_context["reactive_overlay"])
 
     def _handle_pattern_preview_issue(self, issue: dict) -> None:
         self.preview_panel.handle_issue(issue)

@@ -37,6 +37,7 @@ KIND_COLORS = {
     "Event": "#b07a38",
     "Property": "#b34f7b",
     "ScriptEvent": "#a94a4a",
+    "Reactive": "#d05a8d",
 }
 
 
@@ -70,6 +71,10 @@ class TimelineClipItem(QGraphicsObject):
         self.loop_count = clip.loop_count
         self.enabled = clip.enabled
         self.track_muted = track.muted
+        self.activation = dict(clip.payload.get("activation") or {})
+        self.reaction = dict(clip.payload.get("reaction") or {})
+        self.reactive_overlay: dict = {}
+        self.conflicts: tuple[str, ...] = ()
         self.active = False
         self.keyframe_frames = tuple(item.frame for item in clip.keyframes)
         self.pixels_per_frame = pixels_per_frame
@@ -131,6 +136,24 @@ class TimelineClipItem(QGraphicsObject):
             Qt.AlignVCenter | Qt.AlignLeft,
             self.clip_name,
         )
+        if self.kind == "Reactive":
+            activation_kind = str(self.activation.get("kind") or "event")
+            badge = {
+                "on_event": "event",
+                "on_lifecycle": "life",
+                "when_variable": "var",
+                "at_frame": "frame",
+            }.get(activation_kind, activation_kind)
+            painter.setPen(QColor("#ffe6f1"))
+            painter.drawText(
+                self.boundingRect().adjusted(7, 0, -7, 0),
+                Qt.AlignVCenter | Qt.AlignRight,
+                badge,
+            )
+            if self.conflicts:
+                painter.setBrush(QColor("#ff6b81"))
+                painter.setPen(Qt.NoPen)
+                painter.drawEllipse(QPointF(self._width() - 10, 8), 3, 3)
         painter.fillRect(
             QRectF(max(0.0, self._width() - 6), 3, 3, CLIP_HEIGHT - 6),
             QColor("#e6edf7"),
@@ -379,6 +402,7 @@ class TimelineEditor(QWidget):
     clipSelected = pyqtSignal(str, str)
     playheadChanged = pyqtSignal(int)
     zoomChanged = pyqtSignal(float)
+    reactiveNavigateRequested = pyqtSignal(str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -389,6 +413,7 @@ class TimelineEditor(QWidget):
         self.selected_clip_id: str | None = None
         self.playhead_frame = 0
         self.active_clip_ids: set[str] = set()
+        self._reactive_overlay: dict = {}
         self.pixels_per_frame = 0.25
         self._language_manager: LanguageManager | None = None
         root = QVBoxLayout(self)
@@ -397,7 +422,7 @@ class TimelineEditor(QWidget):
         track_toolbar = QHBoxLayout()
         self.kind_picker = QComboBox()
         self.kind_picker.setObjectName("timelineKindPicker")
-        for kind in ("Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent"):
+        for kind in ("Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent", "Reactive"):
             self.kind_picker.addItem(kind, kind)
         track_toolbar.addWidget(self.kind_picker)
         add_track = QPushButton("+ Track")
@@ -585,6 +610,44 @@ class TimelineEditor(QWidget):
                 item.active = item.clip_id in self.active_clip_ids
                 item.update()
 
+    def set_reactive_overlay(self, overlay: dict | None) -> None:
+        """Apply read-only runtime reaction state to visible clip items."""
+
+        payload = dict(overlay or {})
+        active = {
+            str(item.get("clip_id"))
+            for item in payload.get("active_instances", [])
+            if isinstance(item, dict) and item.get("clip_id")
+        }
+        diagnostics = payload.get("diagnostics", [])
+        by_clip: dict[str, list[str]] = {}
+        for item in diagnostics:
+            if isinstance(item, dict) and item.get("clip_id"):
+                by_clip.setdefault(str(item["clip_id"]), []).append(str(item.get("reason") or item.get("kind") or "diagnostic"))
+        self._reactive_overlay = payload
+        for item in self.view.graphics_scene.items():
+            if not isinstance(item, TimelineClipItem):
+                continue
+            item.reactive_overlay = payload
+            item.active = item.clip_id in self.active_clip_ids or item.clip_id in active
+            item.conflicts = tuple(by_clip.get(item.clip_id, ()))
+            item.update()
+
+    def navigate_reactive_clip(self, clip_id: str) -> None:
+        if self.document is None:
+            return
+        result = next(
+            (
+                (track, clip)
+                for track in self.tracks
+                for clip in track.clips
+                if clip.id == clip_id and clip.kind == "Reactive"
+            ),
+            None,
+        )
+        if result is not None:
+            self.reactiveNavigateRequested.emit("reaction", clip_id)
+
     def _nudge_clip(self, clip_id: str, delta: int) -> None:
         if self.document is None:
             return
@@ -714,3 +777,5 @@ class TimelineEditor(QWidget):
         )
         self._playhead_item.setZValue(20)
         self._position_playhead()
+        if self._reactive_overlay:
+            self.set_reactive_overlay(self._reactive_overlay)

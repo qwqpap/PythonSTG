@@ -675,6 +675,21 @@ class PatternPreviewController:
                 else []
             ),
             "trace_events": len(stage_runner.trace) if stage_runner is not None else 0,
+            "reactive_instances": (
+                [dict(item) for item in stage_runner.active_reactive_instances]
+                if stage_runner is not None
+                else []
+            ),
+            "reactive_trace": (
+                [item.to_dict() for item in stage_runner.reactive_trace[-50:]]
+                if stage_runner is not None
+                else []
+            ),
+            "reactive_overlay": (
+                copy.deepcopy(stage_runner.reactive_overlay)
+                if stage_runner is not None
+                else {"active_instances": [], "trace": [], "diagnostics": []}
+            ),
             "paused": self.state != PreviewState.PLAYING,
             "update_ms": round(self.last_update_ms, 6),
             "render_ms": round(self.last_render_ms, 6),

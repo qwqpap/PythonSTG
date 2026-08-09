@@ -107,7 +107,7 @@ N2/N3 focused gate 和全量回归必须保持绿色。它们不是后续阶段�
 ### 3.1 本轮已清理
 
 - 历史路线图 `docs/EDITOR_ROADMAP_TODO.md` 和 `docs/ARCHITECTURE_EVALUATION_AND_ROADMAP.md` 已从当前 Git 历史的工作协议中移除；本文件是唯一 Todo，不创建 `*_TODO_v2.md`。
-- 未完成 N4 实现对应的临时红色草稿 `tests/test_activation_rules.py`、`tests/test_reactive_timeline.py`、`tests/test_timeline_instance_trace.py` 不进入基线；N4.0 开始时按本文件重新创建并保留红色证据。
+- N4.0 已将 `tests/test_activation_rules.py`、`tests/test_reactive_timeline.py`、`tests/test_timeline_instance_trace.py` 固定为正式 Contract；它们不再是临时草稿，后续阶段必须保持其断言语义。
 - 删除重复的 `tests/test_stage_context_bullet_spawn.py`。它只做 regular/polar spawn 的 smoke 检查；极坐标语义由 `tests/test_polar_motion_unit.py` 覆盖，正式 Pattern/Stage 路径由 `tests/test_pattern_runtime.py`、`tests/test_stage_program.py` 和 `tests/test_preview_controller.py` 覆盖。
 
 ### 3.2 保留规则
@@ -132,8 +132,8 @@ git diff --check
 
 | ID | 主题 | 状态 | 依赖 |
 | --- | --- | --- | --- |
-| N4.0 | 响应式时间线 Contract | `[ ]` | N3 |
-| N4.1 | ReactiveClip 正式运行时与实例 trace | `[ ]` | N4.0 |
+| N4.0 | 响应式时间线 Contract | `[x]` | N3 |
+| N4.1 | ReactiveClip 正式运行时与实例 trace | `[x]` | N4.0 |
 | N4.2 | 时间线槽位、overlay、导航与冲突编辑 | `[ ]` | N4.1 |
 | N5.0 | 版本化预设 Contract | `[ ]` | N4 |
 | N5.1 | 首发预设库 | `[ ]` | N5.0 |
@@ -179,6 +179,8 @@ git diff --check
 
 **验收文件**：`tests/test_activation_rules.py`、`tests/test_reactive_timeline.py`、`tests/test_timeline_instance_trace.py`。
 
+**Evidence（2026-08-10）**：Structural/Runtime：`python -m pytest -q tests/test_activation_rules.py tests/test_reactive_timeline.py tests/test_timeline_instance_trace.py`（10 passed）；规则 round-trip、变量边沿、固定帧/delay、窗口取消、owner、预算和 runtime identity 均有断言。
+
 ### N4.1 Runtime：激活、实例、预算与取消
 
 **Agent 要做（按序）**
@@ -194,6 +196,8 @@ git diff --check
 
 **验收文件**：N4.0 三份 Contract、`tests/test_reaction_timeline_integration.py`；回归 `tests/test_reactions.py`、`tests/test_reaction_scheduler.py`、`tests/test_state_graph_runtime.py`、`tests/test_stage_program.py` 及 N2/N3 focused gate。
 
+**Evidence（2026-08-10）**：Runtime：`python -m pytest -q tests/test_reaction_timeline_integration.py tests/test_reactions.py tests/test_reaction_scheduler.py tests/test_state_graph_runtime.py tests/test_stage_program.py`（既有回归与 N4 集成通过）；正式 `SceneDocument → compile_stage → StageRunner → PreviewController` 路径保持 JSON-only authoring，trace/overlay 不写回文档。
+
 ### N4.2 Editor：生命周期槽位、徽标、导航、overlay 与冲突
 
 **Agent 要做（按序）**
@@ -207,6 +211,8 @@ git diff --check
 **完成条件**：新手能在槽位上理解“何时有效”，高级作者能进入局部行为实现；运行时 overlay 可观察但不污染作者资源；没有蓝图到时间线的隐形长连线。
 
 **验收文件**：`tests/test_editor_reactive_clips.py`、`tests/test_reaction_timeline_integration.py`；回归 `tests/test_editor_timeline_model.py`、`tests/test_editor_timeline_workspace.py`、`tests/test_state_graph_editor.py`；另附 native visual 证据。
+
+**Evidence（2026-08-10）**：Structural/Runtime：`python -m pytest -q tests/test_editor_reactive_clips.py tests/test_reaction_timeline_integration.py tests/test_editor_timeline_workspace.py tests/test_state_graph_editor.py`（通过）；offscreen Qt 只作为结构和运行证据。Native visual gate 未关闭：当前 Windows 会话的真实 `EditorMainWindow` smoke 在构造阶段异常退出，不能用 offscreen 结果替代，因此本项保持 `[ ]`。
 
 ## 6. N5：可展开的版本化预设
 

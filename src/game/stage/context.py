@@ -127,6 +127,7 @@ class StageContext(SpellCardContext):
         self._lifecycle_trace: List[LifecycleEvent] = []
         self._runtime_frame = 0
         self._script_event_handlers: Dict[str, Any] = {}
+        self._reaction_actions: Dict[str, Any] = {}
         self._event_bus: EventBus | None = None
         self._event_subscriptions: list[Any] = []
 
@@ -768,6 +769,16 @@ class StageContext(SpellCardContext):
         if not str(hook).strip() or not callable(callback):
             raise ValueError("script event handler needs a non-empty hook and callable")
         self._script_event_handlers[str(hook)] = callback
+
+    def register_reaction_action(self, action_id: str, callback: Any) -> None:
+        if not isinstance(action_id, str) or not action_id.strip() or not callable(callback):
+            raise ValueError("reaction action needs a non-empty id and callable")
+        self._reaction_actions[action_id.strip()] = callback
+
+    def resolve_reaction_action(self, action_id: str) -> Any:
+        """Resolve a Runtime API reaction action by stable authoring ID."""
+
+        return self._reaction_actions.get(str(action_id).strip())
 
     def handle_script_event(self, hook: str, data: Any) -> bool:
         name = str(hook)

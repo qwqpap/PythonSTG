@@ -354,6 +354,7 @@ from .program import (  # noqa: E402
     StageVariableAutomation,
 )
 from ..reactions import (  # noqa: E402
+    ActivationRule,
     BackgroundTransition,
     CancellationToken,
     ReactionScheduler,
@@ -386,6 +387,7 @@ __all__ = [
     "StageTransition",
     "StageVariableAutomation",
     "BackgroundTransition",
+    "ActivationRule",
     "CancellationToken",
     "ReactionScheduler",
     "ReactionSpec",

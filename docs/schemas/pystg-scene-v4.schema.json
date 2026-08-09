@@ -134,7 +134,7 @@
       "properties": {
         "id": {"type": "string", "format": "uuid"},
         "name": {"type": "string", "minLength": 1},
-        "kind": {"enum": ["Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent", "Variable"]},
+        "kind": {"enum": ["Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent", "Variable", "Reactive"]},
         "target_id": {"anyOf": [{"type": "string", "format": "uuid"}, {"type": "null"}]},
         "channel": {"type": "string", "minLength": 1},
         "order": {"type": "integer", "minimum": 0},
@@ -149,7 +149,7 @@
       "properties": {
         "id": {"type": "string", "format": "uuid"},
         "name": {"type": "string", "minLength": 1},
-        "kind": {"enum": ["Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent", "Variable"]},
+        "kind": {"enum": ["Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent", "Variable", "Reactive"]},
         "start_frame": {"type": "integer", "minimum": 0},
         "duration_frames": {"type": "integer", "minimum": 1},
         "target_id": {"anyOf": [{"type": "string", "format": "uuid"}, {"type": "null"}]},
