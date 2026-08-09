@@ -77,4 +77,4 @@ Python.
 
 Use `tools/benchmark_pattern_runtime.py` for the representative M1 dense-burst
 measurement. Performance evidence is environment-specific and is recorded in
-the editor roadmap completion log.
+the current editor implementation TODO evidence section.

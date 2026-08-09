@@ -52,16 +52,18 @@ class ResourceStore:
                 f"{source}: invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
             ) from exc
 
-    def save(self, document: Any, path: str | Path) -> Path:
+    def save(self, document: Any, path: str | Path, *, canonical: bool = False) -> Path:
         target = self._path(path)
-        payload = document.to_dict()
+        serializer = getattr(document, "to_canonical_dict", None) if canonical else None
+        payload = serializer() if callable(serializer) else document.to_dict()
         # Loading through the registry proves current schema/type validation
         # before the atomic replacement is attempted.
         validated = self.registry.load(payload)
         # Persist the registry-normalized current representation so saving an
         # older envelope cannot immediately reopen as a semantically different
         # document after migration.
-        canonical_payload = validated.to_dict()
+        serializer = getattr(validated, "to_canonical_dict", None) if canonical else None
+        canonical_payload = serializer() if callable(serializer) else validated.to_dict()
         return atomic_write_json(target, canonical_payload)
 
     def autosave(self, document: Any, path: str | Path) -> Path:

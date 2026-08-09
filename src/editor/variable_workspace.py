@@ -1,12 +1,13 @@
-"""Compact variable declaration/overlay panel for Scene documents."""
+"""Variable declaration editor and read-only runtime overlay."""
 
 from __future__ import annotations
 
 import json
 
-from src.authoring.variables import VARIABLE_SCOPES, VariableSpec
+from src.authoring.variables import VARIABLE_REDUCERS, VARIABLE_SCOPES, VariableSpec
 from src.qt_compat.QtCore import Qt, pyqtSignal
 from src.qt_compat.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -22,7 +23,7 @@ from .document import SceneDocument
 
 
 class VariableEditor(QWidget):
-    """Authoring declarations are editable; runtime values are an overlay."""
+    """Edit declarations through signals; runtime values never become authoring data."""
 
     variableSelected = pyqtSignal(str)
     addVariableRequested = pyqtSignal(str, str, object, str)
@@ -41,6 +42,7 @@ class VariableEditor(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 6)
         layout.setSpacing(4)
+
         header = QHBoxLayout()
         header.addWidget(QLabel("Variable"))
         self.name_edit = QLineEdit()
@@ -65,13 +67,47 @@ class VariableEditor(QWidget):
         header.addWidget(add)
         layout.addLayout(header)
 
-        self.table = QTableWidget(0, 7)
+        properties = QHBoxLayout()
+        self.writers_edit = QLineEdit()
+        self.writers_edit.setObjectName("variableWriters")
+        self.writers_edit.setPlaceholderText("writers: timeline,safe_action")
+        properties.addWidget(self.writers_edit, 2)
+        self.readers_edit = QLineEdit()
+        self.readers_edit.setObjectName("variableReaders")
+        self.readers_edit.setPlaceholderText("readers: pattern,debugger")
+        properties.addWidget(self.readers_edit, 2)
+        self.reducer_combo = QComboBox()
+        self.reducer_combo.setObjectName("variableReducer")
+        self.reducer_combo.addItem("none", None)
+        for reducer in VARIABLE_REDUCERS:
+            self.reducer_combo.addItem(reducer, reducer)
+        properties.addWidget(self.reducer_combo, 1)
+        self.animatable_check = QCheckBox("Animatable")
+        self.animatable_check.setObjectName("variableAnimatable")
+        properties.addWidget(self.animatable_check)
+        self.replay_check = QCheckBox("Replay")
+        self.replay_check.setObjectName("variableRecordReplay")
+        self.replay_check.setChecked(True)
+        properties.addWidget(self.replay_check)
+        self.behavior_output_check = QCheckBox("Behavior output")
+        self.behavior_output_check.setObjectName("variableBehaviorOutput")
+        properties.addWidget(self.behavior_output_check)
+        edit = QPushButton("Apply properties")
+        edit.setObjectName("variableEdit")
+        edit.clicked.connect(self._edit_requested)
+        properties.addWidget(edit)
+        layout.addLayout(properties)
+
+        self.table = QTableWidget(0, 10)
         self.table.setObjectName("variableTable")
-        self.table.setHorizontalHeaderLabels(["Name", "Type", "Scope", "Default", "Writer", "Reader", "Runtime"])
+        self.table.setHorizontalHeaderLabels(
+            ["Name", "Type", "Scope", "Default", "Writer", "Reader", "Animatable", "Reducer", "Behavior output", "Runtime"]
+        )
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.currentCellChanged.connect(self._selection_changed)
         layout.addWidget(self.table, 1)
+
         footer = QHBoxLayout()
         self.runtime_label = QLabel("Runtime: none")
         self.runtime_label.setObjectName("variableRuntimeOverlay")
@@ -95,7 +131,13 @@ class VariableEditor(QWidget):
         self.set_document(None)
 
     def set_runtime_overlay(self, overlay: dict) -> None:
-        self.runtime_overlay = overlay if isinstance(overlay, dict) else {}
+        if isinstance(overlay, dict):
+            try:
+                self.runtime_overlay = json.loads(json.dumps(overlay, ensure_ascii=False))
+            except (TypeError, ValueError):
+                self.runtime_overlay = {}
+        else:
+            self.runtime_overlay = {}
         self._rebuild()
 
     def _variables(self) -> list[VariableSpec]:
@@ -122,6 +164,9 @@ class VariableEditor(QWidget):
                     json.dumps(variable.default, ensure_ascii=False, sort_keys=True),
                     ", ".join(variable.writable_by) or "read-only",
                     ", ".join(variable.readers) or "—",
+                    "yes" if variable.animatable else "no",
+                    variable.reducer or "—",
+                    "yes" if variable.behavior_output else "no",
                     self._runtime_value(variable),
                 ]
                 for column, value in enumerate(values):
@@ -138,18 +183,36 @@ class VariableEditor(QWidget):
         scope = self.runtime_overlay.get(variable.scope, {})
         if not isinstance(scope, dict):
             return "—"
-        owners = scope.values()
-        for values in owners:
+        for values in scope.values():
             if isinstance(values, dict) and variable.name in values:
                 return json.dumps(values[variable.name], ensure_ascii=False, sort_keys=True)
         return "—"
 
+    def _selected_id(self) -> str | None:
+        row = self.table.currentRow()
+        item = self.table.item(row, 0) if row >= 0 else None
+        return str(item.data(Qt.UserRole)) if item is not None and item.data(Qt.UserRole) else None
+
     def _selection_changed(self, row: int, *_args) -> None:
         if self._rebuilding or row < 0:
             return
-        item = self.table.item(row, 0)
-        if item is not None and item.data(Qt.UserRole):
-            self.variableSelected.emit(str(item.data(Qt.UserRole)))
+        variable_id = self._selected_id()
+        if variable_id is None:
+            return
+        self.variableSelected.emit(variable_id)
+        variable = next((item for item in self._variables() if item.id == variable_id), None)
+        if variable is None:
+            return
+        self.name_edit.setText(variable.name)
+        self.type_combo.setCurrentText(variable.type)
+        self.scope_combo.setCurrentText(variable.scope)
+        self.default_edit.setText(json.dumps(variable.default, ensure_ascii=False, sort_keys=True))
+        self.writers_edit.setText(",".join(variable.writable_by))
+        self.readers_edit.setText(",".join(variable.readers))
+        self.reducer_combo.setCurrentIndex(max(0, self.reducer_combo.findData(variable.reducer)))
+        self.animatable_check.setChecked(variable.animatable)
+        self.replay_check.setChecked(variable.record_in_replay)
+        self.behavior_output_check.setChecked(variable.behavior_output)
 
     def _add_requested(self) -> None:
         name = self.name_edit.text().strip()
@@ -159,24 +222,41 @@ class VariableEditor(QWidget):
             default = json.loads(self.default_edit.text() or "null")
         except json.JSONDecodeError:
             return
-        self.addVariableRequested.emit(
-            name,
-            self.type_combo.currentText(),
-            default,
-            self.scope_combo.currentText(),
+        self.addVariableRequested.emit(name, self.type_combo.currentText(), default, self.scope_combo.currentText())
+
+    def _edit_requested(self) -> None:
+        variable_id = self._selected_id()
+        if variable_id is None:
+            return
+        try:
+            default = json.loads(self.default_edit.text() or "null")
+        except json.JSONDecodeError:
+            return
+        self.editVariableRequested.emit(
+            variable_id,
+            {
+                "name": self.name_edit.text().strip(),
+                "type": self.type_combo.currentText(),
+                "scope": self.scope_combo.currentText(),
+                "default": default,
+                "writable_by": tuple(item.strip() for item in self.writers_edit.text().split(",") if item.strip()),
+                "readers": tuple(item.strip() for item in self.readers_edit.text().split(",") if item.strip()),
+                "reducer": self.reducer_combo.currentData(),
+                "animatable": self.animatable_check.isChecked(),
+                "record_in_replay": self.replay_check.isChecked(),
+                "behavior_output": self.behavior_output_check.isChecked(),
+            },
         )
 
     def _delete_requested(self) -> None:
-        row = self.table.currentRow()
-        item = self.table.item(row, 0) if row >= 0 else None
-        if item is not None and item.data(Qt.UserRole):
-            self.deleteVariableRequested.emit(str(item.data(Qt.UserRole)))
+        variable_id = self._selected_id()
+        if variable_id is not None:
+            self.deleteVariableRequested.emit(variable_id)
 
     def _binding_requested(self) -> None:
-        row = self.table.currentRow()
-        item = self.table.item(row, 0) if row >= 0 else None
-        if item is not None and item.data(Qt.UserRole):
-            self.bindingRequested.emit(str(item.data(Qt.UserRole)))
+        variable_id = self._selected_id()
+        if variable_id is not None:
+            self.bindingRequested.emit(variable_id)
 
 
 VariableWorkspace = VariableEditor

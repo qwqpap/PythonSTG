@@ -338,6 +338,14 @@ def _compile_variable_automation(
     path = f"{state_path}.tracks.{track.id}.clips.{clip.id}"
     try:
         reference = _variable_ref_from_payload(clip.payload, path=f"{path}.payload.variable")
+        declared = [
+            item for item in _all_variable_specs(scene)
+            if item.name == reference.name
+            and (reference.scope is None or item.scope == reference.scope)
+            and (reference.owner_id is None or item.owner_id in (None, reference.owner_id))
+        ]
+        if len(declared) == 1 and reference.scope is None:
+            reference.scope = declared[0].scope
         operation = str(clip.payload.get("operation", "set"))
         if operation not in VARIABLE_OPERATIONS:
             raise ValueError(f"unsupported variable operation {operation!r}")
@@ -370,6 +378,17 @@ def _compile_variable_automation(
         clip_id=clip.id,
         variable_name=reference.name,
         variable_scope=reference.scope,
+        owner_id=(
+            reference.owner_id
+            or (declared[0].owner_id if len(declared) == 1 else None)
+            or (
+                state.id
+                if reference.scope == "state"
+                else clip.id
+                if reference.scope in {"clip", "reaction", "behavior"}
+                else None
+            )
+        ),
         operation=operation,
         start_frame=clip.start_frame,
         duration_frames=clip.duration_frames,
@@ -410,16 +429,32 @@ def _variable_spec_for(
     candidates = [item for item in specs if item.name == reference.name]
     if reference.scope is not None:
         candidates = [item for item in candidates if item.scope == reference.scope]
-    if len(candidates) == 1:
-        return candidates[0]
-    return next(
-        (
-            item
-            for item in candidates
-            if item.scope in {"stage", "project"}
-        ),
-        None,
-    )
+    if reference.owner_id is not None:
+        candidates = [
+            item for item in candidates
+            if item.owner_id in (None, reference.owner_id)
+        ]
+        exact = [item for item in candidates if item.owner_id == reference.owner_id]
+        if exact:
+            candidates = exact
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _variable_candidates(
+    specs: tuple[VariableSpec, ...], reference: VariableRef,
+) -> list[VariableSpec]:
+    candidates = [item for item in specs if item.name == reference.name]
+    if reference.scope is not None:
+        candidates = [item for item in candidates if item.scope == reference.scope]
+    if reference.owner_id is not None:
+        candidates = [
+            item for item in candidates
+            if item.owner_id in (None, reference.owner_id)
+        ]
+        exact = [item for item in candidates if item.owner_id == reference.owner_id]
+        if exact:
+            candidates = exact
+    return candidates
 
 
 def _variable_conflict_diagnostics(
@@ -430,17 +465,28 @@ def _variable_conflict_diagnostics(
     mappings: tuple[VariableOutputMapping, ...] = (),
 ) -> tuple[StageCompileDiagnostic, ...]:
     diagnostics: list[StageCompileDiagnostic] = []
-    legacy = scene.metadata.get("variable_compatibility") == "legacy_last_wins"
-    groups: dict[tuple[str, str | None, str], list[tuple[int, int, str, str | None]]] = {}
+    legacy_keys = {
+        str(item) for item in scene.metadata.get("legacy_variable_keys", [])
+        if isinstance(item, str)
+    }
+    groups: dict[
+        tuple[str, str, str, str],
+        list[tuple[int, int, str, str, str | None, str]],
+    ] = {}
     for item in variable_automations:
         reference = item.ref
         spec = _variable_spec_for(specs, reference)
         path = f"states.{item.state_id}.tracks.{item.track_id}.clips.{item.clip_id}.payload.variable"
         if spec is None:
+            candidates = _variable_candidates(specs, reference)
+            reason = (
+                f"Variable {reference.name!r} is ambiguous; specify scope and owner"
+                if candidates else f"Variable {reference.name!r} is not declared"
+            )
             diagnostics.append(
                 StageCompileDiagnostic(
                     "error", "unknown_variable", scene.id, item.track_id, item.clip_id,
-                    None, path, f"Variable {reference.name!r} is not declared", state_id=item.state_id,
+                    None, path, reason, state_id=item.state_id,
                 )
             )
             continue
@@ -451,8 +497,19 @@ def _variable_conflict_diagnostics(
                     None, path, f"Timeline cannot write non-animatable or unauthorized variable {spec.name!r}", state_id=item.state_id,
                 )
             )
-        groups.setdefault((spec.name, spec.scope, item.state_id), []).append(
-            (item.start_frame, item.end_frame, item.clip_id, item.reducer or spec.reducer)
+        owner = item.owner_id or spec.owner_id or (
+            spec.scope if spec.scope in {"project", "stage", "engine_snapshot"} else item.state_id
+        )
+        key = (spec.scope, spec.name, str(owner), item.state_id)
+        groups.setdefault(key, []).append(
+            (
+                item.start_frame,
+                item.end_frame,
+                f"timeline:{item.clip_id}",
+                f"states.{item.state_id}.tracks.{item.track_id}.clips.{item.clip_id}",
+                item.reducer or spec.reducer,
+                spec.type,
+            )
         )
     for action in actions:
         if action.kind != "Variable":
@@ -465,25 +522,61 @@ def _variable_conflict_diagnostics(
         spec = _variable_spec_for(specs, ref)
         path = f"states.{action.state_id}.actions.{action.clip_id}.payload.variable"
         if spec is None:
-            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, action.track_id, action.clip_id, None, path, f"Variable {ref.name!r} is not declared", state_id=action.state_id))
+            candidates = _variable_candidates(specs, ref)
+            reason = (
+                f"Variable {ref.name!r} is ambiguous; specify scope and owner"
+                if candidates else f"Variable {ref.name!r} is not declared"
+            )
+            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, action.track_id, action.clip_id, None, path, reason, state_id=action.state_id))
             continue
         if "safe_action" not in spec.writable_by:
             diagnostics.append(StageCompileDiagnostic("error", "variable_write_forbidden", scene.id, action.track_id, action.clip_id, None, path, f"Safe Action cannot write {spec.name!r}", state_id=action.state_id))
-        groups.setdefault((spec.name, spec.scope, action.state_id), []).append((action.frame, action.frame + 1, action.clip_id, spec.reducer))
-    for (name, scope, state_id), writes in groups.items():
-        if legacy:
-            continue
+        owner = spec.owner_id or (spec.scope if spec.scope in {"project", "stage", "engine_snapshot"} else action.state_id)
+        key = (spec.scope, spec.name, str(owner), action.state_id)
+        groups.setdefault(key, []).append(
+            (
+                action.frame,
+                action.frame + 1,
+                f"safe_action:{action.clip_id}",
+                f"states.{action.state_id}.actions.{action.clip_id}",
+                spec.reducer,
+                spec.type,
+            )
+        )
+    supported_reducers = {
+        "override": {"bool", "int", "float", "string", "vector2", "color", "resource", "complex"},
+        "add": {"int", "float", "vector2", "complex"},
+        "multiply": {"int", "float", "vector2", "complex"},
+        "blend": {"int", "float", "vector2", "complex"},
+    }
+    for (scope, name, owner, state_id), writes in groups.items():
+        legacy_owner = "" if scope in {"project", "stage", "engine_snapshot"} else owner
+        legacy_key = f"{scope}:{name}@{legacy_owner}"
         for index, left in enumerate(writes):
             for right in writes[index + 1 :]:
                 if left[1] <= right[0] or right[1] <= left[0]:
                     continue
-                if left[3] in {"override", "add", "multiply", "blend"} and left[3] == right[3]:
+                reducer = left[4] or right[4]
+                if (
+                    scene.metadata.get("variable_compatibility") == "legacy_last_wins"
+                    and legacy_key in legacy_keys
+                ):
                     continue
+                if reducer in supported_reducers and left[4] in {None, reducer} and right[4] in {None, reducer}:
+                    if left[5] in supported_reducers[reducer]:
+                        continue
+                    message = f"reducer={reducer} is not supported for type={left[5]}"
+                else:
+                    message = "no compatible reducer was declared"
                 diagnostics.append(
                     StageCompileDiagnostic(
                         "error", "variable_write_conflict", scene.id, None, None, None,
                         f"states.{state_id}.variables.{name}",
-                        f"Multiple writers overlap for {scope or 'inferred'}:{name}; choose an explicit reducer or override order",
+                        (
+                            f"Multiple writers overlap for scope={scope} variable={name!r} owner={owner} "
+                            f"intervals=[{left[0]},{left[1]})/{right[0]},{right[1]}) "
+                            f"writers={left[2]} ({left[3]}) and {right[2]} ({right[3]}): {message}"
+                        ),
                         state_id=state_id,
                     )
                 )
@@ -500,13 +593,30 @@ def _variable_conflict_diagnostics(
         target_spec = _variable_spec_for(specs, target)
         path = f"output_mappings.{mapping.id}"
         if source_spec is None:
-            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, None, None, None, f"{path}.source", f"Variable {source.name!r} is not declared"))
+            source_candidates = _variable_candidates(specs, source)
+            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, None, None, None, f"{path}.source", f"Variable {source.name!r} is {'ambiguous; specify scope and owner' if source_candidates else 'not declared'}"))
         elif source_spec.scope != "behavior" or not source_spec.behavior_output:
-            diagnostics.append(StageCompileDiagnostic("error", "invalid_behavior_output", scene.id, None, None, None, f"{path}.source", f"{source.name!r} is not a declared Behavior output"))
+            diagnostics.append(StageCompileDiagnostic("error", "invalid_behavior_output", scene.id, None, None, None, f"{path}.source", f"writer=behavior scope={source_spec.scope} variable={source.name!r} owner={source.owner_id}: not a declared Behavior output"))
+        if source_spec is not None and source.type is not None and source.type != source_spec.type:
+            diagnostics.append(StageCompileDiagnostic("error", "variable_type_mismatch", scene.id, None, None, None, f"{path}.source.type", f"writer=behavior scope={source_spec.scope} variable={source.name!r} owner={source_spec.owner_id}: declared type is {source_spec.type}, reference requested {source.type}"))
         if target_spec is None:
-            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, None, None, None, f"{path}.target", f"Variable {target.name!r} is not declared"))
-        elif "behavior" not in target_spec.writable_by:
-            diagnostics.append(StageCompileDiagnostic("error", "variable_write_forbidden", scene.id, None, None, None, f"{path}.target", f"Behavior output cannot write {target.name!r}"))
+            target_candidates = _variable_candidates(specs, target)
+            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, None, None, None, f"{path}.target", f"Variable {target.name!r} is {'ambiguous; specify scope and owner' if target_candidates else 'not declared'}"))
+        else:
+            if target_spec.scope == "engine_snapshot":
+                diagnostics.append(StageCompileDiagnostic("error", "variable_write_forbidden", scene.id, None, None, None, f"{path}.target", f"writer=behavior scope=engine_snapshot variable={target.name!r} owner={target.owner_id}: Engine Snapshot is read-only"))
+            elif "behavior" not in target_spec.writable_by:
+                diagnostics.append(StageCompileDiagnostic("error", "variable_write_forbidden", scene.id, None, None, None, f"{path}.target", f"writer=behavior scope={target_spec.scope} variable={target.name!r} owner={target.owner_id}: Behavior output cannot write"))
+            if source_spec is not None and source_spec.type != target_spec.type:
+                diagnostics.append(StageCompileDiagnostic("error", "variable_type_mismatch", scene.id, None, None, None, f"{path}", f"writer=behavior source={source.name}:{source_spec.type} target={target.name}:{target_spec.type}: types are incompatible"))
+            if target.type is not None and target.type != target_spec.type:
+                diagnostics.append(StageCompileDiagnostic("error", "variable_type_mismatch", scene.id, None, None, None, f"{path}.target.type", f"writer=behavior scope={target_spec.scope} variable={target.name!r} owner={target_spec.owner_id}: declared type is {target_spec.type}, reference requested {target.type}"))
+            if mapping.operation == "toggle" and target_spec.type != "bool":
+                diagnostics.append(StageCompileDiagnostic("error", "variable_operation_invalid", scene.id, None, None, None, f"{path}.operation", f"writer=behavior scope={target_spec.scope} variable={target.name!r}: toggle requires bool"))
+            if mapping.operation == "add" and target_spec.type not in {"int", "float", "vector2", "complex"}:
+                diagnostics.append(StageCompileDiagnostic("error", "variable_operation_invalid", scene.id, None, None, None, f"{path}.operation", f"writer=behavior scope={target_spec.scope} variable={target.name!r}: add is unsupported for {target_spec.type}"))
+            if target_spec.scope in {"clip", "reaction", "behavior"} and not target.owner_id:
+                diagnostics.append(StageCompileDiagnostic("error", "missing_variable_owner", scene.id, None, None, None, f"{path}.target.owner_id", f"writer=behavior scope={target_spec.scope} variable={target.name!r} requires an owner"))
     return tuple(diagnostics)
 
 
@@ -869,7 +979,7 @@ def compile_stage(
     )
     if variable_diagnostics:
         raise StageCompileError(variable_diagnostics)
-    canonical = _json(scene.to_dict())
+    canonical = _json(scene.to_canonical_dict())
     identity = "\0".join(
         (
             f"stage-program-v{STAGE_PROGRAM_VERSION}",
@@ -913,6 +1023,12 @@ def compile_stage(
             )
         ),
         output_mappings=_all_output_mappings(scene),
+        replay_seed=(
+            int(scene.metadata.get("seed", 0))
+            if isinstance(scene.metadata.get("seed", 0), int)
+            and not isinstance(scene.metadata.get("seed", 0), bool)
+            else 0
+        ),
     )
 
 

@@ -28,7 +28,7 @@ class DocumentStore:
             raise DocumentError(f"Invalid JSON in {source}: {exc}") from exc
         return SceneDocument.from_dict(data)
 
-    def save(self, document: SceneDocument, path: str | Path) -> Path:
+    def save(self, document: SceneDocument, path: str | Path, *, canonical: bool = False) -> Path:
         target = self._path(path)
-        payload = document.to_dict()
+        payload = document.to_canonical_dict() if canonical else document.to_dict()
         return atomic_write_json(target, payload)

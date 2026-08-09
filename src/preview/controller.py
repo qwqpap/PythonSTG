@@ -148,6 +148,8 @@ class PatternPreviewController:
         self._events: list[PreviewEvent] = []
         self._sequence = 0
         self._closed = False
+        self.last_compatibility_decision: dict[str, Any] = {"policy": "initial"}
+        self.reload_history: list[dict[str, Any]] = []
 
     @property
     def mode(self) -> str:
@@ -194,13 +196,13 @@ class PatternPreviewController:
         if isinstance(source, PatternDocument):
             return PatternDocument.from_dict(source.to_dict()), None
         if isinstance(source, SceneDocument):
-            return SceneDocument.from_dict(source.to_dict()), None
+            return SceneDocument.from_dict(source.to_canonical_dict(), canonical=True), None
         if isinstance(source, Mapping):
             resource_type = str(source.get("type") or "")
             if resource_type == "pystg.pattern":
                 return PatternDocument.from_dict(source), None
             if resource_type == "pystg.scene":
-                return SceneDocument.from_dict(dict(source)), None
+                return SceneDocument.from_dict(dict(source), canonical=True), None
             raise DocumentError(
                 f"load.resource: unsupported authoring resource type {resource_type!r}"
             )
@@ -310,6 +312,11 @@ class PatternPreviewController:
         message: str,
     ) -> None:
         old_runner = self.runner
+        old_snapshot = None
+        old_specs = None
+        if isinstance(old_runner, StageRunner):
+            old_snapshot = old_runner.variable_snapshot
+            old_specs = old_runner.program.variable_specs
         if old_runner is not None:
             old_runner.stop(self.context, clear_owned=True)
         self.document = document
@@ -326,6 +333,21 @@ class PatternPreviewController:
         self.state = PreviewState.PLAYING if resume else PreviewState.PAUSED
         if resume:
             self.runner.start(self.context)
+        if isinstance(self.runner, StageRunner) and old_snapshot is not None:
+            decision = self.runner.variables.restore_compatible_snapshot(old_snapshot, old_specs)
+            self.runner.compatibility_decision = decision
+            self.runner.replay_identity["compatibility"] = decision
+        else:
+            decision = {"policy": "initial" if old_runner is None else "reset", "restored": [], "discarded": []}
+            if isinstance(self.runner, StageRunner):
+                self.runner.compatibility_decision = decision
+                self.runner.replay_identity["compatibility"] = decision
+        self.last_compatibility_decision = copy.deepcopy(decision)
+        self.reload_history.append({
+            "old_program_hash": old_runner.program.content_hash if old_runner is not None else None,
+            "new_program_hash": program.content_hash,
+            "decision": copy.deepcopy(decision),
+        })
         self._emit(
             "program_loaded",
             resource_id=program.resource_id,
@@ -337,6 +359,8 @@ class PatternPreviewController:
                 program.duration_frames if isinstance(program, StageProgram) else None
             ),
             resource_path=str(resource_path) if resource_path else None,
+            compatibility=copy.deepcopy(decision),
+            replay_identity=copy.deepcopy(getattr(self.runner, "replay_identity", {})),
         )
         self._status(message)
 
@@ -659,6 +683,9 @@ class PatternPreviewController:
             "program_hash": self.program.content_hash if self.program else None,
             "player_position": [self.player.x, self.player.y],
             "gizmos": self.show_gizmos,
+            "compatibility_decision": copy.deepcopy(self.last_compatibility_decision),
+            "replay_identity": copy.deepcopy(getattr(self.runner, "replay_identity", {})),
+            "reload_history": copy.deepcopy(self.reload_history[-10:]),
         }
         if emit:
             self._emit("statistics", **payload)

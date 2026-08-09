@@ -175,6 +175,7 @@ class StageVariableAutomation:
     clip_id: str
     variable_name: str
     variable_scope: str | None
+    owner_id: str | None
     operation: str
     start_frame: int
     duration_frames: int
@@ -194,7 +195,11 @@ class StageVariableAutomation:
 
     @property
     def ref(self) -> VariableRef:
-        return VariableRef(self.variable_name, scope=self.variable_scope)
+        return VariableRef(
+            self.variable_name,
+            scope=self.variable_scope,
+            owner_id=self.owner_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -213,6 +218,7 @@ class StageProgram:
     variable_specs: tuple[VariableSpec, ...] = ()
     variable_automations: tuple[StageVariableAutomation, ...] = ()
     output_mappings: tuple[VariableOutputMapping, ...] = ()
+    replay_seed: int = 0
 
 
 class StageRunnerState(str, Enum):
@@ -332,9 +338,12 @@ class _PatternContext:
         return _ShiftedPlayer(float(player.x) - dx, float(player.y) - dy)
 
     def get_variable(self, name: str, *, scope: str | None = None) -> Any:
+        owner_id = self._schedule.state_id if scope == "state" else None
+        if scope == "clip":
+            owner_id = self._schedule.clip_id
         return self._stage.read_variable(
-            VariableRef(str(name), scope=scope),
-            owner_id=self._schedule.state_id if scope == "state" else None,
+            VariableRef(str(name), scope=scope, owner_id=owner_id),
+            owner_id=owner_id,
         )
 
     read_variable = get_variable
@@ -413,6 +422,15 @@ class StageRunner:
         self._active_states: list[StageState] = []
         self._local_frames: dict[str, int] = {}
         self._completed_children: set[str] = set()
+        # Capture the reset baseline immediately so replay metadata is useful
+        # before the first start/reset call as well as after it.
+        self.initial_variable_snapshot: dict[str, dict[str, dict[str, Any]]] = self.variables.snapshot()
+        self.compatibility_decision: dict[str, Any] = {"policy": "reset"}
+        self.replay_identity: dict[str, Any] = {
+            "program_hash": program.content_hash,
+            "seed": program.replay_seed,
+            "initial_variables": self.initial_variable_snapshot,
+        }
         self._restore_node_state()
 
     @staticmethod
@@ -456,6 +474,19 @@ class StageRunner:
     def variable_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
         return self.variables.snapshot()
 
+    @property
+    def active_variable_owners(self) -> dict[str, tuple[str, ...]]:
+        return {
+            scope: self.variables.active_owners(scope)
+            for scope in ("project", "stage", "state", "clip", "reaction", "behavior", "engine_snapshot")
+        }
+
+    def enter_reaction_scope(self, reaction_id: str, *, values: dict[str, Any] | None = None) -> None:
+        self.variables.enter_scope("reaction", reaction_id, values=values)
+
+    def exit_reaction_scope(self, reaction_id: str) -> None:
+        self.variables.exit_scope("reaction", reaction_id)
+
     def read_variable(self, ref: VariableRef | str, *, owner_id: str | None = None) -> Any:
         return self.variables.read(ref, owner_id=owner_id)
 
@@ -470,7 +501,7 @@ class StageRunner:
 
         for name, value in values.items():
             self.variables.write(
-                VariableRef(str(name), scope="behavior"),
+                VariableRef(str(name), scope="behavior", owner_id=owner_id),
                 value,
                 writer="behavior",
                 owner_id=owner_id,
@@ -483,9 +514,17 @@ class StageRunner:
                 continue
             if source.name not in values:
                 continue
-            target_owner = None
-            if target.scope == "state":
+            target_owner = target.owner_id
+            if target.scope == "state" and target_owner is None:
                 target_owner = self.current_state_path[-1] if self.current_state_path else None
+            if target.scope == "clip" and target_owner is None:
+                target_owner = source.owner_id or owner_id
+            target = VariableRef(
+                target.name,
+                scope=target.scope,
+                type=target.type,
+                owner_id=target_owner,
+            )
             self.variables.write(
                 target,
                 self.variables.read(source, owner_id=owner_id),
@@ -493,6 +532,7 @@ class StageRunner:
                 operation=mapping.operation,
                 owner_id=target_owner,
                 frame=frame,
+                mapped_output=True,
             )
 
     def _restore_node_state(self) -> None:
@@ -563,6 +603,15 @@ class StageRunner:
         self.last_events = ()
         self._restore_node_state()
         self.variables.reset()
+        self.initial_variable_snapshot = self.variables.snapshot()
+        self.compatibility_decision = {"policy": "reset"}
+        self.replay_identity = {
+            "program_hash": self.program.content_hash,
+            "seed": self.program.replay_seed,
+            "initial_variables": self.initial_variable_snapshot,
+            "compatibility": self.compatibility_decision,
+            "actual_trigger_frames": [],
+        }
 
     def stop(self, context: Any | None = None, *, clear_owned: bool = True) -> None:
         self.reset(context, clear_owned=clear_owned)
@@ -570,7 +619,13 @@ class StageRunner:
     def _stop_all_patterns(self, context: Any | None, *, clear_owned: bool) -> None:
         for item in tuple(self._active_patterns.values()):
             item.runner.stop(context, clear_owned=clear_owned and context is not None)
+            self._destroy_pattern_scopes(item)
         self._active_patterns.clear()
+
+    def _destroy_pattern_scopes(self, item: _ActivePattern) -> None:
+        for scope, owner in (("behavior", item.runner.instance_id), ("clip", item.schedule.clip_id)):
+            if self.variables.scope_active(scope, owner):
+                self.variables.exit_scope(scope, owner)
 
     def tick(self, context: Any, *, dispatch_actions: bool = True) -> StageTickResult:
         self._context = context
@@ -696,6 +751,29 @@ class StageRunner:
             self.tick(context, dispatch_actions=dispatch_actions)
             for _ in range(frames)
         )
+
+    def seek(
+        self,
+        context: Any,
+        frame: int,
+        *,
+        dispatch_actions: bool = False,
+    ) -> tuple[StageTickResult, ...]:
+        """Reset and replay fixed ticks to ``frame`` through the formal runner."""
+
+        if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
+            raise ValueError("frame must be a non-negative integer")
+        if frame > self.program.duration_frames:
+            raise ValueError("frame must not exceed stage duration")
+        self.reset(context)
+        self.start(context, reset=False, dispatch_actions=dispatch_actions)
+        results = tuple(
+            self.tick(context, dispatch_actions=dispatch_actions)
+            for _ in range(frame)
+        )
+        self.pause()
+        self.replay_identity["actual_trigger_frames"] = [item.frame for item in self.trace]
+        return results
 
     def _enter_state(
         self,
@@ -876,6 +954,7 @@ class StageRunner:
         for key in sorted(expired):
             item = self._active_patterns.pop(key)
             item.runner.stop(context, clear_owned=True)
+            self._destroy_pattern_scopes(item)
             events.append(
                 self._trace_event(
                     global_frame,
@@ -911,7 +990,14 @@ class StageRunner:
             from src.pattern import PatternRunner
 
             runner = PatternRunner(schedule.program)
-            runner.start(_PatternContext(context, self, schedule), reset=False)
+            self.variables.enter_scope("clip", schedule.clip_id)
+            self.variables.enter_scope("behavior", runner.instance_id)
+            try:
+                runner.start(_PatternContext(context, self, schedule), reset=False)
+            except Exception:
+                self.variables.exit_scope("behavior", runner.instance_id)
+                self.variables.exit_scope("clip", schedule.clip_id)
+                raise
             self._active_patterns[key] = _ActivePattern(
                 state_id=state_id,
                 schedule=schedule,
@@ -1021,9 +1107,10 @@ class StageRunner:
                     value,
                     writer="timeline",
                     operation=item.operation,
-                    owner_id=state_id if item.variable_scope == "state" else None,
+                    owner_id=item.owner_id or (state_id if item.variable_scope == "state" else None),
                     frame=global_frame,
                     order=item.order_key[1],
+                    reducer=item.reducer,
                 )
             except VariableError as exc:
                 raise ValueError(str(exc)) from exc
@@ -1039,6 +1126,7 @@ class StageRunner:
                         "name": item.variable_name,
                         "scope": item.variable_scope,
                         "operation": item.operation,
+                        "reducer": item.reducer,
                         "value": value,
                     },
                     state_id=state_id,
@@ -1087,7 +1175,22 @@ class StageRunner:
             if match_frame and item.frame != local_frame:
                 continue
             payload = item.payload
-            if dispatch:
+            # Variable writes are part of deterministic simulation state and
+            # must run during reset/seek replay.  ``dispatch`` only suppresses
+            # externally observable side effects (audio/events/scripts).
+            if item.kind == "Variable":
+                reference = payload.get("variable_ref", payload.get("variable"))
+                self.variables.write(
+                    reference,
+                    payload.get("value"),
+                    writer="safe_action",
+                    operation=str(payload.get("operation", "set")),
+                    owner_id=item.state_id,
+                    frame=global_frame,
+                    order=item.order_key[1],
+                    reducer=payload.get("reducer"),
+                )
+            elif dispatch:
                 if item.kind == "Audio":
                     self._dispatch_audio(
                         context,
@@ -1108,17 +1211,6 @@ class StageRunner:
                     if callable(hook):
                         name = str(payload.get("hook") or payload.get("script") or "")
                         hook(name, payload.get("data", payload.get("payload", {})))
-                elif item.kind == "Variable":
-                    reference = payload.get("variable_ref", payload.get("variable"))
-                    self.variables.write(
-                        reference,
-                        payload.get("value"),
-                        writer="safe_action",
-                        operation=str(payload.get("operation", "set")),
-                        owner_id=item.state_id,
-                        frame=global_frame,
-                        order=item.order_key[1],
-                    )
             events.append(
                 self._trace_event(
                     global_frame,

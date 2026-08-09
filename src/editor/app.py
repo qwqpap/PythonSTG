@@ -137,6 +137,8 @@ from .variable_workspace import VariableEditor
 from .variable_commands import (
     AddVariableCommand,
     RemoveVariableCommand,
+    SetVariablePropertiesCommand,
+    compatible_variable_bindings,
 )
 from .state_graph_commands import (
     AddStateCommand,
@@ -1894,7 +1896,9 @@ class EditorMainWindow(QMainWindow):
         self.timeline.zoomChanged.connect(self._timeline_zoom_changed)
         self.variables = VariableEditor()
         self.variables.addVariableRequested.connect(self._variable_add_requested)
+        self.variables.editVariableRequested.connect(self._variable_edit_requested)
         self.variables.deleteVariableRequested.connect(self._variable_delete_requested)
+        self.variables.bindingRequested.connect(self._variable_binding_requested)
         variables_dock = QDockWidget("Variables", self)
         self.variables_dock = variables_dock
         variables_dock.setObjectName("variablesDock")
@@ -2871,6 +2875,39 @@ class EditorMainWindow(QMainWindow):
             return
         self._refresh()
         self._sync_active_stage_preview()
+
+    def _variable_edit_requested(self, variable_id: str, values: object) -> None:
+        if not isinstance(self.session.document, SceneDocument) or not isinstance(values, dict):
+            return
+        try:
+            self.session.apply(SetVariablePropertiesCommand(self.session.document, variable_id, values))
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Edit Variable failed", exc)
+            return
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _variable_binding_requested(self, variable_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        variable = next(
+            (item for item in self.session.document.variables if item.id == variable_id),
+            None,
+        )
+        if variable is None:
+            return
+        # The catalog is intentionally data driven; the panel can use this
+        # result to populate a binding picker without exposing incompatible
+        # scopes or types.
+        candidates = compatible_variable_bindings(
+            self.session.document,
+            type_id=variable.type,
+            scope=variable.scope,
+            owner_id=variable.owner_id,
+            exclude_id=variable.id,
+        )
+        self.session.editor_context["variable_binding_candidates"] = tuple(item.id for item in candidates)
+        self._refresh()
 
     def _state_graph_add_state(self, graph_id: str) -> None:
         if not isinstance(self.session.document, SceneDocument):

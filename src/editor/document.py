@@ -1348,7 +1348,7 @@ class SceneDocument:
                             "Pattern clip needs a track/clip target_id or payload.pattern"
                         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, canonical: bool = False) -> dict[str, Any]:
         self.validate()
         payload = {
             "schema_version": self.schema_version,
@@ -1384,7 +1384,46 @@ class SceneDocument:
             payload["schema_version"] = 3
         if self.symbol_name is not None:
             payload["symbol_name"] = self.symbol_name
+        if canonical:
+            return self.to_canonical_dict()
         return payload
+
+    def to_canonical_dict(self) -> dict[str, Any]:
+        """Return the only persisted v4 representation.
+
+        Legacy N1 callers may still use :meth:`to_dict` and receive the
+        retired v3 envelope when they loaded one explicitly.  Canonical
+        storage always emits v4, keeps empty declaration arrays, and never
+        leaks private migration markers.
+        """
+
+        legacy_v3 = self._legacy_v3_serialization
+        legacy_empty = self._legacy_empty_serialization
+        try:
+            self._legacy_v3_serialization = False
+            self._legacy_empty_serialization = False
+            payload = self.to_dict()
+        finally:
+            self._legacy_v3_serialization = legacy_v3
+            self._legacy_empty_serialization = legacy_empty
+        payload["schema_version"] = int(SCENE_RESOURCE_SCHEMA_VERSION)
+        metadata = dict(payload.get("metadata", {}))
+        metadata.pop("_legacy_rootless_scene", None)
+        metadata.pop("_legacy_v3_source", None)
+        payload["metadata"] = metadata
+        payload.setdefault("variables", [])
+        payload.setdefault("output_mappings", [])
+
+        def ensure_state_fields(graph: dict[str, Any]) -> None:
+            for state in graph.get("states", []):
+                state.setdefault("variables", [])
+                state.setdefault("output_mappings", [])
+                child = state.get("child_graph")
+                if isinstance(child, dict):
+                    ensure_state_fields(child)
+
+        ensure_state_fields(payload["state_graph"])
+        return deepcopy(payload)
 
     @classmethod
     def from_dict(
@@ -1392,10 +1431,22 @@ class SceneDocument:
         data: dict[str, Any],
         *,
         upgrade_variables: bool = False,
+        canonical: bool = False,
     ) -> "SceneDocument":
         source_version = data.get("schema_version", 0) if isinstance(data, dict) else 0
         source_has_root = isinstance(data, dict) and "root" in data
         migrated = migrate_document(data)
+        canonical = canonical or upgrade_variables
+        if canonical:
+            allowed = {
+                "schema_version", "type", "id", "name", "symbol_name",
+                "metadata", "root", "state_graph", "variables", "output_mappings",
+            }
+            unknown = set(migrated).difference(allowed)
+            if unknown:
+                raise DocumentError(
+                    "scene has unknown fields: " + ", ".join(sorted(str(item) for item in unknown))
+                )
         document = cls(
             schema_version=migrated["schema_version"],
             type=migrated["type"],
@@ -1414,7 +1465,7 @@ class SceneDocument:
         # Keep the retired v3 wire representation readable for N1 integrations
         # that explicitly load old files.  New content and callers that opt in
         # to N2 receive the canonical v4 envelope.
-        if not upgrade_variables and isinstance(source_version, int) and source_version <= 3:
+        if not canonical and isinstance(source_version, int) and source_version <= 3:
             if source_has_root:
                 document._legacy_v3_serialization = True
             else:
@@ -1423,7 +1474,7 @@ class SceneDocument:
             document._legacy_empty_serialization = True
             document.metadata.pop("_legacy_rootless_scene", None)
         if document.metadata.get("_legacy_v3_source") is True:
-            if not upgrade_variables:
+            if not canonical:
                 document._legacy_v3_serialization = True
             document.metadata.pop("_legacy_v3_source", None)
         document.validate()

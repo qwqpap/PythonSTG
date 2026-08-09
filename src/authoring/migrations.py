@@ -333,6 +333,22 @@ def migrate_scene_v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
     # migration marker so new v4 content can require explicit conflict policy.
     if not rootless:
         metadata.setdefault("variable_compatibility", "legacy_last_wins")
+        legacy_keys: list[str] = []
+        for variable in migrated.get("variables", []):
+            if isinstance(variable, dict) and variable.get("name"):
+                legacy_keys.append(
+                    f"{variable.get('scope', 'stage')}:{variable['name']}@{variable.get('owner_id', '')}"
+                )
+        for state in migrated.get("state_graph", {}).get("states", []):
+            if not isinstance(state, dict):
+                continue
+            for variable in state.get("variables", []):
+                if isinstance(variable, dict) and variable.get("name"):
+                    legacy_keys.append(
+                        f"state:{variable['name']}@{state.get('id', '')}"
+                    )
+        if legacy_keys:
+            metadata.setdefault("legacy_variable_keys", sorted(set(legacy_keys)))
         metadata["_legacy_v3_source"] = True
     migrated["schema_version"] = 4
     return migrated

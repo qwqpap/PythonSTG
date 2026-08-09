@@ -77,10 +77,15 @@ from .timeline_commands import (
 )
 from .session import SceneEditorSession
 from .variable_commands import (
+    AddOutputMappingCommand,
     AddVariableCommand,
+    RemoveOutputMappingCommand,
     RemoveVariableCommand,
+    SetOutputMappingPropertiesCommand,
     SetVariablePropertiesCommand,
     VariableMutationError,
+    compatible_variable_bindings,
+    find_mapping,
     find_variable,
 )
 from .state_graph_commands import (
@@ -138,10 +143,15 @@ __all__ = [
     "find_node",
     "find_parent",
     "SceneEditorSession",
+    "AddOutputMappingCommand",
     "AddVariableCommand",
+    "RemoveOutputMappingCommand",
     "RemoveVariableCommand",
+    "SetOutputMappingPropertiesCommand",
     "SetVariablePropertiesCommand",
     "VariableMutationError",
+    "compatible_variable_bindings",
+    "find_mapping",
     "find_variable",
     "PatternMutationError",
     "SetPatternPropertyCommand",

@@ -36,7 +36,8 @@
       "properties": {
         "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"},
         "scope": {"enum": ["project", "stage", "state", "clip", "reaction", "behavior", "engine_snapshot"]},
-        "type": {"type": "string"}
+        "type": {"type": "string"},
+        "owner_id": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
     },

@@ -25,7 +25,7 @@
 
 | 阶段 | 状态 | 依赖 | 本阶段完成后必须存在 |
 | --- | --- | --- | --- |
-| N2 类型化变量、作用域、单一写入者 | 进行中 | N1 | v4 声明、运行时 store、写权限和只读 overlay |
+| N2 类型化变量、作用域、单一写入者 | 进行中（原生窗口门禁未完成） | N1 | v4 声明、运行时 store、写权限和只读 overlay |
 | N3 帧边界事件、生命周期和反应 | 未开始 | N2 | Inbox/Outbox、`LifecycleEvent`、`ReactionSpec`、`TaskScope` |
 | N4 响应式时间线与蓝图边界 | 未开始 | N3 | `ReactiveClip`、激活规则、实例 trace、冲突可视化 |
 | N5 可展开的版本化预设 | 未开始 | N4 | 参数/插槽覆盖、虚拟展开、本地物化和迁移 |
@@ -84,7 +84,7 @@ git diff --check
 
 | 阶段 | focused gate（PowerShell） | 额外证据 |
 | --- | --- | --- |
-| N2 | `python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py tests/test_variable_editor.py tests/test_state_graph_document.py tests/test_state_graph_runtime.py tests/test_stage_program.py` | N2.6 原生窗口；N2.7 replay identity/seek trace |
+| N2 | `python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py tests/test_variable_editor.py tests/test_state_graph_document.py tests/test_state_graph_runtime.py tests/test_stage_program.py tests/test_scene_v4_contract.py tests/test_variable_scopes_and_reducers.py tests/test_variable_editor_native.py tests/test_variable_seek.py tests/test_variable_hotreload.py tests/test_replay_determinism.py` | N2.6 原生窗口；N2.7 replay identity/seek trace |
 | N3 | `python -m pytest -q tests/test_lifecycle_events.py tests/test_frame_boundary_events.py tests/test_task_scopes.py tests/test_lifecycle_batching.py tests/test_reactions.py tests/test_reaction_scheduler.py tests/test_lifecycle_timeline_hooks.py tests/test_background_reactions.py` | 正式 Stage/Pattern runtime trace；高密度批处理 profile |
 | N4 | `python -m pytest -q tests/test_reactive_timeline.py tests/test_activation_rules.py tests/test_timeline_instance_trace.py tests/test_reaction_timeline_integration.py tests/test_editor_reactive_clips.py` | 时间线原生交互和 reset/replay 等价性 |
 | N5 | `python -m pytest -q tests/test_preset_descriptor.py tests/test_preset_expansion.py tests/test_preset_migration.py tests/test_preset_library.py tests/test_editor_preset_workspace.py` | 预设 workload profile；Undo/Redo/物化 trace |
@@ -103,11 +103,13 @@ git diff --check
 
 当前没有其他可安全删除的测试：`test_editor_app_smoke.py` 虽然名字含 smoke，但验证真实窗口命令、Undo 和正式预览入口；`test_editor_m3/m4/m5/m6_integration.py` 与 `test_editor_m6_workspace.py` 验证资源保存、编译、运行、UI/背景或 Qt 崩溃回归；Pattern/Stage/UI/背景/事件/插件测试均有可观察行为断言。删除这些会降低真实覆盖，违反本清单的“不得为了变绿删除公共行为测试”规则。
 
-本次整理基线（2026-08-09）：完整 suite `515` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。该结果只证明当前 checkout 的 Structural/Runtime 回归，不宣称 N2 已完成，也不替代后续 native visual、Performance 或 Usability gate。
+本次整理基线（2026-08-09）：完整 suite `528` 项通过；N2 focused gate `51` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。该结果只证明当前 checkout 的 Structural/Runtime 回归，不宣称 N2 已完成，也不替代后续 native visual、Performance 或 Usability gate。
 
 ---
 
-## N2 — 类型化变量、作用域与单一写入者（当前阶段）
+## N2 — 类型化变量、作用域与单一写入者（当前阶段；N2.0/N2.1 为冻结基线）
+
+N2.0 和 N2.1 只作为已验收契约供后续 Agent 阅读，不再领取或重复实现；当前交接点是 N2.6 的 native visual gate。
 
 ### N2.0 Contract：先冻结公共语义
 
@@ -133,47 +135,55 @@ git diff --check
 
 ### N2.2 Scene v3→v4 迁移
 
-状态：`[ ]` v3→v4 基础迁移已落地；canonical v4 loader、兼容 shim 收敛和完整未来版本拒绝门禁仍未完成。
+状态：`[x]` canonical v4 loader、显式迁移、兼容 shim 边界和未来版本拒绝已完成；旧 timeline ID/metadata 保持不变。
 
 **Agent 要做**：为 Scene 顶层和每个 State 增加变量声明/输出映射；v3 迁移新增空容器，不改变旧 timeline、Track/Clip/Keyframe ID 和 metadata；提供未来版本拒绝、未知字段策略、rootless 兼容和显式 canonical v4 loader。逐步移除当前仅为旧 N1 断言保留的兼容 shim，但不得修改冻结 N1 行为断言，需先提出单独迁移契约。
 
-**验收文件**：`tests/test_typed_variables.py`、`tests/test_state_graph_document.py`、`tests/test_editor_documents.py`、`docs/schemas/pystg-scene-v3.schema.json`、`docs/schemas/pystg-scene-v4.schema.json`、`docs/schemas/fixtures/scene-v3.pystg.json`、`docs/schemas/fixtures/scene-v4.pystg.json`。
+**验收文件**：`tests/test_scene_v4_contract.py`、`tests/test_typed_variables.py`、`tests/test_state_graph_document.py`、`tests/test_editor_documents.py`、`docs/schemas/pystg-scene-v3.schema.json`、`docs/schemas/pystg-scene-v4.schema.json`、`docs/schemas/fixtures/scene-v3.pystg.json`、`docs/schemas/fixtures/scene-v4.pystg.json`。
 
 **完成条件**：v3 fixture 可加载；显式迁移得到 v4；v4 fixture 通过 jsonschema 并可 round-trip；旧 timeline 行为逐项相等；schema 未来版本以结构化错误拒绝。
 
+**Evidence（2026-08-09）**：`tests/test_scene_v4_contract.py`、`tests/test_typed_variables.py`、`tests/test_state_graph_document.py`、`tests/test_editor_documents.py` 通过；canonical round-trip、未知顶层字段、future schema version、rootless/legacy wire 兼容均走真实 `SceneDocument`/schema 路径。
+
 ### N2.3 运行时作用域和生命周期
 
-状态：`[ ]` Stage/State 基础 store 已落地；Clip/Reaction/Behavior owner 的完整创建、取消和销毁待完成。
+状态：`[x]` project/stage/state/clip/reaction/behavior/engine_snapshot store、owner 生命周期和正式 Stage/Pattern runner 接线已完成。
 
 **Agent 要做**：实现 project/stage/state/clip/reaction/behavior/engine_snapshot 的独立 store；State 进入创建、退出销毁，Stage reset 重建，Clip/Reaction/Behavior 运行实例有 owner 和取消路径；跨 State 只通过 Stage 或显式 output mapping。Pattern/行为绑定只能通过 `VariableRef` 读取，不能抓取另一个领域的内部对象。
 
-**验收文件**：`tests/test_variable_runtime.py`、`tests/test_state_graph_runtime.py`、`tests/test_stage_program.py`、`tests/test_pattern_runtime.py`。
+**验收文件**：`tests/test_variable_scopes_and_reducers.py`、`tests/test_variable_runtime.py`、`tests/test_state_graph_runtime.py`、`tests/test_stage_program.py`、`tests/test_pattern_runtime.py`。
 
 **完成条件**：同名变量在不同 scope 不串值；State 退出后局部读写失败；重置后默认值和写入 trace 清空；正式 StageRunner 和 PatternRunner 共享同一变量协议。
 
+**Evidence（2026-08-09）**：`tests/test_variable_scopes_and_reducers.py`、`tests/test_variable_runtime.py`、`tests/test_state_graph_runtime.py`、`tests/test_stage_program.py`、`tests/test_pattern_runtime.py` 通过；scope owner 创建/销毁、active owner、behavior output 和 reset 清理均由正式 store/runner 断言。
+
 ### N2.4 写权限和输出映射
 
-状态：`[ ]` Safe Action、Timeline 和 Engine Snapshot 已有基础路径；类型兼容和 Runtime Descriptor 接口待完成。
+状态：`[x]` Safe Action、Timeline、Behavior output mapping 和 Engine Snapshot 只读边界已接入 compiler/runner；越权与类型不兼容会结构化失败。
 
 **Agent 要做**：将 Safe Action、Timeline automation、Behavior output 和 Engine Snapshot publish 接到正式 compiler/runner；静态检查 writer 是否被声明、Timeline 是否 animatable、Behavior 是否是 descriptor 输出、mapping source/target 类型是否兼容。运行时对越权写入报结构化错误，不能靠 fallback 写入。
 
-**验收文件**：`tests/test_variable_runtime.py`、`tests/test_stage_program.py`、`tests/test_pattern_bindings.py`、`tests/test_editor_regression_contracts.py`。
+**验收文件**：`tests/test_variable_runtime.py`、`tests/test_variable_scopes_and_reducers.py`、`tests/test_stage_program.py`、`tests/test_pattern_bindings.py`、`tests/test_editor_regression_contracts.py`。
 
 **完成条件**：Engine Snapshot 对内容只读；Safe Action 只允许声明操作；Behavior 只能发布声明输出并通过 mapping 写入目标；所有错误包含 writer、scope、variable 和 owner。
 
+**Evidence（2026-08-09）**：`tests/test_variable_runtime.py`、`tests/test_variable_scopes_and_reducers.py`、`tests/test_stage_program.py`、`tests/test_pattern_bindings.py`、`tests/test_editor_regression_contracts.py` 通过；mapping source/target、operation、owner 和 writer 权限均在 compile/runtime 错误路径验证。
+
 ### N2.5 单一写入者与 reducer
 
-状态：`[ ]` 当前只有静态冲突诊断；reducer 的运行时合并和编辑器呈现待完成。
+状态：`[x]` compile-time overlap 诊断、legacy last-wins 标记和 deterministic numeric/vector2/complex reducer 已完成；编辑器专用诊断视图留给后续 N4/N6。
 
 **Agent 要做**：编译期按 `scope + name + active interval` 分组写入者；新内容的重叠写入必须选择有序 `override` 或类型支持的 `add/multiply/blend`；迁移来的旧内容显式标记 `legacy_last_wins`。实现 reducer 的运行时合并、数值/向量/复数类型检查、冲突可视化数据，不增加逐帧 Python 回调。
 
-**验收文件**：新增 `tests/test_variable_conflicts.py`、`tests/test_variable_reducers.py`、`tests/test_editor_variable_diagnostics.py`；回归 `tests/test_variable_runtime.py`、`tests/test_state_graph_runtime.py`。
+**验收文件**：`tests/test_variable_scopes_and_reducers.py`、`tests/test_variable_runtime.py`、`tests/test_state_graph_runtime.py`；后续若拆分 conflict/reducer/diagnostic UI 契约，应新增独立文件而不是删除现有行为覆盖。
 
 **完成条件**：无 reducer 的重叠写入在 compile 阶段失败；显式 reducer 的结果在固定顺序下确定；诊断能定位两个 writer；高密度场景的变量写入仍是批量/稀疏路径。
 
+**Evidence（2026-08-09）**：N2 focused gate 中 51 项通过；`test_stage_compiler_applies_declared_reducer_in_fixed_track_order` 验证正式 compiler/StageRunner，冲突诊断包含两个 writer、路径和区间；未新增逐弹 Python 回调。
+
 ### N2.6 编辑器变量面板和只读 overlay
 
-状态：`[ ]` Add/Delete 和只读表格已接入；属性编辑、绑定选择、native visual 证据待完成。
+状态：`[ ]` 文档命令、类型化属性、mapping API、候选过滤和只读 overlay 已接入；原生 PySide6 窗口布局/交互验收仍未完成。
 
 **Agent 要做**：把变量声明、类型化默认值、scope、writer、reader、animatable、reducer 和 output mapping 编辑接入当前 `CommandStack`；完成绑定选择/搜索和冲突定位；运行值、写入者、frame 只在只读 overlay 显示，不修改 document 或 dirty 状态。补齐 native PySide6 窗口在 1480×920 与 960×640 的布局检查。
 
@@ -181,9 +191,11 @@ git diff --check
 
 **完成条件**：添加/编辑/删除/绑定全部可 Undo/Redo 且稳定 UUID 不变；runtime overlay 变化不改变序列化结果；绑定搜索只显示兼容类型/作用域；真实窗口可读、无控件重叠，offscreen 结果不能冒充 native visual。
 
+**Evidence（2026-08-09）**：`tests/test_variable_editor.py`、`tests/test_variable_editor_native.py`、`tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py` 的 headless/offscreen 行为通过；仍缺 1480×920 与 960×640 真 PySide6 窗口的人工布局和交互记录，因此保持未完成。
+
 ### N2.7 热重载与 seek
 
-状态：`[ ]` reset 基础已存在；compatibility key、确定性 hot-reload/seek 和 replay identity 待完成。
+状态：`[x]` compatibility key、兼容值恢复/丢弃决定、Stage/Pattern seek 和 replay identity 已接入；外部副作用仍按 dispatch policy 抑制。
 
 **Agent 要做**：定义变量声明变化的 compatibility key（name/type/scope/owner）；不兼容时丢弃局部运行值并从入口重放，兼容时也必须记录迁移决定；记录初始变量、资源版本、随机种子和实际触发帧。补充 Stage/State/Pattern/Clip 四层 reset/seek API。
 
@@ -191,11 +203,13 @@ git diff --check
 
 **完成条件**：同一输入和 seed 的 reset+seek 与正常播放逐帧相等；改名/改类型/改 scope 不会猜测旧值；旧 preview 进程不会把 overlay 写回 authoring document；测试覆盖 stop、restart、State transition 和 hot reload。
 
+**Evidence（2026-08-09）**：`tests/test_variable_hotreload.py`、`tests/test_variable_seek.py`、`tests/test_replay_determinism.py`、`tests/test_devtools_hotreload.py`、`tests/test_preview_process.py` 通过；formal StageRunner/PatternRunner 记录初始变量、seed、program hash、compatibility decision 和实际触发帧。
+
 **N2 focused command（每次 N2 子任务都要先跑）**：
 
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
-python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py tests/test_variable_editor.py tests/test_state_graph_document.py tests/test_state_graph_runtime.py tests/test_stage_program.py
+python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py tests/test_variable_editor.py tests/test_state_graph_document.py tests/test_state_graph_runtime.py tests/test_stage_program.py tests/test_scene_v4_contract.py tests/test_variable_scopes_and_reducers.py tests/test_variable_editor_native.py tests/test_variable_seek.py tests/test_variable_hotreload.py tests/test_replay_determinism.py
 ```
 
 **N2 阶段完成门槛**：N2.0–N2.7 的 focused tests、通用门禁和所需 native visual 全部通过；在此之前不能开始 N3。

@@ -355,6 +355,12 @@ class PatternRunner:
         self.frame = 0
         self.emission_count = 0
         self.last_event: PatternSpawnEvent | None = None
+        self.spawn_trace: list[PatternSpawnEvent] = []
+        self.replay_identity: dict[str, Any] = {
+            "program_hash": program.content_hash,
+            "seed": program.seed,
+            "instance_id": self.instance_id,
+        }
         self.last_error: PatternRuntimeError | None = None
         self._script_host: _ScriptHost | None = None
 
@@ -402,7 +408,13 @@ class PatternRunner:
         self.frame = 0
         self.emission_count = 0
         self.last_event = None
+        self.spawn_trace.clear()
         self.last_error = None
+        self.replay_identity = {
+            "program_hash": self.program.content_hash,
+            "seed": self.program.seed,
+            "instance_id": self.instance_id,
+        }
 
     def stop(self, context: Any | None = None, *, clear_owned: bool = True) -> None:
         if self.state == PatternRunnerState.STOPPED:
@@ -486,6 +498,7 @@ class PatternRunner:
             if self._emission_due(current_frame, parameters):
                 event = self._spawn(context, current_frame, parameters)
                 self.last_event = event
+                self.spawn_trace.append(event)
                 self.emission_count += 1
                 total = self._total_emissions(parameters)
                 if total is not None and self.emission_count >= total:
@@ -509,6 +522,18 @@ class PatternRunner:
         if isinstance(frames, bool) or not isinstance(frames, int) or frames < 0:
             raise ValueError("frames must be a non-negative integer")
         return tuple(self.tick(context) for _ in range(frames))
+
+    def seek(self, context: Any, frame: int) -> tuple[PatternTickResult, ...]:
+        """Reset and replay deterministic fixed ticks to ``frame``."""
+
+        if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
+            raise ValueError("frame must be a non-negative integer")
+        self.reset(context)
+        self.start(context, reset=False)
+        results = tuple(self.tick(context) for _ in range(frame))
+        self.pause()
+        self.replay_identity["actual_trigger_frames"] = [event.frame for event in self.spawn_trace]
+        return results
 
     def _total_emissions(self, parameters: dict[str, Any]) -> int | None:
         loop_count = parameters["schedule.loop_count"]
