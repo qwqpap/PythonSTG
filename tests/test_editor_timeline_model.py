@@ -149,7 +149,7 @@ def test_track_clip_keyframe_round_trip_and_duration_contract(tmp_path):
     reopened = ResourceStore(ProjectContext(tmp_path)).registry.load(payload)
 
     assert reopened.to_dict() == payload
-    assert reopened.schema_version == CURRENT_SCHEMA_VERSION == 2
+    assert reopened.schema_version == CURRENT_SCHEMA_VERSION == 3
     assert reopened.duration_frames == 3600
     ids = {
         item.id
@@ -168,7 +168,7 @@ def test_schema_one_flat_timeline_migrates_deterministically():
     scene, _emitter, _pattern = _scene_with_targets()
     payload = scene.to_dict()
     payload["schema_version"] = 1
-    payload.pop("tracks")
+    payload.pop("state_graph")
     event_id = str(uuid.uuid4())
     payload["timeline"] = [
         {
@@ -182,7 +182,7 @@ def test_schema_one_flat_timeline_migrates_deterministically():
     first = type(scene).from_dict(payload)
     second = type(scene).from_dict(payload)
 
-    assert first.schema_version == 2
+    assert first.schema_version == 3
     assert first.to_dict() == second.to_dict()
     assert len(first.tracks) == 1
     clip = first.tracks[0].clips[0]

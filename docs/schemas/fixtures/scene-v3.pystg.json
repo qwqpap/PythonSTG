@@ -1,0 +1,70 @@
+{
+  "schema_version": 3,
+  "type": "pystg.scene",
+  "id": "b88e1d39-dc9d-4fc9-8fb7-9023b17dba30",
+  "name": "Scene V2 Fixture",
+  "metadata": {
+    "duration_frames": 240
+  },
+  "root": {
+    "id": "f330ee96-e0b4-45f4-a0a6-0ba7c90131ef",
+    "type": "SceneRoot",
+    "name": "Scene V2 Fixture",
+    "properties": {
+      "width": 384,
+      "height": 448,
+      "grid_size": 16,
+      "background": "#171a24"
+    },
+    "children": []
+  },
+  "state_graph": {
+    "id": "e0f36a27-e0c4-5a99-b044-ad01a3ebfceb",
+    "name": "StageFlow",
+    "initial_state_id": "d71b4d73-9ecd-5707-a48b-2cbc0c9ca03e",
+    "states": [
+      {
+        "id": "d71b4d73-9ecd-5707-a48b-2cbc0c9ca03e",
+        "name": "Default",
+        "order": 0,
+        "duration_frames": 240,
+        "entry_actions": [],
+        "exit_actions": [],
+        "tracks": [
+          {
+            "id": "177013c4-f690-4b1a-b0a1-a24b36f8cc7a",
+            "name": "Legacy Events",
+            "kind": "Event",
+            "target_id": null,
+            "channel": "stage",
+            "order": 0,
+            "muted": false,
+            "clips": [
+              {
+                "id": "657fc17e-064f-4dd4-a7a7-6e5ea6100acb",
+                "name": "Opening Cue",
+                "kind": "Event",
+                "start_frame": 12,
+                "duration_frames": 30,
+                "target_id": null,
+                "channel": "stage",
+                "order": 0,
+                "loop_count": 2,
+                "enabled": true,
+                "payload": {
+                  "event_type": "opening.cue",
+                  "data": {
+                    "label": "v2 fixture"
+                  }
+                },
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "transitions": [],
+        "child_graph": null
+      }
+    ]
+  }
+}

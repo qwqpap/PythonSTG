@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import uuid
 
 import pytest
 
@@ -44,10 +45,29 @@ def test_all_initial_resource_types_round_trip_atomically(tmp_path):
 
         expected = document.to_dict()
         if resource_type == "pystg.scene":
+            graph_id = str(uuid.uuid5(uuid.UUID(expected["id"]), "state-graph:root"))
+            state_id = str(uuid.uuid5(uuid.UUID(expected["id"]), "state:default"))
             expected = {
                 **expected,
                 "schema_version": SCENE_RESOURCE_SCHEMA_VERSION,
-                "tracks": [],
+                "state_graph": {
+                    "id": graph_id,
+                    "name": "StageFlow",
+                    "initial_state_id": state_id,
+                    "states": [
+                        {
+                            "id": state_id,
+                            "name": "Default",
+                            "order": 0,
+                            "duration_frames": 0,
+                            "entry_actions": [],
+                            "exit_actions": [],
+                            "tracks": [],
+                            "transitions": [],
+                            "child_graph": None,
+                        }
+                    ],
+                },
             }
         assert loaded.to_dict() == expected
         assert loaded.name == f"中文资源 {index}"

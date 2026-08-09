@@ -172,7 +172,8 @@ def test_scene_with_tracks_launches_formal_stage_preview_document(
     ]
     payload = window._pattern_preview_client.commands[-2][1]["document"]
     assert payload["type"] == "pystg.scene"
-    assert payload["tracks"][0]["clips"][0]["kind"] == "Event"
+    state = payload["state_graph"]["states"][0]
+    assert state["tracks"][0]["clips"][0]["kind"] == "Event"
 
     window.session.revert()
     window.close()
