@@ -1522,6 +1522,7 @@ class EditorMainWindow(QMainWindow):
         self._tool_processes: dict[str, QProcess] = {}
         self._plugin_widgets: dict[str, QWidget] = {}
         self._document_widgets: dict[str, QWidget] = {}
+        self._bottom_dock_resize_guard = False
         # The legacy registry continues to own built-in Qt tool widgets.  The
         # SDK registry above owns project-local resource/node/runtime
         # contributions and is deliberately the same registry instance wired
@@ -1536,6 +1537,27 @@ class EditorMainWindow(QMainWindow):
         self._refresh()
         self.resize(1480, 920)
         self.setMinimumSize(960, 640)
+
+    def resizeEvent(self, event) -> None:
+        """Keep the bottom workbench compact at the editor's minimum size.
+
+        The Variables and Inspector docks share the right column vertically.
+        Reserving the normal 220px bottom panel at a 960x640 window leaves
+        the variable editor's command/overlay footer below the fold.  A
+        smaller, still usable workbench keeps those controls reachable while
+        preserving the normal layout at desktop sizes.
+        """
+        super().resizeEvent(event)
+        if not hasattr(self, "bottom_dock") or self._bottom_dock_resize_guard:
+            return
+        target_height = 80 if self.height() <= 700 else 220
+        if abs(self.bottom_dock.height() - target_height) < 8:
+            return
+        self._bottom_dock_resize_guard = True
+        try:
+            self.resizeDocks([self.bottom_dock], [target_height], Qt.Vertical)
+        finally:
+            self._bottom_dock_resize_guard = False
 
     @property
     def language(self) -> str:
@@ -1936,7 +1958,7 @@ class EditorMainWindow(QMainWindow):
         self.bottom_dock = bottom_dock
         bottom_dock.setObjectName("bottomDock")
         bottom_dock.setWidget(self.bottom_tabs)
-        bottom_dock.setMinimumHeight(180)
+        bottom_dock.setMinimumHeight(80)
         self.addDockWidget(Qt.BottomDockWidgetArea, bottom_dock)
         self.resizeDocks([bottom_dock], [220], Qt.Vertical)
 
@@ -2051,7 +2073,7 @@ class EditorMainWindow(QMainWindow):
             )
             self.preview_panel.set_mode("pattern")
             if hasattr(self, "bottom_dock"):
-                target_height = 210 if self.height() <= 700 else 250
+                target_height = 80 if self.height() <= 700 else 250
                 self.resizeDocks([self.bottom_dock], [target_height], Qt.Vertical)
         if not hasattr(self, "tree"):
             return

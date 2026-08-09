@@ -25,7 +25,7 @@
 
 | 阶段 | 状态 | 依赖 | 本阶段完成后必须存在 |
 | --- | --- | --- | --- |
-| N2 类型化变量、作用域、单一写入者 | 进行中（原生窗口门禁未完成） | N1 | v4 声明、运行时 store、写权限和只读 overlay |
+| N2 类型化变量、作用域、单一写入者 | 已完成（N2.0–N2.7） | N1 | v4 声明、运行时 store、写权限和只读 overlay |
 | N3 帧边界事件、生命周期和反应 | 未开始 | N2 | Inbox/Outbox、`LifecycleEvent`、`ReactionSpec`、`TaskScope` |
 | N4 响应式时间线与蓝图边界 | 未开始 | N3 | `ReactiveClip`、激活规则、实例 trace、冲突可视化 |
 | N5 可展开的版本化预设 | 未开始 | N4 | 参数/插槽覆盖、虚拟展开、本地物化和迁移 |
@@ -103,13 +103,13 @@ git diff --check
 
 当前没有其他可安全删除的测试：`test_editor_app_smoke.py` 虽然名字含 smoke，但验证真实窗口命令、Undo 和正式预览入口；`test_editor_m3/m4/m5/m6_integration.py` 与 `test_editor_m6_workspace.py` 验证资源保存、编译、运行、UI/背景或 Qt 崩溃回归；Pattern/Stage/UI/背景/事件/插件测试均有可观察行为断言。删除这些会降低真实覆盖，违反本清单的“不得为了变绿删除公共行为测试”规则。
 
-本次整理基线（2026-08-09）：完整 suite `528` 项通过；N2 focused gate `51` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。该结果只证明当前 checkout 的 Structural/Runtime 回归，不宣称 N2 已完成，也不替代后续 native visual、Performance 或 Usability gate。
+本次整理基线（2026-08-09）：完整 suite `529` 项通过；N2 focused gate `52` 项通过；`python -m compileall -q main.py src game_content tools tests`、`python tools/validate_assets.py --format json`（73 JSON、16 sprite configs、745 sprites、142 images，0 errors/0 warnings）和 `git diff --check` 通过。N2.6 另有真实 PySide6 窗口证据：`build/visual_qa_native_qt_1480x920_final.png` 与 `build/visual_qa_native_qt_960x640_final.png`；后者在最小窗口自动将 Bottom Panel 收缩到 80px，Variables dock 仍显示 Apply、表格水平滚动条、runtime overlay、Delete 和 Bind。证据只覆盖 N2 的 Structural/Runtime/Native visual 门禁，不替代后续 Performance 或 Usability gate。
 
 ---
 
 ## N2 — 类型化变量、作用域与单一写入者（当前阶段；N2.0/N2.1 为冻结基线）
 
-N2.0 和 N2.1 只作为已验收契约供后续 Agent 阅读，不再领取或重复实现；当前交接点是 N2.6 的 native visual gate。
+N2.0 和 N2.1 只作为已验收契约供后续 Agent 阅读，不再领取或重复实现；N2.0–N2.7 已全部固定，后续 Agent 从 N3 开始。
 
 ### N2.0 Contract：先冻结公共语义
 
@@ -183,15 +183,15 @@ N2.0 和 N2.1 只作为已验收契约供后续 Agent 阅读，不再领取或�
 
 ### N2.6 编辑器变量面板和只读 overlay
 
-状态：`[ ]` 文档命令、类型化属性、mapping API、候选过滤和只读 overlay 已接入；原生 PySide6 窗口布局/交互验收仍未完成。
+状态：`[x]` 文档命令、类型化属性、mapping API、候选过滤、只读 overlay 和原生 PySide6 窗口门禁已完成。
 
 **Agent 要做**：把变量声明、类型化默认值、scope、writer、reader、animatable、reducer 和 output mapping 编辑接入当前 `CommandStack`；完成绑定选择/搜索和冲突定位；运行值、写入者、frame 只在只读 overlay 显示，不修改 document 或 dirty 状态。补齐 native PySide6 窗口在 1480×920 与 960×640 的布局检查。
 
 **验收文件**：`tests/test_variable_editor.py`、新增 `tests/test_variable_editor_native.py`、`tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py`。
 
-**完成条件**：添加/编辑/删除/绑定全部可 Undo/Redo 且稳定 UUID 不变；runtime overlay 变化不改变序列化结果；绑定搜索只显示兼容类型/作用域；真实窗口可读、无控件重叠，offscreen 结果不能冒充 native visual。
+**完成条件**：添加/编辑/删除/绑定全部可 Undo/Redo 且稳定 UUID 不变；runtime overlay 变化不改变序列化结果；绑定搜索只显示兼容类型/作用域；真实窗口可读、无控件重叠，最小窗口保留表格水平滚动和 overlay/Bind 入口，offscreen 结果不能冒充 native visual。
 
-**Evidence（2026-08-09）**：`tests/test_variable_editor.py`、`tests/test_variable_editor_native.py`、`tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py` 的 headless/offscreen 行为通过；仍缺 1480×920 与 960×640 真 PySide6 窗口的人工布局和交互记录，因此保持未完成。
+**Evidence（2026-08-09）**：`tests/test_variable_editor.py`、`tests/test_variable_editor_native.py`、`tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py` 的 headless/offscreen 行为通过；N2 focused gate `52 passed`，完整 suite `529 passed`。真实 PySide6 `EditorMainWindow` 在 1480×920 和 960×640 均完成布局检查，证据文件为 `build/visual_qa_native_qt_1480x920_final.png`、`build/visual_qa_native_qt_960x640_final.png`；960×640 时 Bottom Panel 自适应为 80px，Variables dock 的字段、Apply、表格水平滚动条、runtime overlay、Delete、Bind 均可见且无控件重叠。测试环境为 Windows/PySide6，截图由正式 `create_window(ProjectContext)` 路径生成。
 
 ### N2.7 热重载与 seek
 
@@ -212,7 +212,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
 python -m pytest -q tests/test_typed_variables.py tests/test_variable_runtime.py tests/test_variable_editor.py tests/test_state_graph_document.py tests/test_state_graph_runtime.py tests/test_stage_program.py tests/test_scene_v4_contract.py tests/test_variable_scopes_and_reducers.py tests/test_variable_editor_native.py tests/test_variable_seek.py tests/test_variable_hotreload.py tests/test_replay_determinism.py
 ```
 
-**N2 阶段完成门槛**：N2.0–N2.7 的 focused tests、通用门禁和所需 native visual 全部通过；在此之前不能开始 N3。
+**N2 阶段完成门槛**：`[x]` N2.0–N2.7 的 focused tests、通用门禁和所需 native visual 全部通过；可以开始 N3，但必须继续遵守依赖顺序和本文件的 Contract→Implement→Verify→Record 协议。
 
 ---
 
