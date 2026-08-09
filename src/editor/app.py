@@ -133,6 +133,11 @@ from .timeline_commands import (
     timeline_tracks,
 )
 from .timeline_workspace import TimelineEditor
+from .variable_workspace import VariableEditor
+from .variable_commands import (
+    AddVariableCommand,
+    RemoveVariableCommand,
+)
 from .state_graph_commands import (
     AddStateCommand,
     AddTransitionCommand,
@@ -1863,7 +1868,6 @@ class EditorMainWindow(QMainWindow):
         inspector_dock.setWidget(self.inspector)
         inspector_dock.setMinimumWidth(260)
         self.addDockWidget(Qt.RightDockWidgetArea, inspector_dock)
-
         self.output = QTextBrowser()
         self.output.setReadOnly(True)
         self.output.setOpenLinks(False)
@@ -1888,6 +1892,16 @@ class EditorMainWindow(QMainWindow):
         self.timeline.clipSelected.connect(self._timeline_clip_selected)
         self.timeline.playheadChanged.connect(self._timeline_playhead_changed)
         self.timeline.zoomChanged.connect(self._timeline_zoom_changed)
+        self.variables = VariableEditor()
+        self.variables.addVariableRequested.connect(self._variable_add_requested)
+        self.variables.deleteVariableRequested.connect(self._variable_delete_requested)
+        variables_dock = QDockWidget("Variables", self)
+        self.variables_dock = variables_dock
+        variables_dock.setObjectName("variablesDock")
+        variables_dock.setWidget(self.variables)
+        variables_dock.setMinimumWidth(300)
+        self.addDockWidget(Qt.RightDockWidgetArea, variables_dock)
+        self.splitDockWidget(inspector_dock, variables_dock, Qt.Vertical)
         self.bottom_tabs = QTabWidget()
         self.bottom_tabs.setObjectName("bottomWorkbench")
         self.bottom_tabs.addTab(self.output, "Output")
@@ -2427,12 +2441,20 @@ class EditorMainWindow(QMainWindow):
                     else ()
                 ),
             )
+            self.variables.set_document(
+                document,
+                state_id=selected_state_id,
+            )
+            self.variables.set_runtime_overlay(
+                self.session.editor_context.get("runtime_variables", {})
+            )
         else:
             self.tree.blockSignals(True)
             self.tree.clear()
             self.tree.blockSignals(False)
             self.tree.setEnabled(False)
             self.state_graph.clear_document()
+            self.variables.clear_document()
             if isinstance(document, UIDocument):
                 self.inspector.set_ui_node(None)
                 if isinstance(widget, UIWorkspace):
@@ -2806,6 +2828,49 @@ class EditorMainWindow(QMainWindow):
         frame = int(playheads.get(state.id, 0)) if isinstance(playheads, dict) else 0
         self.session.editor_context["timeline_playhead"] = frame
         self._refresh()
+
+    def _variable_add_requested(
+        self,
+        name: str,
+        type_id: str,
+        default: object,
+        scope: str,
+    ) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        from src.authoring.variables import VariableSpec
+
+        selected_state = str(
+            self.session.editor_context.get("selected_state_id")
+            or self.session.document.state_graph.initial_state_id
+        )
+        state_id = selected_state if scope == "state" else None
+        try:
+            variable = VariableSpec(
+                name=name,
+                type=type_id,
+                default=default,
+                scope=scope,
+                writable_by=("timeline",) if scope == "state" else (),
+                animatable=scope == "state",
+            )
+            self.session.apply(AddVariableCommand(self.session.document, variable, state_id=state_id))
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Add Variable failed", exc)
+            return
+        self._refresh()
+        self._sync_active_stage_preview()
+
+    def _variable_delete_requested(self, variable_id: str) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        try:
+            self.session.apply(RemoveVariableCommand(self.session.document, variable_id))
+        except (DocumentError, ValueError) as exc:
+            self._show_error("Delete Variable failed", exc)
+            return
+        self._refresh()
+        self._sync_active_stage_preview()
 
     def _state_graph_add_state(self, graph_id: str) -> None:
         if not isinstance(self.session.document, SceneDocument):
@@ -3825,6 +3890,9 @@ class EditorMainWindow(QMainWindow):
         for widget in self._document_widgets.values():
             if isinstance(widget, SceneViewport):
                 widget.clear_runtime_state()
+        for session in self.document_manager:
+            if isinstance(session.document, SceneDocument):
+                session.editor_context["runtime_variables"] = {}
 
     def _open_pattern_preview(self, resource_value: str) -> None:
         session = self._open_document(resource_value)
@@ -4804,6 +4872,11 @@ class EditorMainWindow(QMainWindow):
             ]
             if self.document_manager.active is session:
                 self.state_graph.set_active_state_path(state_path)
+        variable_snapshot = payload.get("variable_snapshot")
+        if isinstance(variable_snapshot, dict):
+            session.editor_context["runtime_variables"] = variable_snapshot
+            if self.document_manager.active is session and hasattr(self, "variables"):
+                self.variables.set_runtime_overlay(variable_snapshot)
         widget = self._document_widgets.get(session.document.id)
         state = str(payload.get("state") or self._preview_state)
         node_state = payload.get("node_state")

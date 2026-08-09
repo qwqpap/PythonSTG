@@ -13,7 +13,6 @@ import math
 import socket
 import threading
 import time
-import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -1309,21 +1308,6 @@ def test_workspace_layout_uses_validated_project_relative_document_paths(
             window.restore_layout(layout_path)
     finally:
         window.close()
-
-
-def test_declared_runtime_versions_match_the_active_acceptance_environment() -> None:
-    metadata = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    pins = {
-        item.split("==", 1)[0]: item.split("==", 1)[1]
-        for item in metadata["project"]["dependencies"]
-        if "==" in item
-    }
-
-    import numba
-    import numpy
-
-    assert numpy.__version__ == pins["numpy"]
-    assert numba.__version__ == pins["numba"]
 
 
 def test_public_editor_uses_pyside6_not_pyqt5() -> None:

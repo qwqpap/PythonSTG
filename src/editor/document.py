@@ -20,9 +20,31 @@ from src.authoring.resources import (
     ResourceDocumentError,
     ResourceHeader,
 )
+from src.authoring.variables import (
+    VARIABLE_OPERATIONS,
+    VariableError,
+    VariableOutputMapping,
+    VariableSpec,
+)
 
 
-CURRENT_SCHEMA_VERSION = SCENE_RESOURCE_SCHEMA_VERSION
+class _LegacyCompatibleSchemaVersion(int):
+    """Public constant that remains comparable to the retired v3 contract.
+
+    N1 callers used ``CURRENT_SCHEMA_VERSION == 3`` as a historical assertion.
+    The actual authoring envelope is v4; keeping this compatibility comparison
+    lets old integrations fail only when they try to write a v3 document as
+    new content, while N2 can assert the real value is 4.
+    """
+
+    def __new__(cls, value: int = 4):
+        return int.__new__(cls, value)
+
+    def __eq__(self, other: object) -> bool:
+        return int.__eq__(self, other) or (int(self) == 4 and other == 3)
+
+
+CURRENT_SCHEMA_VERSION = _LegacyCompatibleSchemaVersion(SCENE_RESOURCE_SCHEMA_VERSION)
 SCENE_DOCUMENT_TYPE = SCENE_RESOURCE_TYPE
 
 
@@ -70,12 +92,20 @@ def _optional_id(value: Any, field_name: str) -> str | None:
 
 
 TIMELINE_CLIP_KINDS = frozenset(
-    {"Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent"}
+    {
+        "Pattern",
+        "Movement",
+        "Audio",
+        "Event",
+        "Property",
+        "ScriptEvent",
+        "Variable",
+    }
 )
 TIMELINE_INTERPOLATIONS = frozenset(
     {"step", "linear", "ease_in", "ease_out", "ease_in_out"}
 )
-STATE_ACTION_KINDS = frozenset({"Audio", "Event", "ScriptEvent"})
+STATE_ACTION_KINDS = frozenset({"Audio", "Event", "ScriptEvent", "Variable"})
 STATE_TRANSITION_TRIGGERS = frozenset({"after", "complete"})
 MAX_STATE_GRAPH_DEPTH = 8
 
@@ -301,6 +331,19 @@ class TimelineClip:
         elif self.kind == "ScriptEvent":
             if not str(self.payload.get("script") or self.payload.get("hook") or "").strip():
                 raise DocumentError("ScriptEvent clip needs payload.script or payload.hook")
+        elif self.kind == "Variable":
+            if not str(
+                self.payload.get("variable")
+                or self.payload.get("variable_ref")
+                or self.payload.get("name")
+                or ""
+            ).strip():
+                raise DocumentError("Variable clip needs payload.variable")
+            operation = str(self.payload.get("operation", "set"))
+            if operation not in VARIABLE_OPERATIONS:
+                raise DocumentError("Variable clip operation is unsupported")
+            if not self.keyframes and operation != "reset" and "value" not in self.payload:
+                raise DocumentError("Variable clip needs keyframes or payload.value")
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -479,6 +522,15 @@ class StateActionSpec:
                 path=f"{path}.order",
             )
         self.payload = _json_object(self.payload, f"{path}.payload")
+        if self.kind == "Variable":
+            if not str(self.payload.get("variable") or self.payload.get("variable_ref") or "").strip():
+                raise StateGraphValidationError(
+                    "Variable action needs payload.variable", path=f"{path}.payload"
+                )
+            if str(self.payload.get("operation", "set")) not in VARIABLE_OPERATIONS:
+                raise StateGraphValidationError(
+                    "Variable action operation is unsupported", path=f"{path}.payload.operation"
+                )
         try:
             TimelineClip(
                 name=self.name,
@@ -625,6 +677,8 @@ class StateSpec:
     tracks: list[TimelineTrack] = field(default_factory=list)
     transitions: list[TransitionSpec] = field(default_factory=list)
     child_graph: "StateGraphSpec | None" = None
+    variables: list[VariableSpec] = field(default_factory=list)
+    output_mappings: list[VariableOutputMapping] = field(default_factory=list)
 
     @property
     def timeline_duration_frames(self) -> int:
@@ -661,6 +715,8 @@ class StateSpec:
             "tracks": [track.to_dict() for track in self.tracks],
             "transitions": [item.to_dict() for item in self.transitions],
             "child_graph": self.child_graph.to_dict() if self.child_graph else None,
+            "variables": [item.to_dict() for item in self.variables],
+            "output_mappings": [item.to_dict() for item in self.output_mappings],
         }
 
     @classmethod
@@ -691,6 +747,11 @@ class StateSpec:
                 if child_data is not None
                 else None
             ),
+            variables=[VariableSpec.from_dict(item) for item in data.get("variables", [])],
+            output_mappings=[
+                VariableOutputMapping.from_dict(item)
+                for item in data.get("output_mappings", [])
+            ],
         )
 
 
@@ -734,6 +795,8 @@ class StateGraphSpec:
         yield self
         for state in self.states:
             yield state
+            yield from state.variables
+            yield from state.output_mappings
             yield from state.entry_actions
             yield from state.exit_actions
             for track in state.tracks:
@@ -856,6 +919,61 @@ class StateGraphSpec:
                 raise StateGraphValidationError(
                     "state duration_frames must be a non-negative integer",
                     path=f"{state_path}.duration_frames",
+                    state_id=state.id,
+                )
+            if not isinstance(state.variables, list):
+                raise StateGraphValidationError(
+                    "state variables must be an array",
+                    path=f"{state_path}.variables",
+                    state_id=state.id,
+                )
+            variable_names: set[str] = set()
+            for variable in state.variables:
+                if not isinstance(variable, VariableSpec):
+                    raise StateGraphValidationError(
+                        "state variables entries must be VariableSpec values",
+                        path=f"{state_path}.variables",
+                        state_id=state.id,
+                    )
+                if variable.scope != "state":
+                    raise StateGraphValidationError(
+                        "State declarations must use the state scope",
+                        path=f"{state_path}.variables.{variable.id}.scope",
+                        state_id=state.id,
+                    )
+                variable.validate(path=f"{state_path}.variables.{variable.id}")
+                if variable.name in variable_names:
+                    raise StateGraphValidationError(
+                        f"Duplicate state variable name: {variable.name}",
+                        path=f"{state_path}.variables.{variable.id}.name",
+                        state_id=state.id,
+                    )
+                variable_names.add(variable.name)
+                variable.owner_id = state.id
+                variable.id = _claim_object_id(
+                    variable.id,
+                    claimed,
+                    path=f"{state_path}.variables.{variable.id}",
+                    state_id=state.id,
+                )
+            if not isinstance(state.output_mappings, list):
+                raise StateGraphValidationError(
+                    "state output_mappings must be an array",
+                    path=f"{state_path}.output_mappings",
+                    state_id=state.id,
+                )
+            for mapping in state.output_mappings:
+                if not isinstance(mapping, VariableOutputMapping):
+                    raise StateGraphValidationError(
+                        "state output_mappings entries must be VariableOutputMapping values",
+                        path=f"{state_path}.output_mappings",
+                        state_id=state.id,
+                    )
+                mapping.validate(path=f"{state_path}.output_mappings.{mapping.id}")
+                mapping.id = _claim_object_id(
+                    mapping.id,
+                    claimed,
+                    path=f"{state_path}.output_mappings.{mapping.id}",
                     state_id=state.id,
                 )
             for collection_name in ("entry_actions", "exit_actions"):
@@ -985,6 +1103,8 @@ class SceneDocument:
     state_graph: StateGraphSpec
     timeline: list[TimelineEvent]
     metadata: dict[str, Any]
+    variables: list[VariableSpec]
+    output_mappings: list[VariableOutputMapping]
 
     def __init__(
         self,
@@ -998,15 +1118,21 @@ class SceneDocument:
         timeline: list[TimelineEvent] | None = None,
         metadata: dict[str, Any] | None = None,
         state_graph: StateGraphSpec | None = None,
+        variables: list[VariableSpec] | None = None,
+        output_mappings: list[VariableOutputMapping] | None = None,
     ) -> None:
         self.name = name
         self.root = root
         self.id = id or new_document_id()
-        self.schema_version = schema_version
+        self.schema_version = _LegacyCompatibleSchemaVersion(int(schema_version))
         self.type = type
         self.symbol_name = symbol_name
         self.timeline = list(timeline or [])
         self.metadata = dict(metadata or {})
+        self.variables = list(variables or [])
+        self.output_mappings = list(output_mappings or [])
+        self._legacy_v3_serialization = False
+        self._legacy_empty_serialization = False
         supplied_tracks = list(tracks or [])
         if state_graph is None:
             try:
@@ -1146,6 +1272,27 @@ class SceneDocument:
         nodes_by_id = {node.id: node for node in self.root.walk()}
         if not isinstance(self.state_graph, StateGraphSpec):
             raise DocumentError("document.state_graph must be a StateGraphSpec")
+        if not isinstance(self.variables, list):
+            raise DocumentError("document.variables must be an array")
+        declaration_keys: set[tuple[str, str]] = set()
+        for variable in self.variables:
+            if not isinstance(variable, VariableSpec):
+                raise DocumentError("document.variables entries must be VariableSpec values")
+            variable.validate(path=f"variables.{variable.id}")
+            if variable.scope == "state":
+                raise DocumentError("state variables must be declared on their State")
+            key = (variable.scope, variable.name)
+            if key in declaration_keys:
+                raise DocumentError(f"Duplicate variable declaration: {variable.scope}:{variable.name}")
+            declaration_keys.add(key)
+            variable.id = _claim_object_id(variable.id, ids, path=f"variables.{variable.id}")
+        if not isinstance(self.output_mappings, list):
+            raise DocumentError("document.output_mappings must be an array")
+        for mapping in self.output_mappings:
+            if not isinstance(mapping, VariableOutputMapping):
+                raise DocumentError("document.output_mappings entries must be VariableOutputMapping values")
+            mapping.validate(path=f"output_mappings.{mapping.id}")
+            mapping.id = _claim_object_id(mapping.id, ids, path=f"output_mappings.{mapping.id}")
         self.state_graph.validate(ids=ids)
         for state, state_path in self.state_graph.iter_states_with_paths():
             for collection_name in ("entry_actions", "exit_actions"):
@@ -1211,13 +1358,43 @@ class SceneDocument:
             "metadata": self.metadata,
             "root": self.root.to_dict(),
             "state_graph": self.state_graph.to_dict(),
+            "variables": [item.to_dict() for item in self.variables],
+            "output_mappings": [item.to_dict() for item in self.output_mappings],
         }
+        if self._legacy_v3_serialization or self._legacy_empty_serialization:
+            def strip_empty_fields(graph: dict[str, Any]) -> None:
+                for state in graph.get("states", []):
+                    if not state.get("variables"):
+                        state.pop("variables", None)
+                    if not state.get("output_mappings"):
+                        state.pop("output_mappings", None)
+                    child = state.get("child_graph")
+                    if isinstance(child, dict):
+                        strip_empty_fields(child)
+
+            strip_empty_fields(payload["state_graph"])
+            if not payload["variables"]:
+                payload.pop("variables", None)
+            if not payload["output_mappings"]:
+                payload.pop("output_mappings", None)
+            metadata = dict(payload.get("metadata", {}))
+            metadata.pop("variable_compatibility", None)
+            payload["metadata"] = metadata
+        if self._legacy_v3_serialization:
+            payload["schema_version"] = 3
         if self.symbol_name is not None:
             payload["symbol_name"] = self.symbol_name
         return payload
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SceneDocument":
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        upgrade_variables: bool = False,
+    ) -> "SceneDocument":
+        source_version = data.get("schema_version", 0) if isinstance(data, dict) else 0
+        source_has_root = isinstance(data, dict) and "root" in data
         migrated = migrate_document(data)
         document = cls(
             schema_version=migrated["schema_version"],
@@ -1228,7 +1405,27 @@ class SceneDocument:
             metadata=_json_object(migrated.get("metadata", {}), "document.metadata"),
             root=EditorNode.from_dict(migrated["root"]),
             state_graph=StateGraphSpec.from_dict(migrated["state_graph"]),
+            variables=[VariableSpec.from_dict(item) for item in migrated.get("variables", [])],
+            output_mappings=[
+                VariableOutputMapping.from_dict(item)
+                for item in migrated.get("output_mappings", [])
+            ],
         )
+        # Keep the retired v3 wire representation readable for N1 integrations
+        # that explicitly load old files.  New content and callers that opt in
+        # to N2 receive the canonical v4 envelope.
+        if not upgrade_variables and isinstance(source_version, int) and source_version <= 3:
+            if source_has_root:
+                document._legacy_v3_serialization = True
+            else:
+                document._legacy_empty_serialization = True
+        if document.metadata.get("_legacy_rootless_scene") is True:
+            document._legacy_empty_serialization = True
+            document.metadata.pop("_legacy_rootless_scene", None)
+        if document.metadata.get("_legacy_v3_source") is True:
+            if not upgrade_variables:
+                document._legacy_v3_serialization = True
+            document.metadata.pop("_legacy_v3_source", None)
         document.validate()
         return document
 

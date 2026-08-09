@@ -14,6 +14,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from src.authoring.variables import (
+    VariableError,
+    VariableOutputMapping,
+    VariableRef,
+    VariableSpec,
+    VariableStore,
+)
+
 if TYPE_CHECKING:
     from src.pattern import PatternProgram, PatternRunner
 
@@ -159,6 +167,37 @@ class StageStateGraph:
 
 
 @dataclass(frozen=True)
+class StageVariableAutomation:
+    """A sparse timeline writer for one declared variable."""
+
+    state_id: str
+    track_id: str
+    clip_id: str
+    variable_name: str
+    variable_scope: str | None
+    operation: str
+    start_frame: int
+    duration_frames: int
+    loop_count: int
+    track_order: int
+    clip_order: int
+    keyframes: tuple[StageKeyframe, ...]
+    reducer: str | None = None
+
+    @property
+    def end_frame(self) -> int:
+        return self.start_frame + self.duration_frames * self.loop_count
+
+    @property
+    def order_key(self) -> tuple[int, int, str]:
+        return (self.track_order, self.clip_order, self.clip_id)
+
+    @property
+    def ref(self) -> VariableRef:
+        return VariableRef(self.variable_name, scope=self.variable_scope)
+
+
+@dataclass(frozen=True)
 class StageProgram:
     resource_id: str
     schema_version: int
@@ -171,6 +210,9 @@ class StageProgram:
     automations: tuple[StageAutomation, ...]
     actions: tuple[StageAction, ...]
     state_graph: StageStateGraph
+    variable_specs: tuple[VariableSpec, ...] = ()
+    variable_automations: tuple[StageVariableAutomation, ...] = ()
+    output_mappings: tuple[VariableOutputMapping, ...] = ()
 
 
 class StageRunnerState(str, Enum):
@@ -231,6 +273,7 @@ class StageTickResult:
     state: StageRunnerState
     events: tuple[StageTraceEvent, ...] = ()
     spawned_count: int = 0
+    variable_snapshot: dict[str, dict[str, dict[str, Any]]] | None = None
 
 
 @dataclass
@@ -287,6 +330,14 @@ class _PatternContext:
         # player by the inverse delta produces the same vector as aiming from
         # the current timeline-driven emitter position.
         return _ShiftedPlayer(float(player.x) - dx, float(player.y) - dy)
+
+    def get_variable(self, name: str, *, scope: str | None = None) -> Any:
+        return self._stage.read_variable(
+            VariableRef(str(name), scope=scope),
+            owner_id=self._schedule.state_id if scope == "state" else None,
+        )
+
+    read_variable = get_variable
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._context, name)
@@ -346,10 +397,18 @@ class StageRunner:
         self._patterns_by_state = self._group_by_state(program.patterns)
         self._automations_by_state = self._group_by_state(program.automations)
         self._actions_by_state = self._group_by_state(program.actions)
+        self._variable_automations_by_state = self._group_by_state(program.variable_automations)
+        self.variables = VariableStore(program.variable_specs)
         self._automation_values = {
             item.clip_id: tuple(keyframe.value for keyframe in item.keyframes)
             for item in program.automations
         }
+        self._automation_values.update(
+            {
+                item.clip_id: tuple(keyframe.value for keyframe in item.keyframes)
+                for item in program.variable_automations
+            }
+        )
         self._active_graphs: list[StageStateGraph] = []
         self._active_states: list[StageState] = []
         self._local_frames: dict[str, int] = {}
@@ -392,6 +451,49 @@ class StageRunner:
                 if item.start_frame <= local < item.end_frame
             )
         return tuple(sorted(active))
+
+    @property
+    def variable_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
+        return self.variables.snapshot()
+
+    def read_variable(self, ref: VariableRef | str, *, owner_id: str | None = None) -> Any:
+        return self.variables.read(ref, owner_id=owner_id)
+
+    def publish_behavior_output(
+        self,
+        owner_id: str,
+        values: dict[str, Any],
+        *,
+        frame: int | None = None,
+    ) -> None:
+        """Publish only descriptor-declared Behavior outputs and mappings."""
+
+        for name, value in values.items():
+            self.variables.write(
+                VariableRef(str(name), scope="behavior"),
+                value,
+                writer="behavior",
+                owner_id=owner_id,
+                frame=frame,
+            )
+        for mapping in self.program.output_mappings:
+            source = mapping.source
+            target = mapping.target
+            if not isinstance(source, VariableRef) or not isinstance(target, VariableRef):
+                continue
+            if source.name not in values:
+                continue
+            target_owner = None
+            if target.scope == "state":
+                target_owner = self.current_state_path[-1] if self.current_state_path else None
+            self.variables.write(
+                target,
+                self.variables.read(source, owner_id=owner_id),
+                writer="behavior",
+                operation=mapping.operation,
+                owner_id=target_owner,
+                frame=frame,
+            )
 
     def _restore_node_state(self) -> None:
         self.node_state = {item.node_id: item.properties for item in self.program.nodes}
@@ -460,6 +562,7 @@ class StageRunner:
         self.trace.clear()
         self.last_events = ()
         self._restore_node_state()
+        self.variables.reset()
 
     def stop(self, context: Any | None = None, *, clear_owned: bool = True) -> None:
         self.reset(context, clear_owned=clear_owned)
@@ -479,7 +582,12 @@ class StageRunner:
             self._finish(context, events=events, dispatch=dispatch_actions)
             self.trace.extend(events)
             self.last_events = tuple(events)
-            return StageTickResult(current, self.state, tuple(events))
+            return StageTickResult(
+                current,
+                self.state,
+                tuple(events),
+                variable_snapshot=self.variable_snapshot,
+            )
 
         events: list[StageTraceEvent] = []
         spawned_count = 0
@@ -487,8 +595,13 @@ class StageRunner:
         active_state_id: str | None = None
         try:
             active_ids = self.current_state_path
+            self.variables.set_frame(current)
+            self._publish_engine_snapshot(context, current)
             for state_id in active_ids:
                 local = self._local_frames[state_id]
+                self._apply_variable_automations(
+                    state_id, local, current, events
+                )
                 self._expire_patterns(context, state_id, local, current, events)
                 self._apply_automations(context, state_id, local, current, events)
                 self._start_patterns(context, state_id, local, current, events)
@@ -562,7 +675,13 @@ class StageRunner:
 
         self.trace.extend(events)
         self.last_events = tuple(events)
-        return StageTickResult(current, self.state, tuple(events), spawned_count)
+        return StageTickResult(
+            current,
+            self.state,
+            tuple(events),
+            spawned_count,
+            self.variable_snapshot,
+        )
 
     def advance(
         self,
@@ -590,6 +709,7 @@ class StageRunner:
         self._active_graphs.append(graph)
         self._active_states.append(state)
         self._local_frames[state.state_id] = 0
+        self.variables.enter_scope("state", state.state_id)
         self._completed_children.discard(state.state_id)
         self._dispatch_actions(
             self._context,
@@ -640,6 +760,7 @@ class StageRunner:
                 self._stop_audio()
             self._completed_children.discard(state.state_id)
             self._local_frames.pop(state.state_id, None)
+            self.variables.exit_scope("state", state.state_id)
             self._active_states.pop(index)
             self._active_graphs.pop(index)
 
@@ -879,6 +1000,62 @@ class StageRunner:
                 )
             )
 
+    def _apply_variable_automations(
+        self,
+        state_id: str,
+        local_frame: int,
+        global_frame: int,
+        events: list[StageTraceEvent],
+    ) -> None:
+        for item in self._variable_automations_by_state.get(state_id, ()):
+            if not item.start_frame <= local_frame < item.end_frame:
+                continue
+            relative = local_frame - item.start_frame
+            local = relative % item.duration_frames
+            if item.keyframes and local == item.duration_frames - 1 and item.keyframes[-1].frame == item.duration_frames:
+                local = item.duration_frames
+            value = self._automation_value(item, local)
+            try:
+                self.variables.write(
+                    item.ref,
+                    value,
+                    writer="timeline",
+                    operation=item.operation,
+                    owner_id=state_id if item.variable_scope == "state" else None,
+                    frame=global_frame,
+                    order=item.order_key[1],
+                )
+            except VariableError as exc:
+                raise ValueError(str(exc)) from exc
+            events.append(
+                self._trace_event(
+                    global_frame,
+                    "variable_write",
+                    item.track_id,
+                    item.clip_id,
+                    None,
+                    "variable",
+                    {
+                        "name": item.variable_name,
+                        "scope": item.variable_scope,
+                        "operation": item.operation,
+                        "value": value,
+                    },
+                    state_id=state_id,
+                    local_frame=local_frame,
+                )
+            )
+
+    def _publish_engine_snapshot(self, context: Any, frame: int) -> None:
+        values = None
+        hook = getattr(context, "get_engine_snapshot", None)
+        if callable(hook):
+            values = hook()
+        elif isinstance(getattr(context, "engine_snapshot", None), dict):
+            values = getattr(context, "engine_snapshot")
+        if values:
+            self.variables.publish_engine_snapshot(values, frame=frame)
+
     def _automation_value(self, item: StageAutomation, local_frame: int) -> Any:
         frames = item.keyframes
         values = self._automation_values[item.clip_id]
@@ -931,6 +1108,17 @@ class StageRunner:
                     if callable(hook):
                         name = str(payload.get("hook") or payload.get("script") or "")
                         hook(name, payload.get("data", payload.get("payload", {})))
+                elif item.kind == "Variable":
+                    reference = payload.get("variable_ref", payload.get("variable"))
+                    self.variables.write(
+                        reference,
+                        payload.get("value"),
+                        writer="safe_action",
+                        operation=str(payload.get("operation", "set")),
+                        owner_id=item.state_id,
+                        frame=global_frame,
+                        order=item.order_key[1],
+                    )
             events.append(
                 self._trace_event(
                     global_frame,

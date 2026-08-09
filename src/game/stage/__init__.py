@@ -351,6 +351,7 @@ from .program import (  # noqa: E402
     StageTickResult,
     StageTraceEvent,
     StageTransition,
+    StageVariableAutomation,
 )
 
 
@@ -370,4 +371,5 @@ __all__ = [
     "StageTickResult",
     "StageTraceEvent",
     "StageTransition",
+    "StageVariableAutomation",
 ]

@@ -66,7 +66,12 @@ class BindingSpec:
                 f"{path}.value",
                 f"{self.kind} bindings require a non-empty string",
             )
-        if self.kind == "variable" and self.value not in EXPRESSION_VARIABLES:
+        if (
+            self.kind == "variable"
+            and self.value not in EXPRESSION_VARIABLES
+            and "." not in self.value
+            and _PROPERTY_PATH.fullmatch(self.value.strip()) is None
+        ):
             raise BindingError(
                 f"{path}.value",
                 f"unknown binding variable {self.value!r}",

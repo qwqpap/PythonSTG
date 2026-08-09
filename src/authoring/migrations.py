@@ -124,13 +124,17 @@ def migrate_legacy_scene_v0(data: dict[str, Any]) -> dict[str, Any]:
             "properties": {},
             "children": data.get("nodes", []),
         }
+    metadata = copy.deepcopy(data.get("metadata", {}))
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata["_legacy_rootless_scene"] = True
     return {
         "schema_version": 1,
         "type": SCENE_RESOURCE_TYPE,
         "id": data.get("id") or new_resource_id(),
         "name": data.get("name", "Scene"),
         "symbol_name": data.get("symbol_name"),
-        "metadata": data.get("metadata", {}),
+        "metadata": metadata,
         "root": root,
         "timeline": data.get("timeline", []),
     }
@@ -294,6 +298,46 @@ def migrate_scene_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _add_variable_fields_to_graph(graph: Any) -> None:
+    if not isinstance(graph, dict):
+        raise MigrationError("scene.state_graph must be an object")
+    for state in graph.get("states", []):
+        if not isinstance(state, dict):
+            raise MigrationError("scene.state_graph.states entries must be objects")
+        # Declarations are intentionally empty for legacy content.  Timeline
+        # payloads and IDs are copied untouched so v3 behavior remains exact.
+        state.setdefault("variables", [])
+        state.setdefault("output_mappings", [])
+        child = state.get("child_graph")
+        if child is not None:
+            _add_variable_fields_to_graph(child)
+
+
+def migrate_scene_v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
+    """Add typed variable declaration containers without changing timelines."""
+
+    migrated = copy.deepcopy(data)
+    if "state_graph" not in migrated:
+        raise MigrationError("scene schema 3 must contain state_graph")
+    # Header-only/generic scene resources intentionally remain generic.  They
+    # do not have the formal Scene root and must preserve their opaque body.
+    rootless = "root" not in migrated
+    if not rootless:
+        migrated.setdefault("variables", [])
+        migrated.setdefault("output_mappings", [])
+        _add_variable_fields_to_graph(migrated["state_graph"])
+    metadata = migrated.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        raise MigrationError("scene.metadata must be an object")
+    # Last-wins automation order was the implicit v2/v3 behavior.  Keep a
+    # migration marker so new v4 content can require explicit conflict policy.
+    if not rootless:
+        metadata.setdefault("variable_compatibility", "legacy_last_wins")
+        metadata["_legacy_v3_source"] = True
+    migrated["schema_version"] = 4
+    return migrated
+
+
 def build_default_migration_registry() -> MigrationRegistry:
     registry = MigrationRegistry()
     for resource_type in AUTHORING_RESOURCE_TYPES:
@@ -304,4 +348,5 @@ def build_default_migration_registry() -> MigrationRegistry:
     registry.register(SCENE_RESOURCE_TYPE, 0, migrate_legacy_scene_v0)
     registry.register(SCENE_RESOURCE_TYPE, 1, migrate_scene_v1_to_v2)
     registry.register(SCENE_RESOURCE_TYPE, 2, migrate_scene_v2_to_v3)
+    registry.register(SCENE_RESOURCE_TYPE, 3, migrate_scene_v3_to_v4)
     return registry

@@ -145,7 +145,19 @@ def _binding_value(
             rng = _binding_rng(program, frame, burst_index)
             return float(rng.random())
         variables = _binding_variables(program, frame, burst_index, context)
-        return float(variables.get(name, 0.0))
+        if name in variables:
+            return float(variables[name])
+        hook = getattr(context, "get_variable", None)
+        if callable(hook):
+            try:
+                return float(hook(name))
+            except Exception as exc:  # noqa: BLE001 - formal runtime wraps the path
+                raise PatternRuntimeError(
+                    program.resource_id,
+                    frame,
+                    f"variable binding {name!r} could not be read: {exc}",
+                ) from exc
+        return 0.0
     if binding.mode == "curve":
         return _eval_curve(binding, float(frame))
     if binding.mode == "expression":

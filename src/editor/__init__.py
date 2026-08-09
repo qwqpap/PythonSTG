@@ -76,6 +76,13 @@ from .timeline_commands import (
     timeline_tracks,
 )
 from .session import SceneEditorSession
+from .variable_commands import (
+    AddVariableCommand,
+    RemoveVariableCommand,
+    SetVariablePropertiesCommand,
+    VariableMutationError,
+    find_variable,
+)
 from .state_graph_commands import (
     AddStateCommand,
     AddTransitionCommand,
@@ -131,6 +138,11 @@ __all__ = [
     "find_node",
     "find_parent",
     "SceneEditorSession",
+    "AddVariableCommand",
+    "RemoveVariableCommand",
+    "SetVariablePropertiesCommand",
+    "VariableMutationError",
+    "find_variable",
     "PatternMutationError",
     "SetPatternPropertyCommand",
     "pattern_with_property",

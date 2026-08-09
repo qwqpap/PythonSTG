@@ -14,7 +14,7 @@ from src.core.project_context import ProjectContext
 
 
 RESOURCE_SCHEMA_VERSION = 1
-SCENE_RESOURCE_SCHEMA_VERSION = 3
+SCENE_RESOURCE_SCHEMA_VERSION = 4
 RESOURCE_FILE_SUFFIX = ".pystg.json"
 
 SCENE_RESOURCE_TYPE = "pystg.scene"

@@ -640,6 +640,11 @@ class PatternPreviewController:
             "node_state": (
                 copy.deepcopy(stage_runner.node_state) if stage_runner is not None else {}
             ),
+            "variable_snapshot": (
+                copy.deepcopy(stage_runner.variable_snapshot)
+                if stage_runner is not None
+                else {}
+            ),
             "timeline_events": (
                 list(self.context.timeline_events())[-20:]
                 if stage_runner is not None

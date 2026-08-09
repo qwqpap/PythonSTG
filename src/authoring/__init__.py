@@ -25,6 +25,24 @@ from .resources import (
     ResourceReference,
 )
 from .storage import ResourceStore
+from .variables import (
+    DEFAULT_VARIABLE_TYPES,
+    OutputMappingSpec,
+    VARIABLE_OPERATIONS,
+    VARIABLE_REDUCERS,
+    VARIABLE_SCOPES,
+    VARIABLE_WRITERS,
+    VariableError,
+    VariableOutputMapping,
+    VariableRef,
+    VariableRuntimeStore,
+    VariableSpec,
+    VariableStore,
+    VariableTypeError,
+    VariableTypeRegistry,
+    VariableTypeSpec,
+    VariableWrite,
+)
 
 __all__ = [
     "AUTHORING_RESOURCE_TYPES",
@@ -47,4 +65,20 @@ __all__ = [
     "UI_RESOURCE_TYPE",
     "build_default_migration_registry",
     "build_default_resource_type_registry",
+    "DEFAULT_VARIABLE_TYPES",
+    "OutputMappingSpec",
+    "VARIABLE_OPERATIONS",
+    "VARIABLE_REDUCERS",
+    "VARIABLE_SCOPES",
+    "VARIABLE_WRITERS",
+    "VariableError",
+    "VariableOutputMapping",
+    "VariableRef",
+    "VariableRuntimeStore",
+    "VariableSpec",
+    "VariableStore",
+    "VariableTypeError",
+    "VariableTypeRegistry",
+    "VariableTypeSpec",
+    "VariableWrite",
 ]

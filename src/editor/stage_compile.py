@@ -10,6 +10,13 @@ from typing import Any
 
 from src.authoring import ResourceStore
 from src.authoring.resources import ResourceDocumentError, ResourceReference
+from src.authoring.variables import (
+    VARIABLE_OPERATIONS,
+    VariableError,
+    VariableOutputMapping,
+    VariableRef,
+    VariableSpec,
+)
 from src.core.project_context import ProjectContext, ProjectContextError
 from src.game.stage.program import (
     PatternSchedule,
@@ -21,6 +28,7 @@ from src.game.stage.program import (
     StageState,
     StageStateGraph,
     StageTransition,
+    StageVariableAutomation,
 )
 from src.pattern import (
     PatternCompileError,
@@ -42,7 +50,7 @@ from .node_types import NODE_TYPE_REGISTRY
 from .pattern_commands import pattern_with_property
 
 
-STAGE_PROGRAM_VERSION = 2
+STAGE_PROGRAM_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -310,6 +318,198 @@ def _compile_automation(
     )
 
 
+def _variable_ref_from_payload(payload: dict[str, Any], *, path: str) -> VariableRef:
+    raw = payload.get("variable_ref", payload.get("variable"))
+    if raw is None:
+        raw = payload.get("name")
+    try:
+        return VariableRef.from_dict(raw)
+    except VariableError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+
+
+def _compile_variable_automation(
+    scene: SceneDocument,
+    track: TimelineTrack,
+    clip: TimelineClip,
+    state: StateSpec,
+    state_path: str,
+) -> StageVariableAutomation:
+    path = f"{state_path}.tracks.{track.id}.clips.{clip.id}"
+    try:
+        reference = _variable_ref_from_payload(clip.payload, path=f"{path}.payload.variable")
+        operation = str(clip.payload.get("operation", "set"))
+        if operation not in VARIABLE_OPERATIONS:
+            raise ValueError(f"unsupported variable operation {operation!r}")
+        if clip.keyframes:
+            values = [
+                StageKeyframe(
+                    frame=item.frame,
+                    value_json=_json(deepcopy(item.value)),
+                    interpolation=item.interpolation,
+                )
+                for item in sorted(clip.keyframes, key=lambda value: value.frame)
+            ]
+        elif operation == "reset":
+            values = [StageKeyframe(0, _json(None), "step")]
+        else:
+            values = [StageKeyframe(0, _json(deepcopy(clip.payload.get("value"))), "step")]
+    except (TypeError, ValueError, VariableError) as exc:
+        raise _failure(
+            scene,
+            "invalid_variable_automation",
+            path,
+            str(exc),
+            track=track,
+            clip=clip,
+            state=state,
+        ) from exc
+    return StageVariableAutomation(
+        state_id=state.id,
+        track_id=track.id,
+        clip_id=clip.id,
+        variable_name=reference.name,
+        variable_scope=reference.scope,
+        operation=operation,
+        start_frame=clip.start_frame,
+        duration_frames=clip.duration_frames,
+        loop_count=clip.loop_count,
+        track_order=track.order,
+        clip_order=clip.order,
+        keyframes=tuple(values),
+        reducer=str(clip.payload.get("reducer")) if clip.payload.get("reducer") else None,
+    )
+
+
+def _all_variable_specs(scene: SceneDocument) -> tuple[VariableSpec, ...]:
+    values = list(scene.variables)
+    for state in scene.state_graph.walk_states():
+        values.extend(state.variables)
+    return tuple(values)
+
+
+def _all_output_mappings(scene: SceneDocument) -> tuple[VariableOutputMapping, ...]:
+    values = list(scene.output_mappings)
+    for state in scene.state_graph.walk_states():
+        values.extend(state.output_mappings)
+    return tuple(values)
+
+
+def _state_action_writes(scene: SceneDocument) -> tuple[StageAction, ...]:
+    values: list[StageAction] = []
+    for state in scene.state_graph.walk_states():
+        for action in (*state.entry_actions, *state.exit_actions):
+            values.append(_compile_state_action(state, action))
+    return tuple(values)
+
+
+def _variable_spec_for(
+    specs: tuple[VariableSpec, ...],
+    reference: VariableRef,
+) -> VariableSpec | None:
+    candidates = [item for item in specs if item.name == reference.name]
+    if reference.scope is not None:
+        candidates = [item for item in candidates if item.scope == reference.scope]
+    if len(candidates) == 1:
+        return candidates[0]
+    return next(
+        (
+            item
+            for item in candidates
+            if item.scope in {"stage", "project"}
+        ),
+        None,
+    )
+
+
+def _variable_conflict_diagnostics(
+    scene: SceneDocument,
+    specs: tuple[VariableSpec, ...],
+    variable_automations: tuple[StageVariableAutomation, ...],
+    actions: tuple[StageAction, ...],
+    mappings: tuple[VariableOutputMapping, ...] = (),
+) -> tuple[StageCompileDiagnostic, ...]:
+    diagnostics: list[StageCompileDiagnostic] = []
+    legacy = scene.metadata.get("variable_compatibility") == "legacy_last_wins"
+    groups: dict[tuple[str, str | None, str], list[tuple[int, int, str, str | None]]] = {}
+    for item in variable_automations:
+        reference = item.ref
+        spec = _variable_spec_for(specs, reference)
+        path = f"states.{item.state_id}.tracks.{item.track_id}.clips.{item.clip_id}.payload.variable"
+        if spec is None:
+            diagnostics.append(
+                StageCompileDiagnostic(
+                    "error", "unknown_variable", scene.id, item.track_id, item.clip_id,
+                    None, path, f"Variable {reference.name!r} is not declared", state_id=item.state_id,
+                )
+            )
+            continue
+        if "timeline" not in spec.writable_by or not spec.animatable:
+            diagnostics.append(
+                StageCompileDiagnostic(
+                    "error", "variable_write_forbidden", scene.id, item.track_id, item.clip_id,
+                    None, path, f"Timeline cannot write non-animatable or unauthorized variable {spec.name!r}", state_id=item.state_id,
+                )
+            )
+        groups.setdefault((spec.name, spec.scope, item.state_id), []).append(
+            (item.start_frame, item.end_frame, item.clip_id, item.reducer or spec.reducer)
+        )
+    for action in actions:
+        if action.kind != "Variable":
+            continue
+        payload = action.payload
+        try:
+            ref = _variable_ref_from_payload(payload, path=f"states.{action.state_id}.actions.{action.clip_id}")
+        except ValueError:
+            continue
+        spec = _variable_spec_for(specs, ref)
+        path = f"states.{action.state_id}.actions.{action.clip_id}.payload.variable"
+        if spec is None:
+            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, action.track_id, action.clip_id, None, path, f"Variable {ref.name!r} is not declared", state_id=action.state_id))
+            continue
+        if "safe_action" not in spec.writable_by:
+            diagnostics.append(StageCompileDiagnostic("error", "variable_write_forbidden", scene.id, action.track_id, action.clip_id, None, path, f"Safe Action cannot write {spec.name!r}", state_id=action.state_id))
+        groups.setdefault((spec.name, spec.scope, action.state_id), []).append((action.frame, action.frame + 1, action.clip_id, spec.reducer))
+    for (name, scope, state_id), writes in groups.items():
+        if legacy:
+            continue
+        for index, left in enumerate(writes):
+            for right in writes[index + 1 :]:
+                if left[1] <= right[0] or right[1] <= left[0]:
+                    continue
+                if left[3] in {"override", "add", "multiply", "blend"} and left[3] == right[3]:
+                    continue
+                diagnostics.append(
+                    StageCompileDiagnostic(
+                        "error", "variable_write_conflict", scene.id, None, None, None,
+                        f"states.{state_id}.variables.{name}",
+                        f"Multiple writers overlap for {scope or 'inferred'}:{name}; choose an explicit reducer or override order",
+                        state_id=state_id,
+                    )
+                )
+                break
+            else:
+                continue
+            break
+    for mapping in mappings:
+        source = mapping.source
+        target = mapping.target
+        if not isinstance(source, VariableRef) or not isinstance(target, VariableRef):
+            continue
+        source_spec = _variable_spec_for(specs, source)
+        target_spec = _variable_spec_for(specs, target)
+        path = f"output_mappings.{mapping.id}"
+        if source_spec is None:
+            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, None, None, None, f"{path}.source", f"Variable {source.name!r} is not declared"))
+        elif source_spec.scope != "behavior" or not source_spec.behavior_output:
+            diagnostics.append(StageCompileDiagnostic("error", "invalid_behavior_output", scene.id, None, None, None, f"{path}.source", f"{source.name!r} is not a declared Behavior output"))
+        if target_spec is None:
+            diagnostics.append(StageCompileDiagnostic("error", "unknown_variable", scene.id, None, None, None, f"{path}.target", f"Variable {target.name!r} is not declared"))
+        elif "behavior" not in target_spec.writable_by:
+            diagnostics.append(StageCompileDiagnostic("error", "variable_write_forbidden", scene.id, None, None, None, f"{path}.target", f"Behavior output cannot write {target.name!r}"))
+    return tuple(diagnostics)
+
+
 def _compile_state_action(
     state: StateSpec,
     action: StateActionSpec,
@@ -447,6 +647,7 @@ def compile_stage(
     store = ResourceStore(project)
     patterns: list[PatternSchedule] = []
     automations: list[StageAutomation] = []
+    variable_automations: list[StageVariableAutomation] = []
     actions: list[StageAction] = []
     automatic_audio_stops: list[StageAction] = []
     dependency_hashes: list[str] = []
@@ -467,6 +668,15 @@ def compile_stage(
                 continue
             target_id = clip.target_id or track.target_id
             target = nodes.get(target_id or "")
+            if clip.kind == "Variable" or any(
+                key in clip.payload for key in ("variable", "variable_ref")
+            ):
+                variable_automations.append(
+                    _compile_variable_automation(
+                        scene, track, clip, state, state_path
+                    )
+                )
+                continue
             if clip.kind in {"Movement", "Property"}:
                 if target_id is None or target is None:
                     raise _failure(
@@ -649,6 +859,16 @@ def compile_stage(
         )
         not in explicit_audio_stops
     )
+    variable_specs = _all_variable_specs(scene)
+    variable_diagnostics = _variable_conflict_diagnostics(
+        scene,
+        variable_specs,
+        tuple(variable_automations),
+        tuple(actions) + _state_action_writes(scene),
+        _all_output_mappings(scene),
+    )
+    if variable_diagnostics:
+        raise StageCompileError(variable_diagnostics)
     canonical = _json(scene.to_dict())
     identity = "\0".join(
         (
@@ -685,6 +905,14 @@ def compile_stage(
             )
         ),
         state_graph=_compile_state_graph(scene.state_graph),
+        variable_specs=variable_specs,
+        variable_automations=tuple(
+            sorted(
+                variable_automations,
+                key=lambda item: (item.state_id, item.start_frame, *item.order_key),
+            )
+        ),
+        output_mappings=_all_output_mappings(scene),
     )
 
 
