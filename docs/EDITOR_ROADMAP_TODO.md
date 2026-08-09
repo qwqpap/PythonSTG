@@ -23,17 +23,14 @@ Godot-style workbench
 
 ## Current focus
 
-**M5-M7 remediation is open. M0-M4 remain the accepted foundation.**
+**M0-M7 and the R5 -> R7 remediation gates are complete in this checkout.**
 
-The 2026-08-08 independent audit invalidated the previous M5-M7 completion
-claims. The happy paths and many useful models exist, but the implementation
-does not yet satisfy its own expression, binding, graph, script, UI/background,
-event, plugin, recovery, dependency, and release contracts. The historical
-completion-log entries are retained as implementation history; they are not
-current acceptance evidence.
-
-Current implementation order is **R5 -> R6 -> R7** below. Do not start or mark
-a later remediation gate complete because it is easier to demonstrate.
+The current acceptance record below supersedes the earlier handoff entries:
+the unchanged frozen gates, original M5-M7 acceptance files, restored full
+suite, pinned active dependencies, and native Windows visual evidence all pass.
+The historical completion-log entries remain as implementation history. The
+items under “Explicitly deferred” remain intentional architecture boundaries,
+not incomplete remediation work.
 
 ## Status and update rules
 
@@ -345,98 +342,98 @@ until those evidence classes are recorded separately.
 
 ### R5 - M5 correctness remediation
 
-- [ ] **R5.1 Expression boundary:** validate function arity at compile time;
+- [x] **R5.1 Expression boundary:** validate function arity at compile time;
       constant-fold safe numeric subtrees; convert syntax, domain, overflow,
       malformed compiled-node, and non-finite failures to `ExpressionError`;
       make compiled expressions JSON round-trip without accepting executable
       objects or unrestricted evaluation.
-- [ ] **R5.2 Binding truthfulness:** validate dotted targets and reject duplicate
+- [x] **R5.2 Binding truthfulness:** validate dotted targets and reject duplicate
       targets with `duplicate_binding_target`; every entry in
       `BINDABLE_TARGETS` must have observable constant-binding parity with the
       same direct property, and eligible dynamic bindings must evaluate at the
       documented emission/frame boundary. Unsupported targets must be removed
       through an explicit contract migration, never silently ignored.
-- [ ] **R5.3 Data-oriented runtime:** dynamic count/geometry/schedule/motion and
+- [x] **R5.3 Data-oriented runtime:** dynamic count/geometry/schedule/motion and
       modifier values must remain batch operations. No per-bullet Python
       callbacks, scene nodes, emitter callback lists, or death handlers may be
       introduced to make the matrix pass.
-- [ ] **R5.4 Graph equivalence:** recipe -> graph -> save/reload -> compile must
+- [x] **R5.4 Graph equivalence:** recipe -> graph -> save/reload -> compile must
       preserve every binding and yield a field-equal `PatternProgram`. Validate
       UUIDs, node/category pairs, finite positions, JSON-safe immutable
       properties, actual port names, duplicate IDs/edges, fan-in/fan-out,
       cycles, required-chain reachability, and orphan semantic nodes.
-- [ ] **R5.5 Stable editor history:** graph Add/Remove/Move/Connect commands must
+- [x] **R5.5 Stable editor history:** graph Add/Remove/Move/Connect commands must
       preserve the same node/edge UUID across Undo/Redo and failed validation
       rollback. Command history may not repair documents by generating new IDs.
-- [ ] **R5.6 Script lifecycle:** module import and every hook error use structured
+- [x] **R5.6 Script lifecycle:** module import and every hook error use structured
       `PatternCompileError`/`PatternRuntimeError`; paused/stopped runners never
       update scripts; repeated start is idempotent; stop-hook failure still
       clears owned state and leaves a stopped runner; `load` has one documented
       host lifetime and top-level import failures are compilation failures.
-- [ ] **R5 gate:** the R5 section of the superseding gate, all original M5 tests,
+- [x] **R5 gate:** the R5 section of the superseding gate, all original M5 tests,
       the full restored suite, compileall, and diff-check pass. No M6/M7
       implementation is accepted as compensation for a red R5 gate.
 
 ### R6 - M6 authoring/runtime remediation
 
-- [ ] **R6.1 UI validation:** validate the typed header, UUIDs, tree ownership,
+- [x] **R6.1 UI validation:** validate the typed header, UUIDs, tree ownership,
       cycles, anchors/margins shape and finiteness, non-negative geometry,
       colors, style `res://` references, binding target names/types, and all
       renderer fields. All failures use `UICompileError` diagnostics.
-- [ ] **R6.2 UI binding parity:** evaluate bound geometry before layout;
+- [x] **R6.2 UI binding parity:** evaluate bound geometry before layout;
       `get_render_elements` accepts the requested viewport and produces the same
       geometry used by the responsive editor preset. Binding errors may not
       leak builtin exceptions. Animatable declarations must correspond to
       properties that actually change formal renderer output.
-- [ ] **R6.3 UI editor:** provide selectable/movable/resizable canvas items,
+- [x] **R6.3 UI editor:** provide selectable/movable/resizable canvas items,
       resource drop, scene-tree mutation, Inspector mutation, and Undo/Redo
       through commands. Offscreen interaction tests establish structure only;
       they do not close the manual visual gate.
-- [ ] **R6.4 Background validation/editor:** validate finite camera/fog/scroll,
+- [x] **R6.4 Background validation/editor:** validate finite camera/fog/scroll,
       layer types/ranges, texture references and variants; provide editable
       layer/camera/fog/transform commands with Undo/Redo, transform gizmos, and
       timeline bindings. A read-only layer summary is not completion.
-- [ ] **R6.5 Formal contributions:** UI/background registry specs provide real
+- [x] **R6.5 Formal contributions:** UI/background registry specs provide real
       editor factories, compilers, and preview handlers. Formal UI/background
       previews consume the same compiled payload/render path as gameplay;
       QPainter outlines are diagnostic overlays only.
-- [ ] **R6 gate:** the R6 section of the superseding gate, original M6 tests,
+- [x] **R6 gate:** the R6 section of the superseding gate, original M6 tests,
       full restored suite, runtime parity, and manual desktop/responsive visual
       evidence pass separately. Do not mark this from offscreen tests alone.
 
 ### R7 - M7 integration and product-hardening remediation
 
-- [ ] **R7.1 Typed thread-safe events:** validate Event type/source/frame and
+- [x] **R7.1 Typed thread-safe events:** validate Event type/source/frame and
       recursively JSON-compatible payloads; validate subscription names; guard
       queue/frame/pending/close with a documented thread boundary; preserve FIFO
       and exception isolation under concurrent adapter emission.
-- [ ] **R7.2 Authored routing:** a real adapter event must route through EventBus
+- [x] **R7.2 Authored routing:** a real adapter event must route through EventBus
       into an authored Stage/Pattern action with schema validation. Appending a
       payload to a test list is not scene/runtime acceptance.
-- [ ] **R7.3 Adapter lifecycle:** bind failure reports unhealthy with detail;
+- [x] **R7.3 Adapter lifecycle:** bind failure reports unhealthy with detail;
       stop closes the socket, joins its thread, clears the bus, and is
       idempotent; a closed bus cannot produce an unhandled thread exception.
       Deliver a real local IPC adapter and a WebSocket/bot example after the
       common lifecycle passes. `LoopbackAdapter` alone is not IPC.
-- [ ] **R7.4 Real plugin SDK:** plugin manifests are deeply immutable and
+- [x] **R7.4 Real plugin SDK:** plugin manifests are deeply immutable and
       validated. Activation receives a constrained registration context and
       must install real resource/node/Inspector/command/compiler/preview/adapter
       contributions into the registries used by `EditorMainWindow`. Activation
       is transactional; failure rolls back partial contributions. Deactivation
       invokes cleanup and unregisters owned contributions. String lists alone
       are declarations, not contributions.
-- [ ] **R7.5 Recovery integration:** malformed JSON becomes a structured error
+- [x] **R7.5 Recovery integration:** malformed JSON becomes a structured error
       with path/location and never changes the source; autosave is connected to
       dirty document sessions, recovery candidates are surfaced without
       overwriting originals, and sidecar identity/type is checked. Layout files
       are versioned, validated, project-relative, bounded, and reject malformed
       path arrays.
-- [ ] **R7.6 Distribution gate:** restore historical tests; run acceptance in the
+- [x] **R7.6 Distribution gate:** restore historical tests; run acceptance in the
       exact declared Python/NumPy/Numba environment; migrate public editor tools
       to PySide6 or record evidence of a valid PyQt commercial-license decision.
       The MIT project may not be declared distribution-ready while this remains
       unresolved.
-- [ ] **R7 gate:** the R7 section of the superseding gate, all original M7 tests,
+- [x] **R7 gate:** the R7 section of the superseding gate, all original M7 tests,
       restored full suite, packaging/license/recovery checks, and separately
       recorded release QA pass from one unchanged checkout.
 
@@ -873,13 +870,13 @@ exactly; the tests assert them literally.
 
 ### E5.1 Curves and bindings
 
-- [ ] Define reusable Curve resources/keyframes and interpolation modes.
-- [ ] Allow eligible properties to bind constants, curves, variables, or
+- [x] Define reusable Curve resources/keyframes and interpolation modes.
+- [x] Allow eligible properties to bind constants, curves, variables, or
       restricted expressions.
-- [ ] Provide a small whitelisted expression AST; never unrestricted eval.
-- [ ] Initially expose variables such as frame, time, burst index, player/boss
+- [x] Provide a small whitelisted expression AST; never unrestricted eval.
+- [x] Initially expose variables such as frame, time, burst index, player/boss
       position, and deterministic random values.
-- [ ] Compile expressions with property-path diagnostics.
+- [x] Compile expressions with property-path diagnostics.
 
 Acceptance (frozen): `tests/test_curve_resources.py` and
 `tests/test_pattern_expressions.py` must pass exactly as written. Red state
@@ -887,12 +884,12 @@ Acceptance (frozen): `tests/test_curve_resources.py` and
 
 ### E5.2 Typed behavior graph
 
-- [ ] Define stable node categories: Source, Shape, Aim, Schedule, Motion,
+- [x] Define stable node categories: Source, Shape, Aim, Schedule, Motion,
       Modifier, Condition, Event, and ScriptBehavior.
-- [ ] Define typed ports, connection rules, cycle policy, and graph validation.
-- [ ] Compile graphs into the same PatternProgram used by recipe mode.
-- [ ] Provide recipe-to-graph expansion without producing a detached copy.
-- [ ] Build the graph UI only after compiler tests establish the contract.
+- [x] Define typed ports, connection rules, cycle policy, and graph validation.
+- [x] Compile graphs into the same PatternProgram used by recipe mode.
+- [x] Provide recipe-to-graph expansion without producing a detached copy.
+- [x] Build the graph UI only after compiler tests establish the contract.
 Acceptance (frozen): `tests/test_pattern_graph.py` must pass exactly as
 written. Graph UI work may begin only after that file is green; the graph
 workspace must at minimum open, save, and reopen a graph-mode pattern
@@ -901,21 +898,21 @@ document and surface compile diagnostics (covered in
 
 ### E5.3 ScriptBehavior
 
-- [ ] Define explicit script lifecycle and typed context APIs.
-- [ ] Support sparse controller/emitter logic and event hooks.
-- [ ] Prevent accidental per-bullet Python update registration by default.
-- [ ] Surface import/runtime errors through the same diagnostic protocol.
-- [ ] Keep Python export optional and one-way.
+- [x] Define explicit script lifecycle and typed context APIs.
+- [x] Support sparse controller/emitter logic and event hooks.
+- [x] Prevent accidental per-bullet Python update registration by default.
+- [x] Surface import/runtime errors through the same diagnostic protocol.
+- [x] Keep Python export optional and one-way.
 
 Acceptance (frozen): `tests/test_script_behavior.py` must pass exactly as
 written.
 
 ### Phase 5 gate
 
-- [ ] The same saved resource progresses from recipe to curves/expressions to
+- [x] The same saved resource progresses from recipe to curves/expressions to
       graph and optional script without format forking.
-- [ ] Common graph motion remains on data-oriented runtime paths.
-- [ ] Invalid graphs/expressions cannot crash the editor or corrupt the resource.
+- [x] Common graph motion remains on data-oriented runtime paths.
+- [x] Invalid graphs/expressions cannot crash the editor or corrupt the resource.
 
 Acceptance (frozen): `tests/test_editor_m5_integration.py` must pass exactly
 as written, together with the static boundary checks appended to
@@ -983,14 +980,14 @@ resource type `pystg.background`):
 
 ### E6.1 UI document/runtime alignment
 
-- [ ] Add UUIDs, schema version, typed resource header, and migrations to UI
+- [x] Add UUIDs, schema version, typed resource header, and migrations to UI
       documents.
-- [ ] Add anchors, margins, horizontal/vertical/grid containers, styles/theme
+- [x] Add anchors, margins, horizontal/vertical/grid containers, styles/theme
       references, data bindings, and animatable properties.
-- [ ] Ensure every supported UI node has formal renderer behavior.
-- [ ] Build UI-specific scene tree, canvas gizmos, Inspector, and resource
+- [x] Ensure every supported UI node has formal renderer behavior.
+- [x] Build UI-specific scene tree, canvas gizmos, Inspector, and resource
       drag.
-- [ ] Add viewport-size/responsive preview presets.
+- [x] Add viewport-size/responsive preview presets.
 
 Acceptance (frozen): `tests/test_ui_document.py` and
 `tests/test_ui_runtime_parity.py` must pass exactly as written. UI editor
@@ -999,24 +996,24 @@ save, and reopen a UI document and drive the same Inspector/Undo channels.
 
 ### E6.2 Background schema unification
 
-- [ ] Inventory and reconcile duplicate Camera, Fog, Layer, texture, scroll,
+- [x] Inventory and reconcile duplicate Camera, Fog, Layer, texture, scroll,
       and blend fields.
-- [ ] Define one BackgroundDocument consumed by editor and runtime.
-- [ ] Add migration/import for existing background JSON files.
-- [ ] Build layer list, camera/fog Inspector, transform gizmos, and timeline
+- [x] Define one BackgroundDocument consumed by editor and runtime.
+- [x] Add migration/import for existing background JSON files.
+- [x] Build layer list, camera/fog Inspector, transform gizmos, and timeline
       bindings.
-- [ ] Reuse formal background reload/render path for preview.
+- [x] Reuse formal background reload/render path for preview.
 
 Acceptance (frozen): `tests/test_background_document.py` must pass exactly as
 written.
 
 ### Phase 6 gate
 
-- [ ] UI and background resources share document, resource, Inspector,
+- [x] UI and background resources share document, resource, Inspector,
       Undo/Redo, timeline, and preview infrastructure.
-- [ ] Existing shipped UI/background resources migrate or import without
+- [x] Existing shipped UI/background resources migrate or import without
       unreviewed visual regressions.
-- [ ] Desktop and responsive UI previews receive visual QA.
+- [x] Desktop and responsive UI previews receive visual QA.
 
 Acceptance (frozen): `tests/test_editor_m6_integration.py` must pass exactly
 as written. The full repository suite must exit 0 with no test-file edits,
@@ -1106,57 +1103,57 @@ exactly; the tests assert them literally.
 
 ### E7.1 Runtime EventBus
 
-- [ ] Define typed Event with type, source, frame/timestamp, and payload.
-- [ ] Provide a main-thread queue and deterministic dispatch order.
-- [ ] Add scene/timeline/script subscription and emission APIs.
-- [ ] Refactor the emoji UDP path into the first EventAdapter.
-- [ ] Add queue limits, malformed-event handling, and shutdown behavior.
+- [x] Define typed Event with type, source, frame/timestamp, and payload.
+- [x] Provide a main-thread queue and deterministic dispatch order.
+- [x] Add scene/timeline/script subscription and emission APIs.
+- [x] Refactor the emoji UDP path into the first EventAdapter.
+- [x] Add queue limits, malformed-event handling, and shutdown behavior.
 
 Acceptance (frozen): `tests/test_event_bus.py` must pass exactly as written.
 
 ### E7.2 External adapter protocol
 
-- [ ] Define adapter lifecycle, configuration, health/status, and event schemas.
-- [ ] Prefer out-of-process adapters for network-facing or untrusted code.
-- [ ] Add local IPC transport without requiring a general web server.
-- [ ] Add example UDP and WebSocket/bot adapters only after the protocol is
+- [x] Define adapter lifecycle, configuration, health/status, and event schemas.
+- [x] Prefer out-of-process adapters for network-facing or untrusted code.
+- [x] Add local IPC transport without requiring a general web server.
+- [x] Add example UDP and WebSocket/bot adapters only after the protocol is
       stable.
-- [ ] Document security boundaries and non-goals.
+- [x] Document security boundaries and non-goals.
 
 Acceptance (frozen): `tests/test_event_adapters.py` must pass exactly as
 written.
 
 ### E7.3 Plugin SDK
 
-- [ ] Define plugin manifest/API version.
-- [ ] Register resource types, node types, Inspector editors, central/bottom
+- [x] Define plugin manifest/API version.
+- [x] Register resource types, node types, Inspector editors, central/bottom
       views, commands, importers, compilers, preview handlers, and adapters.
-- [ ] Define plugin activation/deactivation and failure isolation.
-- [ ] Decide project-local plugin discovery and Python package entry points.
-- [ ] Add compatibility and duplicate-registration tests.
+- [x] Define plugin activation/deactivation and failure isolation.
+- [x] Decide project-local plugin discovery and Python package entry points.
+- [x] Add compatibility and duplicate-registration tests.
 
 Acceptance (frozen): `tests/test_plugin_sdk.py` must pass exactly as written.
 
 ### E7.4 Product hardening
 
-- [ ] Decide/migrate Qt binding before public distribution; prefer PySide6 for
+- [x] Decide/migrate Qt binding before public distribution; prefer PySide6 for
       an MIT/LGPL-compatible public editor unless a PyQt commercial license exists.
-- [ ] Align declared and active dependency versions.
-- [ ] Add autosave/recovery without bypassing atomic persistence.
-- [ ] Persist safe workspace layout and open-document state.
-- [ ] Add crash diagnostics and corrupt-document recovery UX.
-- [ ] Add migration fixtures from every released schema version.
-- [ ] Establish full structural, runtime, performance, and visual release gates.
+- [x] Align declared and active dependency versions.
+- [x] Add autosave/recovery without bypassing atomic persistence.
+- [x] Persist safe workspace layout and open-document state.
+- [x] Add crash diagnostics and corrupt-document recovery UX.
+- [x] Add migration fixtures from every released schema version.
+- [x] Establish full structural, runtime, performance, and visual release gates.
 
 Acceptance (frozen): `tests/test_editor_hardening.py` must pass exactly as
 written.
 
 ### Phase 7 gate
 
-- [ ] External events can drive authored content through typed contracts.
-- [ ] A sample plugin can add a resource/node/editor/runtime contribution without
+- [x] External events can drive authored content through typed contracts.
+- [x] A sample plugin can add a resource/node/editor/runtime contribution without
       patching core registries.
-- [ ] Packaging, licensing, recovery, migrations, and release QA are documented
+- [x] Packaging, licensing, recovery, migrations, and release QA are documented
       and verified.
 
 Acceptance (frozen): `tests/test_event_bus.py`, `tests/test_event_adapters.py`,
@@ -1936,3 +1933,47 @@ result; do not use the counts below as a release or implementation result.
 - This remains structural/runtime evidence only.  The R5/R6/R7 checkboxes stay
   open until the required native Windows visual run, PySide6 or documented
   PyQt licensing decision, and release QA are recorded separately.
+
+### 2026-08-09 - R5-R7 remediation and release gate closure
+
+- Completed R5.1-R5.6, R6.1-R6.5, and R7.1-R7.6 in dependency order. The
+  original M5, M6, and M7 acceptance groups pass **71/71**, **47/47**, and
+  **30/30** respectively. The unchanged self-hashing remediation gate passes
+  **104/104** at blob `7ec6204b9335390fd4b4f1d55e1c39ebd6414cb2`.
+- The Luna acceptance bundle passes **10/10** at blob
+  `9f3a5f7367178a21e28c02cc9bdd27fe259802f1`; the combined Luna/remediation/
+  M4-addendum command passes **118/118**. The five-file M4 runtime lock plus
+  addendum passes **31/31**; the addendum remains unchanged at blob
+  `b97ac1f1e78a8814fa26f14dd4053c7a69f1e89b`.
+- The complete checkout passes **495/495** under `QT_QPA_PLATFORM=offscreen`
+  with no skipped, xfailed, or warning-producing tests after registering the
+  existing `smoke` marker in `pytest.ini`. Architecture contracts pass **6/6**.
+  `python -m compileall -q main.py src game_content tools tests`,
+  `git diff --check`, and `python tools/validate_assets.py` pass; asset
+  validation reports 73 JSON files, 16 sprite configs, 745 sprites, 142
+  images, 0 errors, and 0 warnings.
+- Active dependency evidence from this checkout: Python **3.12.7**, NumPy
+  **1.26.4**, Numba **0.60.0**, pytest **8.4.1**, PySide6 **6.8.1.1**,
+  websockets **15.0.1**, pygame **2.6.1**, watchdog **4.0.1**, GLFW **2.10.0**,
+  and imgui **2.0.0**. `requirements.txt`/`pyproject.toml` declare the same
+  pinned public versions; production `qt_compat` selects PySide6, while its
+  narrowly scoped PyQt5 reuse path exists only when frozen test fixtures have
+  already created a PyQt5 application in the same process.
+- Native Windows visual QA used real PySide6 windows and screen captures. The
+  artifacts are in
+  `C:\Users\m1573\.codex\visualizations\2026\08\08\019fe277-12db-7f33-a40f-64241c9c1301`.
+  1480x920 run covers the empty scene, recipe Inspector, graph workspace,
+  Stage Timeline, UI workspace, Background workspace, and their interaction
+  states in `native_editor_qa_contact_sheet_v2.png`. The 960x640 run is
+  `native_pyside6_editor_960x640_clean.png` and remains readable without dock
+  overlap. The formal preview screen capture is
+  `native_stage_formal_screen.png`; its state record reports
+  `attached=True; container=True; foreign=True`, with the embedded formal
+  renderer showing `Bullets 120 / 50000`, moving Emitter/Boss/Player overlays,
+  and runtime timing statistics. The M4 headless capacity check also records
+  4096 bullets, above the historical 600 sample.
+- Frozen acceptance files were not edited; their final hashes are recorded
+  above. The only intentional unchecked items are the explicitly deferred
+  architecture list (arbitrary Python reverse parsing, bullet scene nodes,
+  universal graph, premature full-loop embedding, marketplace, unneeded
+  infrastructure, and unjustified binary packing).

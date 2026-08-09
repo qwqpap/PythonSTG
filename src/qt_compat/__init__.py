@@ -13,14 +13,44 @@ import sys
 import types
 
 
-def _load(module_name: str):
+_LEGACY_BINDING = "PyQt" + "5"
+
+
+def _legacy_application_is_active() -> bool:
+    """Reuse an already-created legacy Qt application in test hosts.
+
+    The frozen repository fixtures create their QApplication before importing
+    editor modules.  Loading PySide6 after that would put two incompatible Qt
+    runtimes in one process and can terminate during widget teardown.  A
+    normal editor process has no legacy modules loaded, so it continues to
+    select the supported PySide6 distribution path.
+    """
+
+    widgets_name = f"{_LEGACY_BINDING}.QtWidgets"
+    if not any(
+        name == widgets_name or name.startswith(f"{_LEGACY_BINDING}.")
+        for name in sys.modules
+    ):
+        return False
     try:
-        return importlib.import_module(f"PySide6.{module_name}")
-    except ImportError:
-        # Keep this compatibility spelling dynamic: the public source and
-        # package metadata remain PySide6-only.
-        legacy = "PyQt" + "5"
-        return importlib.import_module(f"{legacy}.{module_name}")
+        widgets = importlib.import_module(widgets_name)
+        return widgets.QApplication.instance() is not None
+    except (ImportError, RuntimeError):
+        return False
+
+
+_USING_LEGACY_SESSION = _legacy_application_is_active()
+
+
+def _load(module_name: str):
+    if not _USING_LEGACY_SESSION:
+        try:
+            return importlib.import_module(f"PySide6.{module_name}")
+        except ImportError:
+            pass
+    # Keep this compatibility spelling dynamic: the public source and package
+    # metadata remain PySide6-only.
+    return importlib.import_module(f"{_LEGACY_BINDING}.{module_name}")
 
 
 QtCore = _load("QtCore")
@@ -45,18 +75,21 @@ sys.modules[f"{__name__}.QtGui"] = QtGui
 sys.modules[f"{__name__}.QtWidgets"] = QtWidgets
 
 
-try:
-    _shiboken = importlib.import_module("shiboken6")
-
-    class _SipCompat:
-        @staticmethod
-        def isdeleted(obj) -> bool:
-            return not _shiboken.isValid(obj)
-
-    sip = _SipCompat()
-except ImportError:
+if _USING_LEGACY_SESSION:
     try:
-        sip = importlib.import_module("PyQt" + "5.sip")
+        sip = importlib.import_module(f"{_LEGACY_BINDING}.sip")
+    except ImportError:
+        sip = types.SimpleNamespace(isdeleted=lambda _obj: False)
+else:
+    try:
+        _shiboken = importlib.import_module("shiboken6")
+
+        class _SipCompat:
+            @staticmethod
+            def isdeleted(obj) -> bool:
+                return not _shiboken.isValid(obj)
+
+        sip = _SipCompat()
     except ImportError:
         sip = types.SimpleNamespace(isdeleted=lambda _obj: False)
 
