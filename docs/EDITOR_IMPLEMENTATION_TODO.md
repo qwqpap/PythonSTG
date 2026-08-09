@@ -134,7 +134,7 @@ git diff --check
 | --- | --- | --- | --- |
 | N4.0 | 响应式时间线 Contract | `[x]` | N3 |
 | N4.1 | ReactiveClip 正式运行时与实例 trace | `[x]` | N4.0 |
-| N4.2 | 时间线槽位、overlay、导航与冲突编辑 | `[ ]` | N4.1 |
+| N4.2 | 时间线槽位、overlay、导航与冲突编辑 | `[x]` | N4.1 |
 | N5.0 | 版本化预设 Contract | `[ ]` | N4 |
 | N5.1 | 首发预设库 | `[ ]` | N5.0 |
 | N5.2 | 虚拟展开 | `[ ]` | N5.1 |
@@ -212,7 +212,7 @@ git diff --check
 
 **验收文件**：`tests/test_editor_reactive_clips.py`、`tests/test_reaction_timeline_integration.py`；回归 `tests/test_editor_timeline_model.py`、`tests/test_editor_timeline_workspace.py`、`tests/test_state_graph_editor.py`；另附 native visual 证据。
 
-**Evidence（2026-08-10）**：Structural/Runtime：`python -m pytest -q tests/test_editor_reactive_clips.py tests/test_reaction_timeline_integration.py tests/test_editor_timeline_workspace.py tests/test_state_graph_editor.py`（通过）；offscreen Qt 只作为结构和运行证据。Native visual gate 未关闭：当前 Windows 会话的真实 `EditorMainWindow` smoke 在构造阶段异常退出，不能用 offscreen 结果替代，因此本项保持 `[ ]`。
+**Evidence（2026-08-10）**：Structural/Runtime：`$env:QT_QPA_PLATFORM='offscreen'; python -m pytest -q tests/test_editor_reactive_clips.py tests/test_reaction_timeline_integration.py tests/test_editor_timeline_workspace.py tests/test_state_graph_editor.py`（通过）；offscreen Qt 仅作为结构和运行证据。Native visual：`Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue; python -u tools/verify_native_editor_n4.py --project . --screenshot C:\Users\m1573\AppData\Local\Temp\pystg-n4-native-editor-script.png` 输出 `native_editor_n4_ok`，真实 PySide6 `EditorMainWindow` 验证 Reactive 轨道/片段、Inspector activation/reaction/scope、runtime overlay、局部导航、overlay 不写回文档，并保存截图；本项门禁已关闭。
 
 ## 6. N5：可展开的版本化预设
 
