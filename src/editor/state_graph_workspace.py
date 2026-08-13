@@ -21,6 +21,7 @@ from src.qt_compat.QtWidgets import (
 )
 
 from .document import SceneDocument, StateGraphSpec, StateSpec
+from .i18n import LANGUAGE_CHINESE, LanguageManager
 
 
 class StateGraphEditor(QWidget):
@@ -44,6 +45,7 @@ class StateGraphEditor(QWidget):
         self.selected_state_id: str | None = None
         self.active_state_path: tuple[str, ...] = ()
         self.context_name = "StageFlow"
+        self._language_manager: LanguageManager | None = None
         self._rebuilding = False
 
         outer = QVBoxLayout(self)
@@ -187,6 +189,39 @@ class StateGraphEditor(QWidget):
         transition_form.setRowStretch(4, 1)
         self._trigger_changed()
 
+    def set_language_manager(self, manager: LanguageManager) -> None:
+        self._language_manager = manager
+        self.transition_frames.setSuffix(
+            " 帧" if manager.language == LANGUAGE_CHINESE else " frames"
+        )
+
+    def _tr(self, text: str) -> str:
+        return self._language_manager.translate(text) if self._language_manager else text
+
+    def _duration_text(self, frames: int) -> str:
+        if (
+            self._language_manager is not None
+            and self._language_manager.language == LANGUAGE_CHINESE
+        ):
+            return f"{frames} 帧"
+        return f"{frames} frames"
+
+    def _state_display_name(self, name: str) -> str:
+        if (
+            self._language_manager is not None
+            and self._language_manager.language == LANGUAGE_CHINESE
+        ):
+            return {
+                "Default": "默认阶段",
+                "Intro": "登场",
+                "Normal": "通常阶段",
+                "Enrage": "强化阶段",
+                "End": "结束",
+                "Wave A": "第一波",
+                "Wave B": "第二波",
+            }.get(name, name)
+        return name
+
     @staticmethod
     def _item_state_id(item: QTreeWidgetItem | None) -> str | None:
         if item is None:
@@ -214,7 +249,7 @@ class StateGraphEditor(QWidget):
         self.selected_state_id = None
         self.active_state_path = ()
         self.context_name = "StageFlow"
-        self.context_label.setText(self.context_name)
+        self.context_label.setText(self._tr(self.context_name))
         self.tree.clear()
         self.state_name.clear()
         self.transition_picker.clear()
@@ -259,7 +294,10 @@ class StateGraphEditor(QWidget):
             def add_graph(graph: StateGraphSpec, parent: QTreeWidgetItem | None) -> None:
                 for state in sorted(graph.states, key=lambda item: (item.order, item.id)):
                     item = QTreeWidgetItem(
-                        [state.name, f"{state.timeline_duration_frames} fr"]
+                        [
+                            self._state_display_name(state.name),
+                            self._duration_text(state.timeline_duration_frames),
+                        ]
                     )
                     item.setData(0, Qt.UserRole, state.id)
                     item.setToolTip(0, state.id)
@@ -311,7 +349,7 @@ class StateGraphEditor(QWidget):
         self.context_name = (
             "StageFlow" if graph is self.document.state_graph else "PhaseFlow"
         )
-        self.context_label.setText(self.context_name)
+        self.context_label.setText(self._tr(self.context_name))
         self._refresh_details()
         if emit:
             self.stateSelected.emit(state.id)
@@ -332,7 +370,9 @@ class StateGraphEditor(QWidget):
                 for sibling in sorted(
                     graph.states, key=lambda item: (item.order, item.id)
                 ):
-                    self.transition_target.addItem(sibling.name, sibling.id)
+                    self.transition_target.addItem(
+                        self._state_display_name(sibling.name), sibling.id
+                    )
         self.transition_target.blockSignals(False)
         self.transition_picker.blockSignals(True)
         self.transition_picker.clear()

@@ -96,6 +96,7 @@ TIMELINE_CLIP_KINDS = frozenset(
         "Pattern",
         "Movement",
         "Audio",
+        "Background",
         "Event",
         "Property",
         "ScriptEvent",
@@ -323,6 +324,18 @@ class TimelineClip:
                 self.payload.get("resource") or self.payload.get("name") or ""
             ).strip():
                 raise DocumentError("Audio play clip needs payload.resource or payload.name")
+        elif self.kind == "Background":
+            if not str(self.payload.get("resource") or "").strip():
+                raise DocumentError("Background clip needs payload.resource")
+            fade_frames = self.payload.get("fade_frames", 0)
+            if (
+                isinstance(fade_frames, bool)
+                or not isinstance(fade_frames, int)
+                or fade_frames < 0
+            ):
+                raise DocumentError(
+                    "Background clip fade_frames must be a non-negative integer"
+                )
         elif self.kind == "Event":
             if not str(self.payload.get("event_type") or "").strip():
                 raise DocumentError("Event clip needs payload.event_type")

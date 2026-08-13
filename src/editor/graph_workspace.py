@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.qt_compat import sip
-from src.qt_compat.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from src.qt_compat.QtCore import QEvent, QPointF, QRectF, Qt, pyqtSignal
 from src.qt_compat.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen, QPolygonF
 from src.qt_compat.QtWidgets import (
     QComboBox,
@@ -26,6 +26,7 @@ from src.qt_compat.QtWidgets import (
 from src.pattern import BehaviorGraph, BehaviorGraphNode, PatternDocument
 from src.pattern.graph import PORT_TYPES
 
+from .i18n import LanguageManager
 from .pattern_workspace import PatternCanvas
 
 GRAPH_CATEGORY_COLORS = {
@@ -99,7 +100,13 @@ CREATABLE_NODE_CATEGORIES = (
 
 NODE_WIDTH = 150.0
 NODE_HEIGHT = 64.0
-PORT_RADIUS = 7.0
+PORT_RADIUS = 11.0
+PORT_HIT_RADIUS = 15.0
+# Put the handle outside the movable card.  When the port sat directly on the
+# card border, native Windows input could select and move the card even though
+# the pointer looked as if it was on the port.  The small gutter makes the two
+# gestures visually and spatially unambiguous.
+PORT_GUTTER = 0.0
 
 
 def can_connect(source_category: str, target_category: str) -> bool:
@@ -131,24 +138,64 @@ class GraphPortItem(QGraphicsObject):
         self.setPos(position)
         self.setCursor(Qt.CrossCursor)
         self.setAcceptHoverEvents(True)
-        self.setToolTip(f"{kind} port · {port_type}")
         self._hovered = False
         self._drag = False
-        self._error_visual = False
+        self._drop_state: str | None = None
+        # The parent node owns presses over the visible handle.  Keeping ports
+        # mouse-transparent avoids a native Qt child/parent grab race while
+        # the view can still find them for hit testing and drop snapping.
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.set_display_language(None)
+
+    def set_display_language(self, manager: LanguageManager | None) -> None:
+        kind = {"in": "Input", "out": "Output"}[self.kind]
+        port_type = {
+            "source": "Bullet source",
+            "geometry": "Emission points",
+            "aim": "Direction",
+            "schedule": "Fire timing",
+            "motion": "Bullet motion",
+            "modifier": "Final bullets",
+        }.get(self.port_type, self.port_type.replace("_", " ").title())
+        if manager is not None:
+            kind = manager.translate(kind)
+            port_type = manager.translate(port_type)
+        self.setToolTip(f"{kind}：{port_type}")
 
     def boundingRect(self) -> QRectF:
-        return QRectF(-PORT_RADIUS, -PORT_RADIUS, PORT_RADIUS * 2, PORT_RADIUS * 2)
+        # The visible dot stays compact while the mouse target is deliberately
+        # generous.  A seven-pixel target became nearly impossible to grab
+        # after fitInView scaled a larger graph down.
+        return QRectF(
+            -PORT_HIT_RADIUS,
+            -PORT_HIT_RADIUS,
+            PORT_HIT_RADIUS * 2,
+            PORT_HIT_RADIUS * 2,
+        )
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addEllipse(self.boundingRect())
+        return path
 
     def set_error_visual(self, error: bool) -> None:
-        self._error_visual = bool(error)
+        self.set_drop_state("invalid" if error else None)
+
+    def set_drop_state(self, state: str | None) -> None:
+        if state not in {None, "valid", "invalid"}:
+            raise ValueError(f"Unsupported port drop state: {state!r}")
+        self._drop_state = state
         self.update()
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         del option, widget
         painter.setRenderHint(QPainter.Antialiasing)
-        if self._error_visual:
+        if self._drop_state == "invalid":
             painter.setPen(QPen(QColor("#ff4d4d"), 2))
             painter.setBrush(QColor("#ff4d4d"))
+        elif self._drop_state == "valid":
+            painter.setPen(QPen(QColor("#ffffff"), 3))
+            painter.setBrush(QColor("#5ee6a8"))
         elif self._drag:
             painter.setPen(QPen(QColor("#ffffff"), 2))
             painter.setBrush(QColor("#ffffff"))
@@ -156,10 +203,19 @@ class GraphPortItem(QGraphicsObject):
             painter.setPen(QPen(QColor("#ffffff"), 2))
             painter.setBrush(QColor("#ffd166"))
         else:
-            painter.setPen(QPen(QColor("#0b1220"), 1))
-            painter.setBrush(QColor("#8b9bb4"))
+            # Connection handles must remain obvious without requiring hover.
+            # Blue/green also makes input and output direction distinguishable
+            # before the user starts dragging.
+            painter.setPen(QPen(QColor("#f8fafc"), 2))
+            painter.setBrush(QColor("#60a5fa" if self.kind == "in" else "#4ade80"))
         painter.drawEllipse(
             QRectF(-PORT_RADIUS, -PORT_RADIUS, PORT_RADIUS * 2, PORT_RADIUS * 2)
+        )
+        painter.setPen(QPen(QColor("#0f172a"), 1))
+        painter.drawText(
+            QRectF(-PORT_RADIUS, -PORT_RADIUS, PORT_RADIUS * 2, PORT_RADIUS * 2),
+            Qt.AlignCenter,
+            "I" if self.kind == "in" else "O",
         )
 
     def hoverEnterEvent(self, event) -> None:
@@ -177,7 +233,7 @@ class GraphPortItem(QGraphicsObject):
             self._drag = True
             self.update()
             self.portDrag.emit(
-                self, self.mapToScene(QPointF(0.0, 0.0))
+                self, event.scenePos()
             )
             event.accept()
             if sip.isdeleted(self):
@@ -187,7 +243,10 @@ class GraphPortItem(QGraphicsObject):
 
     def mouseMoveEvent(self, event) -> None:
         if self._drag:
-            self.portDragMove.emit(self, self.mapToScene(QPointF(0.0, 0.0)))
+            # GraphCanvas updates the wire from viewport coordinates.  Item
+            # scenePos values differ between Qt bindings once the pointer has
+            # left the item's bounds and previously overwrote the correct view
+            # position with a stale transformed coordinate.
             event.accept()
             if sip.isdeleted(self):
                 return
@@ -210,14 +269,21 @@ class GraphNodeItem(QGraphicsObject):
     nodePositionCommitted = pyqtSignal(str, float, float)
     nodeSelected = pyqtSignal(str)
 
-    def __init__(self, node: BehaviorGraphNode):
+    def __init__(
+        self,
+        node: BehaviorGraphNode,
+        language_manager: LanguageManager | None = None,
+    ):
         super().__init__()
         self.node_id = node.id
         self.category = node.category
         self.node_type = node.node_type
         self._name = node.name
         self._properties = dict(node.properties)
+        self._language_manager = language_manager
         self._error = False
+        self._ports: dict[str, GraphPortItem] = {}
+        self._proxy_drag_port: GraphPortItem | None = None
         self.setFlags(
             QGraphicsItem.ItemIsMovable
             | QGraphicsItem.ItemIsSelectable
@@ -231,6 +297,7 @@ class GraphNodeItem(QGraphicsObject):
     def add_port(self, kind: str, port_type: str, position: QPointF) -> GraphPortItem:
         port = GraphPortItem(self.node_id, kind, port_type, position, parent=self)
         port.setZValue(3)
+        self._ports[kind] = port
         return port
 
     def boundingRect(self) -> QRectF:
@@ -241,20 +308,27 @@ class GraphNodeItem(QGraphicsObject):
         self.update()
 
     def summary(self) -> str:
+        tr = (
+            self._language_manager.translate
+            if self._language_manager is not None
+            else lambda text: text
+        )
         if self.category == "shape":
-            return f"{self.node_type} · {self._properties.get('count', 24)}"
+            count = self._properties.get("count", 24)
+            return f"{tr(self.node_type)} · {tr('{count} bullets').format(count=count)}"
         if self.category == "aim":
-            return f"{self.node_type} · {self._properties.get('angle', 270.0)}°"
+            return f"{tr(self.node_type)} · {self._properties.get('angle', 270.0)}°"
         if self.category == "schedule":
-            return (
-                f"every {self._properties.get('interval_frames', 20)}f · "
-                f"x{self._properties.get('burst_count', 1)}"
+            interval = self._properties.get("interval_frames", 20)
+            bursts = self._properties.get("burst_count", 1)
+            return tr("Every {interval} frames · {bursts} bursts").format(
+                interval=interval, bursts=bursts
             )
         if self.category == "motion":
-            return f"speed {self._properties.get('speed', 2.0)}"
+            return tr("Speed {value}").format(value=self._properties.get("speed", 2.0))
         if self.category == "modifier":
-            return "rotate bursts"
-        return self.node_type
+            return tr("Rotate each burst")
+        return tr(self.node_type)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         del option, widget
@@ -273,7 +347,11 @@ class GraphNodeItem(QGraphicsObject):
         painter.drawText(
             QRectF(bounds.left(), bounds.top() + 6, bounds.width(), 18),
             Qt.AlignHCenter | Qt.AlignTop,
-            self._name,
+            (
+                self._language_manager.translate(self._name)
+                if self._language_manager is not None
+                else self._name
+            ),
         )
         painter.setPen(QPen(QColor("#c7d2e4"), 1))
         painter.drawText(
@@ -294,6 +372,13 @@ class GraphNodeItem(QGraphicsObject):
         return super().itemChange(change, value)
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._proxy_drag_port is not None:
+            port = self._proxy_drag_port
+            self._proxy_drag_port = None
+            port.portDragMove.emit(port, event.scenePos())
+            port.portDragRelease.emit(port)
+            event.accept()
+            return
         self.nodePositionCommitted.emit(
             self.node_id, float(self.pos().x()), float(self.pos().y())
         )
@@ -303,11 +388,32 @@ class GraphNodeItem(QGraphicsObject):
         super().mouseReleaseEvent(event)
 
     def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            point = event.pos()
+            kind = None
+            if "in" in self._ports and point.x() <= self.boundingRect().left() + PORT_HIT_RADIUS * 2:
+                kind = "in"
+            elif "out" in self._ports and point.x() >= self.boundingRect().right() - PORT_HIT_RADIUS * 2:
+                kind = "out"
+            if kind is not None:
+                port = self._ports[kind]
+                self._proxy_drag_port = port
+                port.portDrag.emit(port, port.scenePos())
+                event.accept()
+                return
         self.nodeSelected.emit(self.node_id)
         if sip.isdeleted(self):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._proxy_drag_port is not None:
+            port = self._proxy_drag_port
+            port.portDragMove.emit(port, event.scenePos())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
 
 
 class GraphEdgeItem(QGraphicsObject):
@@ -326,8 +432,12 @@ class GraphEdgeItem(QGraphicsObject):
         self.update()
 
     def _endpoints(self) -> tuple[QPointF, QPointF]:
-        start = self._source.mapToScene(QPointF(NODE_WIDTH / 2, 0.0))
-        end = self._target.mapToScene(QPointF(-NODE_WIDTH / 2, 0.0))
+        start = self._source.mapToScene(
+            QPointF(NODE_WIDTH / 2 + PORT_GUTTER, 0.0)
+        )
+        end = self._target.mapToScene(
+            QPointF(-NODE_WIDTH / 2 - PORT_GUTTER, 0.0)
+        )
         return start, end
 
     def boundingRect(self) -> QRectF:
@@ -401,6 +511,7 @@ class GraphCanvas(QGraphicsView):
     edgeRequested = pyqtSignal(str, str)
     nodeRemoveRequested = pyqtSignal(str)
     edgeRemoveRequested = pyqtSignal(str)
+    actionSearchRequested = pyqtSignal(object)
 
     def __init__(self, parent=None):
         self.graphics_scene = QGraphicsScene(parent)
@@ -408,12 +519,26 @@ class GraphCanvas(QGraphicsView):
         self.setObjectName("graphCanvas")
         self.setFrameShape(QGraphicsView.NoFrame)
         self.setRenderHints(QPainter.Antialiasing)
+        # The view owns connection gestures before QGraphicsScene can hand the
+        # same press to a movable node.  This avoids platform-dependent mouse
+        # grabs and keeps wire dragging distinct from moving a card.
         self._graph: BehaviorGraph | None = None
         self._node_items: dict[str, GraphNodeItem] = {}
         self._edge_items: dict[str, GraphEdgeItem] = {}
         self._drag_line: QGraphicsItem | None = None
         self._drag_port: GraphPortItem | None = None
         self._drag_target: GraphPortItem | None = None
+        self._compatible_targets: list[GraphPortItem] = []
+        self._space_pressed = False
+        self._space_dragged = False
+        self._drag_mode_before_space = self.dragMode()
+        self._language_manager: LanguageManager | None = None
+
+    def set_language_manager(self, manager: LanguageManager) -> None:
+        self._language_manager = manager
+        for item in self.graphics_scene.items():
+            if isinstance(item, GraphPortItem):
+                item.set_display_language(manager)
 
     # -- document binding ---------------------------------------------------
 
@@ -425,10 +550,11 @@ class GraphCanvas(QGraphicsView):
         self._drag_line = None
         self._drag_port = None
         self._drag_target = None
+        self._compatible_targets = []
         if graph is None:
             return
         for node in graph.nodes:
-            item = GraphNodeItem(node)
+            item = GraphNodeItem(node, self._language_manager)
             item.nodePositionCommitted.connect(self._node_moved)
             item.nodeSelected.connect(self.nodeSelected)
             if node.position is not None:
@@ -441,20 +567,22 @@ class GraphCanvas(QGraphicsView):
                 port = item.add_port(
                     "in",
                     input_type,
-                    QPointF(-NODE_WIDTH / 2, 0.0),
+                    QPointF(-NODE_WIDTH / 2 - PORT_GUTTER, 0.0),
                 )
                 port.portDrag.connect(self._port_drag_started)
                 port.portDragMove.connect(self._port_drag_moved)
                 port.portDragRelease.connect(self._port_drag_released)
+                port.set_display_language(self._language_manager)
             if output_type is not None:
                 port = item.add_port(
                     "out",
                     output_type,
-                    QPointF(NODE_WIDTH / 2, 0.0),
+                    QPointF(NODE_WIDTH / 2 + PORT_GUTTER, 0.0),
                 )
                 port.portDrag.connect(self._port_drag_started)
                 port.portDragMove.connect(self._port_drag_moved)
                 port.portDragRelease.connect(self._port_drag_released)
+                port.set_display_language(self._language_manager)
         for edge in graph.edges:
             source = self._node_items.get(edge.from_node)
             target = self._node_items.get(edge.to_node)
@@ -514,14 +642,27 @@ class GraphCanvas(QGraphicsView):
     # -- port drag wiring ---------------------------------------------------
 
     def _port_drag_started(self, port: GraphPortItem, scene_pos: QPointF) -> None:
+        if self._drag_port is not None:
+            return
         self._drag_port = port
         self._drag_target = None
+        port._drag = True
+        port.update()
         line = QGraphicsLineItem()
         line.setPen(QPen(QColor("#ffffff"), 2, Qt.DashLine))
         line.setZValue(10)
         line.setLine(scene_pos.x(), scene_pos.y(), scene_pos.x(), scene_pos.y())
         self.graphics_scene.addItem(line)
         self._drag_line = line
+        self._compatible_targets = [
+            item
+            for item in self.graphics_scene.items()
+            if isinstance(item, GraphPortItem)
+            and item is not port
+            and _drag_can_connect_pair(port, item)
+        ]
+        for item in self._compatible_targets:
+            item.set_drop_state("valid")
 
     def _port_drag_moved(self, port: GraphPortItem, scene_pos: QPointF) -> None:
         if self._drag_line is None:
@@ -530,26 +671,39 @@ class GraphCanvas(QGraphicsView):
         old = line.line()
         line.setLine(old.x1(), old.y1(), scene_pos.x(), scene_pos.y())
         if self._drag_target is not None:
-            self._drag_target.set_error_visual(False)
+            self._drag_target.set_drop_state(
+                "valid" if self._drag_target in self._compatible_targets else None
+            )
             self._drag_target = None
         target = self._hit_port_at(scene_pos, exclude=port)
         if target is not None:
             compatible = _drag_can_connect_pair(port, target)
-            target.set_error_visual(not compatible)
+            target.set_drop_state("valid" if compatible else "invalid")
             self._drag_target = target
+            snapped = target.scenePos()
+            line.setLine(old.x1(), old.y1(), snapped.x(), snapped.y())
 
     def _port_drag_released(self, port: GraphPortItem) -> None:
+        if not sip.isdeleted(port):
+            port._drag = False
+            port.update()
         if self._drag_line is not None:
             self.graphics_scene.removeItem(self._drag_line)
             self._drag_line = None
         target = self._drag_target
         self._drag_target = None
         self._drag_port = None
+        for item in self._compatible_targets:
+            if not sip.isdeleted(item):
+                item.set_drop_state(None)
+        self._compatible_targets = []
         if target is None:
+            if port.kind == "out":
+                self.actionSearchRequested.emit(port.port_type)
             return
         if sip.isdeleted(target):
             return
-        target.set_error_visual(False)
+        target.set_drop_state(None)
         if _drag_can_connect_pair(port, target):
             if port.kind == "out":
                 self.edgeRequested.emit(
@@ -560,12 +714,32 @@ class GraphCanvas(QGraphicsView):
                     target.owner_id, port.owner_id
                 )
 
-    def _hit_port_at(self, scene_pos: QPointF, exclude: GraphPortItem) -> GraphPortItem | None:
-        items = self.graphics_scene.items(scene_pos)
-        for item in items:
-            if isinstance(item, GraphPortItem) and item is not exclude:
-                return item
-        return None
+    def _hit_port_at(
+        self, scene_pos: QPointF, exclude: GraphPortItem | None = None
+    ) -> GraphPortItem | None:
+        # Query a small scene-space box as well as the exact point so dropping
+        # a wire does not demand pixel-perfect centring on the visual dot.
+        scale = max(0.001, float(self.transform().m11()))
+        radius = PORT_HIT_RADIUS / scale
+        items = self.graphics_scene.items(
+            QRectF(scene_pos.x() - radius, scene_pos.y() - radius, radius * 2, radius * 2)
+        )
+        ports = [
+            item
+            for item in items
+            if isinstance(item, GraphPortItem) and item is not exclude
+        ]
+        if not ports:
+            return None
+        # Hit regions may overlap after fit-to-view scaling.  Select the port
+        # nearest the pointer instead of relying on scene stacking order.
+        return min(
+            ports,
+            key=lambda item: (
+                (item.scenePos().x() - scene_pos.x()) ** 2
+                + (item.scenePos().y() - scene_pos.y()) ** 2
+            ),
+        )
 
     def _update_node_item(self, node_id: str) -> None:
         item = self._node_items.get(node_id)
@@ -575,6 +749,13 @@ class GraphCanvas(QGraphicsView):
             edge_item.update()
 
     def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_pressed = True
+            self._space_dragged = False
+            self._drag_mode_before_space = self.dragMode()
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            event.accept()
+            return
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             selected = self.graphics_scene.selectedItems()
             for item in selected:
@@ -587,6 +768,81 @@ class GraphCanvas(QGraphicsView):
                     event.accept()
                     return
         super().keyPressEvent(event)
+
+    def viewportEvent(self, event) -> bool:
+        """Own port drags before the scene can turn them into node moves."""
+        event_type = event.type()
+        if (
+            event_type == QEvent.MouseButtonPress
+            and event.button() == Qt.LeftButton
+            and not self._space_pressed
+        ):
+            scene_pos = self.mapToScene(event.pos())
+            port = self._hit_port_at(scene_pos)
+            if port is not None:
+                self._port_drag_started(port, port.scenePos())
+                event.accept()
+                return True
+        if event_type == QEvent.MouseMove and self._drag_port is not None:
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+            event.accept()
+            return True
+        if (
+            event_type == QEvent.MouseButtonRelease
+            and event.button() == Qt.LeftButton
+            and self._drag_port is not None
+            and self._drag_line is not None
+        ):
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+            port = self._drag_port
+            self._port_drag_released(port)
+            event.accept()
+            return True
+        return super().viewportEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and not self._space_pressed:
+            scene_pos = self.mapToScene(event.pos())
+            port = self._hit_port_at(scene_pos)
+            if port is not None:
+                self._port_drag_started(port, port.scenePos())
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._space_pressed and event.buttons() & Qt.LeftButton:
+            self._space_dragged = True
+        if self._drag_port is not None and self._drag_line is not None:
+            # The view owns the authoritative pointer coordinates.  Depending
+            # on Qt binding/platform, a child QGraphicsItem mouse move can
+            # report a position transformed relative to the original grab.
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if (
+            event.button() == Qt.LeftButton
+            and self._drag_port is not None
+            and self._drag_line is not None
+        ):
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+            port = self._drag_port
+            self._port_drag_released(port)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self.setDragMode(self._drag_mode_before_space)
+            should_search = self._space_pressed and not self._space_dragged
+            self._space_pressed = False
+            if should_search:
+                self.actionSearchRequested.emit(None)
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
 
 def _drag_can_connect(source: GraphPortItem, target: GraphPortItem) -> bool:

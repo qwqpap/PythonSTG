@@ -1,4 +1,6 @@
-from PyQt5.QtCore import QPoint, Qt
+from PyQt5.QtCore import QPoint, QPointF, Qt
+from PyQt5.QtGui import QMouseEvent, QWheelEvent
+from PyQt5.QtWidgets import QApplication
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QPlainTextEdit, QPushButton, QTableWidget
 
@@ -95,6 +97,10 @@ def test_graphics_timeline_add_duplicate_delete_and_undo(tmp_path, qapp_session)
 
 def test_scrubbing_seeks_preview_and_zoom_does_not_mutate_frames(tmp_path, qapp_session):
     window = _window(tmp_path, qapp_session)
+    window.resize(960, 640)
+    qapp_session.processEvents()
+    assert window.bottom_dock.height() >= 210
+    assert window.timeline.view.viewport().height() >= 40
     window._active_stage_session = window.session
     window._preview_mode = "stage"
     window._preview_loaded_resource_id = window.session.document.id
@@ -453,6 +459,146 @@ def test_loop_span_keyframe_drag_and_compact_two_row_toolbar(qapp_session):
     assert add_clip.y() > add_track.y()
     assert add_clip.geometry().right() <= editor.width()
     del moved, markers, clip_item
+    editor.close()
+    editor.deleteLater()
+    qapp_session.processEvents()
+
+
+def test_clip_supports_real_mouse_move_and_both_edge_trims(qapp_session):
+    from src.editor.session import SceneEditorSession
+
+    editor = TimelineEditor()
+    track = TimelineTrack(
+        name="Pattern",
+        kind="Pattern",
+        channel="main",
+        clips=[TimelineClip(name="Ring", kind="Pattern", start_frame=60, duration_frames=120, channel="main")],
+    )
+    document = SceneEditorSession.new_document()
+    document.tracks = [track]
+    editor.resize(900, 360)
+    editor.show()
+    editor.set_zoom(1.0)
+    editor.set_document(document)
+    qapp_session.processEvents()
+    events = []
+    editor.clipGeometryRequested.connect(
+        lambda clip_id, start, duration: events.append((clip_id, start, duration))
+    )
+
+    def current_item():
+        return next(
+            item
+            for item in editor.view.graphics_scene.items()
+            if isinstance(item, TimelineClipItem)
+        )
+
+    def drag(start, end):
+        QTest.mousePress(editor.view.viewport(), Qt.LeftButton, pos=start)
+        QApplication.sendEvent(
+            editor.view.viewport(),
+            QMouseEvent(
+                QMouseEvent.MouseMove,
+                end,
+                editor.view.viewport().mapToGlobal(end),
+                Qt.NoButton,
+                Qt.LeftButton,
+                Qt.NoModifier,
+            ),
+        )
+        qapp_session.processEvents()
+        QTest.mouseRelease(editor.view.viewport(), Qt.LeftButton, pos=end)
+        qapp_session.processEvents()
+
+    item = current_item()
+    center = editor.view.mapFromScene(item.scenePos() + QPointF(40, CLIP_HEIGHT / 2))
+    moved = center + QPoint(30, 0)
+    drag(center, moved)
+    assert events[-1][1:] == (90, 120)
+    # Mirror the editor command/rebuild that consumes the request in the main
+    # window before beginning the next independent gesture.
+    track.clips[0].start_frame = 90
+    editor.set_document(document)
+    qapp_session.processEvents()
+
+    item = current_item()
+    right = editor.view.mapFromScene(
+        item.scenePos() + QPointF(item.boundingRect().width() - 2, CLIP_HEIGHT / 2)
+    )
+    drag(right, right + QPoint(30, 0))
+    assert events[-1][1:] == (90, 150)
+    track.clips[0].duration_frames = 150
+    editor.set_document(document)
+    qapp_session.processEvents()
+
+    item = current_item()
+    left = editor.view.mapFromScene(item.scenePos() + QPointF(2, CLIP_HEIGHT / 2))
+    drag(left, left + QPoint(30, 0))
+    assert events[-1][1:] == (120, 120)
+
+    editor.close()
+    editor.deleteLater()
+    qapp_session.processEvents()
+
+
+def test_ctrl_wheel_zooms_without_mutating_document(qapp_session):
+    from src.editor.session import SceneEditorSession
+
+    editor = TimelineEditor()
+    document = SceneEditorSession.new_document()
+    editor.resize(700, 320)
+    editor.show()
+    editor.set_document(document)
+    before = document.to_dict()
+    before_zoom = editor.pixels_per_frame
+    local = QPointF(300, 160)
+    event = QWheelEvent(
+        local,
+        editor.view.viewport().mapToGlobal(local.toPoint()),
+        QPoint(),
+        QPoint(0, 120),
+        Qt.NoButton,
+        Qt.ControlModifier,
+        Qt.NoScrollPhase,
+        False,
+    )
+    editor.view.wheelEvent(event)
+    qapp_session.processEvents()
+
+    assert editor.pixels_per_frame > before_zoom
+    assert document.to_dict() == before
+    editor.close()
+    editor.deleteLater()
+    qapp_session.processEvents()
+
+
+def test_shift_wheel_pans_timeline_horizontally(qapp_session):
+    from src.editor.session import SceneEditorSession
+
+    editor = TimelineEditor()
+    document = SceneEditorSession.new_document()
+    editor.resize(700, 320)
+    editor.show()
+    editor.set_document(document)
+    qapp_session.processEvents()
+    scroll_bar = editor.view.horizontalScrollBar()
+    scroll_bar.setValue(scroll_bar.minimum())
+    before = scroll_bar.value()
+    local = QPointF(300, 160)
+    event = QWheelEvent(
+        local,
+        editor.view.viewport().mapToGlobal(local.toPoint()),
+        QPoint(),
+        QPoint(0, -120),
+        Qt.NoButton,
+        Qt.ShiftModifier,
+        Qt.NoScrollPhase,
+        False,
+    )
+    editor.view.wheelEvent(event)
+    qapp_session.processEvents()
+
+    assert scroll_bar.value() > before
     editor.close()
     editor.deleteLater()
     qapp_session.processEvents()

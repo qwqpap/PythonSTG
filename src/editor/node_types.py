@@ -278,7 +278,10 @@ def build_default_node_type_registry() -> NodeTypeRegistry:
             type_name="Spell",
             display_name="Spell",
             color="#d98cff",
-            viewport=ViewportSpec(shape="diamond", label="SPELL"),
+            # A Spell is a lifecycle/container, not a spatial scene object.
+            # Keeping it out of the canvas prevents hierarchy-only nodes from
+            # stacking on top of the Boss and emitter at the default origin.
+            viewport=ViewportSpec(shape="none"),
             allowed_parents=("SceneRoot", "Stage", "Boss"),
             allowed_children=("Emitter", "PatternInstance", "Sprite"),
             properties=(
@@ -307,7 +310,10 @@ def build_default_node_type_registry() -> NodeTypeRegistry:
             type_name="PatternInstance",
             display_name="Pattern Instance",
             color="#8f9cff",
-            viewport=ViewportSpec(shape="box", label="PAT"),
+            # The referenced Pattern is edited in its own workspace.  This
+            # hierarchy node has no position and therefore must not masquerade
+            # as a draggable scene object.
+            viewport=ViewportSpec(shape="none"),
             allowed_parents=("SceneRoot", "Stage", "Boss", "Spell", "Emitter"),
             allowed_children=(),
             properties=(

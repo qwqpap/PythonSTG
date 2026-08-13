@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.pattern import PatternDocument
+from src.pattern import BindingSpec, PatternDocument
 
 class PatternMutationError(ValueError):
     """Raised when a Pattern property path cannot be changed safely."""
@@ -75,3 +75,46 @@ class SetPatternPropertyCommand:
             return False
         self.value = other.value
         return True
+
+
+@dataclass
+class SetPatternBindingCommand:
+    document: PatternDocument
+    binding: BindingSpec
+    label: str = "Set Pattern binding"
+    _previous: tuple[BindingSpec, ...] | None = field(default=None, init=False, repr=False)
+
+    def execute(self) -> None:
+        self.binding.validate(f"bindings.{self.binding.path}")
+        if self._previous is None:
+            self._previous = tuple(self.document.bindings)
+        self.document.bindings = tuple(
+            item for item in self.document.bindings if item.path != self.binding.path
+        ) + (self.binding,)
+
+    def undo(self) -> None:
+        if self._previous is None:
+            raise PatternMutationError("Cannot undo a binding edit before execution")
+        self.document.bindings = self._previous
+
+
+@dataclass
+class RemovePatternBindingCommand:
+    document: PatternDocument
+    path: str
+    label: str = "Remove Pattern binding"
+    _previous: tuple[BindingSpec, ...] | None = field(default=None, init=False, repr=False)
+
+    def execute(self) -> None:
+        if self._previous is None:
+            self._previous = tuple(self.document.bindings)
+        if not any(item.path == self.path for item in self.document.bindings):
+            raise PatternMutationError(f"Pattern binding does not exist: {self.path}")
+        self.document.bindings = tuple(
+            item for item in self.document.bindings if item.path != self.path
+        )
+
+    def undo(self) -> None:
+        if self._previous is None:
+            raise PatternMutationError("Cannot undo a binding removal before execution")
+        self.document.bindings = self._previous

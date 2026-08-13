@@ -424,6 +424,7 @@ class StageRunner:
         self._active_states: list[StageState] = []
         self._local_frames: dict[str, int] = {}
         self._completed_children: set[str] = set()
+        self._requested_state_completions: set[str] = set()
         # Capture the reset baseline immediately so replay metadata is useful
         # before the first start/reset call as well as after it.
         self.initial_variable_snapshot: dict[str, dict[str, dict[str, Any]]] = self.variables.snapshot()
@@ -633,6 +634,7 @@ class StageRunner:
         self._active_states.clear()
         self._local_frames.clear()
         self._completed_children.clear()
+        self._requested_state_completions.clear()
         self.frame = 0
         self.state = StageRunnerState.STOPPED
         self.last_error = None
@@ -775,7 +777,9 @@ class StageRunner:
                         context=context,
                         variables=self.variables,
                         advance_scheduler=False,
-                        action_resolver=getattr(context, "resolve_reaction_action", None),
+                        action_resolver=lambda action_id: self._resolve_reaction_action(
+                            context, action_id
+                        ),
                         local_frame=self._local_frames.get(state_id, current),
                     )
                 self.reactive_timeline.scheduler.tick(current)
@@ -955,6 +959,7 @@ class StageRunner:
         if self.reactive_timeline is not None:
             self.reactive_timeline.enter_state(state.state_id, self.frame)
         self._completed_children.discard(state.state_id)
+        self._requested_state_completions.discard(state.state_id)
         self._dispatch_actions(
             self._context,
             state.entry_actions,
@@ -1003,6 +1008,7 @@ class StageRunner:
             if self._active_audio_state_id == state.state_id:
                 self._stop_audio()
             self._completed_children.discard(state.state_id)
+            self._requested_state_completions.discard(state.state_id)
             self._local_frames.pop(state.state_id, None)
             self.variables.exit_scope("state", state.state_id)
             if self.reactive_timeline is not None:
@@ -1015,11 +1021,32 @@ class StageRunner:
             self._active_graphs.pop(index)
 
     def _state_complete(self, state: StageState) -> bool:
-        local_done = self._local_frames.get(state.state_id, 0) >= state.duration_frames
+        local_done = (
+            state.state_id in self._requested_state_completions
+            or self._local_frames.get(state.state_id, 0) >= state.duration_frames
+        )
         child_done = (
             state.child_graph is None or state.state_id in self._completed_children
         )
         return local_done and child_done
+
+    def _resolve_reaction_action(self, context: Any, action_id: str):
+        """Resolve built-in Stage actions before trusted Runtime extensions."""
+
+        if str(action_id) == "stage.state.complete":
+            def request_complete(_context, _event, scope) -> None:
+                parent = getattr(scope, "parent", None)
+                state_id = getattr(parent, "owner_id", None)
+                if state_id not in self.current_state_path:
+                    raise RuntimeError(
+                        "stage.state.complete has no active State owner"
+                    )
+                self._requested_state_completions.add(str(state_id))
+                scope.complete(self.frame)
+
+            return request_complete
+        resolver = getattr(context, "resolve_reaction_action", None)
+        return resolver(action_id) if callable(resolver) else None
 
     def _resolve_state_graph(
         self,
@@ -1378,6 +1405,17 @@ class StageRunner:
                             str(payload.get("event_type") or ""),
                             payload.get("data", {}),
                         )
+                elif item.kind == "Background":
+                    hook = getattr(context, "request_background_transition", None)
+                    if not callable(hook):
+                        raise RuntimeError(
+                            "Background action needs a transition context"
+                        )
+                    hook(
+                        str(payload.get("resource") or ""),
+                        owner=item.state_id,
+                        fade_frames=int(payload.get("fade_frames", 0)),
+                    )
                 elif item.kind == "ScriptEvent":
                     hook = getattr(context, "handle_script_event", None)
                     if callable(hook):

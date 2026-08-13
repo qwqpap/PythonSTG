@@ -942,7 +942,7 @@ def compile_stage(
                 )
                 continue
 
-            if clip.kind in {"Audio", "Event", "ScriptEvent"}:
+            if clip.kind in {"Audio", "Background", "Event", "ScriptEvent"}:
                 try:
                     payload_json = _json(deepcopy(clip.payload))
                 except (TypeError, ValueError) as exc:

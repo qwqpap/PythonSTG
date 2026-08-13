@@ -189,7 +189,7 @@ def test_pattern_workspace_remains_usable_at_supported_narrow_size(
     assert not workspace.template_picker.geometry().intersects(apply_template.geometry())
     assert workspace.bullet_picker.geometry().bottom() < workspace.template_picker.geometry().top()
     assert workspace.canvas.height() >= 120
-    assert window.bottom_dock.height() <= 260
+    assert 160 <= window.bottom_dock.height() <= 260
 
     window.close()
     qapp_session.processEvents()

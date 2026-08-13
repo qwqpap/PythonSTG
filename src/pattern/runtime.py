@@ -360,6 +360,10 @@ class PatternRunner:
             "program_hash": program.content_hash,
             "seed": program.seed,
             "instance_id": self.instance_id,
+            "preset_id": program.preset_id,
+            "preset_version": program.preset_version,
+            "preset_instance_id": program.preset_instance_id,
+            "preset_internal_node_ids": program.preset_internal_node_ids,
         }
         self.last_error: PatternRuntimeError | None = None
         self._script_host: _ScriptHost | None = None
@@ -379,6 +383,15 @@ class PatternRunner:
         if reset:
             self.reset(context, clear_owned=clear_owned)
         try:
+            if self.program.termination_reaction and context is not None:
+                register = getattr(context, "register_pattern_termination_reaction", None)
+                if not callable(register):
+                    raise PatternRuntimeError(
+                        self.program.resource_id,
+                        self.frame,
+                        "context cannot register batch termination reactions",
+                    )
+                register(self.owner_tag, dict(self.program.termination_reaction))
             if self.program.script is not None and context is not None:
                 if self._script_host is None:
                     self._script_host = _ScriptHost(self.program)
@@ -402,6 +415,10 @@ class PatternRunner:
             self.state = PatternRunnerState.RUNNING
 
     def reset(self, context: Any | None = None, *, clear_owned: bool = True) -> None:
+        if context is not None and self.program.termination_reaction:
+            unregister = getattr(context, "unregister_pattern_termination_reaction", None)
+            if callable(unregister):
+                unregister(self.owner_tag)
         if clear_owned and context is not None:
             self.clear_owned(context)
         self.state = PatternRunnerState.STOPPED
@@ -414,6 +431,10 @@ class PatternRunner:
             "program_hash": self.program.content_hash,
             "seed": self.program.seed,
             "instance_id": self.instance_id,
+            "preset_id": self.program.preset_id,
+            "preset_version": self.program.preset_version,
+            "preset_instance_id": self.program.preset_instance_id,
+            "preset_internal_node_ids": self.program.preset_internal_node_ids,
         }
 
     def stop(self, context: Any | None = None, *, clear_owned: bool = True) -> None:
@@ -624,7 +645,47 @@ class PatternRunner:
             (origin_x + x, origin_y + y)
             for x, y in template.position_offsets
         )
-        angles = tuple(base_angle + value for value in template.angle_offsets)
+        rotation_acceleration = self.program.emitter_rotation_acceleration
+        accelerated_offset = (
+            0.5 * rotation_acceleration * burst_index * burst_index
+        )
+        angles = tuple(
+            base_angle + accelerated_offset + value
+            for value in template.angle_offsets
+        )
+        trajectory = dict(self.program.trajectory_parameters)
+        curve_type = 0
+        curve_param = (0.0, 0.0, 0.0, 0.0)
+        if self.program.trajectory_kind == "linear_speed":
+            curve_type = 4
+            curve_param = (
+                float(trajectory.get("acceleration", 0.0)) / 60.0,
+                0.0,
+                0.0,
+                float(parameters["motion.speed"]) / 60.0,
+            )
+        elif self.program.trajectory_kind == "wave_angle":
+            curve_type = 2
+            curve_param = (
+                math.radians(float(trajectory.get("amplitude_degrees", 0.0))),
+                float(trajectory.get("frequency", 1.0)),
+                float(trajectory.get("phase", 0.0)),
+                0.0,
+            )
+        elif self.program.trajectory_kind == "delayed_turn":
+            curve_type = 5
+            curve_param = (
+                math.radians(float(trajectory.get("angular_velocity_degrees", 120.0))),
+                float(trajectory.get("delay_frames", 30.0)) / 60.0,
+                0.0,
+                0.0,
+            )
+        elif self.program.trajectory_kind not in {"constant"}:
+            raise PatternRuntimeError(
+                self.program.resource_id,
+                frame,
+                f"unknown trajectory kind {self.program.trajectory_kind!r}",
+            )
         indices = context.create_bullets_batch(
             positions=positions,
             angles=angles,
@@ -641,6 +702,8 @@ class PatternRunner:
             render_scale=float(parameters["motion.render_scale"]),
             bounce_x=bool(parameters["motion.bounce_x"]),
             bounce_y=bool(parameters["motion.bounce_y"]),
+            curve_type=curve_type,
+            curve_param=curve_param,
         )
         return PatternSpawnEvent(
             frame=frame,

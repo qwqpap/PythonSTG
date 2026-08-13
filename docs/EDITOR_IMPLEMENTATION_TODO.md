@@ -135,15 +135,15 @@ git diff --check
 | N4.0 | 响应式时间线 Contract | `[x]` | N3 |
 | N4.1 | ReactiveClip 正式运行时与实例 trace | `[x]` | N4.0 |
 | N4.2 | 时间线槽位、overlay、导航与冲突编辑 | `[x]` | N4.1 |
-| N5.0 | 版本化预设 Contract | `[ ]` | N4 |
-| N5.1 | 首发预设库 | `[ ]` | N5.0 |
-| N5.2 | 虚拟展开 | `[ ]` | N5.1 |
-| N5.3 | 参数覆盖与本地物化 | `[ ]` | N5.2 |
-| N5.4 | 精确版本迁移 | `[ ]` | N5.3 |
-| N6.0 | Action Catalog 与新手流程 Contract | `[ ]` | N5 |
-| N6.1 | 上下文感知搜索 | `[ ]` | N6.0 |
-| N6.2 | 道中/关底骨架模板 | `[ ]` | N6.1 |
-| N6.3 | 分层展开与连续编辑 | `[ ]` | N6.2 |
+| N5.0 | 版本化预设 Contract | `[x]` | N4 |
+| N5.1 | 首发预设库 | `[x]` | N5.0 |
+| N5.2 | 虚拟展开 | `[x]` | N5.1 |
+| N5.3 | 参数覆盖与本地物化 | `[x]` | N5.2 |
+| N5.4 | 精确版本迁移 | `[x]` | N5.3 |
+| N6.0 | Action Catalog 与新手流程 Contract | `[x]` | N5 |
+| N6.1 | 上下文感知搜索 | `[x]` | N6.0 |
+| N6.2 | 道中/关底骨架模板 | `[x]` | N6.1 |
+| N6.3 | 分层展开与连续编辑 | `[x]` | N6.2 |
 | N6.4 | Usability gate | `[ ]` | N6.3 |
 | N7.0 | Behavior Descriptor/权限 Contract | `[ ]` | N6 |
 | N7.1 | Safe API | `[ ]` | N7.0 |
@@ -224,6 +224,8 @@ git diff --check
 
 **验收文件**：`tests/test_preset_descriptor.py`、`tests/test_preset_expansion.py`、`tests/test_preset_migration.py`。
 
+**Evidence（2026-08-13）**：Structural：三份 Contract 覆盖严格 JSON schema、stable ID、精确 semver、参数/槽位类型、未知字段、精确依赖锁、稳定虚拟身份、迁移环和失败路径；`python -m pytest -q tests/test_preset_descriptor.py tests/test_preset_expansion.py tests/test_preset_migration.py` 通过。
+
 ### N5.1 首发预设库
 
 **Agent 要做**：以真实资源提供自机狙、奇数弹、偶数弹、圆形开花、扇形扫射、单/双/交错螺旋、加速旋转、延迟转向、子弹分裂、速度层叠、波纹、米弹墙；每个预设暴露少量精确参数、生命周期策略和预算，走正式 compiler/runner。
@@ -231,6 +233,8 @@ git diff --check
 **完成条件**：预设可运行、可展开、可调参；与基础 Pattern 行为 parity；高密度路径无逐弹 Python 回调。
 
 **验收文件**：`tests/test_preset_library.py`、`tests/test_pattern_parity.py`、`tests/test_pattern_compiler.py`；附固定 workload profile。
+
+**Evidence（2026-08-13）**：Runtime/Performance：`game_content/presets/builtin_patterns.pystg.json` 固定 14 个 `1.0.0` 预设；`python tools/profile_n5_presets.py --output C:\Users\m1573\AppData\Local\Temp\pystg-n5-preset-profile.json` 在 Windows 11、Python 3.12.7、Intel64 Family 6 Model 151 上运行正式 compiler/runner，1836 发由 101 次批量写入完成，逐弹回调 0，总耗时 41.988ms（回归上限 2500ms）。延迟转向、加速旋转、速度层叠、波纹使用批量曲线；子弹分裂使用 owner 级批量生命周期 action。
 
 ### N5.2 虚拟展开
 
@@ -240,6 +244,8 @@ git diff --check
 
 **验收文件**：`tests/test_preset_expansion.py`、`tests/test_editor_preset_workspace.py`、`tests/test_pattern_graph.py`。
 
+**Evidence（2026-08-13）**：Structural/Native visual：虚拟 ID 由 instance UUID + internal ID 派生，折叠/展开不写 graph、不改变作者 payload，compiled program/replay identity 保留 preset/version/internal IDs；`python -u tools/verify_native_editor_n5.py --project . --screenshot C:\Users\m1573\AppData\Local\Temp\pystg-n5-native-editor.png` 输出 `native_editor_n5_ok presets=14 virtual_nodes=5`。
+
 ### N5.3 参数覆盖与本地物化
 
 **Agent 要做**：公开参数和插槽可覆盖；“展开为本地结构”是可预览、可取消、可 Undo/Redo 的单一 CommandStack 事务；物化后与上游预设断开且不被升级偷偷改写；失败保留原实例。
@@ -248,6 +254,8 @@ git diff --check
 
 **验收文件**：`tests/test_preset_expansion.py`、`tests/test_editor_preset_workspace.py`、`tests/test_editor_authoring_integration.py`。
 
+**Evidence（2026-08-13）**：Editor/Runtime：`ApplyPresetCommand`、参数/槽位覆盖和 `MaterializePresetCommand` 全部进入已有 `CommandStack`；本地化移除上游链接但保留来源审计，Undo/Redo 后正式 `PatternCompiler` 结果可重放。N5 focused + Pattern/Graph/editor 回归 `python -m pytest -q tests/test_preset_descriptor.py tests/test_preset_expansion.py tests/test_preset_migration.py tests/test_preset_library.py tests/test_editor_preset_workspace.py tests/test_pattern_document.py tests/test_pattern_compiler.py tests/test_pattern_parity.py tests/test_pattern_graph.py tests/test_pattern_runtime.py tests/test_lifecycle_batching.py tests/test_lifecycle_events.py tests/test_editor_graph_workspace.py tests/test_editor_authoring_integration.py`（103 passed）。
+
 ### N5.4 精确版本迁移
 
 **Agent 要做**：按精确版本执行参数/插槽迁移，在临时副本生成差异和诊断；失败保留原数据、原版本和定位路径；项目依赖锁定到可重放版本，不使用“最接近版本”静默替代。
@@ -255,6 +263,8 @@ git diff --check
 **完成条件**：成功迁移 round-trip；失败可恢复、可 Undo，原文档不被部分写入。
 
 **验收文件**：`tests/test_preset_migration.py`、`tests/test_preset_descriptor.py`、`tests/test_pattern_document.py`。
+
+**Evidence（2026-08-13）**：Migration：`PresetMigration`、`PresetDependencyLock` 均为严格 JSON round-trip；迁移只在临时 `PresetInstance` 副本生成稳定 diff，缺源字段/缺链/冲突/循环均给出路径且不改原文档，确认由单个 `ApplyPresetMigrationCommand` 完成并可 Undo/Redo；解析只接受锁定的精确版本，不做 nearby fallback。
 
 ## 7. N6：上下文搜索与新手连续流程（不含自然语言）
 
@@ -266,6 +276,8 @@ git diff --check
 
 **验收文件**：上述四份 Contract。
 
+**Evidence（2026-08-13）**：Structural/UI：`ActionDescriptor`、`ActionCatalog`、`ActionQuery` 和 `ActionExecutor` 使用正式 Graph 端口表、Scene `NodeTypeRegistry`、Timeline 类型和 N5 Preset Descriptor；重复 ID、未知 command、上下文/类型/父节点过滤、确定性排序、空状态和明确排除自然语言生成均有行为断言。N6 focused（含 N6.0–N6.3 与编辑器回归）`python -m pytest -q tests/test_action_catalog.py tests/test_contextual_search.py tests/test_beginner_workflow.py tests/test_editor_usability.py tests/test_editor_preset_workspace.py tests/test_editor_graph_workspace.py tests/test_editor_timeline_workspace.py tests/test_editor_m3_integration.py tests/test_editor_authoring_integration.py`：76 passed。
+
 ### N6.1 上下文感知搜索
 
 **Agent 要做**：在任意作者上下文轻按空格打开搜索；PointSet 拉线只显示接受 PointSet 的 Action；时间线只显示轨道/片段；场景画布只显示可创建对象；Catalog 来自 Descriptor，UI 不写死分支；解决空格搜索与画布平移冲突并用原生 QA 固定交互。
@@ -273,6 +285,10 @@ git diff --check
 **完成条件**：无效候选不出现，结果可解释且排序稳定；创建和连接都进入文档 CommandStack。
 
 **验收文件**：`tests/test_action_catalog.py`、`tests/test_contextual_search.py`、`tests/test_editor_graph_workspace.py`、`tests/test_editor_timeline_workspace.py`；另附 native visual。
+
+**Evidence（2026-08-13）**：Editor/Native visual：Graph、Timeline、Scene 轻按空格打开同一搜索；按住空格配合鼠标恢复 `ScrollHandDrag`，Graph 输出端口空放携带正式 `port_type`；结果通过已有命令入口创建并可 Undo。`python -u tools/verify_native_editor_n6.py --project . --screenshot C:\Users\m1573\AppData\Local\Temp\pystg-n6-native-editor.png` 在真实 PySide6 Windows 窗口通过：`native_editor_n6_ok scene_candidates=8 graph_nodes=6`；截图人工复核 L2 单一渐进导航、精确绑定控件和原生布局可见。
+
+**整改证据（2026-08-14）**：Graph 端口改为高辨识度 `I/O` 标记并扩大边缘命中区；端口代理接管 press/move/release，拖线时显示临时连线和合法/非法目标反馈，不再误移动节点。`tests/test_editor_graph_workspace.py` 使用真实 viewport 鼠标事件验证抓取、指针跟随、合法目标高亮、完整连线、节点位置不变及重建安全；Windows 原生 PySide6 鼠标验收另行验证删除连线、重新连接和 Undo/Redo。上下文搜索仍由正式端口类型过滤并通过同一 `CommandStack` 创建。本项重新关闭。
 
 ### N6.2 道中/关底骨架模板
 
@@ -282,13 +298,21 @@ git diff --check
 
 **验收文件**：`tests/test_beginner_workflow.py`、`tests/test_editor_m3_integration.py`、`tests/test_editor_authoring_integration.py`、`tests/test_editor_timeline_workspace.py`。
 
+**Evidence（2026-08-13）**：Runtime/Authoring：Add 菜单提供道中和两阶段 Boss 骨架；`ApplyStageTemplateCommand` 在同一 `SceneDocument` 中一次创建 State、Pattern、Movement、Audio、正式 Background 和 Reactive 轨道并整体 Undo/Redo。`encounter.cleared` 由 `stage.state.complete` 在下一固定帧请求 State Graph 转移；背景通过受限 `request_background_transition`，不伪装脚本。`tests/test_beginner_workflow.py` 5 passed；正式 `compile_stage → StageRunner`、Pattern 资源、背景动作、错误路径和全灭后续均有断言，N6 focused 76 passed。
+
+**整改证据（2026-08-14）**：中文模式创建的两阶段 Boss 直接保存作者可读的“两阶段 Boss、登场、通常阶段、强化阶段、结束、背景、背景音乐、背景转场、关卡背景音乐”，内部 kind/ID/runtime 枚举仍保持稳定英文；模板标题和 Undo 显示“撤销 创建两阶段 Boss 模板”。时间线按常见习惯支持空白定位播放头、主体拖动、左右边缘修剪、`Ctrl+滚轮` 缩放、`Shift+滚轮` 横移及 Undo/Redo，所有几何修改仍进入 `CommandStack`。原生 gate `python -u tools/verify_native_editor_n6.py --project . --screenshot %TEMP%\pystg-n6-native-zh.png --compact-screenshot %TEMP%\pystg-n6-native-zh-960x640.png` 通过，分别验证中文 1480×920 和带真实模板轨道的 960×640；最小窗口保留两行工具栏和可编辑轨道，无面板堆叠。本项重新关闭。
+
 ### N6.3 分层展开与连续编辑
 
-**Agent 要做**：固定 L0 预设卡片→L1 参数→L2 曲线/变量/表达式→L3 行为图→L4 Runtime 源码的入口、返回和权限提示；所有层级共享同一生命周期、类型、owner 和 debug identity；局部替换不要求推倒重写。
+**Agent 要做**：以“选择预设→调整参数→添加动态变化→编辑节点→查看脚本源码”的任务语言提供连续入口、返回和权限提示；内部层级 ID 只用于稳定状态，不作为作者界面术语。所有层级共享同一生命周期、类型、owner 和 debug identity；局部替换不要求推倒重写。
 
 **完成条件**：从调参到局部实现是连续操作；折叠/展开不复制资源、不产生第二套 runtime。
 
 **验收文件**：`tests/test_beginner_workflow.py`、`tests/test_editor_graph_workspace.py`、`tests/test_editor_preset_workspace.py`、`tests/test_editor_usability.py`。
+
+**Evidence（2026-08-13）**：Editor/Runtime：PatternWorkspace 以单一 L0–L4 入口显示 Preset、精确参数、Binding、Behavior Graph 与 Runtime 源码定位；旧 Recipe/Graph 控件只保留兼容对象并从作者 UI 隐藏。L2 binding 和 L3 expand 均走 CommandStack；返回 L2 不折叠、不复制 Graph，资源 ID、正式编译 identity、owner/lifecycle 契约保持同一 Pattern。`tests/test_editor_usability.py`、Preset/Graph 回归及 N6 focused 76 passed；原生 N6 gate 通过。
+
+**整改证据（2026-08-14）**：作者导航现只显示“选择预设→调整参数→添加动态变化→编辑节点→查看脚本源码”，不暴露 L0–L4、Behavior Graph 或 Runtime Source；中文动态设置显示“每轮子弹数 / 固定值”等任务词，内部仍保存 `shape.count / constant`。预设、参数、动态设置、节点和脚本入口共用同一 Pattern 资源、正式 compiler identity 与 Undo/Redo，往返不复制 Graph。N6 focused gate（Action、搜索、新手流程、预设、Graph、时间线、中文、M3 与作者集成）88 passed；原生中文 1480×920/960×640 gate 通过。本项重新关闭。
 
 ### N6.4 Usability gate
 
@@ -297,6 +321,12 @@ git diff --check
 **完成条件**：至少 4/5 用户在 10 分钟内完成可运行 Pattern、30 分钟内完成短道中、60 分钟内完成两阶段 Boss、一次背景转场和一次事件反应，全程不写脚本。
 
 **验收文件**：`tests/test_editor_usability.py`、N6 focused gate、真实 PySide6 截图和独立 Usability 报告。
+
+**Evidence（尚未完成）**：研究协议已固定在 `docs/N6_USABILITY_PROTOCOL.md`，报告由 `tools/verify_n6_usability.py` 严格校验 5 名唯一、无 PySTG 经验、无维护者口头指导、无脚本及 4/5 时间阈值；格式/阈值自动化 7 passed。当前没有 `reports/n6_usability.json`，因此不能声称真实 Usability gate 通过，本项保持 `[ ]`，N7 不得开始。
+
+**前置整改门槛（2026-08-13）**：在再次邀请 5 名新手前，必须先关闭四类已知阻塞：作者界面中文与术语统一、支持尺寸内无控件堆叠、时间线符合常见选择/定位/拖动/修剪/缩放操作、Graph 端口可稳定完成真实鼠标拖线。自动化通过或单张截图不能代替这些原生交互门槛。
+
+**前置整改结果（2026-08-14）**：四类已知阻塞均已关闭，并分别具有自动化行为断言和原生交互/布局证据；可以开始邀请 5 名新手。尚无 `reports/n6_usability.json`，因此 N6.4 仍严格保持 `[ ]`，N7 仍不得开始。
 
 ## 8. N7：Behavior Descriptor 与 Safe/Runtime/Engine 权限
 

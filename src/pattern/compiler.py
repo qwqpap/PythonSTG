@@ -652,6 +652,35 @@ class PatternCompiler:
             angle_offset_per_burst=compile_doc.modifiers.angle_offset_per_burst,
             speed_offset_per_burst=compile_doc.modifiers.speed_offset_per_burst,
             random_speed_variation=compile_doc.modifiers.random_speed_variation,
+            preset_id=(compile_doc.header.metadata.get("preset_origin") or {}).get("preset_id"),
+            preset_version=(compile_doc.header.metadata.get("preset_origin") or {}).get("version"),
+            preset_instance_id=(compile_doc.header.metadata.get("preset_origin") or {}).get("instance_id"),
+            preset_internal_node_ids=tuple(
+                str(item)
+                for item in (compile_doc.header.metadata.get("preset_internal_node_ids") or ())
+            ),
+            trajectory_kind=str(
+                (compile_doc.header.metadata.get("trajectory") or {}).get("kind", "constant")
+            ),
+            trajectory_parameters=tuple(
+                sorted(
+                    (str(key), float(value))
+                    for key, value in (compile_doc.header.metadata.get("trajectory") or {}).items()
+                    if key != "kind"
+                    and isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                )
+            ),
+            termination_reaction=tuple(
+                sorted(
+                    (str(key), value)
+                    for key, value in (compile_doc.header.metadata.get("termination_reaction") or {}).items()
+                    if isinstance(value, (str, int, float, bool))
+                )
+            ),
+            emitter_rotation_acceleration=float(
+                compile_doc.header.metadata.get("emitter_rotation_acceleration", 0.0)
+            ),
         )
         self._cache[content_hash] = program
         return program

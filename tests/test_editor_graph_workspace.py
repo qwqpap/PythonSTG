@@ -422,6 +422,64 @@ def test_rebuild_during_port_drag_release_does_not_crash(qapp_session):
     canvas.close()
 
 
+def test_real_mouse_port_drag_tracks_pointer_and_connects(qapp_session):
+    """A viewport mouse gesture, not an internal helper call, creates a wire."""
+    from PyQt5.QtGui import QMouseEvent
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication
+
+    document = _pattern()
+    ExpandToGraphCommand(document).execute()
+    canvas = GraphCanvas()
+    canvas.set_graph(document.graph)
+    canvas.resize(800, 480)
+    canvas.show()
+    qapp_session.processEvents()
+    ports = [item for item in canvas.graphics_scene.items() if hasattr(item, "kind")]
+    shape = next(node for node in document.graph.nodes if node.category == "shape")
+    aim = next(node for node in document.graph.nodes if node.category == "aim")
+    source = next(
+        port for port in ports if port.owner_id == shape.id and port.kind == "out"
+    )
+    target = next(
+        port for port in ports if port.owner_id == aim.id and port.kind == "in"
+    )
+    requested = []
+    canvas.edgeRequested.connect(lambda from_id, to_id: requested.append((from_id, to_id)))
+    source_node_position = canvas._node_items[shape.id].pos()
+    target_node_position = canvas._node_items[aim.id].pos()
+
+    start = canvas.mapFromScene(source.scenePos())
+    end = canvas.mapFromScene(target.scenePos())
+    QTest.mousePress(canvas.viewport(), Qt.LeftButton, pos=start)
+    qapp_session.processEvents()
+    assert canvas._drag_line is not None
+    QApplication.sendEvent(
+        canvas.viewport(),
+        QMouseEvent(
+            QMouseEvent.MouseMove,
+            end,
+            canvas.viewport().mapToGlobal(end),
+            Qt.NoButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+    )
+    qapp_session.processEvents()
+    assert abs(canvas._drag_line.line().p2().x() - target.scenePos().x()) < 0.1
+    assert abs(canvas._drag_line.line().p2().y() - target.scenePos().y()) < 0.1
+    assert target._drop_state == "valid"
+    QTest.mouseRelease(canvas.viewport(), Qt.LeftButton, pos=end)
+    qapp_session.processEvents()
+
+    assert requested == [(shape.id, aim.id)]
+    assert canvas._node_items[shape.id].pos() == source_node_position
+    assert canvas._node_items[aim.id].pos() == target_node_position
+    assert canvas._drag_line is None
+    assert target._drop_state is None
+    canvas.close()
+
+
 def test_node_items_are_added_to_the_scene_exactly_once(qapp_session):
     """Regression: ports are child items and must not be added twice."""
     document = _pattern()

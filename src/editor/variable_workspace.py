@@ -230,7 +230,7 @@ class VariableEditor(QWidget):
                     self.table.setItem(row, column, item)
             self.table.resizeColumnsToContents()
             count = sum(len(values) for values in self.runtime_overlay.values() if isinstance(values, dict))
-            self.runtime_label.setText(f"Runtime overlay: {count} scopes (read-only)")
+            self.runtime_label.setText(f"Runtime values: {count} scopes (read-only)")
         finally:
             self._rebuilding = False
 

@@ -34,6 +34,7 @@ KIND_COLORS = {
     "Pattern": "#7058c7",
     "Movement": "#3686b8",
     "Audio": "#3f9a68",
+    "Background": "#2f8797",
     "Event": "#b07a38",
     "Property": "#b34f7b",
     "ScriptEvent": "#a94a4a",
@@ -59,12 +60,13 @@ class TimelineClipItem(QGraphicsObject):
         pixels_per_frame: float,
         snap_frames: int,
         row_y: float,
+        display_name: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.track_id = track.id
         self.clip_id = clip.id
-        self.clip_name = clip.name
+        self.clip_name = display_name or clip.name
         self.kind = clip.kind
         self.start_frame = clip.start_frame
         self.duration_frames = clip.duration_frames
@@ -81,7 +83,8 @@ class TimelineClipItem(QGraphicsObject):
         self.snap_frames = snap_frames
         self.row_y = row_y
         self._preview_duration = clip.duration_frames
-        self._resizing = False
+        self._preview_start = clip.start_frame
+        self._resize_edge: str | None = None
         self._drag_start = QPointF()
         self.setFlags(
             QGraphicsItem.ItemIsSelectable
@@ -158,6 +161,7 @@ class TimelineClipItem(QGraphicsObject):
             QRectF(max(0.0, self._width() - 6), 3, 3, CLIP_HEIGHT - 6),
             QColor("#e6edf7"),
         )
+        painter.fillRect(QRectF(3, 3, 3, CLIP_HEIGHT - 6), QColor("#e6edf7"))
         single_loop_width = self._preview_duration * self.pixels_per_frame
         painter.setPen(QPen(base.lighter(175), 1, Qt.DashLine))
         for loop_index in range(1, self.loop_count):
@@ -181,7 +185,7 @@ class TimelineClipItem(QGraphicsObject):
                 painter.drawPath(marker)
 
     def itemChange(self, change, value):
-        if change == QGraphicsItem.ItemPositionChange and not self._resizing:
+        if change == QGraphicsItem.ItemPositionChange and self._resize_edge is None:
             point = QPointF(value)
             # ItemPositionChange also fires for the initial setPos() call.  At
             # that point self.pos().y() is still zero, which used to pin every
@@ -193,7 +197,7 @@ class TimelineClipItem(QGraphicsObject):
         return super().itemChange(change, value)
 
     def hoverMoveEvent(self, event) -> None:
-        if event.pos().x() >= self._width() - 9:
+        if event.pos().x() <= 10 or event.pos().x() >= self._width() - 10:
             self.setCursor(Qt.SizeHorCursor)
         else:
             self.setCursor(Qt.OpenHandCursor)
@@ -201,18 +205,55 @@ class TimelineClipItem(QGraphicsObject):
 
     def mousePressEvent(self, event) -> None:
         self._drag_start = self.pos()
-        self._resizing = event.pos().x() >= self._width() - 9
-        self.setCursor(Qt.SizeHorCursor if self._resizing else Qt.ClosedHandCursor)
-        if self._resizing:
+        self._preview_start = self.start_frame
+        if event.pos().x() <= 10:
+            self._resize_edge = "left"
+        elif event.pos().x() >= self._width() - 10:
+            self._resize_edge = "right"
+        else:
+            self._resize_edge = None
+        self.setCursor(Qt.SizeHorCursor if self._resize_edge else Qt.ClosedHandCursor)
+        if self._resize_edge:
+            self.setSelected(True)
+            self.selectedRequested.emit(self.track_id, self.clip_id)
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._resizing:
-            span_frames = max(1, int(round(event.pos().x() / self.pixels_per_frame)))
-            span_frames = max(self.snap_frames, _snap(span_frames, self.snap_frames))
-            frames = max(1, int(round(span_frames / self.loop_count)))
+        if self._resize_edge:
+            original_end = self.start_frame + self.duration_frames * self.loop_count
+            pointer_frame = _snap(
+                int(round((event.scenePos().x() - TRACK_HEADER_WIDTH) / self.pixels_per_frame)),
+                self.snap_frames,
+            )
+            if self._resize_edge == "left":
+                latest_start = max(0, original_end - self.snap_frames * self.loop_count)
+                start = min(pointer_frame, latest_start)
+                span_frames = max(
+                    self.snap_frames * self.loop_count,
+                    original_end - start,
+                )
+                frames = max(
+                    self.snap_frames,
+                    _snap(int(round(span_frames / self.loop_count)), self.snap_frames),
+                )
+                start = max(0, original_end - frames * self.loop_count)
+                if start != self._preview_start:
+                    self._preview_start = start
+                    self.setPos(
+                        TRACK_HEADER_WIDTH + start * self.pixels_per_frame,
+                        self.row_y + (TRACK_HEIGHT - CLIP_HEIGHT) / 2,
+                    )
+            else:
+                span_frames = max(
+                    self.snap_frames * self.loop_count,
+                    pointer_frame - self.start_frame,
+                )
+                frames = max(
+                    self.snap_frames,
+                    _snap(int(round(span_frames / self.loop_count)), self.snap_frames),
+                )
             if frames != self._preview_duration:
                 self.prepareGeometryChange()
                 self._preview_duration = frames
@@ -222,12 +263,12 @@ class TimelineClipItem(QGraphicsObject):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        if self._resizing:
-            self._resizing = False
+        if self._resize_edge:
+            self._resize_edge = None
             self.setCursor(Qt.SizeHorCursor)
             self.geometryCommitted.emit(
                 self.clip_id,
-                self.start_frame,
+                self._preview_start,
                 self._preview_duration,
             )
             event.accept()
@@ -328,6 +369,8 @@ class TimelineGraphicsView(QGraphicsView):
     nudgeRequested = pyqtSignal(str, int)
     deleteRequested = pyqtSignal()
     duplicateRequested = pyqtSignal()
+    actionSearchRequested = pyqtSignal(object)
+    zoomStepRequested = pyqtSignal(float)
 
     def __init__(self, parent=None) -> None:
         self.graphics_scene = QGraphicsScene(parent)
@@ -340,11 +383,17 @@ class TimelineGraphicsView(QGraphicsView):
         self.pixels_per_frame = 0.25
         self.snap_frames = 6
         self.track_ids: list[str] = []
+        self._space_pressed = False
+        self._space_dragged = False
+        self._drag_mode_before_space = self.dragMode()
 
     def mousePressEvent(self, event) -> None:
         point = self.mapToScene(event.pos())
         item = self.itemAt(event.pos())
-        if not isinstance(item, TimelineClipItem):
+        clip_item = item
+        while clip_item is not None and not isinstance(clip_item, TimelineClipItem):
+            clip_item = clip_item.parentItem()
+        if not isinstance(clip_item, TimelineClipItem):
             if point.y() >= RULER_HEIGHT:
                 row = int((point.y() - RULER_HEIGHT) // TRACK_HEIGHT)
                 if 0 <= row < len(self.track_ids):
@@ -357,7 +406,30 @@ class TimelineGraphicsView(QGraphicsView):
                 self.playheadRequested.emit(frame)
         super().mousePressEvent(event)
 
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta:
+                self.zoomStepRequested.emit(1.25 if delta > 0 else 1.0 / 1.25)
+                event.accept()
+                return
+        if event.modifiers() & Qt.ShiftModifier:
+            delta = event.angleDelta().y() or event.angleDelta().x()
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta
+            )
+            event.accept()
+            return
+        super().wheelEvent(event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_pressed = True
+            self._space_dragged = False
+            self._drag_mode_before_space = self.dragMode()
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            event.accept()
+            return
         selected = next(
             (
                 item
@@ -385,6 +457,22 @@ class TimelineGraphicsView(QGraphicsView):
             return
         super().keyPressEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:
+        if self._space_pressed and event.buttons() & Qt.LeftButton:
+            self._space_dragged = True
+        super().mouseMoveEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self.setDragMode(self._drag_mode_before_space)
+            should_search = self._space_pressed and not self._space_dragged
+            self._space_pressed = False
+            if should_search:
+                self.actionSearchRequested.emit(None)
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
 
 class TimelineEditor(QWidget):
     addTrackRequested = pyqtSignal(str)
@@ -403,6 +491,7 @@ class TimelineEditor(QWidget):
     playheadChanged = pyqtSignal(int)
     zoomChanged = pyqtSignal(float)
     reactiveNavigateRequested = pyqtSignal(str, str)
+    actionSearchRequested = pyqtSignal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -422,7 +511,10 @@ class TimelineEditor(QWidget):
         track_toolbar = QHBoxLayout()
         self.kind_picker = QComboBox()
         self.kind_picker.setObjectName("timelineKindPicker")
-        for kind in ("Pattern", "Movement", "Audio", "Event", "Property", "ScriptEvent", "Reactive"):
+        for kind in (
+            "Pattern", "Movement", "Audio", "Background", "Event", "Property",
+            "ScriptEvent", "Reactive",
+        ):
             self.kind_picker.addItem(kind, kind)
         track_toolbar.addWidget(self.kind_picker)
         add_track = QPushButton("+ Track")
@@ -501,6 +593,10 @@ class TimelineEditor(QWidget):
         self.view.nudgeRequested.connect(self._nudge_clip)
         self.view.deleteRequested.connect(self._request_delete)
         self.view.duplicateRequested.connect(self._request_duplicate)
+        self.view.actionSearchRequested.connect(self.actionSearchRequested)
+        self.view.zoomStepRequested.connect(
+            lambda factor: self.set_zoom(self.pixels_per_frame * factor)
+        )
         root.addWidget(self.view, 1)
 
     def set_language_manager(self, manager: LanguageManager) -> None:
@@ -746,7 +842,7 @@ class TimelineEditor(QWidget):
                 QColor("#1d2737"),
             )
             label = QGraphicsSimpleTextItem(
-                f"{track.name}\n{self._tr(track.kind)}"
+                f"{self._tr(track.name)}\n{self._tr(track.kind)}"
             )
             label.setBrush(QColor("#d7e1ee") if not track.muted else QColor("#778397"))
             label.setPos(8, y + 5)
@@ -758,6 +854,7 @@ class TimelineEditor(QWidget):
                     pixels_per_frame=self.pixels_per_frame,
                     snap_frames=self.snap_spin.value(),
                     row_y=y,
+                    display_name=self._tr(clip.name),
                 )
                 item.geometryCommitted.connect(self.clipGeometryRequested)
                 item.keyframeGeometryCommitted.connect(self.keyframeGeometryRequested)

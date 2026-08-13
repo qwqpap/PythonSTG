@@ -13,7 +13,7 @@ import json
 import math
 import os
 import numpy as np
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict, List, Mapping
 
 from .spellcard import SpellCardContext
 from ..audio import AudioManager
@@ -228,6 +228,8 @@ class StageContext(SpellCardContext):
         spin: float = 0.0,
         max_lifetime: float = 0.0,
         render_scale: float = 1.0,
+        curve_type: int = 0,
+        curve_param: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
     ) -> np.ndarray:
         """Create a heterogeneous formal-runtime burst in one pool operation.
 
@@ -272,6 +274,8 @@ class StageContext(SpellCardContext):
                 angular_vel=math.radians(spin),
                 max_lifetime=max_lifetime,
                 render_scale=render_scale,
+                curve_type=curve_type,
+                curve_param=curve_param,
             )
         else:
             spawned = []
@@ -292,6 +296,8 @@ class StageContext(SpellCardContext):
                     angular_vel=math.radians(spin),
                     max_lifetime=max_lifetime,
                     render_scale=render_scale,
+                    curve_type=curve_type,
+                    curve_param=curve_param,
                 )
                 if idx >= 0:
                     spawned.append(idx)
@@ -774,6 +780,19 @@ class StageContext(SpellCardContext):
         if not isinstance(action_id, str) or not action_id.strip() or not callable(callback):
             raise ValueError("reaction action needs a non-empty id and callable")
         self._reaction_actions[action_id.strip()] = callback
+
+    def register_pattern_termination_reaction(
+        self, owner_tag: int, spec: Mapping[str, Any]
+    ) -> None:
+        hook = getattr(self.bullet_pool, "register_termination_batch_reaction", None)
+        if not callable(hook):
+            raise RuntimeError("bullet pool does not support batch termination reactions")
+        hook(int(owner_tag), dict(spec))
+
+    def unregister_pattern_termination_reaction(self, owner_tag: int) -> None:
+        hook = getattr(self.bullet_pool, "unregister_termination_batch_reaction", None)
+        if callable(hook):
+            hook(int(owner_tag))
 
     def resolve_reaction_action(self, action_id: str) -> Any:
         """Resolve a Runtime API reaction action by stable authoring ID."""

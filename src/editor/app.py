@@ -71,10 +71,17 @@ from src.authoring.registry import build_default_resource_type_registry
 from src.authoring.resources import ResourceDocumentError, ResourceReference
 from src.authoring.variables import VariableOutputMapping, VariableRef
 from src.game.background_render.document import BackgroundDocument
-from src.pattern import PatternDocument
+from src.pattern import PatternDocument, PresetLibrary, PresetResolver
 from src.ui.document import UIDocument
 
 from .asset_index import AssetRecord, load_subresource_preview
+from .action_catalog import (
+    ActionDescriptor,
+    ActionExecutor,
+    ActionQuery,
+    build_editor_action_catalog,
+)
+from .action_search import ActionSearchDialog
 from .document import (
     DocumentError,
     EditorNode,
@@ -295,6 +302,7 @@ class NodeGraphicsItem(QGraphicsObject):
         project: ProjectContext,
         grid_size: int,
         node_registry=None,
+        language_manager: LanguageManager | None = None,
     ):
         super().__init__()
         self.node_id = node.id
@@ -308,6 +316,7 @@ class NodeGraphicsItem(QGraphicsObject):
             if node_registry is not None
             else NODE_TYPES.get(node.type)
         )
+        self._language_manager = language_manager
         self._pixmap = self._load_pixmap(node, project, node_registry)
         self._runtime_pose = False
         self.setFlags(
@@ -412,7 +421,16 @@ class NodeGraphicsItem(QGraphicsObject):
                 painter.drawText(QRectF(-24, -10, 48, 20), Qt.AlignCenter, label)
 
         painter.setPen(QColor("#e8ecf5"))
-        painter.drawText(QRectF(-70, 34, 140, 22), Qt.AlignHCenter | Qt.AlignTop, self.node_name)
+        display_name = self.node_name
+        if self._language_manager is not None and (
+            self._spec is not None and self.node_name == self._spec.display_name
+        ):
+            display_name = self._language_manager.translate(display_name)
+        painter.drawText(
+            QRectF(-70, 34, 140, 22),
+            Qt.AlignHCenter | Qt.AlignTop,
+            display_name,
+        )
         if self._runtime_pose:
             painter.setPen(QColor("#54e1ff"))
             painter.drawText(QRectF(-34, -48, 68, 14), Qt.AlignCenter, "RUNTIME")
@@ -444,12 +462,20 @@ class SceneViewport(QGraphicsView):
     nodeSelected = pyqtSignal(str)
     nodePositionRequested = pyqtSignal(str, float, float)
     resourceDropped = pyqtSignal(object, float, float)
+    actionSearchRequested = pyqtSignal(object)
 
-    def __init__(self, project: ProjectContext, parent=None, node_registry=None):
+    def __init__(
+        self,
+        project: ProjectContext,
+        parent=None,
+        node_registry=None,
+        language_manager: LanguageManager | None = None,
+    ):
         self.graphics_scene = QGraphicsScene(parent)
         super().__init__(self.graphics_scene, parent)
         self.project = project
         self.node_registry = node_registry
+        self.language_manager = language_manager
         self._document: SceneDocument | None = None
         self._items: dict[str, NodeGraphicsItem] = {}
         self._grid_size = 16
@@ -457,6 +483,9 @@ class SceneViewport(QGraphicsView):
         self._runtime_state: dict[str, dict] = {}
         self.coordinate_space = CoordinateSpace()
         self._fit_on_next_resize = True
+        self._space_pressed = False
+        self._space_dragged = False
+        self._drag_mode_before_space = self.dragMode()
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
@@ -490,7 +519,11 @@ class SceneViewport(QGraphicsView):
             if spec is None or not spec.viewport_item:
                 continue
             item = NodeGraphicsItem(
-                node, self.project, self._grid_size, self.node_registry
+                node,
+                self.project,
+                self._grid_size,
+                self.node_registry,
+                self.language_manager,
             )
             item.setPos(
                 float(node.properties.get("x", width / 2)),
@@ -597,6 +630,32 @@ class SceneViewport(QGraphicsView):
             return
         super().wheelEvent(event)
 
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_pressed = True
+            self._space_dragged = False
+            self._drag_mode_before_space = self.dragMode()
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._space_pressed and event.buttons() & Qt.LeftButton:
+            self._space_dragged = True
+        super().mouseMoveEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self.setDragMode(self._drag_mode_before_space)
+            should_search = self._space_pressed and not self._space_dragged
+            self._space_pressed = False
+            if should_search:
+                self.actionSearchRequested.emit(None)
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasFormat(RESOURCE_MIME_TYPE):
             event.acceptProposedAction()
@@ -700,6 +759,18 @@ _GRAPH_NODE_DEFAULTS: dict[str, object] = {
     "resource": None,
 }
 
+_BULLET_TYPE_CHOICES = (
+    "ball_s", "ball_m", "ball_l", "knife", "star_s", "star_m", "star_l",
+    "arrow_s", "arrow_m", "arrow_l", "square", "butterfly", "ellipse",
+    "kite", "heart", "grain_a", "grain_b", "grain_c", "gun", "mildew",
+    "ball_light", "silence", "needle", "scale", "fire", "scale_s", "rice_s",
+)
+_BULLET_COLOR_CHOICES = (
+    "black", "blue", "cyan", "darkblue", "darkcyan", "darkgreen", "darkorange",
+    "darkpurple", "darkred", "darkyellow", "gray", "green", "orange", "pink",
+    "purple", "red", "white", "yellow",
+)
+
 
 def _coerce_graph_value(original, text: str):
     """Parse an Inspector text edit back to the node property's type."""
@@ -777,6 +848,18 @@ class InspectorPanel(QScrollArea):
         self._timeline_clip_id: str | None = None
         self._timeline_track_id: str | None = None
         self.node_registry = None
+        self._language_manager: LanguageManager | None = None
+
+    def set_language_manager(self, manager: LanguageManager) -> None:
+        self._language_manager = manager
+
+    def _tr(self, text: object) -> str:
+        value = str(text)
+        return (
+            self._language_manager.translate(value)
+            if self._language_manager is not None
+            else value
+        )
 
     def _clear_form(self) -> None:
         while self._form.count():
@@ -795,7 +878,17 @@ class InspectorPanel(QScrollArea):
             self._form.addRow(QLabel("No node selected"))
             return
 
-        name_edit = QLineEdit(node.name)
+        spec = (
+            self.node_registry.get(node.type)
+            if self.node_registry is not None
+            else None
+        )
+        display_name = node.name
+        if spec is not None and node.name == spec.display_name:
+            display_name = self._tr(node.name)
+        elif node.type == "SceneRoot" and node.name == "Untitled Scene":
+            display_name = self._tr(node.name)
+        name_edit = QLineEdit(display_name)
         name_edit.setObjectName("inspectorName")
         name_edit.editingFinished.connect(
             lambda edit=name_edit, node_id=node.id: self.renameRequested.emit(
@@ -805,7 +898,7 @@ class InspectorPanel(QScrollArea):
         )
         self._form.addRow("Name", name_edit)
 
-        type_edit = QLineEdit(node.type)
+        type_edit = QLineEdit(self._tr(node.type))
         type_edit.setReadOnly(True)
         self._form.addRow("Type", type_edit)
 
@@ -874,17 +967,21 @@ class InspectorPanel(QScrollArea):
         if node is None:
             self._form.addRow(QLabel("No graph node selected"))
             return
-        title = QLabel(f"{node.category.title()} · {node.node_type}")
+        title = QLabel(
+            f"{self._tr(node.category.title())} · {self._tr(node.node_type)}"
+        )
         title.setObjectName("inspectorGraphNodeTitle")
         title.setStyleSheet("font-weight:600; color:#9fc5ff;")
         self._form.addRow(title)
-        type_edit = QLineEdit(f"{node.category} / {node.node_type}")
+        type_edit = QLineEdit(
+            f"{self._tr(node.category.title())} / {self._tr(node.node_type)}"
+        )
         type_edit.setReadOnly(True)
         self._form.addRow("Type", type_edit)
         for key, label, kind in GRAPH_NODE_PROPERTY_SPECS.get(node.category, ()):
             value = node.properties.get(key, _GRAPH_NODE_DEFAULTS.get(key))
             editor = self._make_graph_property_editor(node.id, key, value)
-            self._form.addRow(label, editor)
+            self._form.addRow(self._tr(label), editor)
 
     def set_ui_node(self, node) -> None:
         """Show property editors for one selected UI document node."""
@@ -1070,7 +1167,25 @@ class InspectorPanel(QScrollArea):
         return editor
 
     def _make_graph_property_editor(self, node_id: str, key: str, value):
-        if isinstance(value, bool):
+        choices = {
+            "bullet_type": _BULLET_TYPE_CHOICES,
+            "color": _BULLET_COLOR_CHOICES,
+        }
+        if key in choices:
+            editor = QComboBox()
+            for choice in choices[key]:
+                editor.addItem(self._tr(choice), choice)
+            index = editor.findData(str(value))
+            if index < 0:
+                editor.addItem(str(value), str(value))
+                index = editor.count() - 1
+            editor.setCurrentIndex(index)
+            editor.currentIndexChanged.connect(
+                lambda _index, combo=editor, nid=node_id, k=key: self.graphNodePropertyRequested.emit(
+                    nid, {k: str(combo.currentData())}
+                )
+            )
+        elif isinstance(value, bool):
             editor = QCheckBox()
             editor.setChecked(value)
             editor.toggled.connect(
@@ -1377,8 +1492,7 @@ class InspectorPanel(QScrollArea):
         )
         self._form.addRow("Channel", channel)
 
-    @staticmethod
-    def _pattern_label(path: str) -> str:
+    def _pattern_label(self, path: str) -> str:
         units = {
             "shape.origin_x": "runtime",
             "shape.origin_y": "runtime",
@@ -1393,21 +1507,31 @@ class InspectorPanel(QScrollArea):
             "motion.max_lifetime": "s",
             "modifiers.angle_offset_per_burst": "deg/burst",
         }
-        label = path.split(".")[-1].replace("_", " ").title()
+        labels = {
+            "shape.kind": "Emission shape",
+            "aim.mode": "Aiming mode",
+        }
+        label = labels.get(path, path.split(".")[-1].replace("_", " ").title())
         unit = units.get(path)
-        return f"{label} [{unit}]" if unit else label
+        return self._tr(f"{label} [{unit}]" if unit else label)
 
     def _make_pattern_editor(self, path: str, value):
         choices = {
+            "bullet.bullet_type": _BULLET_TYPE_CHOICES,
+            "bullet.color": _BULLET_COLOR_CHOICES,
             "shape.kind": ("ring", "arc", "line", "spiral", "random", "flower"),
             "aim.mode": ("fixed", "player"),
         }
         if path in choices:
             editor = QComboBox()
-            editor.addItems(list(choices[path]))
-            editor.setCurrentText(str(value))
-            editor.currentTextChanged.connect(
-                lambda text, key=path: self.patternPropertyRequested.emit(key, text)
+            for choice in choices[path]:
+                editor.addItem(self._tr(choice), choice)
+            index = editor.findData(str(value))
+            editor.setCurrentIndex(max(0, index))
+            editor.currentIndexChanged.connect(
+                lambda _index, combo=editor, key=path: self.patternPropertyRequested.emit(
+                    key, str(combo.currentData())
+                )
             )
         elif isinstance(value, bool):
             editor = QCheckBox()
@@ -1544,6 +1668,19 @@ class EditorMainWindow(QMainWindow):
         self._active_pattern_document: PatternDocument | None = None
         self._active_pattern_session: ManagedDocument | None = None
         self._active_pattern_resource = ""
+        self._preset_library = self._load_builtin_preset_library()
+        self._preset_resolver = PresetResolver(self._preset_library.presets)
+        self.action_catalog = build_editor_action_catalog(
+            presets=self._preset_library.presets,
+            node_registry=self.node_type_registry,
+        )
+        self.action_executor = ActionExecutor()
+        self.action_executor.register("apply_preset", self._execute_preset_action)
+        self.action_executor.register("add_graph_node", self._execute_graph_action)
+        self.action_executor.register("add_timeline_track", self._execute_track_action)
+        self.action_executor.register("add_timeline_clip", self._execute_clip_action)
+        self.action_executor.register("add_scene_node", self._execute_scene_action)
+        self._action_search_dialog: ActionSearchDialog | None = None
         self._active_stage_session: ManagedDocument | None = None
         self._preview_loaded_resource_id: str | None = None
         self._preview_mode = "unloaded"
@@ -1570,19 +1707,95 @@ class EditorMainWindow(QMainWindow):
         self.resize(1480, 920)
         self.setMinimumSize(960, 640)
 
+    def _load_builtin_preset_library(self) -> PresetLibrary:
+        path = self.project.root / "game_content" / "presets" / "builtin_patterns.pystg.json"
+        if not path.is_file():
+            path = Path(__file__).resolve().parents[2] / "game_content" / "presets" / "builtin_patterns.pystg.json"
+        return PresetLibrary.load(path)
+
+    def _open_scene_action_search(self) -> None:
+        if not isinstance(self.session.document, SceneDocument):
+            return
+        parent = self.session.node(self._selected_id) or self.session.document.root
+        self._open_action_search("scene", parent_type=parent.type)
+
+    def _open_action_search(
+        self,
+        context: str,
+        *,
+        input_type: str | None = None,
+        parent_type: str | None = None,
+    ) -> None:
+        timeline_kind = None
+        if context == "timeline" and self.timeline.selected_track_id:
+            try:
+                timeline_kind = require_track(
+                    self.session.document, self.timeline.selected_track_id
+                ).kind
+            except (AttributeError, ValueError):
+                timeline_kind = None
+        dialog = ActionSearchDialog(
+            self.action_catalog,
+            ActionQuery(
+                context=context,
+                input_type=input_type,
+                parent_type=parent_type,
+                timeline_kind=timeline_kind,
+            ),
+            language_manager=self.language_manager,
+            parent=self,
+        )
+        dialog.actionChosen.connect(self._execute_action)
+        self._action_search_dialog = dialog
+        dialog.open()
+
+    def _execute_action(self, descriptor: ActionDescriptor) -> None:
+        try:
+            self.action_executor.execute(descriptor)
+        except Exception as exc:
+            self._show_error("Quick create failed", exc)
+
+    def _execute_preset_action(self, descriptor: ActionDescriptor) -> None:
+        self._apply_pattern_template(
+            f"{descriptor.payload['preset_id']}@{descriptor.payload['version']}"
+        )
+
+    def _execute_graph_action(self, descriptor: ActionDescriptor) -> None:
+        self._graph_node_create_requested(
+            str(descriptor.payload["category"]),
+            str(descriptor.payload["node_type"]),
+        )
+
+    def _execute_track_action(self, descriptor: ActionDescriptor) -> None:
+        self._timeline_add_track(str(descriptor.payload["kind"]))
+
+    def _execute_clip_action(self, descriptor: ActionDescriptor) -> None:
+        track_id = self.timeline.selected_track_id
+        if not track_id:
+            raise ValueError("timeline.selected_track: select a compatible track first")
+        track = require_track(self.session.document, track_id)
+        if track.kind != str(descriptor.payload["kind"]):
+            raise ValueError(
+                f"timeline.track:{track.id}.kind: expected {track.kind}, "
+                f"got {descriptor.payload['kind']}"
+            )
+        self._timeline_add_clip(track.id)
+
+    def _execute_scene_action(self, descriptor: ActionDescriptor) -> None:
+        self.add_node(str(descriptor.payload["node_type"]))
+
     def resizeEvent(self, event) -> None:
         """Keep the bottom workbench compact at the editor's minimum size.
 
-        The Variables and Inspector docks share the right column vertically.
-        Reserving the normal 220px bottom panel at a 960x640 window leaves
-        the variable editor's command/overlay footer below the fold.  A
-        smaller, still usable workbench keeps those controls reachable while
-        preserving the normal layout at desktop sizes.
+        The left and right authoring docks now share their columns as tabs, so
+        the bottom panel no longer has to collapse to a tab strip at the
+        supported 960x640 size.  Keep enough height for both timeline toolbars
+        and at least one editable track.
         """
         super().resizeEvent(event)
         if not hasattr(self, "bottom_dock") or self._bottom_dock_resize_guard:
             return
-        target_height = 80 if self.height() <= 700 else 220
+        target_height = 230 if self.height() <= 700 else 220
         if abs(self.bottom_dock.height() - target_height) < 8:
             return
         self._bottom_dock_resize_guard = True
@@ -1607,6 +1820,12 @@ class EditorMainWindow(QMainWindow):
         # forms and newly opened workspaces receive the same language as the
         # shell.  No document command is issued by this path.
         if hasattr(self, "tree"):
+            self.state_graph.set_language_manager(self.language_manager)
+            self.inspector.set_language_manager(self.language_manager)
+            for widget in self._document_widgets.values():
+                if isinstance(widget, PatternWorkspace):
+                    widget.set_language_manager(self.language_manager)
+                    widget.set_available_presets(self._preset_library.presets)
             self._refresh()
         translate_widget_tree(self, self.language_manager)
         runtime_host = getattr(self, "_runtime_preview_host", None)
@@ -1820,6 +2039,14 @@ class EditorMainWindow(QMainWindow):
         quick_flow = add_menu.addAction("Simple Spell Setup")
         quick_flow.setObjectName("addSimpleSpellFlow")
         quick_flow.triggered.connect(self.create_simple_spell_flow)
+        midstage = add_menu.addAction("Midstage Skeleton")
+        midstage.setObjectName("addMidstageSkeleton")
+        midstage.triggered.connect(lambda: self.create_stage_template("midstage"))
+        boss = add_menu.addAction("Two-phase Boss Skeleton")
+        boss.setObjectName("addTwoPhaseBossSkeleton")
+        boss.triggered.connect(
+            lambda: self.create_stage_template("two_phase_boss")
+        )
         add_menu.addSeparator()
         self._node_add_menu = add_menu
         self._node_menu_types: set[str] = set()
@@ -1865,6 +2092,7 @@ class EditorMainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
         self.state_graph = StateGraphEditor()
+        self.state_graph.set_language_manager(self.language_manager)
         self.state_graph.stateSelected.connect(self._state_graph_state_selected)
         self.state_graph.addStateRequested.connect(self._state_graph_add_state)
         self.state_graph.renameStateRequested.connect(self._state_graph_rename_state)
@@ -1888,14 +2116,11 @@ class EditorMainWindow(QMainWindow):
         state_graph_dock.setWidget(self.state_graph)
         state_graph_dock.setMinimumWidth(240)
         self.addDockWidget(Qt.LeftDockWidgetArea, state_graph_dock)
-        self.splitDockWidget(tree_dock, state_graph_dock, Qt.Vertical)
-        self.resizeDocks(
-            [tree_dock, state_graph_dock],
-            [180, 320],
-            Qt.Vertical,
-        )
+        self.tabifyDockWidget(tree_dock, state_graph_dock)
+        tree_dock.raise_()
 
         self.inspector = InspectorPanel()
+        self.inspector.set_language_manager(self.language_manager)
         self.inspector.node_registry = self.node_type_registry
         self.inspector.renameRequested.connect(self.rename_node)
         self.inspector.propertyRequested.connect(self.set_node_property)
@@ -1950,6 +2175,9 @@ class EditorMainWindow(QMainWindow):
             self._timeline_reactive_navigate
         )
         self.timeline.playheadChanged.connect(self._timeline_playhead_changed)
+        self.timeline.actionSearchRequested.connect(
+            lambda _unused: self._open_action_search("timeline")
+        )
         self.timeline.zoomChanged.connect(self._timeline_zoom_changed)
         self.variables = VariableEditor()
         self.variables.addVariableRequested.connect(self._variable_add_requested)
@@ -1963,7 +2191,8 @@ class EditorMainWindow(QMainWindow):
         variables_dock.setWidget(self.variables)
         variables_dock.setMinimumWidth(300)
         self.addDockWidget(Qt.RightDockWidgetArea, variables_dock)
-        self.splitDockWidget(inspector_dock, variables_dock, Qt.Vertical)
+        self.tabifyDockWidget(inspector_dock, variables_dock)
+        inspector_dock.raise_()
         self.bottom_tabs = QTabWidget()
         self.bottom_tabs.setObjectName("bottomWorkbench")
         self.bottom_tabs.addTab(self.output, "Output")
@@ -1994,7 +2223,7 @@ class EditorMainWindow(QMainWindow):
         self.bottom_dock = bottom_dock
         bottom_dock.setObjectName("bottomDock")
         bottom_dock.setWidget(self.bottom_tabs)
-        bottom_dock.setMinimumHeight(80)
+        bottom_dock.setMinimumHeight(210)
         self.addDockWidget(Qt.BottomDockWidgetArea, bottom_dock)
         self.resizeDocks([bottom_dock], [220], Qt.Vertical)
 
@@ -2007,13 +2236,19 @@ class EditorMainWindow(QMainWindow):
             return existing
         if isinstance(session.document, SceneDocument):
             widget: QWidget = SceneViewport(
-                self.project, node_registry=self.node_type_registry
+                self.project,
+                node_registry=self.node_type_registry,
+                language_manager=self.language_manager,
             )
             widget.nodeSelected.connect(self._select_from_viewport)
             widget.nodePositionRequested.connect(self._set_node_position)
             widget.resourceDropped.connect(self._resource_dropped)
+            widget.actionSearchRequested.connect(
+                lambda _unused: self._open_scene_action_search()
+            )
         elif isinstance(session.document, PatternDocument):
             widget = PatternWorkspace()
+            widget.set_language_manager(self.language_manager)
             widget.previewRequested.connect(self._launch_active_preview)
             widget.templateRequested.connect(self._apply_pattern_template)
             widget.bulletResourceRequested.connect(
@@ -2038,6 +2273,22 @@ class EditorMainWindow(QMainWindow):
             widget.graphEdgeRequested.connect(self._graph_edge_requested)
             widget.graphNodeRemoveRequested.connect(self._graph_node_remove_requested)
             widget.graphEdgeRemoveRequested.connect(self._graph_edge_remove_requested)
+            widget.presetParameterRequested.connect(self._preset_parameter_requested)
+            widget.presetMaterializeRequested.connect(self._preset_materialize_requested)
+            widget.authoringLevelRequested.connect(self._pattern_level_requested)
+            widget.patternBindingRequested.connect(self._pattern_binding_requested)
+            widget.patternBindingRemoveRequested.connect(
+                self._pattern_binding_remove_requested
+            )
+            widget.sourceNavigateRequested.connect(
+                self._pattern_source_navigate_requested
+            )
+            widget.actionSearchRequested.connect(
+                lambda input_type: self._open_action_search(
+                    "graph", input_type=input_type
+                )
+            )
+            widget.set_available_presets(self._preset_library.presets)
         elif isinstance(session.document, UIDocument):
             from .ui_workspace import UIWorkspace
 
@@ -2109,7 +2360,7 @@ class EditorMainWindow(QMainWindow):
             )
             self.preview_panel.set_mode("pattern")
             if hasattr(self, "bottom_dock"):
-                target_height = 80 if self.height() <= 700 else 250
+                target_height = 180 if self.height() <= 700 else 250
                 self.resizeDocks([self.bottom_dock], [target_height], Qt.Vertical)
         if not hasattr(self, "tree"):
             return
@@ -2395,7 +2646,17 @@ class EditorMainWindow(QMainWindow):
             return
 
         def add_item(node: EditorNode, parent: QTreeWidgetItem | None = None):
-            item = QTreeWidgetItem([node.name, node.type])
+            # Translate only untouched built-in defaults.  User-authored names
+            # remain verbatim, while internal type IDs stay stable in data.
+            spec = self.node_type_registry.get(node.type)
+            display_name = node.name
+            if (
+                spec is not None and node.name == spec.display_name
+            ) or (node.type == "SceneRoot" and node.name == "Untitled Scene"):
+                display_name = self.language_manager.translate(node.name)
+            item = QTreeWidgetItem(
+                [display_name, self.language_manager.translate(node.type)]
+            )
             item.setData(0, Qt.UserRole, node.id)
             item.setToolTip(0, node.id)
             flags = item.flags() | Qt.ItemIsDropEnabled | Qt.ItemIsSelectable
@@ -2404,7 +2665,6 @@ class EditorMainWindow(QMainWindow):
             else:
                 flags &= ~Qt.ItemIsDragEnabled
             item.setFlags(flags)
-            spec = self.node_type_registry.get(node.type)
             if spec:
                 item.setForeground(1, QColor(spec.color))
             if parent is None:
@@ -2426,6 +2686,7 @@ class EditorMainWindow(QMainWindow):
         if self.document_manager.active is None:
             return
         document = self.session.document
+        self._sync_document_docks(document)
         widget = self._document_widgets.get(document.id)
         if isinstance(document, SceneDocument):
             if self.session.node(self._selected_id) is None:
@@ -2572,12 +2833,49 @@ class EditorMainWindow(QMainWindow):
                     self.session.editor_context.get("player_position", (0.0, -0.8))
                 )
                 widget.set_document(document, player_position=player)
-                mode = "graph" if graph_mode else "recipe"
+                preset_instance = self._preset_resolver.instance_from_document(document)
+                if preset_instance is not None:
+                    descriptor = self._preset_resolver.registry.resolve(
+                        preset_instance.preset_id, preset_instance.version
+                    )
+                    widget.set_preset_expansion(
+                        descriptor,
+                        self._preset_resolver.expand_virtual(preset_instance),
+                        dict(preset_instance.parameters),
+                    )
+                else:
+                    widget.set_preset_expansion(None)
+                preset_mode = bool(self.session.editor_context.get("preset_mode", False))
+                mode = "preset" if preset_mode and preset_instance is not None else ("graph" if graph_mode else "recipe")
                 widget.set_mode(mode, emit=False)
+                level = str(
+                    self.session.editor_context.get(
+                        "pattern_authoring_level",
+                        "l0" if preset_mode and preset_instance is not None else (
+                            "l3" if graph_mode else "l1"
+                        ),
+                    )
+                )
+                if widget.level_picker.findData(level) < 0:
+                    level = "l1"
+                widget.set_authoring_level(level)
                 if hasattr(self, "resource_browser"):
                     widget.set_available_bullets(self.resource_browser.index.records)
         self._update_actions()
         self._update_title()
+
+    def _sync_document_docks(self, document) -> None:
+        """Show only tools that can act on the active document."""
+
+        is_scene = isinstance(document, SceneDocument)
+        for dock in (self.scene_dock, self.state_graph_dock, self.variables_dock):
+            dock.setVisible(is_scene)
+        self.inspector_dock.setVisible(True)
+        if is_scene:
+            self.tabifyDockWidget(self.scene_dock, self.state_graph_dock)
+            self.tabifyDockWidget(self.inspector_dock, self.variables_dock)
+            self.scene_dock.raise_()
+            self.inspector_dock.raise_()
 
     def _update_actions(self) -> None:
         self.action_undo.setEnabled(self.session.commands.can_undo)
@@ -2603,7 +2901,7 @@ class EditorMainWindow(QMainWindow):
         self.action_revert.setEnabled(self.session.is_dirty or self.session.path is not None)
 
     def _update_title(self) -> None:
-        name = self.session.display_name
+        name = self.language_manager.translate(self.session.display_name)
         self.setWindowModified(self.session.is_dirty)
         app_title = self.language_manager.translate(APP_NAME)
         self.setWindowTitle(f"{name}[*] — {app_title}")
@@ -2614,13 +2912,16 @@ class EditorMainWindow(QMainWindow):
             index = self.central_tabs.indexOf(widget)
             if index >= 0:
                 suffix = " *" if session.is_dirty else ""
-                self.central_tabs.setTabText(index, session.display_name + suffix)
+                display_name = self.language_manager.translate(session.display_name)
+                self.central_tabs.setTabText(index, display_name + suffix)
         if hasattr(self, "language_manager"):
             translate_widget_tree(self, self.language_manager)
             self._update_language_actions()
 
     def _log(self, message: str) -> None:
-        self.output.append(html.escape(str(message)))
+        self.output.append(
+            html.escape(self.language_manager.translate(str(message)))
+        )
 
     def _apply_command(
         self,
@@ -2733,7 +3034,7 @@ class EditorMainWindow(QMainWindow):
             return
         node = EditorNode(
             type=str(node_type),
-            name=spec.display_name,
+            name=self.language_manager.translate(spec.display_name),
             properties={prop.key: prop.default for prop in spec.properties},
         )
 
@@ -2765,11 +3066,15 @@ class EditorMainWindow(QMainWindow):
         root = self.session.document.root
         stage = next((node for node in root.children if node.type == "Stage"), None)
         created_stage = stage is None
-        stage = stage or make_node("Stage", name="Stage")
-        boss = make_node("Boss", name="Boss")
-        spell = make_node("Spell", name="Spell")
-        emitter = make_node("Emitter", name="Emitter")
-        instance = make_node("PatternInstance", name="Pattern")
+        tr = self.language_manager.translate
+        stage = stage or make_node("Stage", name=tr("Stage"))
+        boss = make_node("Boss", name=tr("Boss"))
+        spell = make_node("Spell", name=tr("Spell"))
+        emitter = make_node("Emitter", name=tr("Emitter"))
+        # Give the spatial emitter its own visible handle instead of stacking
+        # it directly on the Boss at the registry default position.
+        emitter.properties["y"] = 320.0
+        instance = make_node("PatternInstance", name=tr("Pattern Instance"))
         selected_resource = str(self.session.selected_resource or "")
         record = (
             self.resource_browser.index.find(selected_resource)
@@ -2805,6 +3110,45 @@ class EditorMainWindow(QMainWindow):
         self.session.commands.end_transaction()
         self._selected_id = instance.id
         self._log("Created Stage/Boss/Spell/Emitter/PatternInstance flow")
+        self._refresh()
+
+    def create_stage_template(self, kind: str) -> None:
+        """Apply one runnable beginner skeleton as a single undo step."""
+
+        from .stage_templates import ApplyStageTemplateCommand
+
+        if not isinstance(self.session.document, SceneDocument):
+            self._show_error(
+                "Create Stage template failed",
+                ValueError("Open a Scene document first"),
+            )
+            return
+        pattern_resource = "res://game_content/patterns/starter_ring.pystg.json"
+        background_resource = "res://assets/images/background/luastg_spellcard.json"
+        command = ApplyStageTemplateCommand(
+            self.session.document,
+            str(kind),
+            pattern_resource,
+            background_resource,
+            audio_resource="stage_theme",
+            language=self.language,
+            label=(
+                "Create midstage skeleton"
+                if kind == "midstage"
+                else "Create two-phase Boss skeleton"
+            ),
+        )
+        try:
+            self.session.apply(command)
+        except Exception as exc:
+            self._show_error("Create Stage template failed", exc)
+            self._refresh()
+            return
+        self._selected_id = self.session.document.root.id
+        self.session.editor_context["selected_state_id"] = (
+            self.session.document.state_graph.initial_state_id
+        )
+        self._log(command.label)
         self._refresh()
 
     def delete_selected(self) -> None:
@@ -3291,6 +3635,7 @@ class EditorMainWindow(QMainWindow):
             "Pattern": "danmaku",
             "Movement": "position",
             "Audio": "bgm",
+            "Background": "background",
             "Event": "event",
             "Property": "enabled",
             "ScriptEvent": "script",
@@ -3466,6 +3811,11 @@ class EditorMainWindow(QMainWindow):
                 self.session.document.duration_frames,
             )
             payload = {"action": "play", "name": "bgm", "loops": -1}
+        elif track.kind == "Background":
+            payload = {
+                "resource": "res://game_content/backgrounds/default.pystg.json",
+                "fade_frames": 30,
+            }
         elif track.kind == "Event":
             payload = {"event_type": "timeline_event", "data": {}}
         elif track.kind == "Property":
@@ -4286,12 +4636,61 @@ class EditorMainWindow(QMainWindow):
         session = self._active_pattern_session
         if session is None:
             return
+        session.editor_context["preset_mode"] = str(mode) == "preset"
         if str(mode) == "graph":
             session.editor_context["graph_mode"] = True
         else:
             session.editor_context["graph_mode"] = False
             session.editor_context.pop("selected_graph_node_id", None)
         self._refresh()
+
+    def _pattern_level_requested(self, level: str) -> None:
+        from .progressive_authoring import authoring_level
+
+        session = self._active_pattern_session
+        if session is None or not isinstance(session.document, PatternDocument):
+            return
+        authoring_level(level)
+        session.editor_context["pattern_authoring_level"] = level
+        session.editor_context["preset_mode"] = level == "l0"
+        session.editor_context["graph_mode"] = level == "l3"
+        if level == "l3" and session.document.graph is None:
+            self._graph_expand_requested()
+            return
+        self._refresh()
+
+    def _pattern_binding_requested(self, path: str, kind: str, value) -> None:
+        from src.pattern import BindingSpec
+        from .pattern_commands import SetPatternBindingCommand
+
+        self._apply_graph_command(
+            SetPatternBindingCommand(
+                self._active_pattern_document,
+                BindingSpec(str(path), str(kind), value),
+            ),
+            f"Set {path} binding",
+        )
+
+    def _pattern_binding_remove_requested(self, path: str) -> None:
+        from .pattern_commands import RemovePatternBindingCommand
+
+        self._apply_graph_command(
+            RemovePatternBindingCommand(
+                self._active_pattern_document,
+                str(path),
+            ),
+            f"Remove {path} binding",
+        )
+
+    def _pattern_source_navigate_requested(self, resource_uri: str) -> None:
+        reference = str(resource_uri)
+        try:
+            path = self.project.resolve(reference, must_exist=True)
+        except Exception as exc:
+            self._show_error("Open Runtime source failed", exc)
+            return
+        self.session.editor_context["runtime_source_path"] = str(path)
+        self._log(f"Runtime source: {path}")
 
     def _graph_expand_requested(self) -> None:
         from .graph_commands import ExpandToGraphCommand
@@ -4941,6 +5340,23 @@ class EditorMainWindow(QMainWindow):
         return True
 
     def _apply_pattern_template(self, template: str) -> None:
+        if "@" in template:
+            from .preset_commands import ApplyPresetCommand
+
+            preset_id, version = template.rsplit("@", 1)
+            session = self._active_pattern_session
+            if session is None:
+                return
+            descriptor = self._preset_resolver.registry.resolve(preset_id, version)
+            session.editor_context["preset_mode"] = True
+            session.editor_context["graph_mode"] = False
+            if self._apply_graph_command(
+                ApplyPresetCommand(session.document, self._preset_resolver, descriptor),
+                f"Apply {descriptor.display_name} preset",
+            ):
+                return
+            session.editor_context["preset_mode"] = False
+            return
         templates = {
             "starter_ring": {
                 "shape.kind": "ring",
@@ -4977,6 +5393,38 @@ class EditorMainWindow(QMainWindow):
             values, f"Apply {template.replace('_', ' ')} template"
         ):
             self._sync_active_pattern_preview()
+
+    def _preset_parameter_requested(self, parameter_id: str, value) -> None:
+        from .preset_commands import SetPresetOverrideCommand
+
+        session = self._active_pattern_session
+        if session is None:
+            return
+        if self._apply_graph_command(
+            SetPresetOverrideCommand(
+                session.document,
+                self._preset_resolver,
+                str(parameter_id),
+                value,
+            ),
+            f"Set preset parameter {parameter_id}",
+        ):
+            session.editor_context["preset_mode"] = True
+
+    def _preset_materialize_requested(self) -> None:
+        from .preset_commands import MaterializePresetCommand
+
+        session = self._active_pattern_session
+        if session is None:
+            return
+        session.editor_context["preset_mode"] = False
+        session.editor_context["graph_mode"] = False
+        if self._apply_graph_command(
+            MaterializePresetCommand(session.document, self._preset_resolver),
+            "Make preset local",
+        ):
+            return
+        session.editor_context["preset_mode"] = True
 
     def _pattern_origin_requested(self, x: float, y: float) -> None:
         if self._apply_pattern_properties(

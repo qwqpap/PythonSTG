@@ -64,6 +64,14 @@ class PatternProgram:
     angle_offset_per_burst: float = 0.0
     speed_offset_per_burst: float = 0.0
     random_speed_variation: float = 0.0
+    preset_id: str | None = None
+    preset_version: str | None = None
+    preset_instance_id: str | None = None
+    preset_internal_node_ids: tuple[str, ...] = ()
+    trajectory_kind: str = "constant"
+    trajectory_parameters: tuple[tuple[str, float], ...] = ()
+    termination_reaction: tuple[tuple[str, object], ...] = ()
+    emitter_rotation_acceleration: float = 0.0
 
     @property
     def total_emissions(self) -> int | None:

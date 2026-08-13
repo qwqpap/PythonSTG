@@ -47,6 +47,7 @@ CURVE_SIN_SPEED    = 1  # speed = base + amp * sin(freq * t + phase)
 CURVE_SIN_ANGLE    = 2  # angle += amp * sin(freq * t + phase) * dt
 CURVE_COS_SPEED    = 3  # speed = base + amp * cos(freq * t + phase)
 CURVE_LINEAR_SPEED = 4  # speed = base + amp * t
+CURVE_DELAYED_TURN = 5  # after delay seconds, add a constant angular velocity
 
 
 @dataclass
@@ -174,6 +175,8 @@ class OptimizedBulletPool:
         # compatibility API.
         self.lifecycle_batches: List[LifecycleBatch] = []
         self._termination_reasons: Dict[int, str] = {}
+        self._termination_batch_reactions: Dict[int, Dict[str, Any]] = {}
+        self._termination_batch_queue: List[tuple[np.ndarray, Dict[str, Any], int]] = []
         self.last_alive = np.zeros(max_bullets, dtype='i4')
         self.batch_spawn_calls = 0
 
@@ -649,6 +652,7 @@ class OptimizedBulletPool:
         self._update_emitters()
 
         self._collect_deaths()
+        self._process_termination_batch_reactions()
         self._process_death_queue()
         self._process_spawn_queue()
 
@@ -716,6 +720,57 @@ class OptimizedBulletPool:
                 )
             )
 
+    def register_termination_batch_reaction(self, tag: int, spec: Dict[str, Any]) -> None:
+        """Register one vectorized owner reaction, never one callback per bullet."""
+        data = dict(spec)
+        if data.get("action") != "split":
+            raise ValueError("only the built-in split batch action is supported")
+        count = data.get("count", 0)
+        speed = data.get("speed", 0.0)
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 256:
+            raise ValueError("split count must be an integer in 1..256")
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or speed < 0:
+            raise ValueError("split speed must be non-negative")
+        self._termination_batch_reactions[int(tag)] = data
+
+    def unregister_termination_batch_reaction(self, tag: int) -> None:
+        self._termination_batch_reactions.pop(int(tag), None)
+
+    def _queue_termination_batch_reaction(self, indices, reason: str) -> None:
+        values = np.asarray(indices, dtype=np.intp)
+        for tag in np.unique(self.data['tag'][values]):
+            spec = self._termination_batch_reactions.get(int(tag))
+            if spec is None or str(spec.get("reason", "expired")) != str(reason):
+                continue
+            group = values[self.data['tag'][values] == tag]
+            self._termination_batch_queue.append(
+                (self.data['pos'][group].copy(), dict(spec), int(tag))
+            )
+
+    def _process_termination_batch_reactions(self) -> None:
+        queue = self._termination_batch_queue
+        self._termination_batch_queue = []
+        for sources, spec, tag in queue:
+            split_count = int(spec["count"])
+            if sources.size == 0:
+                continue
+            positions = np.repeat(sources, split_count, axis=0)
+            angles = np.tile(
+                np.arange(split_count, dtype=np.float32)
+                * (2.0 * math.pi / split_count),
+                len(sources),
+            )
+            speeds = np.full(
+                len(positions), float(spec["speed"]) / 60.0, dtype=np.float32
+            )
+            self.spawn_bullets_batch(
+                positions,
+                angles,
+                speeds,
+                tag=tag,
+                max_lifetime=float(spec.get("max_lifetime", 0.0)),
+            )
+
     def _record_classified_deaths(self, indices) -> None:
         values = np.asarray(indices, dtype=np.intp)
         if values.size == 0:
@@ -742,6 +797,7 @@ class OptimizedBulletPool:
             selected = values[mask & ~explicit]
             if selected.size:
                 self._record_lifecycle(selected, reason=reason)
+                self._queue_termination_batch_reaction(selected, reason)
                 handled |= mask & ~explicit
         explicit_values = values[explicit]
         if explicit_values.size:
@@ -928,6 +984,7 @@ class OptimizedBulletPool:
         self.free_indices = list(range(self.max_bullets - 1, -1, -1))
         self.death_handlers.clear()
         self._termination_reasons.clear()
+        self._termination_batch_queue.clear()
         self.polar_motions.clear()
         self.emitter_callbacks.clear()
         # 还原默认值
@@ -1173,6 +1230,9 @@ def _update_bullets_optimized(data, dt):
                 data[i]['speed'] = base + amp * math.cos(freq * t + phase)
             elif ct == 4:  # LINEAR_SPEED
                 data[i]['speed'] = base + amp * t
+            elif ct == 5:  # DELAYED_TURN: amp=angular velocity, freq=delay
+                if t >= freq:
+                    data[i]['angle'] += amp * local_dt
 
         # ---- 摩擦力 / 阻尼 ----
         friction = data[i]['friction']
