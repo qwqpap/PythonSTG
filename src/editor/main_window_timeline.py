@@ -107,7 +107,7 @@ class TimelineSlotsMixin:
             "Reactive": "reaction",
         }
         state_id = str(
-            self.session.editor_context.get("selected_state_id")
+            self.session.editor_state.selection.state_id
             or self.session.document.state_graph.initial_state_id
         )
         selected_tracks = timeline_tracks(self.session.document, state_id)
@@ -131,7 +131,7 @@ class TimelineSlotsMixin:
             self._show_error("Add timeline track failed", exc)
             return
         self.timeline.selected_track_id = track.id
-        self.session.editor_context["selected_track_id"] = track.id
+        self.session.editor_state.selection.track_id = track.id
         self._log(f"Added {kind} timeline track")
         self._refresh()
         self._sync_active_stage_preview()
@@ -143,8 +143,8 @@ class TimelineSlotsMixin:
             track = require_track(self.session.document, track_id)
         except ValueError:
             return
-        self.session.editor_context["selected_track_id"] = track.id
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.track_id = track.id
+        self.session.editor_state.selection.clip_id = None
         self.inspector.set_timeline_track(
             track,
             list(self.session.document.root.walk()),
@@ -153,10 +153,10 @@ class TimelineSlotsMixin:
     def _timeline_reactive_navigate(self, target: str, resource_id: str) -> None:
         """Remember a local reaction/behavior target without merging views."""
 
-        self.session.editor_context["reactive_navigation"] = {
-            "target": str(target),
-            "resource_id": str(resource_id),
-        }
+        self.session.editor_state.timeline.reactive_navigation = (
+            str(target),
+            str(resource_id),
+        )
         self._log(f"Navigate to {target} {resource_id}")
 
     def _timeline_track_properties_requested(
@@ -179,8 +179,8 @@ class TimelineSlotsMixin:
             self._show_error("Edit timeline track failed", exc)
             self._refresh()
             return
-        self.session.editor_context["selected_track_id"] = track_id
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.track_id = track_id
+        self.session.editor_state.selection.clip_id = None
         self._log("Edited timeline track")
         self._refresh()
         self._sync_active_stage_preview()
@@ -195,8 +195,8 @@ class TimelineSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Delete timeline track failed", exc)
             return
-        self.session.editor_context.pop("selected_track_id", None)
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.track_id = None
+        self.session.editor_state.selection.clip_id = None
         self.timeline.selected_track_id = None
         self.timeline.selected_clip_id = None
         self._log("Deleted timeline track")
@@ -209,7 +209,7 @@ class TimelineSlotsMixin:
         try:
             track = require_track(self.session.document, track_id)
             state_id = str(
-                self.session.editor_context.get("selected_state_id")
+                self.session.editor_state.selection.state_id
                 or self.session.document.state_graph.initial_state_id
             )
             selected_tracks = timeline_tracks(self.session.document, state_id)
@@ -223,7 +223,7 @@ class TimelineSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Reorder timeline track failed", exc)
             return
-        self.session.editor_context["selected_track_id"] = track_id
+        self.session.editor_state.selection.track_id = track_id
         self._refresh()
         self._sync_active_stage_preview()
 
@@ -337,7 +337,7 @@ class TimelineSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Add timeline clip failed", exc)
             return
-        self.session.editor_context["selected_clip_id"] = clip.id
+        self.session.editor_state.selection.clip_id = clip.id
         self.timeline.selected_clip_id = clip.id
         self._log(f"Added {track.kind} clip at frame {start}")
         self._refresh()
@@ -452,7 +452,7 @@ class TimelineSlotsMixin:
             self._show_error("Move timeline clip failed", exc)
             self._refresh()
             return
-        self.session.editor_context["selected_clip_id"] = clip_id
+        self.session.editor_state.selection.clip_id = clip_id
         self._log(f"Moved timeline clip to frame {start_frame}")
         self._refresh()
         self._sync_active_stage_preview()
@@ -479,7 +479,7 @@ class TimelineSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Duplicate timeline clip failed", exc)
             return
-        self.session.editor_context["selected_clip_id"] = duplicate.id
+        self.session.editor_state.selection.clip_id = duplicate.id
         self._log(f"Duplicated {clip.name}")
         self._refresh()
         self._sync_active_stage_preview()
@@ -498,7 +498,7 @@ class TimelineSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Delete timeline clip failed", exc)
             return
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.clip_id = None
         self.timeline.selected_clip_id = None
         self._log("Deleted timeline clip")
         self._refresh()
@@ -510,8 +510,8 @@ class TimelineSlotsMixin:
         result = find_clip(self.session.document, clip_id)
         if result is None:
             return
-        self.session.editor_context["selected_track_id"] = track_id
-        self.session.editor_context["selected_clip_id"] = clip_id
+        self.session.editor_state.selection.track_id = track_id
+        self.session.editor_state.selection.clip_id = clip_id
         self.inspector.set_timeline_clip(
             result[0],
             result[1],
@@ -539,7 +539,7 @@ class TimelineSlotsMixin:
             self._show_error("Edit timeline clip failed", exc)
             self._refresh()
             return
-        self.session.editor_context["selected_clip_id"] = clip_id
+        self.session.editor_state.selection.clip_id = clip_id
         self._log("Edited timeline clip")
         self._refresh()
         self._sync_active_stage_preview()
@@ -566,7 +566,7 @@ class TimelineSlotsMixin:
             self._show_error("Edit timeline keyframe failed", exc)
             self._refresh()
             return
-        self.session.editor_context["selected_clip_id"] = clip_id
+        self.session.editor_state.selection.clip_id = clip_id
         self._log("Edited timeline keyframe")
         self._refresh()
         self._sync_active_stage_preview()
@@ -575,7 +575,7 @@ class TimelineSlotsMixin:
         session = self.document_manager.active
         if session is None:
             return
-        session.editor_context["timeline_playhead"] = int(frame)
+        session.editor_state.timeline.playhead_frame = int(frame)
         if (
             self._pattern_preview_client.is_running
             and session is self._active_stage_session
@@ -587,4 +587,4 @@ class TimelineSlotsMixin:
 
     def _timeline_zoom_changed(self, value: float) -> None:
         if self.document_manager.active is not None:
-            self.session.editor_context["timeline_zoom"] = float(value)
+            self.session.editor_state.timeline.zoom = float(value)

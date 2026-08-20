@@ -20,6 +20,7 @@ from src.pattern import PatternDocument
 from .commands import Command, CommandStack
 from .document import EditorNode, SceneDocument
 from .session import SceneEditorSession
+from .state import DocumentEditorState
 
 
 SUPPORTED_DOCUMENT_TYPES = (
@@ -53,9 +54,7 @@ class ManagedDocument:
     path: Path | None = None
     node_registry: Any | None = field(default=None, repr=False)
     commands: CommandStack = field(default_factory=CommandStack)
-    selected_id: str | None = None
-    selected_resource: str | None = None
-    editor_context: dict[str, Any] = field(default_factory=dict)
+    editor_state: DocumentEditorState = field(default_factory=DocumentEditorState)
     _saved_payload: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -65,9 +64,10 @@ class ManagedDocument:
             )
         if self.path is not None:
             self.path = self.store.project.resolve(self.path)
-        if self.selected_id is None:
-            self.selected_id = self.default_selection
+        if self.editor_state.selection.node_id is None:
+            self.editor_state.selection.node_id = self.default_selection
         self._saved_payload = deepcopy(self.document.to_dict())
+        self._correct_editor_state()
 
     @property
     def default_selection(self) -> str:
@@ -105,9 +105,8 @@ class ManagedDocument:
         self.path = self.store.project.resolve(path) if path is not None else None
         self.commands.clear()
         self._saved_payload = deepcopy(document.to_dict())
-        self.selected_id = self.default_selection
-        self.selected_resource = None
-        self.editor_context.clear()
+        self.editor_state = DocumentEditorState()
+        self.editor_state.selection.node_id = self.default_selection
 
     def reset(self, name: str | None = None) -> None:
         """Backward-compatible reset for integrations that held one session."""
@@ -120,6 +119,7 @@ class ManagedDocument:
 
     def apply(self, command: Command, *, coalesce: bool = False) -> None:
         self.commands.push(command, coalesce=coalesce, validate=self._validate)
+        self._correct_editor_state()
 
     def _validate(self) -> None:
         self.document.validate()
@@ -135,12 +135,14 @@ class ManagedDocument:
         changed = self.commands.undo()
         if changed:
             self.document.validate()
+            self._correct_editor_state()
         return changed
 
     def redo(self) -> bool:
         changed = self.commands.redo()
         if changed:
             self.document.validate()
+            self._correct_editor_state()
         return changed
 
     def save(self, path: str | Path | None = None) -> Path:
@@ -162,8 +164,94 @@ class ManagedDocument:
         self.document = replacement
         self.commands.clear()
         self._saved_payload = deepcopy(replacement.to_dict())
-        if self.node(self.selected_id) is None:
-            self.selected_id = self.default_selection
+        self._correct_editor_state()
+
+    def release_editor_state(self) -> None:
+        """Release transient state and history when this document is closed."""
+
+        self.commands.clear()
+        self.editor_state = DocumentEditorState()
+
+    def _correct_editor_state(self) -> None:
+        """Remove selections whose authoring targets no longer exist."""
+
+        selection = self.editor_state.selection
+        if isinstance(self.document, SceneDocument):
+            if self.node(selection.node_id) is None:
+                selection.node_id = self.default_selection
+
+            graph = self.document.state_graph
+            selected_state = graph.find_state(selection.state_id or "")
+            if selection.state_id is not None and selected_state is None:
+                selection.state_id = graph.initial_state_id
+                selected_state = graph.initial_state
+            if selected_state is not None:
+                track_ids = {track.id for track in selected_state.tracks}
+                clip_ids = {
+                    clip.id for track in selected_state.tracks for clip in track.clips
+                }
+                if selection.track_id not in track_ids:
+                    selection.track_id = None
+                if selection.clip_id not in clip_ids:
+                    selection.clip_id = None
+            else:
+                selection.track_id = None
+                selection.clip_id = None
+            variable_ids = {variable.id for variable in self.document.variables}
+            variable_ids.update(
+                variable.id
+                for state in graph.walk_states()
+                for variable in state.variables
+            )
+            if selection.binding_id not in variable_ids:
+                selection.binding_id = None
+            selection.binding_candidate_ids = tuple(
+                variable_id
+                for variable_id in selection.binding_candidate_ids
+                if variable_id in variable_ids
+            )
+            navigation = self.editor_state.timeline.reactive_navigation
+            if navigation is not None:
+                all_clip_ids = {
+                    clip.id
+                    for state in graph.walk_states()
+                    for track in state.tracks
+                    for clip in track.clips
+                }
+                if navigation[1] not in all_clip_ids:
+                    self.editor_state.timeline.reactive_navigation = None
+            return
+
+        graph = getattr(self.document, "graph", None)
+        if selection.graph_node_id is not None and (
+            graph is None
+            or not any(
+                node.id == selection.graph_node_id
+                for node in getattr(graph, "nodes", ())
+            )
+        ):
+            selection.graph_node_id = None
+
+        root = getattr(self.document, "root", None)
+        if root is not None and selection.ui_node_id is not None:
+            walked = tuple(root.walk())
+            node_ids = {
+                getattr(item[0] if isinstance(item, tuple) else item, "id", None)
+                for item in walked
+            }
+            if selection.ui_node_id not in node_ids:
+                selection.ui_node_id = getattr(root, "id", None)
+
+        body = getattr(self.document, "body", None)
+        if isinstance(body, dict):
+            layers = body.get("layers")
+            if isinstance(layers, list) and layers:
+                self.editor_state.background_selected_layer = min(
+                    self.editor_state.background_selected_layer,
+                    len(layers) - 1,
+                )
+            else:
+                self.editor_state.background_selected_layer = 0
 
 
 def _clone_document_from_payload(document: Any, payload: dict[str, Any]) -> Any:
@@ -274,6 +362,7 @@ class DocumentManager:
         if session.is_dirty and not discard:
             raise UnsavedDocumentError(f"Document has unsaved changes: {session.display_name}")
         removed = self._documents.pop(index)
+        removed.release_editor_state()
         if not self._documents:
             self._active_index = -1
         elif self._active_index > index:

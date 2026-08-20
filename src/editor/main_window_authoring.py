@@ -44,17 +44,16 @@ class AuthoringSlotsMixin:
         state = self.session.document.state_graph.find_state(state_id)
         if state is None:
             return
-        previous = self.session.editor_context.get("selected_state_id")
-        playheads = self.session.editor_context.setdefault(
-            "timeline_playheads_by_state", {}
-        )
-        if isinstance(playheads, dict) and previous:
-            playheads[str(previous)] = int(self.timeline.playhead_frame)
-        self.session.editor_context["selected_state_id"] = state.id
-        self.session.editor_context.pop("selected_track_id", None)
-        self.session.editor_context.pop("selected_clip_id", None)
-        frame = int(playheads.get(state.id, 0)) if isinstance(playheads, dict) else 0
-        self.session.editor_context["timeline_playhead"] = frame
+        editor_state = self.session.editor_state
+        previous = editor_state.selection.state_id
+        playheads = editor_state.timeline.playheads_by_state
+        if previous:
+            playheads[previous] = int(self.timeline.playhead_frame)
+        editor_state.selection.state_id = state.id
+        editor_state.selection.track_id = None
+        editor_state.selection.clip_id = None
+        frame = playheads.get(state.id, 0)
+        editor_state.timeline.playhead_frame = frame
         self._refresh()
 
     def _variable_add_requested(
@@ -67,7 +66,7 @@ class AuthoringSlotsMixin:
         if not isinstance(self.session.document, SceneDocument):
             return
         selected_state = str(
-            self.session.editor_context.get("selected_state_id")
+            self.session.editor_state.selection.state_id
             or self.session.document.state_graph.initial_state_id
         )
         state_id = selected_state if scope == "state" else None
@@ -122,7 +121,9 @@ class AuthoringSlotsMixin:
             owner_id=variable.owner_id,
             exclude_id=variable.id,
         )
-        self.session.editor_context["variable_binding_candidates"] = tuple(item.id for item in candidates)
+        self.session.editor_state.selection.binding_candidate_ids = tuple(
+            item.id for item in candidates
+        )
         picker = VariableBindingDialog(candidates, parent=self)
         if picker.exec() != QDialog.Accepted or picker.selected_id is None:
             return
@@ -132,7 +133,7 @@ class AuthoringSlotsMixin:
         # A binding is an editor selection, not a document mutation.  The
         # selected reference is consumed by the owning pattern/behavior tool;
         # choosing it must not create a dirty document or an undo entry.
-        self.session.editor_context["selected_binding_id"] = selected.id
+        self.session.editor_state.selection.binding_id = selected.id
         self.statusBar().showMessage(
             f"Binding candidate: {selected.name} ({selected.scope}, {selected.type})",
             5000,
@@ -156,7 +157,7 @@ class AuthoringSlotsMixin:
     def _variable_mapping_requested(self) -> None:
         if not isinstance(self.session.document, SceneDocument):
             return
-        state_id = str(self.session.editor_context.get("selected_state_id") or "") or None
+        state_id = self.session.editor_state.selection.state_id
         try:
             mappings = tuple(self._mapping_collection(self.session.document, state_id))
         except DocumentError as exc:
@@ -241,9 +242,9 @@ class AuthoringSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Add State failed", exc)
             return
-        self.session.editor_context["selected_state_id"] = state.id
-        self.session.editor_context.pop("selected_track_id", None)
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.state_id = state.id
+        self.session.editor_state.selection.track_id = None
+        self.session.editor_state.selection.clip_id = None
         self._log(f"Added State {state.name}")
         self._refresh()
         self._sync_active_stage_preview()
@@ -260,7 +261,7 @@ class AuthoringSlotsMixin:
             self._show_error("Rename State failed", exc)
             self._refresh()
             return
-        self.session.editor_context["selected_state_id"] = state_id
+        self.session.editor_state.selection.state_id = state_id
         self._refresh()
         self._sync_active_stage_preview()
 
@@ -274,11 +275,11 @@ class AuthoringSlotsMixin:
             self._show_error("Duplicate State failed", exc)
             return
         if command.duplicated_state is not None:
-            self.session.editor_context["selected_state_id"] = (
+            self.session.editor_state.selection.state_id = (
                 command.duplicated_state.id
             )
-        self.session.editor_context.pop("selected_track_id", None)
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.track_id = None
+        self.session.editor_state.selection.clip_id = None
         self._refresh()
         self._sync_active_stage_preview()
 
@@ -293,9 +294,9 @@ class AuthoringSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Delete State failed", exc)
             return
-        self.session.editor_context["selected_state_id"] = graph.initial_state_id
-        self.session.editor_context.pop("selected_track_id", None)
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.state_id = graph.initial_state_id
+        self.session.editor_state.selection.track_id = None
+        self.session.editor_state.selection.clip_id = None
         self._refresh()
         self._sync_active_stage_preview()
 
@@ -317,7 +318,7 @@ class AuthoringSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Move State failed", exc)
             return
-        self.session.editor_context["selected_state_id"] = state_id
+        self.session.editor_state.selection.state_id = state_id
         self._refresh()
         self._sync_active_stage_preview()
 
@@ -350,7 +351,7 @@ class AuthoringSlotsMixin:
         except (DocumentError, ValueError) as exc:
             self._show_error("Add transition failed", exc)
             return
-        self.session.editor_context["selected_state_id"] = source_state_id
+        self.session.editor_state.selection.state_id = source_state_id
         self._refresh()
         self._sync_active_stage_preview()
 

@@ -205,16 +205,15 @@ def test_double_clicking_a_reactive_slot_navigates_to_its_local_view(tmp_path, q
     # A non-reactive clip has no local behaviour view, so entering it must not
     # invent a navigation target.
     double_click(plain.id)
-    assert "reactive_navigation" not in window.session.editor_context
+    assert window.session.editor_state.timeline.reactive_navigation is None
 
     double_click(reactive.id)
-    assert window.session.editor_context["reactive_navigation"] == {
-        "target": "reaction",
-        "resource_id": reactive.id,
-    }
+    assert window.session.editor_state.timeline.reactive_navigation == (
+        "reaction",
+        reactive.id,
+    )
     # Navigating is a read of the document, never a write to it.
     assert window.session.document.tracks[1].clips[0].payload == reactive.payload
     window.session.revert()
     window.close()
     qapp_session.processEvents()
-

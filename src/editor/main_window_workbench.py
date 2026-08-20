@@ -222,7 +222,7 @@ class WorkbenchSlotsMixin:
 
     def _resource_selected(self, record: AssetRecord) -> None:
         if self.document_manager.active is not None:
-            self.session.selected_resource = record.resource_value
+            self.session.editor_state.selection.resource_uri = record.resource_value
         self.statusBar().showMessage(record.resource_value, 3000)
 
     def _resource_activated(self, record: AssetRecord) -> None:
@@ -368,5 +368,5 @@ class WorkbenchSlotsMixin:
         widget = self._document_widgets.get(document_id)
         if widget is not None:
             self.central_tabs.setCurrentWidget(widget)
-        session.selected_id = node_id
+        session.editor_state.selection.node_id = node_id
         self._refresh()

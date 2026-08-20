@@ -252,7 +252,9 @@ def test_formal_stage_trace_moves_owner_overlay_and_timeline(
         qapp_session.processEvents()
 
         assert window.timeline.playhead_frame == 15
-        assert owner.editor_context["timeline_playhead"] == 15
+        assert window.runtime_overlay is not None
+        assert window.runtime_overlay.document_id == owner.document.id
+        assert window.runtime_overlay.frame == 15
         item = owner_viewport._items[boss.id]
         assert item._runtime_pose is True
         assert (item.x(), item.y()) != authored_position

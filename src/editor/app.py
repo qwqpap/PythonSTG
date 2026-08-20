@@ -80,6 +80,7 @@ from .main_window_scene_edit import SceneEditSlotsMixin
 from .main_window_timeline import TimelineSlotsMixin
 from .main_window_ui_docs import UIDocumentSlotsMixin
 from .main_window_workbench import WorkbenchSlotsMixin
+from .state import RuntimeOverlayState
 
 # ``build_preview_command`` and ``NodeGraphicsItem`` now live in the modules split
 # out of this file; they stay importable from here because the editor tests and
@@ -159,6 +160,7 @@ class EditorMainWindow(
         self._preview_loaded_resource_id: str | None = None
         self._preview_mode = "unloaded"
         self._preview_state = "stopped"
+        self._runtime_overlay: RuntimeOverlayState | None = None
         self._preview_pending_properties: dict[str, tuple[str, object]] = {}
         self._runtime_preview_host: RuntimePreviewHost | None = None
         self._sdk_plugins_deactivated = False
@@ -258,14 +260,28 @@ class EditorMainWindow(
         session = self.document_manager.active
         if session is None:
             return self._fallback_selected_id
-        return session.selected_id or session.default_selection
+        return session.editor_state.selection.node_id or session.default_selection
 
     @_selected_id.setter
     def _selected_id(self, value: str) -> None:
         self._fallback_selected_id = str(value)
         session = self.document_manager.active
         if session is not None:
-            session.selected_id = str(value)
+            session.editor_state.selection.node_id = str(value)
+
+    @property
+    def runtime_overlay(self) -> RuntimeOverlayState | None:
+        """Return the latest immutable formal-preview feedback snapshot."""
+
+        return self._runtime_overlay
+
+    def _runtime_overlay_for(
+        self, session: ManagedDocument
+    ) -> RuntimeOverlayState | None:
+        overlay = self._runtime_overlay
+        if overlay is None or overlay.document_id != session.document.id:
+            return None
+        return overlay
 
     def _refresh_node_add_menu(self) -> None:
         """Expose newly activated SDK node contributions in the shell menu."""
@@ -732,17 +748,17 @@ class EditorMainWindow(
             self.viewport = widget
             widget.rebuild(document)
             widget.select_node(self._selected_id)
+        state = self.session.editor_state
         selected_state_id = str(
-            self.session.editor_context.get("selected_state_id")
-            or document.state_graph.initial_state_id
+            state.selection.state_id or document.state_graph.initial_state_id
         )
         selected_state = document.state_graph.find_state(selected_state_id)
         if selected_state is None:
             selected_state_id = document.state_graph.initial_state_id
             selected_state = document.state_graph.initial_state
-        self.session.editor_context["selected_state_id"] = selected_state_id
-        selected_clip_id = self.session.editor_context.get("selected_clip_id")
-        selected_track_id = self.session.editor_context.get("selected_track_id")
+        state.selection.state_id = selected_state_id
+        selected_clip_id = state.selection.clip_id
+        selected_track_id = state.selection.track_id
         clip_result = (
             find_clip(document, str(selected_clip_id))
             if selected_clip_id
@@ -767,48 +783,40 @@ class EditorMainWindow(
                 list(document.root.walk()),
             )
         else:
-            self.session.editor_context.pop("selected_clip_id", None)
-            self.session.editor_context.pop("selected_track_id", None)
+            state.selection.clip_id = None
+            state.selection.track_id = None
             self.inspector.set_node(self.session.node(self._selected_id))
         self.timeline.set_document(
             document,
             state_id=selected_state_id,
             selected_clip_id=(clip_result[1].id if clip_result is not None else None),
-            zoom=float(self.session.editor_context.get("timeline_zoom", 0.25)),
+            zoom=state.timeline.zoom,
         )
         self.timeline.selected_track_id = (
             track_result.id if track_result is not None else None
         )
+        overlay = self._runtime_overlay_for(self.session)
         self.timeline.set_playhead(
-            int(self.session.editor_context.get("timeline_playhead", 0)),
+            overlay.frame if overlay is not None else state.timeline.playhead_frame,
             emit=False,
         )
-        stored_active = self.session.editor_context.get(
-            "timeline_active_clips", ()
-        )
         self.timeline.set_active_clips(
-            stored_active if isinstance(stored_active, (list, tuple, set)) else ()
+            overlay.active_clip_ids if overlay is not None else ()
         )
-        stored_reactive = self.session.editor_context.get("reactive_overlay", {})
         self.timeline.set_reactive_overlay(
-            stored_reactive if isinstance(stored_reactive, dict) else {}
+            overlay.mutable_reactive_overlay() if overlay is not None else {}
         )
-        runtime_path = self.session.editor_context.get("runtime_state_path", ())
         self.state_graph.set_document(
             document,
             selected_state_id=selected_state_id,
-            active_state_path=(
-                runtime_path
-                if isinstance(runtime_path, (list, tuple, set))
-                else ()
-            ),
+            active_state_path=overlay.state_path if overlay is not None else (),
         )
         self.variables.set_document(
             document,
             state_id=selected_state_id,
         )
         self.variables.set_runtime_overlay(
-            self.session.editor_context.get("runtime_variables", {})
+            overlay.mutable_variable_snapshot() if overlay is not None else {}
         )
 
     def _refresh_foreign_document(self, document, widget) -> None:
@@ -842,19 +850,16 @@ class EditorMainWindow(
             self.inspector.set_background_document(document)
             if isinstance(widget, BackgroundWorkspace):
                 widget.set_document(document)
-                selected_layer = self.session.editor_context.get(
-                    "background_selected_layer", 0
-                )
+                selected_layer = self.session.editor_state.background_selected_layer
                 if widget.layers.count():
                     widget.layers.setCurrentRow(
                         max(0, min(int(selected_layer), widget.layers.count() - 1))
                     )
             self.timeline.clear_document()
             return
-        graph_mode = bool(self.session.editor_context.get("graph_mode", False))
-        selected_graph_node = self.session.editor_context.get(
-            "selected_graph_node_id"
-        )
+        state = self.session.editor_state
+        graph_mode = state.pattern.graph_mode
+        selected_graph_node = state.selection.graph_node_id
         if graph_mode and document.graph is not None:
             selected_node = next(
                 (
@@ -869,9 +874,7 @@ class EditorMainWindow(
             self.inspector.set_pattern(document)
         self.timeline.clear_document()
         if isinstance(widget, PatternWorkspace):
-            player = tuple(
-                self.session.editor_context.get("player_position", (0.0, -0.8))
-            )
+            player = state.pattern.player_position
             widget.set_document(document, player_position=player)
             preset_instance = self._preset_resolver.instance_from_document(document)
             if preset_instance is not None:
@@ -889,17 +892,10 @@ class EditorMainWindow(
                 )
             else:
                 widget.set_preset_expansion(None)
-            preset_mode = bool(self.session.editor_context.get("preset_mode", False))
+            preset_mode = state.pattern.preset_mode
             mode = "preset" if preset_mode and preset_instance is not None else ("graph" if graph_mode else "recipe")
             widget.set_mode(mode, emit=False)
-            level = str(
-                self.session.editor_context.get(
-                    "pattern_authoring_level",
-                    "l0" if preset_mode and preset_instance is not None else (
-                        "l3" if graph_mode else "l1"
-                    ),
-                )
-            )
+            level = state.pattern.authoring_level
             if widget.level_picker.findData(level) < 0:
                 level = "l1"
             widget.set_authoring_level(level)
@@ -1111,6 +1107,8 @@ class EditorMainWindow(
             self._preview_process.terminate()
             if not self._preview_process.waitForFinished(1500):
                 self._preview_process.kill()
+        self._clear_stage_runtime_feedback()
+        self._active_stage_session = None
         self._pattern_preview_client.close()
         for process in tuple(self._tool_processes.values()):
             if process.state() == QProcess.NotRunning:

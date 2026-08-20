@@ -18,17 +18,17 @@ from src.editor.document import SceneDocument
 from src.pattern import PatternDocument
 
 
-def test_manager_owns_independent_documents_savepoints_and_context(tmp_path):
+def test_manager_owns_independent_documents_savepoints_and_state(tmp_path):
     project = ProjectContext(tmp_path)
     manager = DocumentManager(project)
     scene = manager.active
     assert scene is not None
-    scene.selected_resource = "res://assets/player.png"
-    scene.editor_context["zoom"] = 1.75
+    scene.editor_state.selection.resource_uri = "res://assets/player.png"
+    scene.editor_state.timeline.zoom = 1.75
 
     pattern = manager.new_pattern("Ring")
     pattern.apply(SetPatternPropertyCommand(pattern.document, "shape.count", 48))
-    pattern.selected_resource = "res://assets/bullets.json#ball"
+    pattern.editor_state.selection.resource_uri = "res://assets/bullets.json#ball"
     assert pattern.is_dirty
     assert pattern.commands.can_undo
     assert not scene.is_dirty
@@ -37,8 +37,8 @@ def test_manager_owns_independent_documents_savepoints_and_context(tmp_path):
     saved = manager.save(pattern, "game_content/patterns/ring.pystg.json")
     assert saved.is_file()
     assert not pattern.is_dirty
-    assert scene.selected_resource == "res://assets/player.png"
-    assert scene.editor_context["zoom"] == 1.75
+    assert scene.editor_state.selection.resource_uri == "res://assets/player.png"
+    assert scene.editor_state.timeline.zoom == 1.75
 
     manager.activate(scene)
     assert manager.active is scene

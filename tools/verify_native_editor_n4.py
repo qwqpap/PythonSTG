@@ -38,7 +38,7 @@ class _GatePlayer:
     pos = [0.0, -0.75]
 
 
-def _runtime_overlay(project: ProjectContext, document, clip) -> dict:
+def _runtime_overlay(project: ProjectContext, document, clip) -> tuple[dict, int]:
     """Run the authored scene on the formal path and return its real overlay."""
 
     program = compile_stage(project, document)
@@ -70,7 +70,7 @@ def _runtime_overlay(project: ProjectContext, document, clip) -> dict:
         raise AssertionError("the formal runtime produced no reactive trace")
     if not overlay.get("active_instances"):
         raise AssertionError("the formal runtime reported no live reaction instance")
-    return overlay
+    return overlay, runner.frame
 
 
 def run(*, project_root: Path, screenshot: Path | None = None) -> None:
@@ -84,13 +84,15 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
     window._timeline_add_track("Reactive")
     track = window.session.document.tracks[0]
     window.timeline.selected_track_id = track.id
-    window.session.editor_context["selected_track_id"] = track.id
+    window.session.editor_state.selection.track_id = track.id
     window._timeline_add_clip(track.id)
     app.processEvents()
     window.bottom_tabs.setCurrentWidget(window.timeline)
     clip = track.clips[0]
 
-    overlay = _runtime_overlay(project, window.session.document, clip)
+    overlay, runtime_frame = _runtime_overlay(
+        project, window.session.document, clip
+    )
 
     # Deliver the runtime overlay through the editor's own statistics path so
     # the gate covers the plumbing an author's preview run would use.
@@ -105,6 +107,7 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
                 "state": "playing",
                 "mode": "stage",
                 "resource_id": window.session.document.id,
+                "frame": runtime_frame,
                 "reactive_overlay": overlay,
             },
         }
@@ -129,7 +132,8 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
     QTest.mouseDClick(viewport, Qt.LeftButton, pos=point)
     QTest.mouseRelease(viewport, Qt.LeftButton, pos=point)
     app.processEvents()
-    if window.session.editor_context.get("reactive_navigation", {}).get("target") != "reaction":
+    navigation = window.session.editor_state.timeline.reactive_navigation
+    if navigation is None or navigation[0] != "reaction":
         raise AssertionError("Double-clicking the slot did not open the local reaction view")
     if window.session.document.to_dict() != before:
         raise AssertionError("Reactive navigation mutated the authoring document")

@@ -49,7 +49,7 @@ def _add_event_clip(window):
     window._timeline_add_track("Event")
     track = window.session.document.tracks[0]
     window.timeline.selected_track_id = track.id
-    window.session.editor_context["selected_track_id"] = track.id
+    window.session.editor_state.selection.track_id = track.id
     add_clip = window.timeline.findChild(QPushButton, "timelineAddClip")
     add_clip.click()
     return track, track.clips[0]
@@ -81,7 +81,7 @@ def test_graphics_timeline_add_duplicate_delete_and_undo(tmp_path, qapp_session)
     assert track.clips == [clip]
 
     window.timeline.selected_clip_id = clip.id
-    window.session.editor_context["selected_clip_id"] = clip.id
+    window.session.editor_state.selection.clip_id = clip.id
     window._refresh()
     qapp_session.processEvents()
     window.timeline.view.setFocus()
@@ -217,7 +217,9 @@ def test_runtime_statistics_drive_playhead_active_clip_and_pose_without_seek_or_
     qapp_session.processEvents()
 
     assert window.timeline.playhead_frame == 24
-    assert window.session.editor_context["timeline_playhead"] == 24
+    assert window.runtime_overlay is not None
+    assert window.runtime_overlay.frame == 24
+    assert window.session.editor_state.timeline.playhead_frame == 0
     assert window._pattern_preview_client.commands == []
     assert window.session.document.to_dict() == before_document
     assert window.session.is_dirty is before_dirty
@@ -313,7 +315,7 @@ def test_stage_preview_feedback_is_owned_by_loaded_scene_and_does_not_cross_tabs
 
     assert window.session is current
     assert window.timeline.playhead_frame == 6
-    assert current.editor_context.get("timeline_playhead") != 120
+    assert current.editor_state.timeline.playhead_frame != 120
     owner.revert()
     window.close()
     window.deleteLater()
@@ -358,7 +360,9 @@ def test_stage_runtime_feedback_moves_boss_in_owner_viewport_while_other_tab_is_
 
     assert current is window.session
     assert window.timeline.playhead_frame == 7
-    assert owner.editor_context["timeline_playhead"] == 42
+    assert window.runtime_overlay is not None
+    assert window.runtime_overlay.document_id == owner.document.id
+    assert window.runtime_overlay.frame == 42
     item = owner_viewport._items[boss.id]
     assert item._runtime_pose is True
     assert (item.x(), item.y()) == (288.0, 336.0)

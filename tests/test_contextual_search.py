@@ -163,7 +163,8 @@ def test_graph_search_executes_real_command_and_undo(tmp_path, qapp_session):
     window._resource_activated(record)
     session = window._active_pattern_session
     ExpandToGraphCommand(session.document).execute()
-    session.editor_context["graph_mode"] = True
+    session.editor_state.pattern.graph_mode = True
+    session.editor_state.pattern.authoring_level = "l3"
     window._refresh()
     before = len(session.document.graph.nodes)
     action = next(

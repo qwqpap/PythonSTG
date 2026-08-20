@@ -540,7 +540,7 @@ def test_window_expand_fold_handlers_sync_context_and_preview(tmp_path, qapp_ses
 
     window._graph_expand_requested()
     assert session.document.graph is not None
-    assert session.editor_context.get("graph_mode") is True
+    assert session.editor_state.pattern.graph_mode is True
     assert workspace.mode() == "graph"
     assert len(workspace.graph_canvas._node_items) == 6
     load_payload = dict(fake.commands[-1][1])
@@ -548,7 +548,7 @@ def test_window_expand_fold_handlers_sync_context_and_preview(tmp_path, qapp_ses
 
     window._graph_fold_requested()
     assert session.document.graph is None
-    assert not session.editor_context.get("graph_mode")
+    assert not session.editor_state.pattern.graph_mode
     window.close()
 
 

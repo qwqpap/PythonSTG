@@ -106,12 +106,17 @@ class PatternSlotsMixin:
         session = self._active_pattern_session
         if session is None:
             return
-        session.editor_context["preset_mode"] = str(mode) == "preset"
-        if str(mode) == "graph":
-            session.editor_context["graph_mode"] = True
+        mode = str(mode)
+        session.editor_state.pattern.preset_mode = mode == "preset"
+        if mode == "graph":
+            session.editor_state.pattern.graph_mode = True
+            session.editor_state.pattern.authoring_level = "l3"
         else:
-            session.editor_context["graph_mode"] = False
-            session.editor_context.pop("selected_graph_node_id", None)
+            session.editor_state.pattern.graph_mode = False
+            session.editor_state.selection.graph_node_id = None
+            session.editor_state.pattern.authoring_level = (
+                "l0" if mode == "preset" else "l1"
+            )
         self._refresh()
 
     def _pattern_level_requested(self, level: str) -> None:
@@ -119,9 +124,9 @@ class PatternSlotsMixin:
         if session is None or not isinstance(session.document, PatternDocument):
             return
         authoring_level(level)
-        session.editor_context["pattern_authoring_level"] = level
-        session.editor_context["preset_mode"] = level == "l0"
-        session.editor_context["graph_mode"] = level == "l3"
+        session.editor_state.pattern.authoring_level = level
+        session.editor_state.pattern.preset_mode = level == "l0"
+        session.editor_state.pattern.graph_mode = level == "l3"
         if level == "l3" and session.document.graph is None:
             self._graph_expand_requested()
             return
@@ -152,14 +157,15 @@ class PatternSlotsMixin:
         except Exception as exc:
             self._show_error("Open Runtime source failed", exc)
             return
-        self.session.editor_context["runtime_source_path"] = str(path)
+        self.session.editor_state.pattern.runtime_source_path = str(path)
         self._log(f"Runtime source: {path}")
 
     def _graph_expand_requested(self) -> None:
         session = self._active_pattern_session
         if session is None:
             return
-        session.editor_context["graph_mode"] = True
+        session.editor_state.pattern.graph_mode = True
+        session.editor_state.pattern.authoring_level = "l3"
         if self._apply_graph_command(
             ExpandToGraphCommand(session.document),
             "Expand pattern to graph",
@@ -170,8 +176,9 @@ class PatternSlotsMixin:
         session = self._active_pattern_session
         if session is None:
             return
-        session.editor_context["graph_mode"] = False
-        session.editor_context.pop("selected_graph_node_id", None)
+        session.editor_state.pattern.graph_mode = False
+        session.editor_state.pattern.authoring_level = "l1"
+        session.editor_state.selection.graph_node_id = None
         if self._apply_graph_command(
             FoldBackToRecipeCommand(session.document),
             "Fold back to recipe",
@@ -184,7 +191,7 @@ class PatternSlotsMixin:
             return
         if session.document.graph is None:
             return
-        session.editor_context["selected_graph_node_id"] = str(node_id)
+        session.editor_state.selection.graph_node_id = str(node_id)
         selected = next(
             (
                 node
@@ -318,14 +325,16 @@ class PatternSlotsMixin:
             if session is None:
                 return
             descriptor = self._preset_resolver.registry.resolve(preset_id, version)
-            session.editor_context["preset_mode"] = True
-            session.editor_context["graph_mode"] = False
+            session.editor_state.pattern.preset_mode = True
+            session.editor_state.pattern.graph_mode = False
+            session.editor_state.pattern.authoring_level = "l0"
             if self._apply_graph_command(
                 ApplyPresetCommand(session.document, self._preset_resolver, descriptor),
                 f"Apply {descriptor.display_name} preset",
             ):
                 return
-            session.editor_context["preset_mode"] = False
+            session.editor_state.pattern.preset_mode = False
+            session.editor_state.pattern.authoring_level = "l1"
             return
         templates = {
             "starter_ring": {
@@ -377,7 +386,8 @@ class PatternSlotsMixin:
             ),
             f"Set preset parameter {parameter_id}",
         ):
-            session.editor_context["preset_mode"] = True
+            session.editor_state.pattern.preset_mode = True
+            session.editor_state.pattern.authoring_level = "l0"
 
     def _preset_slot_requested(self, slot_id: str, value) -> None:
         session = self._active_pattern_session
@@ -392,7 +402,8 @@ class PatternSlotsMixin:
             ),
             f"Set preset slot {slot_id}",
         ):
-            session.editor_context["preset_mode"] = True
+            session.editor_state.pattern.preset_mode = True
+            session.editor_state.pattern.authoring_level = "l0"
 
     def _preset_migrate_requested(self, target_version: str) -> None:
         session = self._active_pattern_session
@@ -421,20 +432,23 @@ class PatternSlotsMixin:
             ),
             f"Migrate preset to {target_version}",
         ):
-            session.editor_context["preset_mode"] = True
+            session.editor_state.pattern.preset_mode = True
+            session.editor_state.pattern.authoring_level = "l0"
 
     def _preset_materialize_requested(self) -> None:
         session = self._active_pattern_session
         if session is None:
             return
-        session.editor_context["preset_mode"] = False
-        session.editor_context["graph_mode"] = False
+        session.editor_state.pattern.preset_mode = False
+        session.editor_state.pattern.graph_mode = False
+        session.editor_state.pattern.authoring_level = "l1"
         if self._apply_graph_command(
             MaterializePresetCommand(session.document, self._preset_resolver),
             "Make preset local",
         ):
             return
-        session.editor_context["preset_mode"] = True
+        session.editor_state.pattern.preset_mode = True
+        session.editor_state.pattern.authoring_level = "l0"
 
     def _pattern_origin_requested(self, x: float, y: float) -> None:
         if self._apply_pattern_properties(
@@ -445,7 +459,10 @@ class PatternSlotsMixin:
 
     def _pattern_player_requested(self, x: float, y: float) -> None:
         if self._active_pattern_session is not None:
-            self._active_pattern_session.editor_context["player_position"] = (x, y)
+            self._active_pattern_session.editor_state.pattern.player_position = (
+                float(x),
+                float(y),
+            )
         self._send_pattern_preview_command(
             "set-player-position", {"x": float(x), "y": float(y)}
         )

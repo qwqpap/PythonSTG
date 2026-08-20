@@ -269,7 +269,8 @@ def test_runtime_state_feedback_is_overlay_only_and_stays_with_owner_document(
             },
         }
     )
-    assert owner.editor_context["runtime_state_path"] == [first.id, second.id]
+    assert window.runtime_overlay is not None
+    assert window.runtime_overlay.state_path == (first.id, second.id)
     assert window.state_graph.active_state_path == (first.id, second.id)
     assert owner.document.to_dict() == before
     assert owner.is_dirty is before_dirty
@@ -294,7 +295,9 @@ def test_runtime_state_feedback_is_overlay_only_and_stays_with_owner_document(
     )
     assert window.session is current
     assert window.state_graph.active_state_path == current_path
-    assert owner.editor_context["runtime_state_path"] == [second.id]
+    assert window.runtime_overlay is not None
+    assert window.runtime_overlay.document_id == owner.document.id
+    assert window.runtime_overlay.state_path == (second.id,)
     assert owner.document.to_dict() == before
 
     owner.revert()

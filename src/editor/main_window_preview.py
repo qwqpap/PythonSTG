@@ -12,6 +12,7 @@ from .scene_compile import SceneSpellCompileError, compile_simple_spell
 from .i18n import LANGUAGE_ENGLISH, translate_widget_tree
 from .main_window_support import _scene_has_stage_content, build_preview_command
 from .scene_view import SceneViewport
+from .state import RuntimeOverlayState
 
 
 class PreviewSlotsMixin:
@@ -73,28 +74,21 @@ class PreviewSlotsMixin:
         self._active_stage_session = None
 
     def _clear_stage_runtime_feedback(self) -> None:
+        self._runtime_overlay = None
         self.timeline.set_active_clips(())
         self.timeline.set_reactive_overlay({})
         self.state_graph.set_active_state_path(())
-        owner = self._active_stage_session
-        if owner is not None:
-            # Keep the document-local playhead coherent even when the preview
-            # process exits unexpectedly (in the normal stop path a statistics
-            # snapshot will also carry frame=0).
-            owner.editor_context["timeline_playhead"] = 0
-            owner.editor_context["timeline_active_clips"] = []
-            owner.editor_context["runtime_state_path"] = []
-            owner.editor_context["reactive_overlay"] = {
-                "active_instances": [],
-                "trace": [],
-                "diagnostics": [],
-            }
+        if hasattr(self, "variables"):
+            self.variables.set_runtime_overlay({})
+        active = self.document_manager.active
+        if active is not None and isinstance(active.document, SceneDocument):
+            self.timeline.set_playhead(
+                active.editor_state.timeline.playhead_frame,
+                emit=False,
+            )
         for widget in self._document_widgets.values():
             if isinstance(widget, SceneViewport):
                 widget.clear_runtime_state()
-        for session in self.document_manager:
-            if isinstance(session.document, SceneDocument):
-                session.editor_context["runtime_variables"] = {}
 
     def _open_pattern_preview(self, resource_value: str) -> None:
         session = self._open_document(resource_value)
@@ -187,6 +181,8 @@ class PreviewSlotsMixin:
         self._log(f"[pattern-preview] opening {label}")
 
     def _send_pattern_preview_command(self, command: str, payload: dict) -> None:
+        if command in {"reset", "stop"}:
+            self._clear_stage_runtime_feedback()
         active_document = (
             self.document_manager.active.document
             if self.document_manager.active is not None
@@ -269,6 +265,7 @@ class PreviewSlotsMixin:
             )
             self._clear_graph_diagnostics()
         elif event in {"compile_error", "runtime_error", "protocol_error"}:
+            self._clear_stage_runtime_feedback()
             self._log(f"[pattern-preview:{event}] {payload}")
             if event == "compile_error":
                 self._apply_graph_diagnostics(payload.get("diagnostics"))
@@ -287,55 +284,29 @@ class PreviewSlotsMixin:
             or self._preview_loaded_resource_id != session.document.id
         ):
             return
-        frame = payload.get("frame")
-        if isinstance(frame, int) and not isinstance(frame, bool):
-            session.editor_context["timeline_playhead"] = frame
-            # TimelineEditor is a single shared bottom panel, so only update it
-            # when it is currently showing the owner document.  The owner
-            # context above is still updated while another tab is active;
-            # _refresh() restores that playhead on return without seeking back
-            # into the preview.
-            if self.document_manager.active is session:
-                self.timeline.set_playhead(frame, emit=False)
-        active_clips = payload.get("active_clips")
-        if isinstance(active_clips, list):
-            session.editor_context["timeline_active_clips"] = list(active_clips)
-            if self.document_manager.active is session:
-                self.timeline.set_active_clips(active_clips)
-        state_path = payload.get("state_path")
-        if isinstance(state_path, list):
-            session.editor_context["runtime_state_path"] = [
-                str(value) for value in state_path
-            ]
-            if self.document_manager.active is session:
-                self.state_graph.set_active_state_path(state_path)
-        variable_snapshot = payload.get("variable_snapshot")
-        if isinstance(variable_snapshot, dict):
-            session.editor_context["runtime_variables"] = variable_snapshot
-            if self.document_manager.active is session and hasattr(self, "variables"):
-                self.variables.set_runtime_overlay(variable_snapshot)
-        reactive_overlay = payload.get("reactive_overlay")
-        if isinstance(reactive_overlay, dict):
-            session.editor_context["reactive_overlay"] = reactive_overlay
-            if self.document_manager.active is session:
-                self.timeline.set_reactive_overlay(reactive_overlay)
         widget = self._document_widgets.get(session.document.id)
         state = str(payload.get("state") or self._preview_state)
         node_state = payload.get("node_state")
+        if state in {"stopped", "unloaded", "error"}:
+            self._clear_stage_runtime_feedback()
+            return
+        frame = payload.get("frame")
+        if not isinstance(frame, int) or isinstance(frame, bool) or frame < 0:
+            return
+        overlay = RuntimeOverlayState.from_payload(session.document.id, payload)
+        self._runtime_overlay = overlay
+        if self.document_manager.active is session:
+            self.timeline.set_playhead(overlay.frame, emit=False)
+            self.timeline.set_active_clips(overlay.active_clip_ids)
+            self.timeline.set_reactive_overlay(overlay.mutable_reactive_overlay())
+            self.state_graph.set_active_state_path(overlay.state_path)
+            if hasattr(self, "variables"):
+                self.variables.set_runtime_overlay(
+                    overlay.mutable_variable_snapshot()
+                )
         if isinstance(widget, SceneViewport):
             if state in {"playing", "paused"} and isinstance(node_state, dict):
                 widget.set_runtime_state(node_state)
-            elif state in {"stopped", "unloaded", "error"}:
-                widget.clear_runtime_state()
-                session.editor_context["runtime_state_path"] = []
-                session.editor_context["reactive_overlay"] = {
-                    "active_instances": [],
-                    "trace": [],
-                    "diagnostics": [],
-                }
-                if self.document_manager.active is session:
-                    self.state_graph.set_active_state_path(())
-                    self.timeline.set_reactive_overlay(session.editor_context["reactive_overlay"])
 
     def _handle_pattern_preview_issue(self, issue: dict) -> None:
         self.preview_panel.handle_issue(issue)

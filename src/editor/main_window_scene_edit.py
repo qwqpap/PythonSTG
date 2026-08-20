@@ -40,7 +40,7 @@ class SceneEditSlotsMixin:
             or not isinstance(self.session.document, SceneDocument)
         ):
             return
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.clip_id = None
         self._selected_id = str(current.data(0, Qt.UserRole))
         self._syncing_selection = True
         self.viewport.select_node(self._selected_id)
@@ -51,7 +51,7 @@ class SceneEditSlotsMixin:
     def _select_from_viewport(self, node_id: str) -> None:
         if self._syncing_selection or not isinstance(self.session.document, SceneDocument):
             return
-        self.session.editor_context.pop("selected_clip_id", None)
+        self.session.editor_state.selection.clip_id = None
         item = self.tree._find_item(node_id)
         if item is None:
             return
@@ -162,7 +162,7 @@ class SceneEditSlotsMixin:
         # it directly on the Boss at the registry default position.
         emitter.properties["y"] = 320.0
         instance = make_node("PatternInstance", name=tr("Pattern Instance"))
-        selected_resource = str(self.session.selected_resource or "")
+        selected_resource = str(self.session.editor_state.selection.resource_uri or "")
         record = (
             self.resource_browser.index.find(selected_resource)
             if selected_resource and hasattr(self, "resource_browser")
@@ -230,7 +230,7 @@ class SceneEditSlotsMixin:
             self._refresh()
             return
         self._selected_id = self.session.document.root.id
-        self.session.editor_context["selected_state_id"] = (
+        self.session.editor_state.selection.state_id = (
             self.session.document.state_graph.initial_state_id
         )
         self._log(command.label)

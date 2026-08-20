@@ -44,7 +44,7 @@ class UIDocumentSlotsMixin:
 
     def _apply_ui_document_view(self, widget, document) -> None:
         widget.set_document(document)
-        selected = self.session.editor_context.get("selected_ui_node_id")
+        selected = self.session.editor_state.selection.ui_node_id
         if selected:
             widget.select_node(str(selected))
 
@@ -52,7 +52,7 @@ class UIDocumentSlotsMixin:
         session, _widget = self._ui_session_for_sender()
         if session is None:
             return
-        session.editor_context["selected_ui_node_id"] = str(node_id)
+        session.editor_state.selection.ui_node_id = str(node_id)
         node = _find_ui_node(session.document.root, str(node_id))
         if session is self.document_manager.active:
             self.inspector.set_ui_node(node)
@@ -102,7 +102,7 @@ class UIDocumentSlotsMixin:
             )
             self._log(f"[ui-edit:error] {exc}")
             return
-        session.editor_context["selected_ui_node_id"] = node.id
+        session.editor_state.selection.ui_node_id = node.id
         self._log("Add UI node")
         if session is self.document_manager.active:
             self._refresh()
@@ -124,7 +124,7 @@ class UIDocumentSlotsMixin:
             )
             self._log(f"[ui-edit:error] {exc}")
             return
-        session.editor_context["selected_ui_node_id"] = session.document.root.id
+        session.editor_state.selection.ui_node_id = session.document.root.id
         self._log("Remove UI node")
         if session is self.document_manager.active:
             self._refresh()
@@ -266,7 +266,7 @@ class UIDocumentSlotsMixin:
     def _background_layer_selected(self, index: int) -> None:
         session, _widget = self._background_session_for_sender()
         if session is not None:
-            session.editor_context["background_selected_layer"] = int(index)
+            session.editor_state.background_selected_layer = int(index)
             if session is self.document_manager.active:
                 self.inspector.set_background_document(session.document)
 
@@ -398,7 +398,7 @@ class UIDocumentSlotsMixin:
         session, widget = self._ui_session_for_sender()
         if session is None:
             return
-        session.editor_context["ui_viewport"] = (int(width), int(height))
+        session.editor_state.ui_viewport = (int(width), int(height))
         if session is self.document_manager.active:
             self._refresh()
         elif isinstance(widget, UIWorkspace):

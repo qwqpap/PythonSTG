@@ -54,7 +54,7 @@ def test_document_tabs_preserve_selection_context_savepoints_and_history(tmp_pat
     scene = window.session
     window.add_node("Emitter")
     emitter_id = window._selected_id
-    scene.editor_context["zoom"] = 1.5
+    scene.editor_state.timeline.zoom = 1.5
 
     record = window.resource_browser.index.find(
         "res://game_content/patterns/m3_ring.pystg.json"
@@ -68,8 +68,8 @@ def test_document_tabs_preserve_selection_context_savepoints_and_history(tmp_pat
     window._pattern_property_requested("shape.count", 36)
     assert pattern.document.shape.count == 36
     assert pattern.is_dirty
-    assert scene.selected_id == emitter_id
-    assert scene.editor_context["zoom"] == 1.5
+    assert scene.editor_state.selection.node_id == emitter_id
+    assert scene.editor_state.timeline.zoom == 1.5
 
     scene_widget = window._document_widgets[scene.document.id]
     window.central_tabs.setCurrentWidget(scene_widget)
@@ -110,7 +110,7 @@ def test_pattern_workspace_template_gizmos_and_bullet_picker_are_undoable(tmp_pa
     assert session.document.shape.origin_y == 0.65
 
     window._pattern_player_requested(-0.2, -0.7)
-    assert session.editor_context["player_position"] == (-0.2, -0.7)
+    assert session.editor_state.pattern.player_position == (-0.2, -0.7)
     assert fake.commands[-1] == (
         "set-player-position",
         {"x": -0.2, "y": -0.7},
