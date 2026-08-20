@@ -19,9 +19,10 @@ from .background_commands import (
     SetBackgroundBindingCommand,
     SetBackgroundPropertyCommand,
 )
+from .shell import WindowService
 
 
-class UIDocumentSlotsMixin:
+class UIDocumentService(WindowService):
     """UI and background document slots: nodes, layers, transforms and bindings.
 
     These slots stay bound to the window instance instead of moving into a

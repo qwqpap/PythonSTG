@@ -17,9 +17,10 @@ from .scene_commands import (
     SetNodePropertyCommand,
     find_parent,
 )
+from .shell import WindowService
 
 
-class SceneEditSlotsMixin:
+class SceneEditService(WindowService):
     """Scene hierarchy editing slots: add, delete, rename, reparent and templates.
 
     These slots stay bound to the window instance instead of moving into a

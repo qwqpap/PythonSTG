@@ -26,9 +26,10 @@ from .state_graph_commands import (
     RenameStateCommand,
     SetTransitionPropertiesCommand,
 )
+from .shell import WindowService
 
 
-class AuthoringSlotsMixin:
+class AuthoringService(WindowService):
     """State-graph and variable authoring slots.
 
     These slots stay bound to the window instance instead of moving into a

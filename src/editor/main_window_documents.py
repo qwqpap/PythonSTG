@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .shell import WindowService
+
 from pathlib import Path
 from src.qt_compat.QtCore import Qt
 from src.qt_compat.QtWidgets import QFileDialog, QMessageBox, QWidget
@@ -18,7 +20,7 @@ from .main_window_support import RESOURCE_FILTER, _scene_has_stage_content
 from .scene_view import SceneViewport
 
 
-class DocumentSlotsMixin:
+class DocumentService(WindowService):
     """Document lifecycle slots: new, open, save, revert, close and central tabs.
 
     These slots stay bound to the window instance instead of moving into a

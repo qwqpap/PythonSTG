@@ -27,9 +27,10 @@ from .timeline_commands import (
     require_track,
     timeline_tracks,
 )
+from .shell import WindowService
 
 
-class TimelineSlotsMixin:
+class TimelineService(WindowService):
     """Timeline dock slots: tracks, clips, keyframes, playhead and reactive slots.
 
     These slots stay bound to the window instance instead of moving into a

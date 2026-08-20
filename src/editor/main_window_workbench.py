@@ -17,9 +17,10 @@ from .scene_commands import AddNodeCommand, AssignResourceCommand
 from .scene_compile import SceneSpellCompileError
 from .timeline_commands import require_track
 from .workbench import EditorPlugin, default_external_plugins
+from .shell import WindowService
 
 
-class WorkbenchSlotsMixin:
+class WorkbenchService(WindowService):
     """Workbench slots: plugins, resource browser, action search and diagnostics.
 
     These slots stay bound to the window instance instead of moving into a

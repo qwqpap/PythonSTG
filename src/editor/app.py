@@ -56,8 +56,15 @@ from .document_manager import (
 )
 from .pattern_workspace import PatternWorkspace
 from .ui_workspace import BackgroundWorkspace, UIWorkspace
-from .scene_commands import SceneMutationError
-from .timeline_commands import find_clip, find_track
+from .application import (
+    DocumentController,
+    EditorCoordinator,
+    InvalidationScope,
+    InvalidationSet,
+    RedoIntent,
+    UndoIntent,
+)
+from .application.queries import find_timeline_clip, find_timeline_track
 from .timeline_workspace import TimelineEditor
 from .variable_workspace import VariableEditor
 from .state_graph_workspace import StateGraphEditor
@@ -72,14 +79,15 @@ from .workbench import PluginRegistry as EditorPluginRegistry
 from .inspector_panel import InspectorPanel
 from .main_window_support import APP_NAME, build_preview_command
 from .scene_view import NodeGraphicsItem, SceneTreeWidget, SceneViewport
-from .main_window_authoring import AuthoringSlotsMixin
-from .main_window_documents import DocumentSlotsMixin
-from .main_window_pattern import PatternSlotsMixin
-from .main_window_preview import PreviewSlotsMixin
-from .main_window_scene_edit import SceneEditSlotsMixin
-from .main_window_timeline import TimelineSlotsMixin
-from .main_window_ui_docs import UIDocumentSlotsMixin
-from .main_window_workbench import WorkbenchSlotsMixin
+from .main_window_authoring import AuthoringService
+from .main_window_documents import DocumentService
+from .main_window_pattern import PatternService
+from .main_window_preview import PreviewService
+from .main_window_scene_edit import SceneEditService
+from .main_window_timeline import TimelineService
+from .main_window_ui_docs import UIDocumentService
+from .main_window_workbench import WorkbenchService
+from .shell import install_service_methods
 from .state import RuntimeOverlayState
 
 # ``build_preview_command`` and ``NodeGraphicsItem`` now live in the modules split
@@ -95,24 +103,12 @@ __all__ = [
 ]
 
 
-class EditorMainWindow(
-    TimelineSlotsMixin,
-    PreviewSlotsMixin,
-    DocumentSlotsMixin,
-    SceneEditSlotsMixin,
-    PatternSlotsMixin,
-    UIDocumentSlotsMixin,
-    AuthoringSlotsMixin,
-    WorkbenchSlotsMixin,
-    QMainWindow,
-):
+class EditorMainWindow(QMainWindow):
     """The editor shell: window chrome, selection state and the refresh loop.
 
-    Everything domain-specific lives in the slot mixins listed above.  They are
-    mixins rather than controller objects so the slots keep operating on this
-    instance's attributes, which is what the editor tests and the native gates
-    drive directly.  Mixins come before ``QMainWindow`` so their methods win the
-    MRO, matching ``SceneViewport(SpaceTapSearchMixin, QGraphicsView)``.
+    Domain requests are handled by a Qt-free coordinator.  Composed shell
+    services retain the public compatibility method names used by existing
+    integrations without adding domain mixins to the window's inheritance.
     """
 
     def __init__(self, project: ProjectContext):
@@ -135,6 +131,19 @@ class EditorMainWindow(
             registry=self.resource_type_registry,
             node_registry=self.node_type_registry,
         )
+        self.editor_coordinator = EditorCoordinator(self.document_manager)
+        self.document_controller = DocumentController(self.document_manager)
+        self._shell_services = (
+            TimelineService(self),
+            PreviewService(self),
+            DocumentService(self),
+            SceneEditService(self),
+            PatternService(self),
+            UIDocumentService(self),
+            AuthoringService(self),
+            WorkbenchService(self),
+        )
+        install_service_methods(self, self._shell_services)
         self._fallback_selected_id = ""
         self._selected_id = self.session.document.root.id
         self._syncing_selection = False
@@ -720,10 +729,26 @@ class EditorMainWindow(
 
         add_item(self.session.document.root)
         self.tree.expandAll()
-        selected = self.tree._find_item(self._selected_id)
+        selected = self._find_tree_item(self._selected_id)
         if selected is not None:
             self.tree.setCurrentItem(selected)
         self.tree.blockSignals(False)
+
+    def _find_tree_item(self, node_id: str) -> QTreeWidgetItem | None:
+        """Find an item through the public tree API used by the shell port."""
+
+        pending = [
+            self.tree.topLevelItem(index)
+            for index in range(self.tree.topLevelItemCount())
+        ]
+        while pending:
+            item = pending.pop()
+            if item is None:
+                continue
+            if str(item.data(0, Qt.UserRole)) == str(node_id):
+                return item
+            pending.extend(item.child(index) for index in range(item.childCount()))
+        return None
 
     def _refresh(self) -> None:
         if self.document_manager.active is None:
@@ -737,6 +762,144 @@ class EditorMainWindow(
             self._refresh_foreign_document(document, widget)
         self._update_actions()
         self._update_title()
+
+    def apply_invalidation(
+        self,
+        document_id: str,
+        invalidation: InvalidationSet,
+    ) -> None:
+        """Apply finite application damage through public panel operations."""
+
+        session = next(
+            (item for item in self.document_manager if item.document.id == document_id),
+            None,
+        )
+        if session is None:
+            return
+        if invalidation.is_full_sync:
+            if self.document_manager.active is session:
+                self._refresh()
+            return
+        document = session.document
+        widget = self._document_widgets.get(document_id)
+        active = self.document_manager.active is session
+        scopes = invalidation.scopes
+
+        if InvalidationScope.SCENE_TREE in scopes and active:
+            self._populate_tree()
+        if InvalidationScope.SCENE_CANVAS in scopes and isinstance(widget, SceneViewport):
+            widget.rebuild(document)
+            if active:
+                self.viewport = widget
+                widget.select_node(session.editor_state.selection.node_id or document.root.id)
+        if InvalidationScope.INSPECTOR in scopes and active:
+            self._refresh_active_inspector(document)
+        if InvalidationScope.TIMELINE in scopes and active:
+            self._refresh_active_timeline(document)
+        if InvalidationScope.STATE_GRAPH in scopes and active:
+            self._refresh_active_state_graph(document)
+        if InvalidationScope.VARIABLES in scopes and active:
+            self._refresh_active_variables(document)
+        if InvalidationScope.PATTERN in scopes and isinstance(widget, PatternWorkspace):
+            state = session.editor_state.pattern
+            widget.set_document(document, player_position=state.player_position)
+        if InvalidationScope.UI_CANVAS in scopes and isinstance(widget, UIWorkspace):
+            self._apply_ui_document_view(widget, document)
+        if InvalidationScope.BACKGROUND in scopes and isinstance(widget, BackgroundWorkspace):
+            widget.set_document(document)
+        if InvalidationScope.ACTIONS in scopes and active:
+            self._update_actions()
+        if InvalidationScope.TITLE in scopes:
+            self._update_title()
+
+    def _refresh_active_inspector(self, document) -> None:
+        session = self.session
+        if isinstance(document, SceneDocument):
+            state = session.editor_state
+            clip_id = state.selection.clip_id
+            track_id = state.selection.track_id
+            clip_result = find_timeline_clip(document, clip_id) if clip_id else None
+            track_result = (
+                find_timeline_track(document, track_id, state.selection.state_id)
+                if track_id
+                else None
+            )
+            if clip_result is not None:
+                self.inspector.set_timeline_clip(
+                    clip_result[0], clip_result[1], list(document.root.walk())
+                )
+            elif track_result is not None:
+                self.inspector.set_timeline_track(
+                    track_result, list(document.root.walk())
+                )
+            else:
+                self.inspector.set_node(session.node(state.selection.node_id))
+            return
+        if isinstance(document, UIDocument):
+            from .main_window_support import _find_ui_node
+
+            self.inspector.set_ui_node(
+                _find_ui_node(document.root, session.editor_state.selection.ui_node_id or "")
+            )
+            return
+        if isinstance(document, BackgroundDocument):
+            self.inspector.set_background_document(document)
+            return
+        selected_id = session.editor_state.selection.graph_node_id
+        selected = next(
+            (node for node in (document.graph.nodes if document.graph else ()) if node.id == selected_id),
+            None,
+        )
+        if session.editor_state.pattern.graph_mode:
+            self.inspector.set_graph_node(selected)
+        else:
+            self.inspector.set_pattern(document)
+
+    def _refresh_active_timeline(self, document) -> None:
+        if not isinstance(document, SceneDocument):
+            self.timeline.clear_document()
+            return
+        state = self.session.editor_state
+        state_id = str(
+            state.selection.state_id or document.state_graph.initial_state_id
+        )
+        self.timeline.set_document(
+            document,
+            state_id=state_id,
+            selected_clip_id=state.selection.clip_id,
+            zoom=state.timeline.zoom,
+        )
+        self.timeline.selected_track_id = state.selection.track_id
+        overlay = self._runtime_overlay_for(self.session)
+        self.timeline.set_playhead(
+            overlay.frame if overlay is not None else state.timeline.playhead_frame,
+            emit=False,
+        )
+
+    def _refresh_active_state_graph(self, document) -> None:
+        if not isinstance(document, SceneDocument):
+            self.state_graph.clear_document()
+            return
+        state = self.session.editor_state
+        overlay = self._runtime_overlay_for(self.session)
+        self.state_graph.set_document(
+            document,
+            selected_state_id=(
+                state.selection.state_id or document.state_graph.initial_state_id
+            ),
+            active_state_path=overlay.state_path if overlay is not None else (),
+        )
+
+    def _refresh_active_variables(self, document) -> None:
+        if not isinstance(document, SceneDocument):
+            self.variables.clear_document()
+            return
+        state = self.session.editor_state
+        self.variables.set_document(document, state_id=state.selection.state_id)
+        overlay = self._runtime_overlay_for(self.session)
+        self.variables.set_runtime_overlay(
+            overlay.mutable_variable_snapshot() if overlay is not None else {}
+        )
 
     def _refresh_scene_document(self, document: SceneDocument, widget) -> None:
         """Repopulate the tree, timeline, state graph and inspector for a scene."""
@@ -760,12 +923,12 @@ class EditorMainWindow(
         selected_clip_id = state.selection.clip_id
         selected_track_id = state.selection.track_id
         clip_result = (
-            find_clip(document, str(selected_clip_id))
+            find_timeline_clip(document, str(selected_clip_id))
             if selected_clip_id
             else None
         )
         track_result = (
-            find_track(document, str(selected_track_id), selected_state_id)
+            find_timeline_track(document, str(selected_track_id), selected_state_id)
             if selected_track_id
             else None
         )
@@ -970,33 +1133,50 @@ class EditorMainWindow(
     ) -> bool:
         try:
             self.session.apply(command, coalesce=coalesce)
-        except (DocumentError, ResourceDocumentError, SceneMutationError, ValueError) as exc:
+        except (DocumentError, ResourceDocumentError, ValueError) as exc:
             self._show_error("Edit failed", exc)
-            self._refresh()
             return False
         if select_id is not None:
             self._selected_id = select_id
         self._log(command.label)
-        self._refresh()
+        self.apply_invalidation(
+            self.session.document.id,
+            InvalidationSet(
+                (
+                    InvalidationScope.SCENE_TREE,
+                    InvalidationScope.SCENE_CANVAS,
+                    InvalidationScope.INSPECTOR,
+                    InvalidationScope.TIMELINE,
+                    InvalidationScope.STATE_GRAPH,
+                    InvalidationScope.VARIABLES,
+                    InvalidationScope.ACTIONS,
+                    InvalidationScope.TITLE,
+                )
+            ),
+        )
         return True
 
     def undo(self) -> bool:
-        changed = self.session.undo()
-        if changed:
+        invalidation = self.editor_coordinator.dispatch(
+            UndoIntent(self.session.document.id)
+        )
+        if invalidation.scopes:
             self._log("Undo")
-            self._refresh()
+            self.apply_invalidation(self.session.document.id, invalidation)
             self._sync_active_pattern_preview()
             self._sync_active_stage_preview()
-        return bool(changed)
+        return bool(invalidation.scopes)
 
     def redo(self) -> bool:
-        changed = self.session.redo()
-        if changed:
+        invalidation = self.editor_coordinator.dispatch(
+            RedoIntent(self.session.document.id)
+        )
+        if invalidation.scopes:
             self._log("Redo")
-            self._refresh()
+            self.apply_invalidation(self.session.document.id, invalidation)
             self._sync_active_pattern_preview()
             self._sync_active_stage_preview()
-        return bool(changed)
+        return bool(invalidation.scopes)
 
     def _fit_viewport(self) -> None:
         self.viewport.fit_canvas()

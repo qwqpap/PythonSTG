@@ -28,9 +28,10 @@ from .preset_commands import (
     SetPresetSlotOverrideCommand,
 )
 from .progressive_authoring import authoring_level
+from .shell import WindowService
 
 
-class PatternSlotsMixin:
+class PatternService(WindowService):
     """Pattern authoring slots: properties, node graph, bindings and presets.
 
     These slots stay bound to the window instance instead of moving into a

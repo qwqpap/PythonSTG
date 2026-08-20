@@ -13,9 +13,10 @@ from .i18n import LANGUAGE_ENGLISH, translate_widget_tree
 from .main_window_support import _scene_has_stage_content, build_preview_command
 from .scene_view import SceneViewport
 from .state import RuntimeOverlayState
+from .shell import WindowService
 
 
-class PreviewSlotsMixin:
+class PreviewService(WindowService):
     """Preview slots: launching, transport, live properties and runtime feedback.
 
     These slots stay bound to the window instance instead of moving into a
