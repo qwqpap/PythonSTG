@@ -132,7 +132,10 @@ class EditorMainWindow(QMainWindow):
             node_registry=self.node_type_registry,
         )
         self.editor_coordinator = EditorCoordinator(self.document_manager)
-        self.document_controller = DocumentController(self.document_manager)
+        self.document_controller = DocumentController(
+            self.document_manager,
+            history_reset=self.editor_coordinator.reset_document_history,
+        )
         self._shell_services = (
             TimelineService(self),
             PreviewService(self),
@@ -154,6 +157,7 @@ class EditorMainWindow(QMainWindow):
         self._active_pattern_resource = ""
         self._preset_library = self._load_builtin_preset_library()
         self._preset_resolver = PresetResolver(self._preset_library.presets)
+        self.editor_coordinator.preset_resolver = self._preset_resolver
         self.action_catalog = build_editor_action_catalog(
             presets=self._preset_library.presets,
             node_registry=self.node_type_registry,
@@ -188,7 +192,10 @@ class EditorMainWindow(QMainWindow):
         self._discover_sdk_plugins()
         self._connect_pattern_preview()
         self._apply_theme()
-        self._refresh()
+        self.apply_invalidation(
+            self.session.document.id,
+            self.document_controller.initial_sync(),
+        )
         self.resize(1480, 920)
         self.setMinimumSize(960, 640)
 
@@ -236,11 +243,11 @@ class EditorMainWindow(QMainWindow):
         if hasattr(self, "tree"):
             self.state_graph.set_language_manager(self.language_manager)
             self.inspector.set_language_manager(self.language_manager)
+            self.timeline.set_language_manager(self.language_manager)
             for widget in self._document_widgets.values():
                 if isinstance(widget, PatternWorkspace):
                     widget.set_language_manager(self.language_manager)
                     widget.set_available_presets(self._preset_library.presets)
-            self._refresh()
         translate_widget_tree(self, self.language_manager)
         runtime_host = getattr(self, "_runtime_preview_host", None)
         if runtime_host is not None:
@@ -251,6 +258,8 @@ class EditorMainWindow(QMainWindow):
                     self.language_manager.translate("Runtime Preview"),
                 )
         self._update_language_actions()
+        if hasattr(self, "central_tabs"):
+            self._update_title()
 
     def _update_language_actions(self) -> None:
         english = self.language == LANGUAGE_ENGLISH
@@ -788,10 +797,17 @@ class EditorMainWindow(QMainWindow):
         if InvalidationScope.SCENE_TREE in scopes and active:
             self._populate_tree()
         if InvalidationScope.SCENE_CANVAS in scopes and isinstance(widget, SceneViewport):
-            widget.rebuild(document)
-            if active:
-                self.viewport = widget
-                widget.select_node(session.editor_state.selection.node_id or document.root.id)
+            was_syncing = self._syncing_selection
+            self._syncing_selection = True
+            try:
+                widget.rebuild(document)
+                if active:
+                    self.viewport = widget
+                    widget.select_node(
+                        session.editor_state.selection.node_id or document.root.id
+                    )
+            finally:
+                self._syncing_selection = was_syncing
         if InvalidationScope.INSPECTOR in scopes and active:
             self._refresh_active_inspector(document)
         if InvalidationScope.TIMELINE in scopes and active:
@@ -801,8 +817,7 @@ class EditorMainWindow(QMainWindow):
         if InvalidationScope.VARIABLES in scopes and active:
             self._refresh_active_variables(document)
         if InvalidationScope.PATTERN in scopes and isinstance(widget, PatternWorkspace):
-            state = session.editor_state.pattern
-            widget.set_document(document, player_position=state.player_position)
+            self._apply_pattern_document_view(session, widget)
         if InvalidationScope.UI_CANVAS in scopes and isinstance(widget, UIWorkspace):
             self._apply_ui_document_view(widget, document)
         if InvalidationScope.BACKGROUND in scopes and isinstance(widget, BackgroundWorkspace):
@@ -908,9 +923,14 @@ class EditorMainWindow(QMainWindow):
         self._populate_tree()
         self.tree.setEnabled(True)
         if isinstance(widget, SceneViewport):
-            self.viewport = widget
-            widget.rebuild(document)
-            widget.select_node(self._selected_id)
+            was_syncing = self._syncing_selection
+            self._syncing_selection = True
+            try:
+                self.viewport = widget
+                widget.rebuild(document)
+                widget.select_node(self._selected_id)
+            finally:
+                self._syncing_selection = was_syncing
         state = self.session.editor_state
         selected_state_id = str(
             state.selection.state_id or document.state_graph.initial_state_id
@@ -1037,33 +1057,53 @@ class EditorMainWindow(QMainWindow):
             self.inspector.set_pattern(document)
         self.timeline.clear_document()
         if isinstance(widget, PatternWorkspace):
-            player = state.pattern.player_position
-            widget.set_document(document, player_position=player)
-            preset_instance = self._preset_resolver.instance_from_document(document)
-            if preset_instance is not None:
-                descriptor = self._preset_resolver.registry.resolve(
+            self._apply_pattern_document_view(self.session, widget)
+
+    def _apply_pattern_document_view(
+        self,
+        session: ManagedDocument,
+        widget: PatternWorkspace,
+    ) -> None:
+        """Rebind the public Pattern port from authoring and typed view state."""
+
+        document = session.document
+        if not isinstance(document, PatternDocument):
+            return
+        state = session.editor_state.pattern
+        widget.set_document(document, player_position=state.player_position)
+        preset_instance = self._preset_resolver.instance_from_document(document)
+        if preset_instance is not None:
+            descriptor = self._preset_resolver.registry.resolve(
+                preset_instance.preset_id, preset_instance.version
+            )
+            widget.set_preset_expansion(
+                descriptor,
+                self._preset_resolver.expand_virtual(preset_instance),
+                dict(preset_instance.parameters),
+                dict(preset_instance.slot_overrides),
+                self._preset_resolver.registry.migration_targets(
                     preset_instance.preset_id, preset_instance.version
-                )
-                widget.set_preset_expansion(
-                    descriptor,
-                    self._preset_resolver.expand_virtual(preset_instance),
-                    dict(preset_instance.parameters),
-                    dict(preset_instance.slot_overrides),
-                    self._preset_resolver.registry.migration_targets(
-                        preset_instance.preset_id, preset_instance.version
-                    ),
-                )
-            else:
-                widget.set_preset_expansion(None)
-            preset_mode = state.pattern.preset_mode
-            mode = "preset" if preset_mode and preset_instance is not None else ("graph" if graph_mode else "recipe")
-            widget.set_mode(mode, emit=False)
-            level = state.pattern.authoring_level
-            if widget.level_picker.findData(level) < 0:
-                level = "l1"
-            widget.set_authoring_level(level)
-            if hasattr(self, "resource_browser"):
-                widget.set_available_bullets(self.resource_browser.index.records)
+                ),
+            )
+        else:
+            widget.set_preset_expansion(None)
+        mode = (
+            "preset"
+            if state.preset_mode and preset_instance is not None
+            else ("graph" if state.graph_mode else "recipe")
+        )
+        widget.set_mode(mode, emit=False)
+        level = state.authoring_level
+        if widget.level_picker.findData(level) < 0:
+            level = "l1"
+        widget.set_authoring_level(level)
+        if hasattr(self, "resource_browser"):
+            widget.set_available_bullets(self.resource_browser.index.records)
+        # PatternWorkspace rebuilds several combo-box item lists while binding
+        # a document.  Re-translate this local subtree after the rebuild so a
+        # workspace opened after a language switch does not expose the English
+        # source labels until the next global language change.
+        translate_widget_tree(widget, self.language_manager)
 
     def _sync_document_docks(self, document) -> None:
         """Show only tools that can act on the active document."""
@@ -1123,38 +1163,6 @@ class EditorMainWindow(QMainWindow):
         self.output.append(
             html.escape(self.language_manager.translate(str(message)))
         )
-
-    def _apply_command(
-        self,
-        command,
-        *,
-        select_id: str | None = None,
-        coalesce: bool = False,
-    ) -> bool:
-        try:
-            self.session.apply(command, coalesce=coalesce)
-        except (DocumentError, ResourceDocumentError, ValueError) as exc:
-            self._show_error("Edit failed", exc)
-            return False
-        if select_id is not None:
-            self._selected_id = select_id
-        self._log(command.label)
-        self.apply_invalidation(
-            self.session.document.id,
-            InvalidationSet(
-                (
-                    InvalidationScope.SCENE_TREE,
-                    InvalidationScope.SCENE_CANVAS,
-                    InvalidationScope.INSPECTOR,
-                    InvalidationScope.TIMELINE,
-                    InvalidationScope.STATE_GRAPH,
-                    InvalidationScope.VARIABLES,
-                    InvalidationScope.ACTIONS,
-                    InvalidationScope.TITLE,
-                )
-            ),
-        )
-        return True
 
     def undo(self) -> bool:
         invalidation = self.editor_coordinator.dispatch(

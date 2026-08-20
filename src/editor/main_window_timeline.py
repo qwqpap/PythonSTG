@@ -1,423 +1,287 @@
-"""Timeline dock slots: tracks, clips, keyframes, playhead and reactive slots."""
+"""Timeline shell adapters that translate Qt events into typed editor intents."""
 
 from __future__ import annotations
 
-from .document import (
-    DocumentError,
-    EditorNode,
-    SceneDocument,
-    TimelineClip,
-    TimelineKeyframe,
-    TimelineTrack,
+from src.qt_compat.QtCore import QTimer
+
+from .application import (
+    InvalidationScope,
+    InvalidationSet,
+    IntentRejectedError,
+    SetTimelinePlayheadIntent,
+    TimelineAction,
+    TimelineIntent,
 )
-from .timeline_commands import (
-    AddClipCommand,
-    AddKeyframeCommand,
-    AddTrackCommand,
-    MoveResizeClipCommand,
-    MoveTrackCommand,
-    RemoveClipCommand,
-    RemoveKeyframeCommand,
-    RemoveTrackCommand,
-    SetClipPropertiesCommand,
-    SetKeyframePropertiesCommand,
-    SetTrackPropertiesCommand,
-    clone_clip_with_new_ids,
-    find_clip,
-    require_track,
-    timeline_tracks,
-)
+from .application.queries import find_timeline_clip, find_timeline_track
+from .document import SceneDocument
 from .shell import WindowService
 
 
 class TimelineService(WindowService):
-    """Timeline dock slots: tracks, clips, keyframes, playhead and reactive slots.
+    """Keep public timeline entry points while Coordinator owns mutations."""
 
-    These slots stay bound to the window instance instead of moving into a
-    controller object: every attribute they touch is owned by
-    ``EditorMainWindow``, and the editor tests plus the three native gates drive
-    these methods by name.  Mix in before the Qt base class, the same way
-    ``SpaceTapSearchMixin`` is used by ``SceneViewport``.
-    """
-
-    def _timeline_default_target(self, kind: str) -> EditorNode | None:
-        if not isinstance(self.session.document, SceneDocument):
-            return None
-        selected = self.session.node(self._selected_id)
-        if kind == "Pattern":
-            if selected is not None and selected.type == "PatternInstance":
-                return selected
-            return next(
-                (
-                    node
-                    for node in self.session.document.root.walk()
-                    if node.type == "PatternInstance"
-                ),
-                None,
-            )
-        if kind == "Movement":
-            if (
-                selected is not None
-                and isinstance(selected.properties.get("x"), (int, float))
-                and not isinstance(selected.properties.get("x"), bool)
-                and isinstance(selected.properties.get("y"), (int, float))
-                and not isinstance(selected.properties.get("y"), bool)
-            ):
-                return selected
-            return next(
-                (
-                    node
-                    for node in self.session.document.root.walk()
-                    if node.type in {"Emitter", "Boss"}
-                ),
-                None,
-            )
-        if kind == "Property":
-            if selected is not None and "enabled" in selected.properties:
-                return selected
-            return next(
-                (
-                    node
-                    for node in self.session.document.root.walk()
-                    if "enabled" in node.properties
-                ),
-                None,
-            )
-        return None
+    def _dispatch_timeline_intent(
+        self,
+        intent,
+        *,
+        error_title: str | None = "Edit timeline failed",
+        label: str = "",
+        sync_stage: bool = False,
+        defer_invalidation: bool = False,
+        refresh_inspector: bool = False,
+    ) -> bool:
+        try:
+            invalidation = self.editor_coordinator.dispatch(intent)
+        except (IntentRejectedError, ValueError) as exc:
+            if error_title is not None:
+                self._show_error(error_title, exc)
+            return False
+        if invalidation.scopes:
+            if defer_invalidation:
+                if refresh_inspector:
+                    self.apply_invalidation(
+                        intent.document_id,
+                        InvalidationSet((InvalidationScope.INSPECTOR,)),
+                    )
+                QTimer.singleShot(
+                    0,
+                    lambda document_id=intent.document_id, result=invalidation: (
+                        self.apply_invalidation(document_id, result)
+                    ),
+                )
+            else:
+                self.apply_invalidation(intent.document_id, invalidation)
+            if label:
+                self._log(label)
+            if sync_stage:
+                self._sync_active_stage_preview()
+        return bool(invalidation.scopes)
 
     def _timeline_add_track(self, kind: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        target = self._timeline_default_target(kind)
-        if kind in {"Pattern", "Movement", "Property"} and target is None:
-            self._show_error(
-                "Add timeline track failed",
-                ValueError(
-                    f"Create or select a compatible target before adding a {kind} track"
-                ),
-            )
-            return
-        channels = {
-            "Pattern": "danmaku",
-            "Movement": "position",
-            "Audio": "bgm",
-            "Background": "background",
-            "Event": "event",
-            "Property": "enabled",
-            "ScriptEvent": "script",
-            "Reactive": "reaction",
-        }
-        state_id = str(
-            self.session.editor_state.selection.state_id
-            or self.session.document.state_graph.initial_state_id
+        document_id = session.document.id
+        track_kind = str(kind)
+        self._dispatch_timeline_intent(
+            TimelineIntent(document_id, TimelineAction.ADD_TRACK, target_id=track_kind),
+            error_title="Add timeline track failed",
+            label=f"Added {track_kind} timeline track",
+            sync_stage=True,
         )
-        selected_tracks = timeline_tracks(self.session.document, state_id)
-        track = TimelineTrack(
-            name=f"{kind} Track",
-            kind=kind,
-            channel=channels[kind],
-            target_id=target.id if target is not None else None,
-            order=len(selected_tracks),
-        )
-        try:
-            self.session.apply(
-                AddTrackCommand(
-                    self.session.document,
-                    track,
-                    state_id=state_id,
-                    label=f"Add {kind} track",
-                )
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Add timeline track failed", exc)
-            return
-        self.timeline.selected_track_id = track.id
-        self.session.editor_state.selection.track_id = track.id
-        self._log(f"Added {kind} timeline track")
-        self._refresh()
-        self._sync_active_stage_preview()
 
     def _timeline_track_selected(self, track_id: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        if getattr(self, "_timeline_selection_dispatching", False):
             return
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
+            return
+        document_id = session.document.id
+        selected_track_id = str(track_id)
+        selection = session.editor_state.selection
+        if selection.track_id == selected_track_id and selection.clip_id is None:
+            return
+        self._timeline_selection_dispatching = True
         try:
-            track = require_track(self.session.document, track_id)
-        except ValueError:
-            return
-        self.session.editor_state.selection.track_id = track.id
-        self.session.editor_state.selection.clip_id = None
-        self.inspector.set_timeline_track(
-            track,
-            list(self.session.document.root.walk()),
-        )
+            self._dispatch_timeline_intent(
+                TimelineIntent(
+                    document_id,
+                    TimelineAction.SELECT_TRACK,
+                    target_id=selected_track_id,
+                ),
+                error_title=None,
+                defer_invalidation=True,
+                refresh_inspector=True,
+            )
+        finally:
+            self._timeline_selection_dispatching = False
 
     def _timeline_reactive_navigate(self, target: str, resource_id: str) -> None:
         """Remember a local reaction/behavior target without merging views."""
 
-        self.session.editor_state.timeline.reactive_navigation = (
-            str(target),
-            str(resource_id),
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
+            return
+        document_id = session.document.id
+        target_name = str(target)
+        stable_resource_id = str(resource_id)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.SET_REACTIVE_NAVIGATION,
+                target_id=target_name,
+                related_id=stable_resource_id,
+            ),
+            error_title=None,
+            label=f"Navigate to {target_name} {stable_resource_id}",
         )
-        self._log(f"Navigate to {target} {resource_id}")
 
     def _timeline_track_properties_requested(
         self,
         track_id: str,
         values: dict[str, object],
     ) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            self.session.apply(
-                SetTrackPropertiesCommand(
-                    self.session.document,
-                    track_id,
-                    values,
-                ),
+        document_id = session.document.id
+        selected_track_id = str(track_id)
+        payload = dict(values)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.SET_TRACK_PROPERTIES,
+                target_id=selected_track_id,
+                values=payload,
                 coalesce=True,
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Edit timeline track failed", exc)
-            self._refresh()
-            return
-        self.session.editor_state.selection.track_id = track_id
-        self.session.editor_state.selection.clip_id = None
-        self._log("Edited timeline track")
-        self._refresh()
-        self._sync_active_stage_preview()
+            ),
+            error_title="Edit timeline track failed",
+            label="Edited timeline track",
+            sync_stage=True,
+        )
 
     def _timeline_delete_track(self, track_id: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            self.session.apply(
-                RemoveTrackCommand(self.session.document, track_id)
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Delete timeline track failed", exc)
-            return
-        self.session.editor_state.selection.track_id = None
-        self.session.editor_state.selection.clip_id = None
-        self.timeline.selected_track_id = None
-        self.timeline.selected_clip_id = None
-        self._log("Deleted timeline track")
-        self._refresh()
-        self._sync_active_stage_preview()
+        document_id = session.document.id
+        selected_track_id = str(track_id)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.REMOVE_TRACK,
+                target_id=selected_track_id,
+            ),
+            error_title="Delete timeline track failed",
+            label="Deleted timeline track",
+            sync_stage=True,
+        )
 
     def _timeline_move_track(self, track_id: str, delta: int) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            track = require_track(self.session.document, track_id)
-            state_id = str(
-                self.session.editor_state.selection.state_id
-                or self.session.document.state_graph.initial_state_id
-            )
-            selected_tracks = timeline_tracks(self.session.document, state_id)
-            current = selected_tracks.index(track)
-            target = max(0, min(current + int(delta), len(selected_tracks) - 1))
-            if target == current:
-                return
-            self.session.apply(
-                MoveTrackCommand(self.session.document, track_id, target)
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Reorder timeline track failed", exc)
-            return
-        self.session.editor_state.selection.track_id = track_id
-        self._refresh()
-        self._sync_active_stage_preview()
+        document_id = session.document.id
+        selected_track_id = str(track_id)
+        amount = int(delta)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.MOVE_TRACK,
+                target_id=selected_track_id,
+                amount=amount,
+            ),
+            error_title="Reorder timeline track failed",
+            sync_stage=True,
+        )
 
     def _timeline_mute_track(self, track_id: str, muted: bool) -> None:
-        self._timeline_track_properties_requested(track_id, {"muted": bool(muted)})
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
+            return
+        document_id = session.document.id
+        selected_track_id = str(track_id)
+        payload = {"muted": bool(muted)}
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.SET_TRACK_PROPERTIES,
+                target_id=selected_track_id,
+                values=payload,
+                coalesce=True,
+            ),
+            error_title="Edit timeline track failed",
+            label="Edited timeline track",
+            sync_stage=True,
+        )
 
     def _timeline_add_clip(self, track_id: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            track = require_track(self.session.document, track_id)
-        except ValueError as exc:
-            self._show_error("Add timeline clip failed", exc)
-            return
-        start = self.timeline.playhead_frame
-        target_id = track.target_id
-        duration = 1
-        payload: dict[str, object] = {}
-        keyframes: list[TimelineKeyframe] = []
-        if track.kind == "Pattern":
-            duration = self.session.document.timebase.tick_rate * 10
-            if target_id is None:
-                self._show_error(
-                    "Add timeline clip failed",
-                    ValueError("Pattern track needs a PatternInstance target"),
-                )
-                return
-        elif track.kind == "Movement":
-            duration = self.session.document.timebase.tick_rate * 2
-            node = self.session.node(target_id)
-            if node is None:
-                self._show_error(
-                    "Add timeline clip failed",
-                    ValueError("Movement track needs a Scene node target"),
-                )
-                return
-            x = float(node.properties.get("x", 192.0))
-            y = float(node.properties.get("y", 224.0))
-            keyframes = [
-                TimelineKeyframe(0, {"x": x, "y": y}),
-                TimelineKeyframe(
-                    duration,
-                    {"x": min(384.0, x + 64.0), "y": y},
-                    interpolation="ease_in_out",
-                ),
-            ]
-        elif track.kind == "Audio":
-            duration = max(
-                self.session.document.timebase.tick_rate * 30,
-                self.session.document.duration_frames,
-            )
-            payload = {"action": "play", "name": "bgm", "loops": -1}
-        elif track.kind == "Background":
-            payload = {
-                "resource": "res://game_content/backgrounds/default.pystg.json",
-                "fade_frames": 30,
-            }
-        elif track.kind == "Event":
-            payload = {"event_type": "timeline_event", "data": {}}
-        elif track.kind == "Property":
-            node = self.session.node(target_id)
-            if node is None:
-                self._show_error(
-                    "Add timeline clip failed",
-                    ValueError("Property track needs a Scene node target"),
-                )
-                return
-            payload = {
-                "property": track.channel,
-                "value": node.properties.get(track.channel, True),
-            }
-        elif track.kind == "ScriptEvent":
-            payload = {"hook": "on_timeline_event", "data": {}}
-        elif track.kind == "Reactive":
-            # The runtime evaluates arming on the frame boundary after a clip
-            # starts, so a one-frame window is never observed and the hook would
-            # be dead on arrival.  Give the hook a real armed window instead.
-            duration = self.session.document.timebase.tick_rate * 10
-            payload = {
-                "activation": {
-                    "kind": "on_event",
-                    "event_type": "boss.hit",
-                },
-                "reaction": {
-                    "id": f"reaction-{track.id[:8]}",
-                    "event_type": "boss.hit",
-                    "action": "reaction.action",
-                    "once_per_scope": False,
-                },
-            }
-        clip = TimelineClip(
-            name=f"{track.kind} Clip",
-            kind=track.kind,
-            start_frame=start,
-            duration_frames=duration,
-            target_id=target_id,
-            channel=track.channel,
-            order=len(track.clips),
-            payload=payload,
-            keyframes=keyframes,
+        document_id = session.document.id
+        selected_track_id = str(track_id)
+        start_frame = int(self.timeline.playhead_frame)
+        track = find_timeline_track(
+            session.document,
+            selected_track_id,
+            session.editor_state.selection.state_id,
         )
-        try:
-            self.session.apply(
-                AddClipCommand(
-                    self.session.document,
-                    track.id,
-                    clip,
-                    label=f"Add {track.kind} clip",
-                )
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Add timeline clip failed", exc)
-            return
-        self.session.editor_state.selection.clip_id = clip.id
-        self.timeline.selected_clip_id = clip.id
-        self._log(f"Added {track.kind} clip at frame {start}")
-        self._refresh()
-        self._sync_active_stage_preview()
+        label = (
+            f"Added {track.kind} clip at frame {start_frame}"
+            if track is not None
+            else ""
+        )
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.ADD_CLIP,
+                target_id=selected_track_id,
+                frame=start_frame,
+            ),
+            error_title="Add timeline clip failed",
+            label=label,
+            sync_stage=True,
+        )
 
     def _timeline_add_keyframe(self, clip_id: str, playhead_frame: int) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        result = find_clip(self.session.document, clip_id)
-        if result is None:
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        frame = int(playhead_frame)
+        found = find_timeline_clip(session.document, selected_clip_id)
+        if found is None:
             return
-        track, clip, _index = result
-        if clip.kind not in {"Movement", "Property"}:
-            self._show_error(
-                "Add timeline keyframe failed",
-                ValueError("Only Movement and Property clips support keyframes"),
-            )
-            return
-        relative = max(0, int(playhead_frame) - clip.start_frame)
-        local = min(clip.duration_frames, relative % clip.duration_frames if clip.loop_count > 1 else relative)
-        if any(item.frame == local for item in clip.keyframes):
-            self._show_error(
-                "Add timeline keyframe failed",
-                ValueError(f"A keyframe already exists at local frame {local}"),
-            )
-            return
-        target = self.session.node(clip.target_id or track.target_id)
-        if clip.kind == "Movement":
-            value = {
-                "x": float(target.properties.get("x", 192.0)) if target else 192.0,
-                "y": float(target.properties.get("y", 224.0)) if target else 224.0,
-            }
-        else:
-            value = clip.payload.get("value")
-            if clip.keyframes:
-                previous = [item for item in clip.keyframes if item.frame < local]
-                value = (previous[-1] if previous else clip.keyframes[0]).value
-        keyframe = TimelineKeyframe(local, value)
-        try:
-            self.session.apply(
-                AddKeyframeCommand(self.session.document, clip.id, keyframe)
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Add timeline keyframe failed", exc)
-            return
-        self._log(f"Added keyframe at local frame {local}")
-        self._refresh()
-        self._sync_active_stage_preview()
+        clip = found[1]
+        relative = max(0, frame - clip.start_frame)
+        local = min(
+            clip.duration_frames,
+            relative % clip.duration_frames if clip.loop_count > 1 else relative,
+        )
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.ADD_KEYFRAME,
+                target_id=selected_clip_id,
+                frame=frame,
+            ),
+            error_title="Add timeline keyframe failed",
+            label=f"Added keyframe at local frame {local}",
+            sync_stage=True,
+        )
 
     def _timeline_delete_keyframe(self, clip_id: str, playhead_frame: int) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        result = find_clip(self.session.document, clip_id)
-        if result is None or not result[1].keyframes:
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        frame = int(playhead_frame)
+        snap_distance = int(self.timeline.snap_spin.value())
+        found = find_timeline_clip(session.document, selected_clip_id)
+        if found is None or not found[1].keyframes:
             return
-        clip = result[1]
-        relative = max(0, int(playhead_frame) - clip.start_frame)
-        local = min(clip.duration_frames, relative % clip.duration_frames if clip.loop_count > 1 else relative)
-        keyframe = min(clip.keyframes, key=lambda item: abs(item.frame - local))
-        if abs(keyframe.frame - local) > self.timeline.snap_spin.value():
-            self._show_error(
-                "Delete timeline keyframe failed",
-                ValueError("Move the playhead onto a keyframe before deleting it"),
-            )
-            return
-        try:
-            self.session.apply(
-                RemoveKeyframeCommand(
-                    self.session.document,
-                    clip.id,
-                    keyframe.id,
-                )
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Delete timeline keyframe failed", exc)
-            return
-        self._log(f"Deleted keyframe at local frame {keyframe.frame}")
-        self._refresh()
-        self._sync_active_stage_preview()
+        clip = found[1]
+        relative = max(0, frame - clip.start_frame)
+        local = min(
+            clip.duration_frames,
+            relative % clip.duration_frames if clip.loop_count > 1 else relative,
+        )
+        nearest = min(clip.keyframes, key=lambda item: abs(item.frame - local))
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.REMOVE_KEYFRAME,
+                target_id=selected_clip_id,
+                frame=frame,
+                amount=snap_distance,
+            ),
+            error_title="Delete timeline keyframe failed",
+            label=f"Deleted keyframe at local frame {nearest.frame}",
+            sync_stage=True,
+        )
 
     def _timeline_keyframe_geometry(
         self,
@@ -425,10 +289,25 @@ class TimelineService(WindowService):
         keyframe_id: str,
         frame: int,
     ) -> None:
-        self._timeline_keyframe_properties_requested(
-            clip_id,
-            keyframe_id,
-            {"frame": int(frame)},
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
+            return
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        selected_keyframe_id = str(keyframe_id)
+        payload = {"frame": int(frame)}
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.SET_KEYFRAME_PROPERTIES,
+                target_id=selected_clip_id,
+                related_id=selected_keyframe_id,
+                values=payload,
+                coalesce=True,
+            ),
+            error_title="Edit timeline keyframe failed",
+            label="Edited timeline keyframe",
+            sync_stage=True,
         )
 
     def _timeline_clip_geometry(
@@ -437,113 +316,119 @@ class TimelineService(WindowService):
         start_frame: int,
         duration_frames: int,
     ) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            self.session.apply(
-                MoveResizeClipCommand(
-                    self.session.document,
-                    clip_id,
-                    start_frame,
-                    duration_frames,
-                ),
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        start = int(start_frame)
+        duration = int(duration_frames)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.MOVE_CLIP,
+                target_id=selected_clip_id,
+                frame=start,
+                amount=duration,
                 coalesce=True,
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Move timeline clip failed", exc)
-            self._refresh()
-            return
-        self.session.editor_state.selection.clip_id = clip_id
-        self._log(f"Moved timeline clip to frame {start_frame}")
-        self._refresh()
-        self._sync_active_stage_preview()
+            ),
+            error_title="Move timeline clip failed",
+            label=f"Moved timeline clip to frame {start}",
+            sync_stage=True,
+        )
 
     def _timeline_duplicate_clip(self, clip_id: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        result = find_clip(self.session.document, clip_id)
-        if result is None:
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        found = find_timeline_clip(session.document, selected_clip_id)
+        if found is None:
             return
-        track, clip, index = result
-        duplicate = clone_clip_with_new_ids(clip)
-        duplicate.start_frame = clip.end_frame
-        try:
-            self.session.apply(
-                AddClipCommand(
-                    self.session.document,
-                    track.id,
-                    duplicate,
-                    index=index + 1,
-                    label=f"Duplicate {clip.name}",
-                )
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Duplicate timeline clip failed", exc)
-            return
-        self.session.editor_state.selection.clip_id = duplicate.id
-        self._log(f"Duplicated {clip.name}")
-        self._refresh()
-        self._sync_active_stage_preview()
+        label = f"Duplicated {found[1].name}"
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.DUPLICATE_CLIP,
+                target_id=selected_clip_id,
+            ),
+            error_title="Duplicate timeline clip failed",
+            label=label,
+            sync_stage=True,
+        )
 
     def _timeline_delete_clip(self, clip_id: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            self.session.apply(
-                RemoveClipCommand(
-                    self.session.document,
-                    clip_id,
-                    label="Delete timeline clip",
-                )
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Delete timeline clip failed", exc)
-            return
-        self.session.editor_state.selection.clip_id = None
-        self.timeline.selected_clip_id = None
-        self._log("Deleted timeline clip")
-        self._refresh()
-        self._sync_active_stage_preview()
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.REMOVE_CLIP,
+                target_id=selected_clip_id,
+            ),
+            error_title="Delete timeline clip failed",
+            label="Deleted timeline clip",
+            sync_stage=True,
+        )
 
     def _timeline_clip_selected(self, track_id: str, clip_id: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        if getattr(self, "_timeline_selection_dispatching", False):
             return
-        result = find_clip(self.session.document, clip_id)
-        if result is None:
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        self.session.editor_state.selection.track_id = track_id
-        self.session.editor_state.selection.clip_id = clip_id
-        self.inspector.set_timeline_clip(
-            result[0],
-            result[1],
-            list(self.session.document.root.walk()),
-        )
+        document_id = session.document.id
+        selected_track_id = str(track_id)
+        selected_clip_id = str(clip_id)
+        selection = session.editor_state.selection
+        if (
+            selection.track_id == selected_track_id
+            and selection.clip_id == selected_clip_id
+        ):
+            return
+        self._timeline_selection_dispatching = True
+        try:
+            self._dispatch_timeline_intent(
+                TimelineIntent(
+                    document_id,
+                    TimelineAction.SELECT_CLIP,
+                    target_id=selected_track_id,
+                    related_id=selected_clip_id,
+                ),
+                error_title=None,
+                defer_invalidation=True,
+                refresh_inspector=True,
+            )
+        finally:
+            self._timeline_selection_dispatching = False
 
     def _timeline_clip_properties_requested(
         self,
         clip_id: str,
         values: dict[str, object],
     ) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            self.session.apply(
-                SetClipPropertiesCommand(
-                    self.session.document,
-                    clip_id,
-                    values,
-                    label="Edit timeline clip",
-                ),
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        payload = dict(values)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.SET_CLIP_PROPERTIES,
+                target_id=selected_clip_id,
+                values=payload,
                 coalesce=True,
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Edit timeline clip failed", exc)
-            self._refresh()
-            return
-        self.session.editor_state.selection.clip_id = clip_id
-        self._log("Edited timeline clip")
-        self._refresh()
-        self._sync_active_stage_preview()
+            ),
+            error_title="Edit timeline clip failed",
+            label="Edited timeline clip",
+            sync_stage=True,
+        )
 
     def _timeline_keyframe_properties_requested(
         self,
@@ -551,41 +436,66 @@ class TimelineService(WindowService):
         keyframe_id: str,
         values: dict[str, object],
     ) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
             return
-        try:
-            self.session.apply(
-                SetKeyframePropertiesCommand(
-                    self.session.document,
-                    clip_id,
-                    keyframe_id,
-                    values,
-                ),
+        document_id = session.document.id
+        selected_clip_id = str(clip_id)
+        selected_keyframe_id = str(keyframe_id)
+        payload = dict(values)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.SET_KEYFRAME_PROPERTIES,
+                target_id=selected_clip_id,
+                related_id=selected_keyframe_id,
+                values=payload,
                 coalesce=True,
-            )
-        except (DocumentError, ValueError) as exc:
-            self._show_error("Edit timeline keyframe failed", exc)
-            self._refresh()
-            return
-        self.session.editor_state.selection.clip_id = clip_id
-        self._log("Edited timeline keyframe")
-        self._refresh()
-        self._sync_active_stage_preview()
+            ),
+            error_title="Edit timeline keyframe failed",
+            label="Edited timeline keyframe",
+            sync_stage=True,
+        )
 
     def _timeline_playhead_changed(self, frame: int) -> None:
         session = self.document_manager.active
         if session is None:
             return
-        session.editor_state.timeline.playhead_frame = int(frame)
+        document_id = session.document.id
+        playhead_frame = int(frame)
+        if not self._dispatch_timeline_intent(
+            SetTimelinePlayheadIntent(document_id, playhead_frame),
+            error_title=None,
+            defer_invalidation=True,
+        ):
+            return
         if (
             self._pattern_preview_client.is_running
             and session is self._active_stage_session
             and isinstance(session.document, SceneDocument)
             and self._preview_mode == "stage"
-            and self._preview_loaded_resource_id == session.document.id
+            and self._preview_loaded_resource_id == document_id
         ):
-            self._pattern_preview_client.send_command("seek", {"frame": int(frame)})
+            self._pattern_preview_client.send_command(
+                "seek",
+                {"frame": playhead_frame},
+            )
 
     def _timeline_zoom_changed(self, value: float) -> None:
-        if self.document_manager.active is not None:
-            self.session.editor_state.timeline.zoom = float(value)
+        session = self.document_manager.active
+        if session is None or not isinstance(session.document, SceneDocument):
+            return
+        document_id = session.document.id
+        zoom = float(value)
+        self._dispatch_timeline_intent(
+            TimelineIntent(
+                document_id,
+                TimelineAction.SET_ZOOM,
+                values={"zoom": zoom},
+            ),
+            error_title=None,
+            defer_invalidation=True,
+        )
+
+
+__all__ = ["TimelineService"]

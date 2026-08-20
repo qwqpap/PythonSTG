@@ -10,12 +10,16 @@ from src.qt_compat.QtWidgets import QWidget
 from .asset_index import AssetRecord
 from .action_catalog import ActionDescriptor, ActionQuery
 from .action_search import ActionSearchDialog
+from .application import (
+    AddSceneNodeIntent,
+    IntentRejectedError,
+    SelectNodeIntent,
+    SetNodePropertyIntent,
+)
 from .document import SceneDocument
-from .node_types import make_node
 from .resource_browser import ResourceBrowserPanel
-from .scene_commands import AddNodeCommand, AssignResourceCommand
 from .scene_compile import SceneSpellCompileError
-from .timeline_commands import require_track
+from .application.queries import require_timeline_track
 from .workbench import EditorPlugin, default_external_plugins
 from .shell import WindowService
 
@@ -46,7 +50,7 @@ class WorkbenchService(WindowService):
         timeline_kind = None
         if context == "timeline" and self.timeline.selected_track_id:
             try:
-                timeline_kind = require_track(
+                timeline_kind = require_timeline_track(
                     self.session.document, self.timeline.selected_track_id
                 ).kind
             except (AttributeError, ValueError):
@@ -60,7 +64,7 @@ class WorkbenchService(WindowService):
                 timeline_kind=timeline_kind,
             ),
             language_manager=self.language_manager,
-            parent=self,
+            parent=self._window,
         )
         dialog.actionChosen.connect(self._execute_action)
         self._action_search_dialog = dialog
@@ -90,7 +94,7 @@ class WorkbenchService(WindowService):
         track_id = self.timeline.selected_track_id
         if not track_id:
             raise ValueError("timeline.selected_track: select a compatible track first")
-        track = require_track(self.session.document, track_id)
+        track = require_timeline_track(self.session.document, track_id)
         if track.kind != str(descriptor.payload["kind"]):
             raise ValueError(
                 f"timeline.track:{track.id}.kind: expected {track.kind}, "
@@ -179,7 +183,7 @@ class WorkbenchService(WindowService):
                 ValueError(f"Tool script does not exist: {plugin.script}"),
             )
             return
-        process = QProcess(self)
+        process = QProcess(self._window)
         process.setProgram(sys.executable)
         process.setArguments([str(plugin.script)])
         process.setWorkingDirectory(str(self.project.root))
@@ -293,16 +297,15 @@ class WorkbenchService(WindowService):
         if kind == "pattern":
             selected = self.session.node(self._selected_id)
             if selected is not None and selected.type == "PatternInstance":
-                self._apply_command(
-                    AssignResourceCommand(
-                        self.session.document.root,
+                invalidation = self.editor_coordinator.dispatch(
+                    SetNodePropertyIntent(
+                        self.session.document.id,
                         selected.id,
                         "pattern",
                         value,
-                        label="Assign Pattern resource",
-                    ),
-                    select_id=selected.id,
+                    )
                 )
+                self.apply_invalidation(self.session.document.id, invalidation)
             self._open_pattern_preview(value)
             return
 
@@ -317,21 +320,21 @@ class WorkbenchService(WindowService):
         if not isinstance(self.session.document, SceneDocument):
             return
         parent = self.session.node(self._selected_id) or self.session.document.root
-        node = make_node("Sprite", name=Path(name).stem or "Sprite")
-        node.properties["texture"] = resource_value
+        properties: dict[str, object] = {"texture": resource_value}
         if x is not None:
-            node.properties["x"] = float(x)
+            properties["x"] = float(x)
         if y is not None:
-            node.properties["y"] = float(y)
-        self._apply_command(
-            AddNodeCommand(
-                self.session.document.root,
+            properties["y"] = float(y)
+        invalidation = self.editor_coordinator.dispatch(
+            AddSceneNodeIntent(
+                self.session.document.id,
                 parent.id,
-                node,
-                label=f"Add {node.name}",
-            ),
-            select_id=node.id,
+                "Sprite",
+                Path(name).stem or "Sprite",
+                properties,
+            )
         )
+        self.apply_invalidation(self.session.document.id, invalidation)
 
     def _log_scene_diagnostics(self, error: SceneSpellCompileError) -> None:
         for diagnostic in error.diagnostics:
@@ -365,9 +368,12 @@ class WorkbenchService(WindowService):
         )
         if session is None or not isinstance(session.document, SceneDocument):
             return
-        self.document_manager.activate(session)
+        invalidation = self.document_controller.activate(document_id)
         widget = self._document_widgets.get(document_id)
         if widget is not None:
             self.central_tabs.setCurrentWidget(widget)
-        session.editor_state.selection.node_id = node_id
-        self._refresh()
+        self.apply_invalidation(document_id, invalidation)
+        selection = self.editor_coordinator.dispatch(
+            SelectNodeIntent(document_id, node_id)
+        )
+        self.apply_invalidation(document_id, selection)

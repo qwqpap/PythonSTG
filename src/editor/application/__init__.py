@@ -5,10 +5,16 @@ from .document_controller import DocumentController
 from .errors import IntentRejectedError, IntentRejectionCode
 from .intents import (
     AddSceneNodeIntent,
+    AuthoringAction,
+    AuthoringIntent,
+    BackgroundAction,
+    BackgroundIntent,
     CreateSimpleSpellIntent,
     CreateStageTemplateIntent,
     EditorIntent,
     MoveSceneNodeIntent,
+    PatternAction,
+    PatternIntent,
     RedoIntent,
     RemoveSceneNodeIntent,
     RenameSceneNodeIntent,
@@ -16,6 +22,10 @@ from .intents import (
     SetNodePropertyIntent,
     SetSceneNodePropertiesIntent,
     SetTimelinePlayheadIntent,
+    TimelineAction,
+    TimelineIntent,
+    UIDocumentAction,
+    UIDocumentIntent,
     UndoIntent,
 )
 from .invalidation import FullSyncReason, InvalidationScope, InvalidationSet
@@ -23,6 +33,10 @@ from .ports import PanelPort
 
 __all__ = [
     "AddSceneNodeIntent",
+    "AuthoringAction",
+    "AuthoringIntent",
+    "BackgroundAction",
+    "BackgroundIntent",
     "CreateSimpleSpellIntent",
     "CreateStageTemplateIntent",
     "DocumentController",
@@ -34,6 +48,8 @@ __all__ = [
     "InvalidationScope",
     "InvalidationSet",
     "MoveSceneNodeIntent",
+    "PatternAction",
+    "PatternIntent",
     "PanelPort",
     "RedoIntent",
     "RemoveSceneNodeIntent",
@@ -42,5 +58,9 @@ __all__ = [
     "SetNodePropertyIntent",
     "SetSceneNodePropertiesIntent",
     "SetTimelinePlayheadIntent",
+    "TimelineAction",
+    "TimelineIntent",
+    "UIDocumentAction",
+    "UIDocumentIntent",
     "UndoIntent",
 ]

@@ -44,6 +44,8 @@ class InvalidationSet:
         if any(not isinstance(scope, InvalidationScope) for scope in values):
             raise TypeError("scopes must contain only InvalidationScope values")
         all_scopes = frozenset(InvalidationScope)
+        if reason is not None and not isinstance(reason, FullSyncReason):
+            raise TypeError("reason must be FullSyncReason or None")
         if values == all_scopes and reason is None:
             raise ValueError("full sync requires an explicit lifecycle reason")
         if reason is not None and values != all_scopes:

@@ -142,7 +142,7 @@ class DocumentService(WindowService):
         session = self._managed_for_widget(widget)
         if session is None:
             return
-        self.document_manager.activate(session)
+        invalidation = self.document_controller.activate(session.document.id)
         if isinstance(session.document, SceneDocument):
             self.viewport = self.central_tabs.widget(index)
             if _scene_has_stage_content(session.document):
@@ -163,7 +163,7 @@ class DocumentService(WindowService):
                 self.resizeDocks([self.bottom_dock], [target_height], Qt.Vertical)
         if not hasattr(self, "tree"):
             return
-        self._refresh()
+        self.apply_invalidation(session.document.id, invalidation)
 
     def _close_central_tab(self, index: int) -> None:
         widget = self.central_tabs.widget(index)
@@ -182,7 +182,10 @@ class DocumentService(WindowService):
                 self._clear_stage_runtime_feedback()
                 self._active_stage_session = None
                 self._preview_loaded_resource_id = None
-            self.document_manager.close(session, discard=True)
+            _removed, active, invalidation = self.document_controller.close(
+                session.document.id,
+                discard=True,
+            )
             if self._active_pattern_session is session:
                 self._active_pattern_session = None
                 self._active_pattern_document = None
@@ -190,15 +193,15 @@ class DocumentService(WindowService):
             self._document_widgets.pop(session.document.id, None)
             self.central_tabs.removeTab(index)
             widget.deleteLater()
-            if self.document_manager.active is None and self.central_tabs.count() == 0:
+            if active is None and self.central_tabs.count() == 0:
                 self.new_scene()
-            elif self.document_manager.active is not None:
+            elif active is not None:
                 active_widget = self._document_widgets.get(
-                    self.document_manager.active.document.id
+                    active.document.id
                 )
                 if active_widget is not None:
                     self.central_tabs.setCurrentWidget(active_widget)
-            self._refresh()
+                self.apply_invalidation(active.document.id, invalidation)
             return
         if widget is None or not widget.close():
             return
@@ -209,15 +212,15 @@ class DocumentService(WindowService):
         widget.deleteLater()
 
     def new_scene(self) -> None:
-        session = self.document_manager.new_scene()
+        session, invalidation = self.document_controller.new_scene()
         self._add_document_tab(session)
         self._log("New scene")
-        self._refresh()
+        self.apply_invalidation(session.document.id, invalidation)
 
     def open_resource(self) -> None:
         start = self.project.game_content / "scenes"
         path, _ = QFileDialog.getOpenFileName(
-            self,
+            self._window,
             self.language_manager.translate("Open PySTG Resource"),
             str(start),
             RESOURCE_FILTER,
@@ -242,7 +245,7 @@ class DocumentService(WindowService):
                 path = reference.resolve(self.project, must_exist=True)
             else:
                 path = self.project.resolve(resource_value)
-            session = self.document_manager.open(path)
+            session, invalidation = self.document_controller.open(path)
         except (
             OSError,
             DocumentError,
@@ -254,7 +257,7 @@ class DocumentService(WindowService):
             return None
         self._add_document_tab(session)
         self._log(f"Opened {self.project.relative(path)}")
-        self._refresh()
+        self.apply_invalidation(session.document.id, invalidation)
         return session
 
     def save_scene(self) -> bool:
@@ -285,7 +288,9 @@ class DocumentService(WindowService):
     ) -> bool:
         if session.path is not None and not save_as:
             try:
-                saved = self.document_manager.save(session)
+                saved, invalidation = self.document_controller.save(
+                    session.document.id
+                )
             except (OSError, DocumentError, ResourceDocumentError, ValueError) as exc:
                 self._show_error("Save failed", exc)
                 return False
@@ -295,7 +300,7 @@ class DocumentService(WindowService):
                 self.preview_panel.set_resource(self._active_pattern_resource)
             if hasattr(self, "resource_browser"):
                 self.resource_browser.refresh()
-            self._refresh()
+            self.apply_invalidation(session.document.id, invalidation)
             return True
         folder = "patterns" if isinstance(session.document, PatternDocument) else "scenes"
         start = self.project.game_content / folder
@@ -306,7 +311,7 @@ class DocumentService(WindowService):
             else ("new_pattern.pystg.json" if folder == "patterns" else "untitled.pystg.json")
         )
         path, _ = QFileDialog.getSaveFileName(
-            self,
+            self._window,
             self.language_manager.translate("Save PySTG Resource"),
             str(suggested),
             RESOURCE_FILTER,
@@ -316,7 +321,10 @@ class DocumentService(WindowService):
         if not path.lower().endswith(".json"):
             path += ".pystg.json"
         try:
-            saved = self.document_manager.save(session, path)
+            saved, invalidation = self.document_controller.save(
+                session.document.id,
+                path,
+            )
         except (OSError, DocumentError, ResourceDocumentError, ValueError) as exc:
             self._show_error("Save failed", exc)
             return False
@@ -326,14 +334,14 @@ class DocumentService(WindowService):
             self.preview_panel.set_resource(self._active_pattern_resource)
         if hasattr(self, "resource_browser"):
             self.resource_browser.refresh()
-        self._refresh()
+        self.apply_invalidation(session.document.id, invalidation)
         return True
 
     def revert_document(self) -> None:
         session = self.session
         if session.is_dirty:
             result = QMessageBox.warning(
-                self,
+                self._window,
                 self.language_manager.translate("Revert document"),
                 self.language_manager.translate(
                     f"Discard all changes to {session.display_name}?"
@@ -344,13 +352,13 @@ class DocumentService(WindowService):
             if result != QMessageBox.Yes:
                 return
         try:
-            self.document_manager.revert(session)
+            invalidation = self.document_controller.revert(session.document.id)
         except (OSError, ValueError, ResourceDocumentError) as exc:
             self._show_error("Revert failed", exc)
             return
         self._selected_id = session.default_selection
         self._log(f"Reverted {session.display_name}")
-        self._refresh()
+        self.apply_invalidation(session.document.id, invalidation)
         self._sync_active_pattern_preview()
 
     def close_active_document(self) -> None:
@@ -367,7 +375,7 @@ class DocumentService(WindowService):
         if not self.isVisible():
             return True
         result = QMessageBox.warning(
-            self,
+            self._window,
             self.language_manager.translate("Unsaved changes"),
             self.language_manager.translate(
                 f"Save changes to {session.display_name}?"

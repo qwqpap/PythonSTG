@@ -1,260 +1,239 @@
-"""Pattern authoring slots: properties, node graph, bindings and presets."""
+"""Pattern shell adapters for typed coordinator intents and preview effects."""
 
 from __future__ import annotations
 
-from src.pattern import BindingSpec, PatternDocument
-from .pattern_commands import (
-    RemovePatternBindingCommand,
-    SetPatternBindingCommand,
-    SetPatternPropertyCommand,
-    pattern_with_property,
+from src.pattern import PatternDocument
+
+from .application import (
+    IntentRejectedError,
+    InvalidationScope,
+    InvalidationSet,
+    PatternAction,
+    PatternIntent,
 )
 from .pattern_workspace import PatternWorkspace
-from .graph_commands import (
-    AddGraphEdgeCommand,
-    AddGraphNodeCommand,
-    ExpandToGraphCommand,
-    FoldBackToRecipeCommand,
-    RemoveGraphEdgeCommand,
-    RemoveGraphNodeCommand,
-    SetGraphNodePositionCommand,
-    SetGraphNodePropertiesCommand,
-)
-from .preset_commands import (
-    ApplyPresetCommand,
-    ApplyPresetMigrationCommand,
-    MaterializePresetCommand,
-    SetPresetOverrideCommand,
-    SetPresetSlotOverrideCommand,
-)
-from .progressive_authoring import authoring_level
 from .shell import WindowService
 
 
 class PatternService(WindowService):
-    """Pattern authoring slots: properties, node graph, bindings and presets.
-
-    These slots stay bound to the window instance instead of moving into a
-    controller object: every attribute they touch is owned by
-    ``EditorMainWindow``, and the editor tests plus the three native gates drive
-    these methods by name.  Mix in before the Qt base class, the same way
-    ``SpaceTapSearchMixin`` is used by ``SceneViewport``.
-    """
+    def _submit_pattern_intent(
+        self,
+        intent: PatternIntent,
+        *,
+        label: str = "",
+        sync_preview: bool = False,
+    ) -> bool:
+        # Tests and plugin adapters may replace the active resolver after the
+        # window is assembled.  Keep the Qt-free coordinator pointed at the
+        # window's one current resolver instead of a stale construction-time
+        # instance.
+        self.editor_coordinator.preset_resolver = self._preset_resolver
+        try:
+            invalidation = self.editor_coordinator.dispatch(intent)
+        except (IntentRejectedError, ValueError) as exc:
+            issue_code = (
+                "invalid_graph_edit"
+                if "GRAPH" in intent.action.name
+                else "invalid_pattern_edit"
+            )
+            self.preview_panel.handle_issue(
+                {"code": issue_code, "message": str(exc)}
+            )
+            self._log(f"[pattern-edit:error] {exc}")
+            # A form control can already contain the rejected value when its
+            # signal reaches this adapter.  Rebind only the Pattern/Inspector
+            # consumers so the UI returns to the authoritative document value
+            # without a global refresh or a compensating Command.
+            self.apply_invalidation(
+                intent.document_id,
+                InvalidationSet(
+                    (InvalidationScope.PATTERN, InvalidationScope.INSPECTOR)
+                ),
+            )
+            return False
+        if invalidation.scopes:
+            self.apply_invalidation(intent.document_id, invalidation)
+            if label:
+                self._log(label)
+            if sync_preview:
+                self._sync_active_pattern_preview()
+        self._active_pattern_document = self.session.document
+        return bool(invalidation.scopes)
 
     def new_pattern(self) -> None:
-        session = self.document_manager.new_pattern()
+        session, invalidation = self.document_controller.new_pattern()
         self._add_document_tab(session)
         self._active_pattern_session = session
         self._active_pattern_document = session.document
         self._active_pattern_resource = ""
         self._log("New Pattern")
-        self._refresh()
+        self.apply_invalidation(session.document.id, invalidation)
 
     def _pattern_property_requested(self, path: str, value) -> None:
-        session = self._active_pattern_session
-        if session is None or not isinstance(session.document, PatternDocument):
-            self.preview_panel.handle_issue(
-                {"code": "no_pattern", "message": "Select a Pattern resource first"}
-            )
+        if not path or not isinstance(self.session.document, PatternDocument):
             return
-        if not path:
-            return
-        if not self._apply_pattern_properties({str(path): value}, f"Set {path}"):
-            if self._pattern_preview_client.is_running:
-                request_id = self._pattern_preview_client.send_command(
-                    "set-property",
-                    {"path": path, "value": value},
-                )
-                self._preview_pending_properties[request_id] = (str(path), value)
+        changed = self._apply_pattern_properties(
+            {str(path): value},
+            f"Set {path}",
+        )
+        if not changed:
             return
         if not self._pattern_preview_client.is_running:
             self._launch_active_pattern_preview()
-        elif self._pattern_preview_client.is_running:
+        else:
             request_id = self._pattern_preview_client.send_command(
-                "set-property",
-                {"path": path, "value": value},
+                "set-property", {"path": path, "value": value}
             )
             self._preview_pending_properties[request_id] = (str(path), value)
 
-    @staticmethod
-    def _pattern_with_property(
-        document: PatternDocument,
-        path: str,
-        value,
-    ) -> PatternDocument:
-        return pattern_with_property(document, path, value)
-
-    def _apply_graph_command(self, command, label: str) -> bool:
-        session = self._active_pattern_session
-        if session is None or not isinstance(session.document, PatternDocument):
-            return False
-        try:
-            session.apply(command)
-        except Exception as exc:
-            self.preview_panel.handle_issue(
-                {"code": "invalid_graph_edit", "message": str(exc)}
-            )
-            self._log(f"[graph-edit:error] {exc}")
-            self._refresh()
-            return False
-        self._active_pattern_document = session.document
-        self._log(label)
-        self._refresh()
-        self._sync_active_pattern_preview()
-        return True
-
     def _graph_mode_changed(self, mode: str) -> None:
-        session = self._active_pattern_session
-        if session is None:
-            return
-        mode = str(mode)
-        session.editor_state.pattern.preset_mode = mode == "preset"
-        if mode == "graph":
-            session.editor_state.pattern.graph_mode = True
-            session.editor_state.pattern.authoring_level = "l3"
-        else:
-            session.editor_state.pattern.graph_mode = False
-            session.editor_state.selection.graph_node_id = None
-            session.editor_state.pattern.authoring_level = (
-                "l0" if mode == "preset" else "l1"
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_MODE,
+                target_id=str(mode),
             )
-        self._refresh()
+        )
 
     def _pattern_level_requested(self, level: str) -> None:
-        session = self._active_pattern_session
-        if session is None or not isinstance(session.document, PatternDocument):
-            return
-        authoring_level(level)
-        session.editor_state.pattern.authoring_level = level
-        session.editor_state.pattern.preset_mode = level == "l0"
-        session.editor_state.pattern.graph_mode = level == "l3"
-        if level == "l3" and session.document.graph is None:
-            self._graph_expand_requested()
-            return
-        self._refresh()
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_LEVEL,
+                target_id=str(level),
+            ),
+            label=f"Set authoring level {level}",
+            sync_preview=True,
+        )
 
     def _pattern_binding_requested(self, path: str, kind: str, value) -> None:
-        self._apply_graph_command(
-            SetPatternBindingCommand(
-                self._active_pattern_document,
-                BindingSpec(str(path), str(kind), value),
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_BINDING,
+                target_id=str(path),
+                related_id=str(kind),
+                value=value,
             ),
-            f"Set {path} binding",
+            label=f"Set {path} binding",
+            sync_preview=True,
         )
 
     def _pattern_binding_remove_requested(self, path: str) -> None:
-        self._apply_graph_command(
-            RemovePatternBindingCommand(
-                self._active_pattern_document,
-                str(path),
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.REMOVE_BINDING,
+                target_id=str(path),
             ),
-            f"Remove {path} binding",
+            label=f"Remove {path} binding",
+            sync_preview=True,
         )
 
     def _pattern_source_navigate_requested(self, resource_uri: str) -> None:
-        reference = str(resource_uri)
-        try:
-            path = self.project.resolve(reference, must_exist=True)
-        except Exception as exc:
-            self._show_error("Open Runtime source failed", exc)
-            return
-        self.session.editor_state.pattern.runtime_source_path = str(path)
-        self._log(f"Runtime source: {path}")
+        if self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_SOURCE_PATH,
+                target_id=str(resource_uri),
+            )
+        ):
+            self._log(
+                f"Runtime source: {self.session.editor_state.pattern.runtime_source_path}"
+            )
 
     def _graph_expand_requested(self) -> None:
-        session = self._active_pattern_session
-        if session is None:
-            return
-        session.editor_state.pattern.graph_mode = True
-        session.editor_state.pattern.authoring_level = "l3"
-        if self._apply_graph_command(
-            ExpandToGraphCommand(session.document),
-            "Expand pattern to graph",
-        ):
-            pass
+        self._submit_pattern_intent(
+            PatternIntent(self.session.document.id, PatternAction.EXPAND_GRAPH),
+            label="Expand pattern to graph",
+            sync_preview=True,
+        )
 
     def _graph_fold_requested(self) -> None:
-        session = self._active_pattern_session
-        if session is None:
-            return
-        session.editor_state.pattern.graph_mode = False
-        session.editor_state.pattern.authoring_level = "l1"
-        session.editor_state.selection.graph_node_id = None
-        if self._apply_graph_command(
-            FoldBackToRecipeCommand(session.document),
-            "Fold back to recipe",
-        ):
-            pass
+        self._submit_pattern_intent(
+            PatternIntent(self.session.document.id, PatternAction.FOLD_GRAPH),
+            label="Fold back to recipe",
+            sync_preview=True,
+        )
 
     def _graph_node_selected(self, node_id: str) -> None:
-        session = self._active_pattern_session
-        if session is None or not isinstance(session.document, PatternDocument):
-            return
-        if session.document.graph is None:
-            return
-        session.editor_state.selection.graph_node_id = str(node_id)
-        selected = next(
-            (
-                node
-                for node in session.document.graph.nodes
-                if node.id == str(node_id)
-            ),
-            None,
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SELECT_GRAPH_NODE,
+                target_id=str(node_id),
+            )
         )
-        self.inspector.set_graph_node(selected)
 
     def _graph_node_property_requested(self, node_id: str, properties) -> None:
-        self._apply_graph_command(
-            SetGraphNodePropertiesCommand(
-                self._active_pattern_document,
-                str(node_id),
-                dict(properties),
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_GRAPH_NODE_PROPERTIES,
+                target_id=str(node_id),
+                values=dict(properties),
             ),
-            "Set graph node property",
+            label="Set graph node property",
+            sync_preview=True,
         )
 
     def _graph_node_position_requested(self, node_id: str, x: float, y: float) -> None:
-        self._apply_graph_command(
-            SetGraphNodePositionCommand(
-                self._active_pattern_document,
-                str(node_id),
-                float(x),
-                float(y),
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.MOVE_GRAPH_NODE,
+                target_id=str(node_id),
+                x=float(x),
+                y=float(y),
             ),
-            "Move graph node",
+            label="Move graph node",
+            sync_preview=True,
         )
 
     def _graph_node_create_requested(self, category: str, node_type: str) -> None:
-        self._apply_graph_command(
-            AddGraphNodeCommand(
-                self._active_pattern_document,
-                str(category),
-                str(node_type),
-                label=f"Add {category} node",
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.ADD_GRAPH_NODE,
+                target_id=str(category),
+                related_id=str(node_type),
             ),
-            f"Add {category} node",
+            label=f"Add {category} node",
+            sync_preview=True,
         )
 
     def _graph_edge_requested(self, from_id: str, to_id: str) -> None:
-        self._apply_graph_command(
-            AddGraphEdgeCommand(
-                self._active_pattern_document,
-                str(from_id),
-                str(to_id),
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.ADD_GRAPH_EDGE,
+                target_id=str(from_id),
+                related_id=str(to_id),
             ),
-            "Connect graph nodes",
+            label="Connect graph nodes",
+            sync_preview=True,
         )
 
     def _graph_node_remove_requested(self, node_id: str) -> None:
-        self._apply_graph_command(
-            RemoveGraphNodeCommand(self._active_pattern_document, str(node_id)),
-            "Remove graph node",
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.REMOVE_GRAPH_NODE,
+                target_id=str(node_id),
+            ),
+            label="Remove graph node",
+            sync_preview=True,
         )
 
     def _graph_edge_remove_requested(self, edge_id: str) -> None:
-        self._apply_graph_command(
-            RemoveGraphEdgeCommand(self._active_pattern_document, str(edge_id)),
-            "Remove graph edge",
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.REMOVE_GRAPH_EDGE,
+                target_id=str(edge_id),
+            ),
+            label="Remove graph edge",
+            sync_preview=True,
         )
 
     def _apply_graph_diagnostics(self, diagnostics) -> None:
@@ -269,20 +248,22 @@ class PatternService(WindowService):
                 node_ids.append(object_id)
             elif prefix == "graph.edge":
                 edge_ids.append(object_id)
-        if not node_ids and not edge_ids:
-            return
         session = self.document_manager.active
-        if session is None:
-            return
-        widget = self._document_widgets.get(session.document.id)
-        if isinstance(widget, PatternWorkspace) and widget.mode() == "graph":
+        widget = (
+            self._document_widgets.get(session.document.id)
+            if session is not None
+            else None
+        )
+        if (node_ids or edge_ids) and isinstance(widget, PatternWorkspace) and widget.mode() == "graph":
             widget.set_graph_diagnostics(tuple(node_ids), tuple(edge_ids))
 
     def _clear_graph_diagnostics(self) -> None:
         session = self.document_manager.active
-        if session is None:
-            return
-        widget = self._document_widgets.get(session.document.id)
+        widget = (
+            self._document_widgets.get(session.document.id)
+            if session is not None
+            else None
+        )
         if isinstance(widget, PatternWorkspace):
             widget.clear_graph_diagnostics()
 
@@ -291,179 +272,88 @@ class PatternService(WindowService):
         values: dict[str, object],
         label: str,
     ) -> bool:
-        session = self._active_pattern_session
-        if session is None or not isinstance(session.document, PatternDocument):
-            return False
-        session.commands.begin_transaction(label)
-        try:
-            for path, value in values.items():
-                session.apply(
-                    SetPatternPropertyCommand(
-                        session.document,
-                        path,
-                        value,
-                        label=f"Set {path}",
-                    )
-                )
-        except Exception as exc:
-            session.commands.cancel_transaction()
-            self.preview_panel.handle_issue(
-                {"code": "invalid_pattern_edit", "message": str(exc)}
-            )
-            self._log(f"[pattern-edit:error] {exc}")
-            self._refresh()
-            return False
-        session.commands.end_transaction()
-        self._active_pattern_document = session.document
-        self._log(label)
-        self._refresh()
-        return True
+        return self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_PROPERTIES,
+                target_id=str(label),
+                values=dict(values),
+            ),
+            label=label,
+        )
 
     def _apply_pattern_template(self, template: str) -> None:
-        if "@" in template:
-            preset_id, version = template.rsplit("@", 1)
-            session = self._active_pattern_session
-            if session is None:
-                return
-            descriptor = self._preset_resolver.registry.resolve(preset_id, version)
-            session.editor_state.pattern.preset_mode = True
-            session.editor_state.pattern.graph_mode = False
-            session.editor_state.pattern.authoring_level = "l0"
-            if self._apply_graph_command(
-                ApplyPresetCommand(session.document, self._preset_resolver, descriptor),
-                f"Apply {descriptor.display_name} preset",
-            ):
-                return
-            session.editor_state.pattern.preset_mode = False
-            session.editor_state.pattern.authoring_level = "l1"
-            return
-        templates = {
-            "starter_ring": {
-                "shape.kind": "ring",
-                "shape.count": 24,
-                "aim.mode": "fixed",
-                "aim.angle": 270.0,
-                "schedule.interval_frames": 12,
-                "schedule.burst_count": 8,
-                "schedule.loop_count": None,
-                "motion.speed": 2.0,
-                "motion.max_lifetime": 5.0,
-            },
-            "aimed_arc": {
-                "shape.kind": "arc",
-                "shape.count": 12,
-                "shape.angle_span": 60.0,
-                "aim.mode": "player",
-                "schedule.interval_frames": 24,
-                "schedule.burst_count": 4,
-                "motion.speed": 2.5,
-            },
-            "spiral": {
-                "shape.kind": "spiral",
-                "shape.count": 18,
-                "aim.mode": "fixed",
-                "schedule.interval_frames": 8,
-                "schedule.burst_count": 24,
-                "modifiers.angle_offset_per_burst": 11.0,
-                "motion.speed": 2.0,
-            },
-        }
-        values = templates.get(template)
-        if values is not None and self._apply_pattern_properties(
-            values, f"Apply {template.replace('_', ' ')} template"
-        ):
-            self._sync_active_pattern_preview()
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.APPLY_TEMPLATE,
+                target_id=str(template),
+            ),
+            label=f"Apply {template}",
+            sync_preview=True,
+        )
 
     def _preset_parameter_requested(self, parameter_id: str, value) -> None:
-        session = self._active_pattern_session
-        if session is None:
-            return
-        if self._apply_graph_command(
-            SetPresetOverrideCommand(
-                session.document,
-                self._preset_resolver,
-                str(parameter_id),
-                value,
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_PRESET_PARAMETER,
+                target_id=str(parameter_id),
+                value=value,
             ),
-            f"Set preset parameter {parameter_id}",
-        ):
-            session.editor_state.pattern.preset_mode = True
-            session.editor_state.pattern.authoring_level = "l0"
+            label=f"Set preset parameter {parameter_id}",
+            sync_preview=True,
+        )
 
     def _preset_slot_requested(self, slot_id: str, value) -> None:
-        session = self._active_pattern_session
-        if session is None:
-            return
-        if self._apply_graph_command(
-            SetPresetSlotOverrideCommand(
-                session.document,
-                self._preset_resolver,
-                str(slot_id),
-                value,
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_PRESET_SLOT,
+                target_id=str(slot_id),
+                value=value,
             ),
-            f"Set preset slot {slot_id}",
-        ):
-            session.editor_state.pattern.preset_mode = True
-            session.editor_state.pattern.authoring_level = "l0"
+            label=f"Set preset slot {slot_id}",
+            sync_preview=True,
+        )
 
     def _preset_migrate_requested(self, target_version: str) -> None:
-        session = self._active_pattern_session
-        if session is None:
-            return
-        instance = self._preset_resolver.instance_from_document(session.document)
-        if instance is None:
-            return
-        try:
-            preview = self._preset_resolver.registry.preview_migration(
-                instance, str(target_version)
-            )
-        except Exception as exc:
-            # A rejected preview is the author's answer, not a crash: the target
-            # has no exact migration path, or an override no longer fits it.
-            self.preview_panel.handle_issue(
-                {"code": "preset_migration_unavailable", "message": str(exc)}
-            )
-            self._log(f"[preset-migration:error] {exc}")
-            return
-        if self._apply_graph_command(
-            ApplyPresetMigrationCommand(
-                session.document,
-                self._preset_resolver,
-                preview,
+        self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.MIGRATE_PRESET,
+                target_id=str(target_version),
             ),
-            f"Migrate preset to {target_version}",
-        ):
-            session.editor_state.pattern.preset_mode = True
-            session.editor_state.pattern.authoring_level = "l0"
+            label=f"Migrate preset to {target_version}",
+            sync_preview=True,
+        )
 
     def _preset_materialize_requested(self) -> None:
-        session = self._active_pattern_session
-        if session is None:
-            return
-        session.editor_state.pattern.preset_mode = False
-        session.editor_state.pattern.graph_mode = False
-        session.editor_state.pattern.authoring_level = "l1"
-        if self._apply_graph_command(
-            MaterializePresetCommand(session.document, self._preset_resolver),
-            "Make preset local",
-        ):
-            return
-        session.editor_state.pattern.preset_mode = True
-        session.editor_state.pattern.authoring_level = "l0"
+        self._submit_pattern_intent(
+            PatternIntent(self.session.document.id, PatternAction.MATERIALIZE_PRESET),
+            label="Make preset local",
+            sync_preview=True,
+        )
 
     def _pattern_origin_requested(self, x: float, y: float) -> None:
         if self._apply_pattern_properties(
-            {"shape.origin_x": x, "shape.origin_y": y},
+            {"shape.origin_x": float(x), "shape.origin_y": float(y)},
             "Move Pattern emitter",
         ):
             self._sync_active_pattern_preview()
 
     def _pattern_player_requested(self, x: float, y: float) -> None:
-        if self._active_pattern_session is not None:
-            self._active_pattern_session.editor_state.pattern.player_position = (
-                float(x),
-                float(y),
+        if self._submit_pattern_intent(
+            PatternIntent(
+                self.session.document.id,
+                PatternAction.SET_PLAYER_POSITION,
+                x=float(x),
+                y=float(y),
             )
-        self._send_pattern_preview_command(
-            "set-player-position", {"x": float(x), "y": float(y)}
-        )
+        ):
+            self._send_pattern_preview_command(
+                "set-player-position", {"x": float(x), "y": float(y)}
+            )
+
+
+__all__ = ["PatternService"]

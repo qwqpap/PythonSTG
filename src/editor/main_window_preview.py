@@ -373,7 +373,7 @@ class PreviewService(WindowService):
             self._show_error("Preview unavailable", exc)
             return
 
-        process = QProcess(self)
+        process = QProcess(self._window)
         process.setProgram(sys.executable)
         process.setArguments(arguments)
         process.setWorkingDirectory(str(self.project.root))
