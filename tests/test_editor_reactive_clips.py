@@ -2,12 +2,14 @@
 
 from copy import deepcopy
 
-from PyQt5.QtWidgets import QComboBox, QLabel
+from src.qt_compat.QtCore import QPointF, Qt
+from src.qt_compat.QtTest import QTest
+from src.qt_compat.QtWidgets import QComboBox, QLabel
 
 from src.core.project_context import ProjectContext
 from src.editor import SceneEditorSession, TimelineClip, TimelineTrack
 from src.editor.app import EditorMainWindow
-from src.editor.timeline_workspace import TimelineClipItem, TimelineEditor
+from src.editor.timeline_workspace import CLIP_HEIGHT, TimelineClipItem, TimelineEditor
 
 
 def _reactive_clip():
@@ -98,6 +100,120 @@ def test_reactive_clip_inspector_exposes_activation_reaction_and_owner(tmp_path,
     assert window.inspector.findChild(QLabel, "timelineReactiveActivation").text() == "on_event"
     assert window.inspector.findChild(QLabel, "timelineReactiveReaction").text() == "fake-overload"
     assert window.inspector.findChild(QLabel, "timelineReactiveOwner").text() == "boss.fake"
+    window.session.revert()
+    window.close()
+    qapp_session.processEvents()
+
+
+def test_default_reactive_clip_actually_arms_on_the_formal_runtime(tmp_path, qapp_session):
+    """The clip the editor authors by default must fire, not merely validate.
+
+    The runtime evaluates arming on the frame boundary after a clip starts, so a
+    one-frame default window would compile and validate while never reacting to
+    anything.
+    """
+
+    from src.editor.stage_compile import compile_stage
+    from src.game.bullet.optimized_pool import OptimizedBulletPool
+    from src.game.events import EventBus
+    from src.game.stage.context import StageContext
+    from src.game.stage.program import StageRunner
+
+    class _Player:
+        pos = [0.0, -0.75]
+
+    window = EditorMainWindow(ProjectContext(tmp_path))
+    window.show()
+    qapp_session.processEvents()
+    window._timeline_add_track("Reactive")
+    track = window.session.document.tracks[0]
+    window.timeline.selected_track_id = track.id
+    window._timeline_add_clip(track.id)
+    clip = track.clips[0]
+
+    program = compile_stage(ProjectContext(tmp_path), window.session.document)
+    assert len(program.reactive_clips) == 1
+    bus = EventBus()
+    context = StageContext(OptimizedBulletPool(max_bullets=64), _Player(), event_bus=bus)
+    fired = []
+
+    def action(event, scope):
+        fired.append(event.type)
+        for _ in range(4):
+            yield scope.wait(1)
+
+    context.register_reaction_action(clip.payload["reaction"]["action"], action)
+    runner = StageRunner(program)
+    runner.start(context)
+    bus.emit(clip.payload["activation"]["event_type"], {}, source="boss")
+    runner.tick(context)
+
+    assert fired == ["boss.hit"]
+    overlay = runner.reactive_overlay
+    assert [item["clip_id"] for item in overlay["active_instances"]] == [clip.id]
+    assert overlay["trace"]
+
+    window.session.revert()
+    window.close()
+    qapp_session.processEvents()
+
+
+def test_double_clicking_a_reactive_slot_navigates_to_its_local_view(tmp_path, qapp_session):
+    window = EditorMainWindow(ProjectContext(tmp_path))
+    window.resize(1000, 700)
+    window.show()
+    qapp_session.processEvents()
+    plain = TimelineClip(
+        name="Fan",
+        kind="Pattern",
+        start_frame=12,
+        duration_frames=60,
+        channel="pattern",
+        payload={"pattern": "ring"},
+    )
+    reactive = _reactive_clip()
+    window.session.document.tracks = [
+        TimelineTrack(name="Body", kind="Pattern", channel="pattern", clips=[plain]),
+        TimelineTrack(name="Hooks", kind="Reactive", channel="reaction", clips=[reactive]),
+    ]
+    window._refresh()
+    window.timeline.set_zoom(1.0)
+    qapp_session.processEvents()
+
+    def double_click(clip_id):
+        # Look the item up fresh each time: selecting a clip rebuilds the
+        # scene, so a wrapper cached before the first gesture would hand back a
+        # position the live scene no longer uses.
+        item = next(
+            value
+            for value in window.timeline.view.graphics_scene.items()
+            if isinstance(value, TimelineClipItem) and value.clip_id == clip_id
+        )
+        viewport = window.timeline.view.viewport()
+        point = window.timeline.view.mapFromScene(
+            item.scenePos() + QPointF(20, CLIP_HEIGHT / 2)
+        )
+        # QTest.mouseDClick posts the double-click event alone.  A real double
+        # click arrives as click, double-click, release, and the graphics scene
+        # needs that trailing release to let go of its mouse grabber -- without
+        # it every later click in this test would land on the first clip.
+        QTest.mouseClick(viewport, Qt.LeftButton, pos=point)
+        QTest.mouseDClick(viewport, Qt.LeftButton, pos=point)
+        QTest.mouseRelease(viewport, Qt.LeftButton, pos=point)
+        qapp_session.processEvents()
+
+    # A non-reactive clip has no local behaviour view, so entering it must not
+    # invent a navigation target.
+    double_click(plain.id)
+    assert "reactive_navigation" not in window.session.editor_context
+
+    double_click(reactive.id)
+    assert window.session.editor_context["reactive_navigation"] == {
+        "target": "reaction",
+        "resource_id": reactive.id,
+    }
+    # Navigating is a read of the document, never a write to it.
+    assert window.session.document.tracks[1].clips[0].payload == reactive.payload
     window.session.revert()
     window.close()
     qapp_session.processEvents()

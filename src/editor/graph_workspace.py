@@ -1,4 +1,4 @@
-"""Graph authoring canvas and Recipe/Graph mode switching in PatternWorkspace."""
+"""Graph authoring canvas and node/parameter view switching in PatternWorkspace."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from src.qt_compat.QtWidgets import (
 from src.pattern import BehaviorGraph, BehaviorGraphNode, PatternDocument
 from src.pattern.graph import PORT_TYPES
 
+from .action_search import SpaceTapSearchMixin
 from .i18n import LanguageManager
 from .pattern_workspace import PatternCanvas
 
@@ -177,9 +178,6 @@ class GraphPortItem(QGraphicsObject):
         path = QPainterPath()
         path.addEllipse(self.boundingRect())
         return path
-
-    def set_error_visual(self, error: bool) -> None:
-        self.set_drop_state("invalid" if error else None)
 
     def set_drop_state(self, state: str | None) -> None:
         if state not in {None, "valid", "invalid"}:
@@ -505,7 +503,7 @@ def _sin(degrees: float) -> float:
     return math.sin(math.radians(degrees))
 
 
-class GraphCanvas(QGraphicsView):
+class GraphCanvas(SpaceTapSearchMixin, QGraphicsView):
     nodeSelected = pyqtSignal(str)
     nodePositionCommitted = pyqtSignal(str, float, float)
     edgeRequested = pyqtSignal(str, str)
@@ -529,9 +527,7 @@ class GraphCanvas(QGraphicsView):
         self._drag_port: GraphPortItem | None = None
         self._drag_target: GraphPortItem | None = None
         self._compatible_targets: list[GraphPortItem] = []
-        self._space_pressed = False
-        self._space_dragged = False
-        self._drag_mode_before_space = self.dragMode()
+        self._init_space_tap()
         self._language_manager: LanguageManager | None = None
 
     def set_language_manager(self, manager: LanguageManager) -> None:
@@ -749,12 +745,7 @@ class GraphCanvas(QGraphicsView):
             edge_item.update()
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_pressed = True
-            self._space_dragged = False
-            self._drag_mode_before_space = self.dragMode()
-            self.setDragMode(QGraphicsView.ScrollHandDrag)
-            event.accept()
+        if self._space_tap_press(event):
             return
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             selected = self.graphics_scene.selectedItems()
@@ -777,14 +768,14 @@ class GraphCanvas(QGraphicsView):
             and event.button() == Qt.LeftButton
             and not self._space_pressed
         ):
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             port = self._hit_port_at(scene_pos)
             if port is not None:
                 self._port_drag_started(port, port.scenePos())
                 event.accept()
                 return True
         if event_type == QEvent.MouseMove and self._drag_port is not None:
-            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.position().toPoint()))
             event.accept()
             return True
         if (
@@ -793,7 +784,7 @@ class GraphCanvas(QGraphicsView):
             and self._drag_port is not None
             and self._drag_line is not None
         ):
-            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.position().toPoint()))
             port = self._drag_port
             self._port_drag_released(port)
             event.accept()
@@ -802,7 +793,7 @@ class GraphCanvas(QGraphicsView):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton and not self._space_pressed:
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.position().toPoint())
             port = self._hit_port_at(scene_pos)
             if port is not None:
                 self._port_drag_started(port, port.scenePos())
@@ -811,13 +802,11 @@ class GraphCanvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._space_pressed and event.buttons() & Qt.LeftButton:
-            self._space_dragged = True
         if self._drag_port is not None and self._drag_line is not None:
             # The view owns the authoritative pointer coordinates.  Depending
             # on Qt binding/platform, a child QGraphicsItem mouse move can
             # report a position transformed relative to the original grab.
-            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.position().toPoint()))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
@@ -826,23 +815,12 @@ class GraphCanvas(QGraphicsView):
             and self._drag_port is not None
             and self._drag_line is not None
         ):
-            self._port_drag_moved(self._drag_port, self.mapToScene(event.pos()))
+            self._port_drag_moved(self._drag_port, self.mapToScene(event.position().toPoint()))
             port = self._drag_port
             self._port_drag_released(port)
             event.accept()
             return
         super().mouseReleaseEvent(event)
-
-    def keyReleaseEvent(self, event) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self.setDragMode(self._drag_mode_before_space)
-            should_search = self._space_pressed and not self._space_dragged
-            self._space_pressed = False
-            if should_search:
-                self.actionSearchRequested.emit(None)
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
 
 
 def _drag_can_connect(source: GraphPortItem, target: GraphPortItem) -> bool:
@@ -860,7 +838,7 @@ def _drag_can_connect_pair(drag: GraphPortItem, target: GraphPortItem) -> bool:
 
 
 class GraphPlaceholder(QWidget):
-    """Shown in graph mode when the document is still in recipe mode."""
+    """Shown in the node view before this pattern has local nodes yet."""
 
     expandRequested = pyqtSignal()
 
@@ -869,12 +847,12 @@ class GraphPlaceholder(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         hint = QLabel(
-            "This pattern is in Recipe mode. Expand it into the typed "
-            "behavior graph to edit nodes, ports, and connections."
+            "This pattern is still described by its parameters. Open it as "
+            "nodes to edit each step and how they connect."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
-        expand = QPushButton("Expand to Graph")
+        expand = QPushButton("Edit Nodes")
         expand.setObjectName("graphExpandButton")
         expand.clicked.connect(self.expandRequested)
         layout.addWidget(expand, 0, Qt.AlignLeft)

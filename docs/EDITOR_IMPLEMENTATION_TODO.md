@@ -126,6 +126,41 @@ python tools/validate_assets.py --format json
 git diff --check
 ~~~
 
+### 3.4 2026-08-20 跨阶段工程整改
+
+对 `src/editor/` 57 文件做全量 AST 结构比对与调用链可达性追踪后，确认 9 项「已记 `[x]` 但证据或作者入口不成立」的问题和 7 项冗余。以下改动一律不新增功能、不删测试、不放宽断言。
+
+**门禁与安全网**
+
+- pytest 会话绑定改为 PySide6（`tests/conftest.py` 与 `src/qt_compat/__init__.py`），与 `tools/scene_editor.py` 及三个 native gate 使用同一绑定。此前全部测试跑在 PyQt5(sip) 而生产跑 PySide6(shiboken)，两者 C++ 对象所有权与 GC 时机不同，「拖线过程中重建不崩溃」这类测试在 PyQt5 上通过并不构成 PySide6 上的证据。
+- `tools/verify_native_editor_n4.py` 重写为真跑 `compile_stage → StageRunner`，见 N4.2 的 Evidence（2026-08-20 重做）。
+- `tests/test_editor_usability.py::test_n6_usability_claim_and_report_must_agree` 取代原先断言「`reports/n6_usability.json` 不存在」的写法。原断言把报告缺席编码成永久不变量，真正提交人工研究报告的当天测试就会因为错误的理由变红；现在断言的是声明与证据必须一致，两种世界下都成立。
+- 新增 `tests/test_editor_i18n_coverage.py`：遍历真实编辑器控件树，对 i18n 层声称拥有却译不出的作者可见文案直接失败。此前 458 条以英文源串为键的词条只有点检测试，改动任一英文文案都会让对应中文静默失效且无人发现。
+
+**作者入口补齐（此前属于「写了实现但没接按钮」）**
+
+- Reactive 片段双击进入局部视图：`TimelineEditor._clip_activated` → `navigate_reactive_clip()`，该方法此前全仓零调用者。
+- `SetPresetSlotOverrideCommand` 与 `ApplyPresetMigrationCommand` 接入 PatternWorkspace 的插槽表单和迁移按钮，见 N5.3、N5.4 的整改证据。
+- `stage_compile` 的 State 动作路径不再静默 `continue` 跳过错误的变量载荷，与 Clip 路径一样发 `invalid_variable_automation` 诊断。
+
+**冗余消除（零行为变化的提取，除一处已标注的收敛）**
+
+- `MergeableCommand`（`src/editor/commands.py`）承载原先 12 处逐字重复的 `merge_with()`；子类只声明 `merge_owner` / `merge_identity` / `merge_same_keys` / `merge_values`。
+- `SpaceTapSearchMixin`（`src/editor/action_search.py`）承载 Scene、Graph、Timeline 三份重复的「按住空格平移、轻按空格搜索」状态机。提取过程中修掉一个真实缺陷：`SceneViewport` 在 `setDragMode(RubberBandDrag)` 之前就记下待恢复的拖动模式，一次没有配对按下的空格释放会静默关掉框选。
+- 新增 `src/editor/pattern_resolve.py`，承载 Stage 与 Spell 两条编译路径共用的 Pattern 引用解析与出生点规则。此前 `scene_compile` 只认直接父级恰为 `Emitter`，`stage_compile` 走完整祖先链并接受任何带 `x`/`y` 的节点（例如 `Boss`），同一场景在两条路径下会在不同位置出弹。**行为变化**：`Spell > Boss(x,y) > PatternInstance` 这类结构的 M3 预览现在采用 Boss 位置，与正式路径一致。`scene_compile.py` 保留而非删除——`tests/test_editor_scene_compile.py`、`tests/test_editor_m3_integration.py` 覆盖的是 M3 无脚本 Spell 流程，删文件等于删一个受测功能；它现在与正式路径共用同一套解析规则，不再是第二套语义。
+- `stage_compile._variable_spec_for` 改为委托 `_variable_candidates`，此前两函数逐行同构。
+- 删除死符号 `flat_snapshot`、`set_error_visual`、`set_metadata`、`template_for_emission`，以及仅为兼容测试而隐藏保留的 `mode_switch` 控件（Qt 虚函数覆写如 `mimeTypes` / `filterAcceptsRow` / `drawForeground` 由框架调用，不动）。
+- 五个 93–183 语句的 `__init__`（`PatternWorkspace`、`VariableEditor`、`StateGraphEditor`、`PatternPreviewPanel`、`TimelineEditor`）拆为 `_build_*` 私有构建器，抽出的构建器最大 49 语句（`EditorMainWindow._build_ui` 的 195 语句属于下面延后的 R1 范围）；`PatternWorkspace` 六处重复的视图切换收敛为 `_show_view()`。
+
+**明确延后**：`EditorMainWindow` God-class（`src/editor/app.py` 5,760 行、单类 2,482 语句、37 处函数内延迟 import）按域切协调器工作量大、风险高，按 §2 的执行协议不与功能改动混在一个提交里，放到 N6.4 门禁关闭后单独做。
+
+**整改门禁（2026-08-20，Python 3.12.7 / PySide6 6.8.1.1）**
+
+- `QT_QPA_PLATFORM=offscreen python -m pytest tests --no-header` → `641 passed in 539.41s`，无 skip/xfail；其中 `test_editor_i18n_coverage.py` 为本次新增，`test_n6_usability_claim_and_report_must_agree` 取代同名位置上的旧断言，其余用例集未删减。
+- `python -m compileall -q src tools tests` → 通过。
+- `python tools/validate_assets.py --format json` → `issues` 为空。
+- `git diff --check` → 无空白错误；改动文件全部保持 LF 行尾（仓库 `core.autocrlf=false`）。
+
 ## 4. 未完成任务总表
 
 依赖顺序固定为：`N4 → N5 → N6 → N7 → N8 → N9`。同一阶段内按编号顺序领取；当前阶段 focused gate 未通过，不得开始下一阶段。
@@ -212,7 +247,7 @@ git diff --check
 
 **验收文件**：`tests/test_editor_reactive_clips.py`、`tests/test_reaction_timeline_integration.py`；回归 `tests/test_editor_timeline_model.py`、`tests/test_editor_timeline_workspace.py`、`tests/test_state_graph_editor.py`；另附 native visual 证据。
 
-**Evidence（2026-08-10）**：Structural/Runtime：`$env:QT_QPA_PLATFORM='offscreen'; python -m pytest -q tests/test_editor_reactive_clips.py tests/test_reaction_timeline_integration.py tests/test_editor_timeline_workspace.py tests/test_state_graph_editor.py`（通过）；offscreen Qt 仅作为结构和运行证据。Native visual：`Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue; python -u tools/verify_native_editor_n4.py --project . --screenshot C:\Users\m1573\AppData\Local\Temp\pystg-n4-native-editor-script.png` 输出 `native_editor_n4_ok`，真实 PySide6 `EditorMainWindow` 验证 Reactive 轨道/片段、Inspector activation/reaction/scope、runtime overlay、局部导航、overlay 不写回文档，并保存截图；本项门禁已关闭。
+**Evidence（2026-08-20 重做）**：Structural/Runtime：`$env:QT_QPA_PLATFORM='offscreen'; python -m pytest -q tests/test_editor_reactive_clips.py tests/test_reaction_timeline_integration.py tests/test_editor_timeline_workspace.py tests/test_state_graph_editor.py`（通过）；offscreen Qt 仅作为结构和运行证据。Native visual：`Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue; python -u tools/verify_native_editor_n4.py --project . --screenshot $env:TEMP\pystg-n4-native-editor-script.png` 输出 `native_editor_n4_ok`。该门禁 2026-08-20 重写：不再手写 overlay 载荷，也不再直接调用编辑器的下游槽函数——脚本用编辑器自己的命令创作 Reactive 轨道/片段，`compile_stage` + `StageRunner` 真跑一次得到 `runner.reactive_overlay`，再经 `_handle_pattern_preview_event` 走编辑器自身的 runtime feedback 管线，最后用真实双击手势进入局部 Reaction 视图；同时验证 overlay 与导航都不写回文档。此次重写暴露并修好一个真实缺陷：编辑器默认 Reactive 片段的窗口只有 1 帧，而 runtime 在片段起始后的帧边界才判定 armed，因此该默认片段永远不会触发（见 `tests/test_editor_reactive_clips.py::test_default_reactive_clip_actually_arms_on_the_formal_runtime`）。
 
 ## 6. N5：可展开的版本化预设
 
@@ -256,6 +291,8 @@ git diff --check
 
 **Evidence（2026-08-13）**：Editor/Runtime：`ApplyPresetCommand`、参数/槽位覆盖和 `MaterializePresetCommand` 全部进入已有 `CommandStack`；本地化移除上游链接但保留来源审计，Undo/Redo 后正式 `PatternCompiler` 结果可重放。N5 focused + Pattern/Graph/editor 回归 `python -m pytest -q tests/test_preset_descriptor.py tests/test_preset_expansion.py tests/test_preset_migration.py tests/test_preset_library.py tests/test_editor_preset_workspace.py tests/test_pattern_document.py tests/test_pattern_compiler.py tests/test_pattern_parity.py tests/test_pattern_graph.py tests/test_pattern_runtime.py tests/test_lifecycle_batching.py tests/test_lifecycle_events.py tests/test_editor_graph_workspace.py tests/test_editor_authoring_integration.py`（103 passed）。
 
+**整改证据（2026-08-20）**：上面这段 Evidence 关于「槽位可覆盖」的部分此前只在命令层成立——`SetPresetSlotOverrideCommand` 实现完整但全仓零调用者、零测试，作者在编辑器里没有任何入口，等于参数覆盖是真的、插槽覆盖是假的。现在 PatternWorkspace 为每个 slot 渲染 `PresetReactionSlotEditor`（`objectName` 为 `presetSlot_<slot.id>`），启用开关与参数经 `presetSlotRequested` → `_preset_slot_requested` 进入同一 `CommandStack`。`tests/test_editor_preset_workspace.py::test_preset_slot_editor_writes_one_undoable_slot_override` 用真实 `EditorMainWindow` 从控件出发断言 `slot_overrides` 写入、表单重建后回显、两级 Undo 分别回到旧值与无覆盖状态。
+
 ### N5.4 精确版本迁移
 
 **Agent 要做**：按精确版本执行参数/插槽迁移，在临时副本生成差异和诊断；失败保留原数据、原版本和定位路径；项目依赖锁定到可重放版本，不使用“最接近版本”静默替代。
@@ -265,6 +302,8 @@ git diff --check
 **验收文件**：`tests/test_preset_migration.py`、`tests/test_preset_descriptor.py`、`tests/test_pattern_document.py`。
 
 **Evidence（2026-08-13）**：Migration：`PresetMigration`、`PresetDependencyLock` 均为严格 JSON round-trip；迁移只在临时 `PresetInstance` 副本生成稳定 diff，缺源字段/缺链/冲突/循环均给出路径且不改原文档，确认由单个 `ApplyPresetMigrationCommand` 完成并可 Undo/Redo；解析只接受锁定的精确版本，不做 nearby fallback。
+
+**整改证据（2026-08-20）**：`ApplyPresetMigrationCommand` 此前只出现在 `tests/test_editor_preset_workspace.py`，`app.py` 无任何接线——命令确实单条可撤销，但作者在界面上找不到触发它的地方。现在 PatternWorkspace 显示当前版本并只把「有精确迁移路径」的版本填进 `preset_migrate_target`，按钮经 `presetMigrateRequested` → `_preset_migrate_requested` 先 `preview_migration()` 再压入一条命令；预览被拒时走 `preset_migration_unavailable` 诊断而不是崩溃或静默。`tests/test_editor_preset_workspace.py::test_preset_migration_button_only_offers_reachable_versions` 用真实窗口断言候选只含 `2.0.0`、点击后实例版本与重命名后的参数正确、到链尾后控件自行禁用、Undo 回到 `1.0.0`。
 
 ## 7. N6：上下文搜索与新手连续流程（不含自然语言）
 
@@ -313,6 +352,9 @@ git diff --check
 **Evidence（2026-08-13）**：Editor/Runtime：PatternWorkspace 以单一 L0–L4 入口显示 Preset、精确参数、Binding、Behavior Graph 与 Runtime 源码定位；旧 Recipe/Graph 控件只保留兼容对象并从作者 UI 隐藏。L2 binding 和 L3 expand 均走 CommandStack；返回 L2 不折叠、不复制 Graph，资源 ID、正式编译 identity、owner/lifecycle 契约保持同一 Pattern。`tests/test_editor_usability.py`、Preset/Graph 回归及 N6 focused 76 passed；原生 N6 gate 通过。
 
 **整改证据（2026-08-14）**：作者导航现只显示“选择预设→调整参数→添加动态变化→编辑节点→查看脚本源码”，不暴露 L0–L4、Behavior Graph 或 Runtime Source；中文动态设置显示“每轮子弹数 / 固定值”等任务词，内部仍保存 `shape.count / constant`。预设、参数、动态设置、节点和脚本入口共用同一 Pattern 资源、正式 compiler identity 与 Undo/Redo，往返不复制 Graph。N6 focused gate（Action、搜索、新手流程、预设、Graph、时间线、中文、M3 与作者集成）88 passed；原生中文 1480×920/960×640 gate 通过。本项重新关闭。
+
+**整改证据（2026-08-20）**：上面这段整改只覆盖了导航控件，主界面文案仍有残留：`GraphPlaceholder` 硬编码 “This pattern is in Recipe mode. Expand it into the typed behavior graph…” 与按钮 “Expand to Graph”，`src/editor/i18n.py` 又把它逐字译成“配方模式 / 类型化行为图 / 展开为行为图”——被声称消灭的术语由 i18n 字典忠实保存了下来；`fold_button` 也还写着 “Fold back to Recipe”。现在两侧一并改为任务语言（占位页说明「此弹幕目前只由参数描述。以节点方式打开后，即可编辑每一步以及它们之间的连接。」，按钮为 “Edit Nodes” / 「编辑节点」，折返按钮为 “Back to Parameters” / 「返回调整参数」），并删除仅为兼容测试而隐藏保留的 `mode_switch`。根因是缺少端到端文案审查，因此新增 `tests/test_editor_i18n_coverage.py::test_chinese_shell_leaves_no_author_facing_string_untranslated`：遍历真实编辑器控件树，凡 i18n 层声称拥有却译不出的作者可见文案即失败，`test_coverage_walk_actually_sees_the_shell` 反向保证这条遍历确实走到了 shell 而不是空转。
+
 
 ### N6.4 Usability gate
 

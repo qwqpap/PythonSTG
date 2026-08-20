@@ -11,8 +11,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PyQt5 import sip
-from PyQt5.QtCore import Qt
+from src.qt_compat import sip
+from src.qt_compat.QtCore import Qt
+from src.qt_compat.QtWidgets import QFormLayout
 
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
@@ -345,7 +346,7 @@ def test_rebuild_during_node_mouse_press_does_not_crash(qapp_session):
     and ``RuntimeError: wrapped C/C++ object of type GraphNodeItem has been
     deleted`` when a signal handler rebuilds the canvas synchronously.
     """
-    from PyQt5.QtTest import QTest
+    from src.qt_compat.QtTest import QTest
 
     document = _pattern()
     ExpandToGraphCommand(document).execute()
@@ -376,7 +377,7 @@ def test_rebuild_during_node_mouse_press_does_not_crash(qapp_session):
 
 def test_rebuild_during_port_drag_release_does_not_crash(qapp_session):
     """A rebuild triggered by the port-drop edge signal must not crash."""
-    from PyQt5.QtTest import QTest
+    from src.qt_compat.QtTest import QTest
 
     document = _pattern()
     ExpandToGraphCommand(document).execute()
@@ -424,9 +425,9 @@ def test_rebuild_during_port_drag_release_does_not_crash(qapp_session):
 
 def test_real_mouse_port_drag_tracks_pointer_and_connects(qapp_session):
     """A viewport mouse gesture, not an internal helper call, creates a wire."""
-    from PyQt5.QtGui import QMouseEvent
-    from PyQt5.QtTest import QTest
-    from PyQt5.QtWidgets import QApplication
+    from src.qt_compat.QtGui import QMouseEvent
+    from src.qt_compat.QtTest import QTest
+    from src.qt_compat.QtWidgets import QApplication
 
     document = _pattern()
     ExpandToGraphCommand(document).execute()
@@ -508,8 +509,11 @@ def test_inspector_shows_graph_node_properties(qapp_session):
     inspector.set_graph_node(shape)
     labels = []
     for index in range(inspector._form.rowCount()):
-        for column in (0, 1):
-            item = inspector._form.itemAt(index, column)
+        for role in (
+            QFormLayout.ItemRole.LabelRole,
+            QFormLayout.ItemRole.FieldRole,
+        ):
+            item = inspector._form.itemAt(index, role)
             if item is not None and item.widget() is not None:
                 labels.append(item.widget().text())
     assert "Shape · ring" in labels

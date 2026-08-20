@@ -7,6 +7,9 @@ from typing import Any
 
 from src.pattern import BindingSpec, PatternDocument
 
+from .commands import MergeableCommand
+
+
 class PatternMutationError(ValueError):
     """Raised when a Pattern property path cannot be changed safely."""
 
@@ -50,12 +53,15 @@ def _copy_pattern(target: PatternDocument, source: PatternDocument) -> None:
 
 
 @dataclass
-class SetPatternPropertyCommand:
+class SetPatternPropertyCommand(MergeableCommand):
     document: PatternDocument
     path: str
     value: Any
     label: str = "Set Pattern property"
     _previous: PatternDocument | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("path",)
+    merge_values = ("value",)
 
     def execute(self) -> None:
         if self._previous is None:
@@ -67,14 +73,6 @@ class SetPatternPropertyCommand:
         if self._previous is None:
             raise PatternMutationError("Cannot undo a Pattern edit that was not executed")
         _copy_pattern(self.document, self._previous)
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetPatternPropertyCommand):
-            return False
-        if self.document is not other.document or self.path != other.path:
-            return False
-        self.value = other.value
-        return True
 
 
 @dataclass

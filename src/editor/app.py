@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from src.qt_compat import sip
 from src.qt_compat.QtCore import QPointF, QProcess, QRectF, Qt, QUrl, pyqtSignal
 from src.qt_compat.QtGui import (
     QBrush,
@@ -81,7 +82,7 @@ from .action_catalog import (
     ActionQuery,
     build_editor_action_catalog,
 )
-from .action_search import ActionSearchDialog
+from .action_search import ActionSearchDialog, SpaceTapSearchMixin
 from .document import (
     DocumentError,
     EditorNode,
@@ -458,7 +459,7 @@ class NodeGraphicsItem(QGraphicsObject):
             self.positionCommitted.emit(self.node_id, snapped.x(), snapped.y())
 
 
-class SceneViewport(QGraphicsView):
+class SceneViewport(SpaceTapSearchMixin, QGraphicsView):
     nodeSelected = pyqtSignal(str)
     nodePositionRequested = pyqtSignal(str, float, float)
     resourceDropped = pyqtSignal(object, float, float)
@@ -483,11 +484,9 @@ class SceneViewport(QGraphicsView):
         self._runtime_state: dict[str, dict] = {}
         self.coordinate_space = CoordinateSpace()
         self._fit_on_next_resize = True
-        self._space_pressed = False
-        self._space_dragged = False
-        self._drag_mode_before_space = self.dragMode()
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.RubberBandDrag)
+        self._init_space_tap()
         self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setFrameShape(QFrame.NoFrame)
@@ -601,6 +600,11 @@ class SceneViewport(QGraphicsView):
         self.viewport().update()
 
     def _selection_changed(self) -> None:
+        # Qt can deliver a queued selectionChanged after the scene's C++ side is
+        # gone (window teardown, document swap).  Touching it then aborts the
+        # process, so confirm both halves are alive before reading selection.
+        if sip.isdeleted(self) or sip.isdeleted(self.graphics_scene):
+            return
         selected = self.graphics_scene.selectedItems()
         if selected and isinstance(selected[0], NodeGraphicsItem):
             self.nodeSelected.emit(selected[0].node_id)
@@ -630,32 +634,6 @@ class SceneViewport(QGraphicsView):
             return
         super().wheelEvent(event)
 
-    def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_pressed = True
-            self._space_dragged = False
-            self._drag_mode_before_space = self.dragMode()
-            self.setDragMode(QGraphicsView.ScrollHandDrag)
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._space_pressed and event.buttons() & Qt.LeftButton:
-            self._space_dragged = True
-        super().mouseMoveEvent(event)
-
-    def keyReleaseEvent(self, event) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self.setDragMode(self._drag_mode_before_space)
-            should_search = self._space_pressed and not self._space_dragged
-            self._space_pressed = False
-            if should_search:
-                self.actionSearchRequested.emit(None)
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
-
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasFormat(RESOURCE_MIME_TYPE):
             event.acceptProposedAction()
@@ -679,7 +657,7 @@ class SceneViewport(QGraphicsView):
         except (UnicodeDecodeError, json.JSONDecodeError):
             event.ignore()
             return
-        scene_position = self.mapToScene(event.pos())
+        scene_position = self.mapToScene(event.position().toPoint())
         self.resourceDropped.emit(
             payload,
             float(scene_position.x()),
@@ -965,7 +943,7 @@ class InspectorPanel(QScrollArea):
         self._timeline_clip_id = None
         self._timeline_track_id = None
         if node is None:
-            self._form.addRow(QLabel("No graph node selected"))
+            self._form.addRow(QLabel("No node selected"))
             return
         title = QLabel(
             f"{self._tr(node.category.title())} · {self._tr(node.node_type)}"
@@ -2274,6 +2252,8 @@ class EditorMainWindow(QMainWindow):
             widget.graphNodeRemoveRequested.connect(self._graph_node_remove_requested)
             widget.graphEdgeRemoveRequested.connect(self._graph_edge_remove_requested)
             widget.presetParameterRequested.connect(self._preset_parameter_requested)
+            widget.presetSlotRequested.connect(self._preset_slot_requested)
+            widget.presetMigrateRequested.connect(self._preset_migrate_requested)
             widget.presetMaterializeRequested.connect(self._preset_materialize_requested)
             widget.authoringLevelRequested.connect(self._pattern_level_requested)
             widget.patternBindingRequested.connect(self._pattern_binding_requested)
@@ -2787,9 +2767,15 @@ class EditorMainWindow(QMainWindow):
                 if isinstance(widget, UIWorkspace):
                     from src.qt_compat.QtCore import QTimer
 
+                    # Bind the timer to self: a bare singleShot keeps no link to
+                    # the window, so closing the editor before it fires leaves
+                    # the lambda calling into a deleted C++ object, which aborts
+                    # the process instead of raising.  The guard covers the
+                    # workspace widget, which Qt does not track for us.
                     QTimer.singleShot(
                         0,
-                        lambda doc=document, w=widget: self._apply_ui_document_view(
+                        self,
+                        lambda doc=document, w=widget: self._apply_ui_document_view_if_alive(
                             w, doc
                         ),
                     )
@@ -2842,6 +2828,10 @@ class EditorMainWindow(QMainWindow):
                         descriptor,
                         self._preset_resolver.expand_virtual(preset_instance),
                         dict(preset_instance.parameters),
+                        dict(preset_instance.slot_overrides),
+                        self._preset_resolver.registry.migration_targets(
+                            preset_instance.preset_id, preset_instance.version
+                        ),
                     )
                 else:
                     widget.set_preset_expansion(None)
@@ -3833,6 +3823,10 @@ class EditorMainWindow(QMainWindow):
         elif track.kind == "ScriptEvent":
             payload = {"hook": "on_timeline_event", "data": {}}
         elif track.kind == "Reactive":
+            # The runtime evaluates arming on the frame boundary after a clip
+            # starts, so a one-frame window is never observed and the hook would
+            # be dead on arrival.  Give the hook a real armed window instead.
+            duration = self.session.document.timebase.tick_rate * 10
             payload = {
                 "activation": {
                     "kind": "on_event",
@@ -4715,7 +4709,7 @@ class EditorMainWindow(QMainWindow):
         session.editor_context.pop("selected_graph_node_id", None)
         if self._apply_graph_command(
             FoldBackToRecipeCommand(session.document),
-            "Fold graph back to recipe",
+            "Fold back to recipe",
         ):
             pass
 
@@ -4801,6 +4795,17 @@ class EditorMainWindow(QMainWindow):
             RemoveGraphEdgeCommand(self._active_pattern_document, str(edge_id)),
             "Remove graph edge",
         )
+
+    def _apply_ui_document_view_if_alive(self, widget, document) -> None:
+        """Deferred entry point for _apply_ui_document_view.
+
+        Runs one event loop turn after the document swap, by which point the
+        window or the workspace widget may already be gone.
+        """
+
+        if sip.isdeleted(self) or widget is None or sip.isdeleted(widget):
+            return
+        self._apply_ui_document_view(widget, document)
 
     def _apply_ui_document_view(self, widget, document) -> None:
         widget.set_document(document)
@@ -5408,6 +5413,54 @@ class EditorMainWindow(QMainWindow):
                 value,
             ),
             f"Set preset parameter {parameter_id}",
+        ):
+            session.editor_context["preset_mode"] = True
+
+    def _preset_slot_requested(self, slot_id: str, value) -> None:
+        from .preset_commands import SetPresetSlotOverrideCommand
+
+        session = self._active_pattern_session
+        if session is None:
+            return
+        if self._apply_graph_command(
+            SetPresetSlotOverrideCommand(
+                session.document,
+                self._preset_resolver,
+                str(slot_id),
+                value,
+            ),
+            f"Set preset slot {slot_id}",
+        ):
+            session.editor_context["preset_mode"] = True
+
+    def _preset_migrate_requested(self, target_version: str) -> None:
+        from .preset_commands import ApplyPresetMigrationCommand
+
+        session = self._active_pattern_session
+        if session is None:
+            return
+        instance = self._preset_resolver.instance_from_document(session.document)
+        if instance is None:
+            return
+        try:
+            preview = self._preset_resolver.registry.preview_migration(
+                instance, str(target_version)
+            )
+        except Exception as exc:
+            # A rejected preview is the author's answer, not a crash: the target
+            # has no exact migration path, or an override no longer fits it.
+            self.preview_panel.handle_issue(
+                {"code": "preset_migration_unavailable", "message": str(exc)}
+            )
+            self._log(f"[preset-migration:error] {exc}")
+            return
+        if self._apply_graph_command(
+            ApplyPresetMigrationCommand(
+                session.document,
+                self._preset_resolver,
+                preview,
+            ),
+            f"Migrate preset to {target_version}",
         ):
             session.editor_context["preset_mode"] = True
 

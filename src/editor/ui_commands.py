@@ -8,6 +8,8 @@ from typing import Any
 
 from src.ui.document import UIDocument, UIDocumentNode
 
+from .commands import MergeableCommand
+
 
 class UIMutationError(ValueError):
     """Raised when a UI document mutation cannot be applied safely."""
@@ -21,12 +23,18 @@ def _find_node(root: UIDocumentNode, node_id: str) -> UIDocumentNode:
 
 
 @dataclass
-class SetUINodePropertyCommand:
+class SetUINodePropertyCommand(MergeableCommand):
+    """Set node fields; a continuous Inspector/gizmo edit coalesces into one step."""
+
     document: UIDocument
     node_id: str
     properties: dict[str, Any]
     label: str = "Set UI node property"
     _previous: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("node_id",)
+    merge_same_keys = ("properties",)
+    merge_values = ("properties",)
 
     def execute(self) -> None:
         node = _find_node(self.document.root, self.node_id)
@@ -50,19 +58,6 @@ class SetUINodePropertyCommand:
         node = _find_node(self.document.root, self.node_id)
         for key, value in self._previous.items():
             setattr(node, key, copy.deepcopy(value))
-
-    def merge_with(self, other: object) -> bool:
-        """Coalesce a continuous Inspector/gizmo edit into one undo step."""
-        if not isinstance(other, SetUINodePropertyCommand):
-            return False
-        if self.document is not other.document or self.node_id != other.node_id:
-            return False
-        if set(self.properties) != set(other.properties):
-            return False
-        # Keep this command's original _previous snapshot for Undo, while
-        # replacing only the latest state used by Redo.
-        self.properties = copy.deepcopy(other.properties)
-        return True
 
 
 def _parent_and_index(

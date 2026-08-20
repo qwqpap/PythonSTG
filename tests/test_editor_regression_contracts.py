@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from src.qt_compat.QtWidgets import QGraphicsItem
+
 from src.authoring.registry import (
     ResourceTypeRegistry,
     ResourceTypeSpec,
@@ -759,8 +761,10 @@ def test_ui_canvas_exposes_undoable_gizmo_and_resource_drop_contracts(
     assert hasattr(canvas, "resourceDropped")
     item = canvas.item_for_node(child.id)
     assert item is not None
-    assert bool(item.flags() & item.ItemIsMovable)
-    assert bool(item.flags() & item.ItemIsSelectable)
+    movable = QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+    selectable = QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+    assert bool(item.flags() & movable)
+    assert bool(item.flags() & selectable)
 
 
 def test_ui_canvas_gizmo_commits_geometry_back_to_document(qapp_session) -> None:

@@ -1,7 +1,7 @@
 import json
 from enum import Enum
 
-from PyQt5.QtCore import QProcess
+from src.qt_compat.QtCore import QProcess
 
 from src.core.project_context import ProjectContext
 from src.editor.preview_process import PatternPreviewProcess, _qt_enum_value

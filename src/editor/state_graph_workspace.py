@@ -51,6 +51,18 @@ class StateGraphEditor(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 4, 6, 6)
         outer.setSpacing(4)
+        outer.addLayout(self._build_header())
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("stateGraphTabs")
+        self.tabs.setDocumentMode(True)
+        outer.addWidget(self.tabs, 1)
+        self.tabs.addTab(self._build_states_page(), "States")
+        self.tabs.addTab(self._build_transitions_page(), "Transitions")
+        self._trigger_changed()
+
+    def _build_header(self) -> QHBoxLayout:
+        """Context name plus the rename field for the selected state."""
+
         header = QHBoxLayout()
         self.context_label = QLabel(self.context_name)
         self.context_label.setObjectName("stateGraphContextLabel")
@@ -70,19 +82,16 @@ class StateGraphEditor(QWidget):
         apply_name.setStyleSheet("padding: 1px 5px;")
         apply_name.clicked.connect(self._request_rename)
         header.addWidget(apply_name)
-        outer.addLayout(header)
+        return header
 
-        self.tabs = QTabWidget()
-        self.tabs.setObjectName("stateGraphTabs")
-        self.tabs.setDocumentMode(True)
-        outer.addWidget(self.tabs, 1)
+    def _build_states_page(self) -> QWidget:
+        """State tree with the add/copy/delete/reorder strip beneath it."""
 
         states_page = QWidget()
         states_page.setObjectName("stateGraphStatesPage")
         states_layout = QVBoxLayout(states_page)
         states_layout.setContentsMargins(2, 2, 2, 2)
         states_layout.setSpacing(2)
-        self.tabs.addTab(states_page, "States")
 
         self.tree = QTreeWidget()
         self.tree.setObjectName("stateGraphTree")
@@ -117,6 +126,10 @@ class StateGraphEditor(QWidget):
             button.clicked.connect(callback)
             state_buttons.addWidget(button)
         states_layout.addLayout(state_buttons)
+        return states_page
+
+    def _build_transitions_page(self) -> QWidget:
+        """Transition picker, target, trigger and the three edit actions."""
 
         transitions = QWidget()
         transitions.setObjectName("stateGraphTransitionsGroup")
@@ -125,7 +138,6 @@ class StateGraphEditor(QWidget):
         transition_form.setContentsMargins(2, 2, 2, 2)
         transition_form.setHorizontalSpacing(4)
         transition_form.setVerticalSpacing(2)
-        self.tabs.addTab(transitions, "Transitions")
         self.transition_picker = QComboBox()
         self.transition_picker.setObjectName("stateGraphTransitionPicker")
         self.transition_picker.setEditable(True)
@@ -157,6 +169,14 @@ class StateGraphEditor(QWidget):
         self.transition_frames.setSuffix(" fr")
         self.transition_frames.setToolTip("Frames after entering this state")
         transition_form.addWidget(self.transition_frames, 2, 2)
+        transition_form.addLayout(self._build_transition_actions(), 3, 0, 1, 3)
+        transition_form.setColumnStretch(1, 1)
+        transition_form.setRowStretch(4, 1)
+        return transitions
+
+    def _build_transition_actions(self) -> QHBoxLayout:
+        """Priority spin box, then add/apply/delete for the picked transition."""
+
         self.transition_priority = QSpinBox()
         self.transition_priority.setObjectName("stateGraphTransitionPriority")
         self.transition_priority.setRange(-1000, 1000)
@@ -184,10 +204,7 @@ class StateGraphEditor(QWidget):
         for button in (add_transition, apply_transition, delete_transition):
             button.setFixedSize(34, 24)
             button.setStyleSheet("padding: 1px 2px;")
-        transition_form.addLayout(transition_buttons, 3, 0, 1, 3)
-        transition_form.setColumnStretch(1, 1)
-        transition_form.setRowStretch(4, 1)
-        self._trigger_changed()
+        return transition_buttons
 
     def set_language_manager(self, manager: LanguageManager) -> None:
         self._language_manager = manager

@@ -78,6 +78,3 @@ class PatternProgram:
         if self.loop_count is None:
             return None
         return self.burst_count * self.loop_count
-
-    def template_for_emission(self, emission_index: int) -> BurstTemplate:
-        return self.templates[emission_index % self.burst_count]

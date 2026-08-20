@@ -48,8 +48,10 @@ def test_editor_language_switch_retranslates_shell_and_preserves_document(
     assert window.bottom_tabs.tabText(0) == "输出"
     assert window.language_menu.title() == "语言(&L)"
     assert window.action_language_chinese.isChecked()
-    assert pattern.mode_switch.itemText(0) == "配方"
-    assert pattern.mode_switch.currentData() == "recipe"
+    # The author-facing controls carry task language only; the view mode is
+    # internal state and no longer has a widget of its own to translate.
+    assert pattern.fold_button.text() == "返回调整参数"
+    assert pattern.mode() == "recipe"
     assert pattern.level_picker.itemText(0) == "调整参数"
     shape_kind = window.inspector.findChild(QComboBox, "patternProperty_shape_kind")
     aim_mode = window.inspector.findChild(QComboBox, "patternProperty_aim_mode")
@@ -81,7 +83,7 @@ def test_editor_language_switch_retranslates_shell_and_preserves_document(
     assert window.action_new.text() == "New Scene"
     assert window.scene_dock.windowTitle() == "Scene"
     assert window.bottom_tabs.tabText(0) == "Output"
-    assert pattern.mode_switch.itemText(0) == "Recipe"
+    assert pattern.fold_button.text() == "Back to Parameters"
     assert window.timeline.kind_picker.itemText(0) == "Pattern"
     assert window.session.document.to_dict() == before
 

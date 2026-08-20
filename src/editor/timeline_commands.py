@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from .commands import MergeableCommand
 from .document import (
     SceneDocument,
     TimelineClip,
@@ -155,12 +156,16 @@ class RemoveTrackCommand:
 
 
 @dataclass
-class SetTrackPropertiesCommand:
+class SetTrackPropertiesCommand(MergeableCommand):
     document: SceneDocument
     track_id: str
     values: dict[str, Any]
     label: str = "Edit timeline track"
     _previous: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("track_id",)
+    merge_same_keys = ("values",)
+    merge_values = ("values",)
 
     _ALLOWED = frozenset({"name", "target_id", "channel", "order", "muted"})
 
@@ -182,16 +187,6 @@ class SetTrackPropertiesCommand:
         track = require_track(self.document, self.track_id)
         for key, value in self._previous.items():
             setattr(track, key, deepcopy(value))
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetTrackPropertiesCommand):
-            return False
-        if self.document is not other.document or self.track_id != other.track_id:
-            return False
-        if set(self.values) != set(other.values):
-            return False
-        self.values = deepcopy(other.values)
-        return True
 
 
 @dataclass
@@ -286,13 +281,16 @@ class RemoveClipCommand:
 
 
 @dataclass
-class MoveResizeClipCommand:
+class MoveResizeClipCommand(MergeableCommand):
     document: SceneDocument
     clip_id: str
     start_frame: int
     duration_frames: int
     label: str = "Move/resize timeline clip"
     _previous: tuple[int, int] | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("clip_id",)
+    merge_values = ("start_frame", "duration_frames")
 
     def execute(self) -> None:
         _track, clip, _index = require_clip(self.document, self.clip_id)
@@ -307,23 +305,18 @@ class MoveResizeClipCommand:
         _track, clip, _index = require_clip(self.document, self.clip_id)
         clip.start_frame, clip.duration_frames = self._previous
 
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, MoveResizeClipCommand):
-            return False
-        if self.document is not other.document or self.clip_id != other.clip_id:
-            return False
-        self.start_frame = other.start_frame
-        self.duration_frames = other.duration_frames
-        return True
-
 
 @dataclass
-class SetClipPropertiesCommand:
+class SetClipPropertiesCommand(MergeableCommand):
     document: SceneDocument
     clip_id: str
     values: dict[str, Any]
     label: str = "Edit timeline clip"
     _previous: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("clip_id",)
+    merge_same_keys = ("values",)
+    merge_values = ("values",)
 
     _ALLOWED = frozenset(
         {
@@ -368,16 +361,6 @@ class SetClipPropertiesCommand:
         _track, clip, _index = require_clip(self.document, self.clip_id)
         for key, value in self._previous.items():
             setattr(clip, key, deepcopy(value))
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetClipPropertiesCommand):
-            return False
-        if self.document is not other.document or self.clip_id != other.clip_id:
-            return False
-        if set(self.values) != set(other.values):
-            return False
-        self.values = deepcopy(other.values)
-        return True
 
 
 @dataclass

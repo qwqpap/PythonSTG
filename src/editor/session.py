@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from .commands import Command, CommandStack
 from .document import EditorNode, SceneDocument
@@ -68,9 +67,6 @@ class SceneEditorSession:
         if changed:
             self.document.validate()
         return changed
-
-    def set_metadata(self, key: str, value: Any) -> None:
-        self.document.metadata[key] = value
 
     def node(self, node_id: str) -> EditorNode | None:
         return next(

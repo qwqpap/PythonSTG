@@ -19,6 +19,7 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 
+from .action_search import SpaceTapSearchMixin
 from .document import SceneDocument, TimelineClip, TimelineTrack
 from .i18n import LanguageManager
 
@@ -51,6 +52,7 @@ class TimelineClipItem(QGraphicsObject):
     geometryCommitted = pyqtSignal(str, int, int)
     keyframeGeometryCommitted = pyqtSignal(str, str, int)
     selectedRequested = pyqtSignal(str, str)
+    activateRequested = pyqtSignal(str, str)
 
     def __init__(
         self,
@@ -97,6 +99,11 @@ class TimelineClipItem(QGraphicsObject):
             TRACK_HEADER_WIDTH + clip.start_frame * pixels_per_frame,
             row_y + (TRACK_HEIGHT - CLIP_HEIGHT) / 2,
         )
+        # Hold the markers explicitly.  A Qt parent alone is not enough: the
+        # parent here is a QGraphicsItem, and that does not keep a Python
+        # reference alive, so the markers would be garbage collected straight
+        # out of the scene and the clip would render without keyframes.
+        self.keyframe_items: list[TimelineKeyframeItem] = []
         for keyframe in clip.keyframes:
             marker = TimelineKeyframeItem(
                 clip.id,
@@ -109,6 +116,7 @@ class TimelineClipItem(QGraphicsObject):
             )
             marker.geometryCommitted.connect(self.keyframeGeometryCommitted)
             marker.selectedRequested.connect(self.selectedRequested)
+            self.keyframe_items.append(marker)
 
     def _width(self) -> float:
         return max(
@@ -219,6 +227,19 @@ class TimelineClipItem(QGraphicsObject):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        # Selecting a clip fills the inspector; entering it is a separate
+        # gesture so browsing the timeline never yanks the author into a
+        # local view they did not ask for.
+        #
+        # Delegate to the base class rather than accepting here: the scene
+        # tracks a mouse grabber, and swallowing the double click leaves this
+        # item holding the grab, so every later click anywhere in the timeline
+        # would be delivered to this clip instead of the one under the cursor.
+        super().mouseDoubleClickEvent(event)
+        self.setSelected(True)
+        self.activateRequested.emit(self.track_id, self.clip_id)
 
     def mouseMoveEvent(self, event) -> None:
         if self._resize_edge:
@@ -363,7 +384,7 @@ class TimelineKeyframeItem(QGraphicsObject):
             self.geometryCommitted.emit(self.clip_id, self.keyframe_id, local_frame)
 
 
-class TimelineGraphicsView(QGraphicsView):
+class TimelineGraphicsView(SpaceTapSearchMixin, QGraphicsView):
     playheadRequested = pyqtSignal(int)
     trackSelected = pyqtSignal(str)
     nudgeRequested = pyqtSignal(str, int)
@@ -383,13 +404,12 @@ class TimelineGraphicsView(QGraphicsView):
         self.pixels_per_frame = 0.25
         self.snap_frames = 6
         self.track_ids: list[str] = []
-        self._space_pressed = False
-        self._space_dragged = False
-        self._drag_mode_before_space = self.dragMode()
+        self._init_space_tap()
 
     def mousePressEvent(self, event) -> None:
-        point = self.mapToScene(event.pos())
-        item = self.itemAt(event.pos())
+        event_pos = event.position().toPoint()
+        point = self.mapToScene(event_pos)
+        item = self.itemAt(event_pos)
         clip_item = item
         while clip_item is not None and not isinstance(clip_item, TimelineClipItem):
             clip_item = clip_item.parentItem()
@@ -423,12 +443,7 @@ class TimelineGraphicsView(QGraphicsView):
         super().wheelEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_pressed = True
-            self._space_dragged = False
-            self._drag_mode_before_space = self.dragMode()
-            self.setDragMode(QGraphicsView.ScrollHandDrag)
-            event.accept()
+        if self._space_tap_press(event):
             return
         selected = next(
             (
@@ -456,22 +471,6 @@ class TimelineGraphicsView(QGraphicsView):
             event.accept()
             return
         super().keyPressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._space_pressed and event.buttons() & Qt.LeftButton:
-            self._space_dragged = True
-        super().mouseMoveEvent(event)
-
-    def keyReleaseEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self.setDragMode(self._drag_mode_before_space)
-            should_search = self._space_pressed and not self._space_dragged
-            self._space_pressed = False
-            if should_search:
-                self.actionSearchRequested.emit(None)
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
 
 
 class TimelineEditor(QWidget):
@@ -507,6 +506,12 @@ class TimelineEditor(QWidget):
         self._language_manager: LanguageManager | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
+        root.addLayout(self._build_track_toolbar())
+        root.addLayout(self._build_clip_toolbar())
+        root.addWidget(self._build_view(), 1)
+
+    def _build_track_toolbar(self) -> QHBoxLayout:
+        """Track kind, the track-level actions, and the playhead readout."""
 
         track_toolbar = QHBoxLayout()
         self.kind_picker = QComboBox()
@@ -545,7 +550,10 @@ class TimelineEditor(QWidget):
         self.playhead_label = QLabel("Frame 0")
         self.playhead_label.setObjectName("timelinePlayheadLabel")
         track_toolbar.addWidget(self.playhead_label)
-        root.addLayout(track_toolbar)
+        return track_toolbar
+
+    def _build_clip_toolbar(self) -> QHBoxLayout:
+        """Clip and keyframe actions on the left, zoom and snap on the right."""
 
         clip_toolbar = QHBoxLayout()
         add_clip = QPushButton("+ Clip")
@@ -585,7 +593,10 @@ class TimelineEditor(QWidget):
         self.snap_spin.setSuffix(" fr")
         self.snap_spin.valueChanged.connect(self._snap_changed)
         clip_toolbar.addWidget(self.snap_spin)
-        root.addLayout(clip_toolbar)
+        return clip_toolbar
+
+    def _build_view(self) -> TimelineGraphicsView:
+        """The lane canvas; every gesture it reports is forwarded from here."""
 
         self.view = TimelineGraphicsView()
         self.view.playheadRequested.connect(self.set_playhead)
@@ -597,7 +608,7 @@ class TimelineEditor(QWidget):
         self.view.zoomStepRequested.connect(
             lambda factor: self.set_zoom(self.pixels_per_frame * factor)
         )
-        root.addWidget(self.view, 1)
+        return self.view
 
     def set_language_manager(self, manager: LanguageManager) -> None:
         self._language_manager = manager
@@ -660,6 +671,12 @@ class TimelineEditor(QWidget):
         self.selected_track_id = track_id
         self.selected_clip_id = clip_id
         self.clipSelected.emit(track_id, clip_id)
+
+    def _clip_activated(self, track_id: str, clip_id: str) -> None:
+        """Enter a clip's local view, which only reactive slots have."""
+
+        self._clip_selected(track_id, clip_id)
+        self.navigate_reactive_clip(clip_id)
 
     def _request_add_clip(self) -> None:
         if self.selected_track_id:
@@ -859,6 +876,7 @@ class TimelineEditor(QWidget):
                 item.geometryCommitted.connect(self.clipGeometryRequested)
                 item.keyframeGeometryCommitted.connect(self.keyframeGeometryRequested)
                 item.selectedRequested.connect(self._clip_selected)
+                item.activateRequested.connect(self._clip_activated)
                 scene.addItem(item)
                 item.active = clip.id in self.active_clip_ids
                 if clip.id == self.selected_clip_id:

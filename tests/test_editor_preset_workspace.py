@@ -4,7 +4,7 @@ from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
 from src.editor.commands import CommandStack
-from src.editor.pattern_workspace import PatternWorkspace
+from src.editor.pattern_workspace import PatternWorkspace, PresetReactionSlotEditor
 from src.editor.preset_commands import (
     ApplyPresetMigrationCommand,
     ApplyPresetCommand,
@@ -103,7 +103,7 @@ def test_window_applies_builtin_preset_and_undo_redoes_materialization(
         window._apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
         qapp_session.processEvents()
         assert window._preset_resolver.instance_from_document(window.session.document) is not None
-        assert workspace.mode_switch.findData("preset") >= 0
+        assert "preset" in workspace.available_modes()
         assert window.session.is_dirty
 
         window._preset_materialize_requested()
@@ -112,6 +112,132 @@ def test_window_applies_builtin_preset_and_undo_redoes_materialization(
         assert window._preset_resolver.instance_from_document(window.session.document) is not None
         assert window.redo()
         assert window._preset_resolver.instance_from_document(window.session.document) is None
+    finally:
+        window.close()
+        qapp_session.processEvents()
+
+
+def _versioned_pair():
+    """Build a 1.0.0 -> 2.0.0 preset pair joined by one parameter rename."""
+
+    base = next(item for item in LIBRARY.presets if item.display_name == "圆形开花")
+    payload = base.to_dict()
+    payload["version"] = "2.0.0"
+    payload["parameters"][0]["id"] = "bullet_count"
+    newer = type(base).from_dict(payload)
+    migration = PresetMigration(
+        base.preset_id,
+        "1.0.0",
+        "2.0.0",
+        parameter_renames={"count": "bullet_count"},
+    )
+    resolver = PresetResolver((base, newer))
+    resolver.registry = PresetRegistry((base, newer), (migration,))
+    return base, resolver
+
+
+def test_preset_slot_editor_writes_one_undoable_slot_override(
+    tmp_path: Path, qapp_session
+) -> None:
+    project = ProjectContext(tmp_path)
+    path = ResourceStore(project).save(
+        PatternDocument.new("Slot"), "patterns/slot.pystg.json"
+    )
+    window = EditorMainWindow(project)
+    try:
+        window._open_document(path)
+        qapp_session.processEvents()
+        descriptor = next(
+            item for item in LIBRARY.presets if item.display_name == "圆形开花"
+        )
+        window._apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
+        qapp_session.processEvents()
+        slot = descriptor.slots[0]
+
+        def slot_editor():
+            # Applying a command rebuilds the preset form, so the previous
+            # editor widget is already scheduled for deletion by now.
+            found = window.central_tabs.currentWidget().findChild(
+                PresetReactionSlotEditor, f"presetSlot_{slot.id}"
+            )
+            assert found is not None
+            return found
+
+        editor = slot_editor()
+        assert editor.enabled.isChecked() is False
+        assert editor.count.isEnabled() is False
+
+        editor.enabled.setChecked(True)
+        qapp_session.processEvents()
+        instance = window._preset_resolver.instance_from_document(
+            window.session.document
+        )
+        assert instance.slot_overrides[slot.id]["action"] == "split"
+
+        editor = slot_editor()
+        assert editor.enabled.isChecked() is True
+        editor.count.setValue(9)
+        editor.count.editingFinished.emit()
+        qapp_session.processEvents()
+        instance = window._preset_resolver.instance_from_document(
+            window.session.document
+        )
+        assert instance.slot_overrides[slot.id]["count"] == 9
+
+        assert window.undo()
+        instance = window._preset_resolver.instance_from_document(
+            window.session.document
+        )
+        assert instance.slot_overrides[slot.id]["count"] == 6
+        assert window.undo()
+        instance = window._preset_resolver.instance_from_document(
+            window.session.document
+        )
+        assert slot.id not in instance.slot_overrides
+    finally:
+        window.close()
+        qapp_session.processEvents()
+
+
+def test_preset_migration_button_only_offers_reachable_versions(
+    tmp_path: Path, qapp_session
+) -> None:
+    base, resolver = _versioned_pair()
+    project = ProjectContext(tmp_path)
+    path = ResourceStore(project).save(
+        PatternDocument.new("Migrate"), "patterns/migrate.pystg.json"
+    )
+    window = EditorMainWindow(project)
+    try:
+        window._preset_resolver = resolver
+        window._open_document(path)
+        qapp_session.processEvents()
+        window._apply_pattern_template(f"{base.preset_id}@1.0.0")
+        window._preset_parameter_requested("count", 48)
+        qapp_session.processEvents()
+
+        workspace = window.central_tabs.currentWidget()
+        assert workspace.preset_version.text().endswith("1.0.0")
+        assert [
+            workspace.preset_migrate_target.itemData(index)
+            for index in range(workspace.preset_migrate_target.count())
+        ] == ["2.0.0"]
+        assert workspace.preset_migrate_button.isEnabled()
+
+        workspace.preset_migrate_button.click()
+        qapp_session.processEvents()
+        migrated = resolver.instance_from_document(window.session.document)
+        assert migrated.version == "2.0.0"
+        assert migrated.parameters == {"bullet_count": 48}
+
+        # 2.0.0 is the end of the chain, so the control retires itself rather
+        # than offering a target the preview would reject.
+        workspace = window.central_tabs.currentWidget()
+        assert workspace.preset_migrate_target.count() == 0
+        assert workspace.preset_migrate_button.isEnabled() is False
+
+        assert window.undo()
+        assert resolver.instance_from_document(window.session.document).version == "1.0.0"
     finally:
         window.close()
         qapp_session.processEvents()

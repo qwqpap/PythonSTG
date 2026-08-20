@@ -6,6 +6,8 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any
 
+from .commands import MergeableCommand
+
 
 _MISSING = object()
 
@@ -72,13 +74,16 @@ def _restore_value(target: Any, key: str, value: Any) -> None:
 
 
 @dataclass
-class SetBackgroundPropertyCommand:
+class SetBackgroundPropertyCommand(MergeableCommand):
     document: Any
     path: str
     value: Any
     label: str = "Set background property"
     _previous: Any = field(default=_MISSING, init=False, repr=False)
     _executed: bool = field(default=False, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("path",)
+    merge_values = ("value",)
 
     def execute(self) -> None:
         parts = _parts(self.path)
@@ -101,14 +106,6 @@ class SetBackgroundPropertyCommand:
         target, key = _resolve_parent(self.document.body, parts)
         _restore_value(target, key, self._previous)
         self.document.validate()
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetBackgroundPropertyCommand):
-            return False
-        if self.document is not other.document or self.path != other.path:
-            return False
-        self.value = copy.deepcopy(other.value)
-        return True
 
 
 @dataclass

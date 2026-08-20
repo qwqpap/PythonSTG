@@ -2,8 +2,8 @@
 
 import json
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtTest import QTest
+from src.qt_compat.QtCore import Qt
+from src.qt_compat.QtTest import QTest
 
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext

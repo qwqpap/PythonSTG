@@ -712,6 +712,33 @@ class PresetRegistry:
                 f"preset {preset_id!r} exact version {version!r} is unavailable",
             ) from exc
 
+    def versions(self, preset_id: str) -> tuple[str, ...]:
+        """List every registered version of one preset, in registration order."""
+
+        return tuple(
+            version for registered, version in self._descriptors if registered == preset_id
+        )
+
+    def migration_targets(self, preset_id: str, from_version: str) -> tuple[str, ...]:
+        """List versions reachable from ``from_version`` along exact migrations.
+
+        Callers use this to offer only upgrades that actually have a migration
+        path, so an author never picks a target that ``preview_migration``
+        would then reject.
+        """
+
+        targets: list[str] = []
+        current = str(from_version)
+        seen = {current}
+        while (preset_id, current) in self._migrations:
+            migration = self._migrations[(preset_id, current)]
+            if migration.to_version in seen:
+                break
+            targets.append(migration.to_version)
+            seen.add(migration.to_version)
+            current = migration.to_version
+        return tuple(targets)
+
     def _reject_cycles(self) -> None:
         for start in self._migrations:
             seen: set[tuple[str, str]] = set()

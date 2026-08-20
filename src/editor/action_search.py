@@ -1,12 +1,72 @@
-"""Small modal contextual-search palette shared by authoring canvases."""
+"""Contextual-search palette and the canvas gesture that opens it."""
 
 from __future__ import annotations
 
 from src.qt_compat.QtCore import Qt, pyqtSignal
-from src.qt_compat.QtWidgets import QDialog, QLabel, QLineEdit, QListWidget, QVBoxLayout
+from src.qt_compat.QtWidgets import (
+    QDialog,
+    QGraphicsView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QVBoxLayout,
+)
 
 from .action_catalog import ActionCatalog, ActionDescriptor, ActionQuery
 from .i18n import LanguageManager
+
+
+class SpaceTapSearchMixin:
+    """Hold Space to hand-drag a canvas; tap it to ask for the search palette.
+
+    The Scene viewport, the graph canvas and the timeline view all offer the
+    same gesture, so the state machine that tells a pan apart from a tap lives
+    here once.  A Qt signal cannot be declared on a plain mixin, so each canvas
+    keeps its own ``actionSearchRequested`` and calls ``_init_space_tap()`` once
+    its idle drag mode is configured -- that is the mode a release restores.
+
+    Mix in before the view class.  A canvas with no other key handling inherits
+    ``keyPressEvent`` as-is; one that handles further keys overrides it and
+    short-circuits on ``_space_tap_press()`` first, so Space never falls through
+    to a shortcut.
+    """
+
+    def _init_space_tap(self) -> None:
+        self._space_pressed = False
+        self._space_dragged = False
+        self._drag_mode_before_space = self.dragMode()
+
+    def _space_tap_press(self, event) -> bool:
+        """Claim a Space press; True when the caller must stop handling it."""
+        if event.key() != Qt.Key_Space or event.isAutoRepeat():
+            return False
+        self._space_pressed = True
+        self._space_dragged = False
+        self._drag_mode_before_space = self.dragMode()
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        event.accept()
+        return True
+
+    def keyPressEvent(self, event) -> None:
+        if self._space_tap_press(event):
+            return
+        super().keyPressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._space_pressed and event.buttons() & Qt.LeftButton:
+            self._space_dragged = True
+        super().mouseMoveEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self.setDragMode(self._drag_mode_before_space)
+            should_search = self._space_pressed and not self._space_dragged
+            self._space_pressed = False
+            if should_search:
+                self.actionSearchRequested.emit(None)
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
 
 class ActionSearchDialog(QDialog):

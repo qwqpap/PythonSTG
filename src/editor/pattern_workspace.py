@@ -211,6 +211,94 @@ class PatternCanvas(QGraphicsView):
         )
 
 
+class PresetReactionSlotEditor(QWidget):
+    """Structured editor for a preset ``reaction`` slot.
+
+    The runtime accepts exactly one batch reaction -- ``split`` -- with a fixed
+    field set, so this exposes those fields instead of a free-form payload the
+    engine would reject at spawn time.
+    """
+
+    valueChanged = pyqtSignal(object)
+
+    def __init__(self, slot_id: str, value, *, nullable: bool, parent=None):
+        super().__init__(parent)
+        self._slot_id = str(slot_id)
+        self._nullable = bool(nullable)
+        self._loading = True
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.enabled = QCheckBox("On")
+        self.enabled.setObjectName(f"presetSlotEnabled_{self._slot_id}")
+        self.enabled.setEnabled(self._nullable)
+        layout.addWidget(self.enabled)
+        self.reason = QComboBox()
+        self.reason.setObjectName(f"presetSlotReason_{self._slot_id}")
+        for label, data in (("Lifetime ended", "expired"), ("Left the field", "out_of_bounds")):
+            self.reason.addItem(label, data)
+        layout.addWidget(self.reason)
+        self.count = QSpinBox()
+        self.count.setObjectName(f"presetSlotCount_{self._slot_id}")
+        self.count.setRange(1, 256)
+        layout.addWidget(self.count)
+        self.speed = QDoubleSpinBox()
+        self.speed.setObjectName(f"presetSlotSpeed_{self._slot_id}")
+        self.speed.setDecimals(3)
+        self.speed.setRange(0.0, 100.0)
+        layout.addWidget(self.speed)
+        self.max_lifetime = QDoubleSpinBox()
+        self.max_lifetime.setObjectName(f"presetSlotLifetime_{self._slot_id}")
+        self.max_lifetime.setDecimals(3)
+        self.max_lifetime.setRange(0.0, 60.0)
+        layout.addWidget(self.max_lifetime)
+
+        self.set_value(value)
+        self._loading = False
+        self.enabled.toggled.connect(self._commit)
+        self.reason.currentIndexChanged.connect(self._commit)
+        for spin in (self.count, self.speed, self.max_lifetime):
+            spin.editingFinished.connect(self._commit)
+
+    def set_value(self, value) -> None:
+        """Load a slot value without emitting, so rebuilds do not look like edits."""
+
+        previous = self._loading
+        self._loading = True
+        payload = dict(value) if isinstance(value, dict) else {}
+        self.enabled.setChecked(bool(payload) or not self._nullable)
+        index = self.reason.findData(str(payload.get("reason", "expired")))
+        self.reason.setCurrentIndex(max(0, index))
+        self.count.setValue(int(payload.get("count", 6)))
+        self.speed.setValue(float(payload.get("speed", 1.5)))
+        self.max_lifetime.setValue(float(payload.get("max_lifetime", 2.0)))
+        self._update_enablement()
+        self._loading = previous
+
+    def value(self):
+        """Return the slot override, or None when the author switched it off."""
+
+        if self._nullable and not self.enabled.isChecked():
+            return None
+        return {
+            "action": "split",
+            "reason": str(self.reason.currentData()),
+            "count": int(self.count.value()),
+            "speed": float(self.speed.value()),
+            "max_lifetime": float(self.max_lifetime.value()),
+        }
+
+    def _update_enablement(self) -> None:
+        active = self.enabled.isChecked()
+        for widget in (self.reason, self.count, self.speed, self.max_lifetime):
+            widget.setEnabled(active)
+
+    def _commit(self, *_args) -> None:
+        self._update_enablement()
+        if self._loading:
+            return
+        self.valueChanged.emit(self.value())
+
+
 class PatternWorkspace(QWidget):
     previewRequested = pyqtSignal()
     templateRequested = pyqtSignal(str)
@@ -228,6 +316,8 @@ class PatternWorkspace(QWidget):
     graphNodeRemoveRequested = pyqtSignal(str)
     graphEdgeRemoveRequested = pyqtSignal(str)
     presetParameterRequested = pyqtSignal(str, object)
+    presetSlotRequested = pyqtSignal(str, object)
+    presetMigrateRequested = pyqtSignal(str)
     presetMaterializeRequested = pyqtSignal()
     actionSearchRequested = pyqtSignal(object)
     authoringLevelRequested = pyqtSignal(str)
@@ -238,8 +328,34 @@ class PatternWorkspace(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("patternWorkspace")
+        # The pickers built below consult the language manager and the preset
+        # availability flag, so both exist before any builder runs.
+        self._language_manager: LanguageManager | None = None
+        self._preset_mode_available = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
+        layout.addLayout(self._build_primary_toolbar())
+        layout.addLayout(self._build_authoring_toolbar())
+        layout.addWidget(self._build_graph_toolbar())
+        hint = QLabel("Drag E/P gizmos. Drop an Assets sprite to assign.")
+        hint.setObjectName("patternWorkspaceHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        layout.addWidget(self._build_view_stack(), 1)
+        self._mode = "recipe"
+        self._document: PatternDocument | None = None
+        self._preset_descriptor: PresetDescriptor | None = None
+        self._preset_nodes: tuple[VirtualPresetNode, ...] = ()
+        self._player_position = (0.0, -0.8)
+        self._level_switching = False
+        self._authoring_level = "l1"
+        self._source_resource = ""
+        self._reset_binding_pickers()
+        self._reset_level_picker(False)
+
+    def _build_primary_toolbar(self) -> QHBoxLayout:
+        """Title, authoring-task picker, guides toggle and the preview button."""
+
         primary_toolbar = QHBoxLayout()
         self.title = QLabel("Pattern")
         self.title.setObjectName("patternWorkspaceTitle")
@@ -250,20 +366,10 @@ class PatternWorkspace(QWidget):
         self.level_picker.setObjectName("patternAuthoringLevel")
         primary_toolbar.addWidget(self.level_picker)
         self.level_picker.currentIndexChanged.connect(self._level_changed)
-        self.mode_switch = QComboBox()
-        self.mode_switch.setObjectName("patternModeSwitch")
-        self.mode_switch.setToolTip(
-            "Authoring mode: Recipe (fields) or Graph (behavior nodes)"
-        )
-        self.mode_switch.addItem("Recipe", "recipe")
-        self.mode_switch.addItem("Graph", "graph")
-        self.mode_switch.currentIndexChanged.connect(self._mode_changed)
-        primary_toolbar.addWidget(self.mode_switch)
-        # Task names are the single user-facing progression.  Keep this legacy
-        # widget alive for translations and compatibility tests, but do not
-        # present a second competing mode selector to authors.
-        self.mode_switch.hide()
-        self.fold_button = QPushButton("Fold back to Recipe")
+        # Task names are the single author-facing progression.  The view mode is
+        # internal state derived from the selected task, so it is plain data
+        # instead of a hidden combo box carrying its own competing vocabulary.
+        self.fold_button = QPushButton("Back to Parameters")
         self.fold_button.setObjectName("graphFoldButton")
         self.fold_button.clicked.connect(self.graphFoldRequested)
         primary_toolbar.addWidget(self.fold_button)
@@ -274,12 +380,16 @@ class PatternWorkspace(QWidget):
         preview.setObjectName("patternFormalPreview")
         preview.clicked.connect(self.previewRequested)
         primary_toolbar.addWidget(preview)
-        layout.addLayout(primary_toolbar)
+        return primary_toolbar
 
-        # Keep each authoring operation on its own row.  The central canvas is
-        # intentionally narrow when both Scene and Inspector docks are visible
-        # at the supported 960 px window width, so a single horizontal strip
-        # would overlap its controls.
+    def _build_authoring_toolbar(self) -> QGridLayout:
+        """Bullet assignment and template application, one operation per row.
+
+        The central canvas is intentionally narrow when both the Scene and
+        Inspector docks are visible at the supported 960 px window width, so a
+        single horizontal strip would overlap its controls.
+        """
+
         authoring_toolbar = QGridLayout()
         authoring_toolbar.addWidget(QLabel("Bullet"), 0, 0)
         self.bullet_picker = QComboBox()
@@ -307,19 +417,21 @@ class PatternWorkspace(QWidget):
         )
         authoring_toolbar.addWidget(apply_template, 1, 2)
         authoring_toolbar.setColumnStretch(1, 1)
-        layout.addLayout(authoring_toolbar)
+        return authoring_toolbar
+
+    def _build_graph_toolbar(self) -> QWidget:
+        """Node-creation strip, hidden until a graph view is on screen."""
+
+        from .graph_workspace import CREATABLE_NODE_CATEGORIES
 
         self.graph_toolbar_widget = QWidget()
         self.graph_toolbar_widget.setObjectName("graphToolbar")
         self.graph_toolbar = QGridLayout(self.graph_toolbar_widget)
         self.graph_toolbar.setContentsMargins(0, 0, 0, 0)
         self.graph_toolbar.addWidget(QLabel("Add Node"), 0, 0)
-        from .graph_workspace import CREATABLE_NODE_CATEGORIES, GraphCanvas, GraphPlaceholder
-
         self._creatable_node_categories = CREATABLE_NODE_CATEGORIES
         self.node_type_picker = QComboBox()
         self.node_type_picker.setObjectName("graphNodeTypePicker")
-        self._language_manager: LanguageManager | None = None
         self._reset_node_type_picker()
         self.graph_toolbar.addWidget(self.node_type_picker, 0, 1)
         add_node = QPushButton("Add")
@@ -333,21 +445,18 @@ class PatternWorkspace(QWidget):
         self.graph_toolbar.addWidget(tip, 1, 1, 1, 2)
         self.graph_toolbar.setColumnStretch(1, 1)
         self.graph_toolbar_widget.setVisible(False)
-        layout.addWidget(self.graph_toolbar_widget)
+        return self.graph_toolbar_widget
 
-        hint = QLabel(
-            "Drag E/P gizmos. Drop an Assets sprite to assign."
-        )
-        hint.setObjectName("patternWorkspaceHint")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+    def _build_view_stack(self) -> QStackedWidget:
+        """The one central stack every authoring task switches between."""
+
+        from .graph_workspace import GraphCanvas, GraphPlaceholder
+
         self.canvas = PatternCanvas()
         self.canvas.originPositionRequested.connect(self.originPositionRequested)
         self.canvas.playerPositionRequested.connect(self.playerPositionRequested)
         self.canvas.bulletResourceDropped.connect(self.bulletResourceRequested)
         self.guides.toggled.connect(self.canvas.set_guides)
-
-        from .graph_workspace import GraphCanvas, GraphPlaceholder
 
         self.graph_canvas = GraphCanvas()
         self.graph_canvas.nodeSelected.connect(self.graphNodeSelected)
@@ -360,6 +469,18 @@ class PatternWorkspace(QWidget):
         self.graph_canvas.actionSearchRequested.connect(self.actionSearchRequested)
         self.graph_placeholder = GraphPlaceholder()
         self.graph_placeholder.expandRequested.connect(self.graphExpandRequested)
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.canvas)
+        self.stack.addWidget(self.graph_canvas)
+        self.stack.addWidget(self.graph_placeholder)
+        self.stack.addWidget(self._build_preset_view())
+        self.stack.addWidget(self._build_advanced_view())
+        self.stack.addWidget(self._build_source_view())
+        return self.stack
+
+    def _build_preset_view(self) -> QWidget:
+        """Read-only preset expansion plus its parameter, slot and version rows."""
 
         self.preset_view = QWidget()
         preset_layout = QVBoxLayout(self.preset_view)
@@ -374,10 +495,32 @@ class PatternWorkspace(QWidget):
         preset_layout.addWidget(self.preset_nodes, 1)
         self.preset_parameter_form = QGridLayout()
         preset_layout.addLayout(self.preset_parameter_form)
+        self.preset_slot_form = QGridLayout()
+        preset_layout.addLayout(self.preset_slot_form)
+        migrate_row = QHBoxLayout()
+        self.preset_version = QLabel("")
+        self.preset_version.setObjectName("presetVersion")
+        migrate_row.addWidget(self.preset_version)
+        self.preset_migrate_target = QComboBox()
+        self.preset_migrate_target.setObjectName("presetMigrateTarget")
+        self.preset_migrate_target.setToolTip(
+            "Only versions with an exact migration path are offered"
+        )
+        migrate_row.addWidget(self.preset_migrate_target)
+        self.preset_migrate_button = QPushButton("Migrate")
+        self.preset_migrate_button.setObjectName("presetMigrate")
+        self.preset_migrate_button.clicked.connect(self._request_preset_migration)
+        migrate_row.addWidget(self.preset_migrate_button)
+        migrate_row.addStretch()
+        preset_layout.addLayout(migrate_row)
         materialize = QPushButton("Make Local Copy")
         materialize.setObjectName("presetMaterialize")
         materialize.clicked.connect(self.presetMaterializeRequested)
         preset_layout.addWidget(materialize)
+        return self.preset_view
+
+    def _build_advanced_view(self) -> QWidget:
+        """Explicit property bindings: constant, curve, variable or expression."""
 
         self.advanced_view = QWidget()
         advanced_layout = QVBoxLayout(self.advanced_view)
@@ -407,6 +550,10 @@ class PatternWorkspace(QWidget):
         remove_binding.setObjectName("patternRemoveBinding")
         remove_binding.clicked.connect(self._request_remove_binding)
         advanced_layout.addWidget(remove_binding)
+        return self.advanced_view
+
+    def _build_source_view(self) -> QWidget:
+        """Where a script-backed Pattern points the author at its own source."""
 
         self.source_view = QWidget()
         source_layout = QVBoxLayout(self.source_view)
@@ -419,26 +566,7 @@ class PatternWorkspace(QWidget):
         self.open_source.clicked.connect(self._request_source_navigation)
         source_layout.addWidget(self.open_source)
         source_layout.addStretch()
-
-        self.stack = QStackedWidget()
-        self.stack.addWidget(self.canvas)
-        self.stack.addWidget(self.graph_canvas)
-        self.stack.addWidget(self.graph_placeholder)
-        self.stack.addWidget(self.preset_view)
-        self.stack.addWidget(self.advanced_view)
-        self.stack.addWidget(self.source_view)
-        layout.addWidget(self.stack, 1)
-        self._mode = "recipe"
-        self._document: PatternDocument | None = None
-        self._preset_descriptor: PresetDescriptor | None = None
-        self._preset_nodes: tuple[VirtualPresetNode, ...] = ()
-        self._player_position = (0.0, -0.8)
-        self._mode_switching = False
-        self._level_switching = False
-        self._authoring_level = "l1"
-        self._source_resource = ""
-        self._reset_binding_pickers()
-        self._reset_level_picker(False)
+        return self.source_view
 
     def set_language_manager(self, manager: LanguageManager) -> None:
         self._language_manager = manager
@@ -508,6 +636,16 @@ class PatternWorkspace(QWidget):
         self.binding_path.setCurrentIndex(max(0, path_index))
         self.binding_kind.setCurrentIndex(max(0, kind_index))
 
+    def _preset_slot_label(self, slot) -> str:
+        labels = {"termination_reaction": "Lifecycle Reaction"}
+        fallback = slot.id.replace("_", " ").title()
+        return self._tr(labels.get(slot.id, fallback))
+
+    def _request_preset_migration(self) -> None:
+        target = self.preset_migrate_target.currentData()
+        if target:
+            self.presetMigrateRequested.emit(str(target))
+
     def _preset_parameter_label(self, parameter) -> str:
         labels = {
             "shape.count": "Bullet Count",
@@ -563,52 +701,45 @@ class PatternWorkspace(QWidget):
             self.set_mode("recipe", emit=False)
         elif level == "l2":
             self._mode = "advanced"
-            self.stack.setCurrentWidget(self.advanced_view)
-            self.fold_button.setVisible(False)
-            self.graph_toolbar_widget.setVisible(False)
+            self._show_view(self.advanced_view)
         elif level == "l3":
             self.set_mode("graph", emit=False)
         else:
             self._mode = "source"
-            self.stack.setCurrentWidget(self.source_view)
-            self.fold_button.setVisible(False)
-            self.graph_toolbar_widget.setVisible(False)
+            self._show_view(self.source_view)
         if emit:
             self.authoringLevelRequested.emit(level)
+
+    def _show_view(self, widget: QWidget, *, graph_chrome: bool = False) -> None:
+        """Swap the central view; only the graph tasks carry the graph chrome."""
+
+        self.fold_button.setVisible(graph_chrome)
+        self.graph_toolbar_widget.setVisible(graph_chrome)
+        self.stack.setCurrentWidget(widget)
 
     def authoring_level(self) -> str:
         return self._authoring_level
 
-    def _mode_changed(self) -> None:
-        mode = str(self.mode_switch.currentData())
-        if mode == self._mode:
-            return
-        self._mode = mode
-        self._refresh_mode()
-        self.graphModeChanged.emit(mode)
+    def available_modes(self) -> tuple[str, ...]:
+        """View modes the current document can reach, in navigation order."""
+
+        modes = ["recipe", "graph"]
+        if self._preset_mode_available:
+            modes.insert(0, "preset")
+        return tuple(modes)
 
     def _refresh_mode(self) -> None:
-        self._mode_switching = True
-        try:
-            document = self._document
-            if self._mode == "preset":
-                self.fold_button.setVisible(False)
-                self.graph_toolbar_widget.setVisible(False)
-                self.stack.setCurrentWidget(self.preset_view)
-            elif self._mode == "graph":
-                self.fold_button.setVisible(True)
-                self.graph_toolbar_widget.setVisible(True)
-                if document is not None and document.graph is not None:
-                    self.graph_canvas.set_graph(document.graph)
-                    self.stack.setCurrentWidget(self.graph_canvas)
-                else:
-                    self.stack.setCurrentWidget(self.graph_placeholder)
+        document = self._document
+        if self._mode == "preset":
+            self._show_view(self.preset_view)
+        elif self._mode == "graph":
+            if document is not None and document.graph is not None:
+                self.graph_canvas.set_graph(document.graph)
+                self._show_view(self.graph_canvas, graph_chrome=True)
             else:
-                self.fold_button.setVisible(False)
-                self.graph_toolbar_widget.setVisible(False)
-                self.stack.setCurrentWidget(self.canvas)
-        finally:
-            self._mode_switching = False
+                self._show_view(self.graph_placeholder, graph_chrome=True)
+        else:
+            self._show_view(self.canvas)
 
     def _request_add_node(self) -> None:
         category, node_type = self.node_type_picker.currentData()
@@ -661,12 +792,16 @@ class PatternWorkspace(QWidget):
         if mode not in {"recipe", "graph", "preset"}:
             raise ValueError(f"unsupported pattern workspace mode: {mode!r}")
         if emit:
-            index = self.mode_switch.findData(mode)
-            if index >= 0 and index != self.mode_switch.currentIndex():
-                self.mode_switch.setCurrentIndex(index)
-            elif index == self.mode_switch.currentIndex():
-                self._mode = mode
-                self._refresh_mode()
+            # A mode the document cannot reach is ignored rather than forced:
+            # asking for the preset view of a local pattern is a no-op, not an
+            # error, and callers rely on that.
+            if mode not in self.available_modes():
+                return
+            changed = mode != self._mode
+            self._mode = mode
+            self._refresh_mode()
+            if changed:
+                self.graphModeChanged.emit(mode)
         else:
             self._mode = mode
             self._refresh_mode()
@@ -722,19 +857,22 @@ class PatternWorkspace(QWidget):
         descriptor: PresetDescriptor | None,
         nodes: tuple[VirtualPresetNode, ...] = (),
         parameters: dict[str, object] | None = None,
+        slots: dict[str, object] | None = None,
+        migration_targets: tuple[str, ...] = (),
     ) -> None:
         self._preset_descriptor = descriptor
         self._preset_nodes = tuple(nodes)
-        preset_index = self.mode_switch.findData("preset")
         if descriptor is None:
-            if preset_index >= 0:
-                self.mode_switch.removeItem(preset_index)
+            self._preset_mode_available = False
             if self._mode == "preset":
                 self.set_mode("recipe", emit=False)
             self._reset_level_picker(False)
+            self._clear_preset_slots()
+            self.preset_version.setText("")
+            self.preset_migrate_target.clear()
+            self.preset_migrate_button.setEnabled(False)
             return
-        if preset_index < 0:
-            self.mode_switch.insertItem(0, "Preset", "preset")
+        self._preset_mode_available = True
         self._reset_level_picker(True)
         self.preset_summary.setText(
             f"{descriptor.display_name}\n"
@@ -782,6 +920,65 @@ class PatternWorkspace(QWidget):
                 )
             editor.setObjectName(f"presetParameter_{parameter.id}")
             self.preset_parameter_form.addWidget(editor, row, 1)
+        self._populate_preset_slots(descriptor, dict(slots or {}))
+        self._populate_preset_migration(descriptor, tuple(migration_targets))
+
+    def _clear_preset_slots(self) -> None:
+        while self.preset_slot_form.count():
+            item = self.preset_slot_form.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+
+    def _populate_preset_slots(
+        self,
+        descriptor: PresetDescriptor,
+        overrides: dict[str, object],
+    ) -> None:
+        self._clear_preset_slots()
+        for row, slot in enumerate(descriptor.slots):
+            label = QLabel(self._preset_slot_label(slot))
+            label.setObjectName(f"presetSlotLabel_{slot.id}")
+            self.preset_slot_form.addWidget(label, row, 0)
+            value = overrides.get(slot.id, slot.default)
+            if slot.value_type == "reaction":
+                editor = PresetReactionSlotEditor(
+                    slot.id, value, nullable=slot.nullable
+                )
+                editor.valueChanged.connect(
+                    lambda payload, sid=slot.id: self.presetSlotRequested.emit(
+                        sid, payload
+                    )
+                )
+            else:
+                # Slots share the preset value-type vocabulary with parameters,
+                # so anything non-structural reuses the same numeric editor.
+                editor = QDoubleSpinBox()
+                editor.setDecimals(6)
+                editor.setRange(-1_000_000.0, 1_000_000.0)
+                editor.setValue(float(value or 0.0))
+                editor.editingFinished.connect(
+                    lambda widget=editor, sid=slot.id: self.presetSlotRequested.emit(
+                        sid, widget.value()
+                    )
+                )
+            editor.setObjectName(f"presetSlot_{slot.id}")
+            self.preset_slot_form.addWidget(editor, row, 1)
+
+    def _populate_preset_migration(
+        self,
+        descriptor: PresetDescriptor,
+        targets: tuple[str, ...],
+    ) -> None:
+        self.preset_version.setText(
+            self._tr("Version") + f" {descriptor.version}"
+        )
+        self.preset_migrate_target.clear()
+        for version in targets:
+            self.preset_migrate_target.addItem(version, version)
+        # Offering a disabled button beats hiding the control: an author who
+        # looks for the upgrade path learns there is none for this version.
+        self.preset_migrate_target.setEnabled(bool(targets))
+        self.preset_migrate_button.setEnabled(bool(targets))
 
     @property
     def virtual_preset_nodes(self) -> tuple[VirtualPresetNode, ...]:

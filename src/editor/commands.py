@@ -8,8 +8,9 @@ and a multi-field operation can be committed as one transaction.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Callable, Iterator, Protocol
+from typing import Callable, ClassVar, Iterator, Protocol
 
 
 class Command(Protocol):
@@ -18,6 +19,69 @@ class Command(Protocol):
     def execute(self) -> None: ...
 
     def undo(self) -> None: ...
+
+
+class MergeableCommand:
+    """Coalesce consecutive edits of one target into a single undo step.
+
+    A spinbox drag or gizmo move emits a command per value.  Recording each one
+    would make Undo walk back through the drag frame by frame, so the stack asks
+    the previous command to absorb the next one.  Absorbing means adopting the
+    later command's value while keeping this command's original undo snapshot:
+    one drag, one Undo, and the value the author released on.
+
+    A subclass declares what it edits rather than reimplementing the rule:
+
+    ``merge_owner``
+        Attributes naming the document or tree the edit belongs to, compared by
+        identity.  Two separately loaded documents never coalesce.
+    ``merge_identity``
+        Attributes identifying the edited target within that owner (node id,
+        property path), compared by value.
+    ``merge_same_keys``
+        Mapping attributes that must carry the same key set.  A later edit that
+        touches a different set of fields is a different operation.
+    ``merge_values``
+        Attributes carrying the edited value, adopted from the later command.
+    """
+
+    merge_owner: ClassVar[tuple[str, ...]] = ()
+    merge_identity: ClassVar[tuple[str, ...]] = ()
+    merge_same_keys: ClassVar[tuple[str, ...]] = ()
+    merge_values: ClassVar[tuple[str, ...]] = ()
+    _merge_type: ClassVar[type | None] = None
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        # The declaring class decides what may merge, not the runtime class, so a
+        # subclass that only specialises behaviour still coalesces with its base.
+        if any(
+            name in vars(cls)
+            for name in ("merge_owner", "merge_identity", "merge_values")
+        ):
+            cls._merge_type = cls
+
+    def merge_with(self, other: object) -> bool:
+        if not isinstance(other, self._merge_type or type(self)):
+            return False
+        if any(
+            getattr(self, name) is not getattr(other, name)
+            for name in self.merge_owner
+        ):
+            return False
+        if any(
+            getattr(self, name) != getattr(other, name)
+            for name in self.merge_identity
+        ):
+            return False
+        if any(
+            set(getattr(self, name)) != set(getattr(other, name))
+            for name in self.merge_same_keys
+        ):
+            return False
+        for name in self.merge_values:
+            setattr(self, name, deepcopy(getattr(other, name)))
+        return True
 
 
 @dataclass

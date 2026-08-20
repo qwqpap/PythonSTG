@@ -3,7 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtWidgets import QApplication, QLineEdit
+from src.qt_compat.QtWidgets import QApplication, QLineEdit
 
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow, build_preview_command

@@ -36,6 +36,21 @@ class PatternPreviewPanel(QWidget):
         self._language_manager: LanguageManager | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
+        root.addLayout(self._build_header())
+        root.addLayout(self._build_transport())
+        root.addWidget(self._build_body(), 1)
+        self.status_label = QLabel("Preview process is stopped")
+        self.status_label.setObjectName("previewStatus")
+        self.status_label.setWordWrap(True)
+        self.error_label = QLabel("")
+        self.error_label.setObjectName("previewError")
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet("color: #ff9ca8;")
+        root.addWidget(self.status_label)
+        root.addWidget(self.error_label)
+
+    def _build_header(self) -> QHBoxLayout:
+        """Which authoring resource the preview runs, and the launch button."""
 
         header = QHBoxLayout()
         self.resource_label = QLabel("No authoring resource selected")
@@ -46,7 +61,10 @@ class PatternPreviewPanel(QWidget):
         launch.clicked.connect(self.launchRequested)
         header.addWidget(self.resource_label, 1)
         header.addWidget(launch)
-        root.addLayout(header)
+        return header
+
+    def _build_transport(self) -> QHBoxLayout:
+        """Play/pause/step/reset/stop plus the frame seek."""
 
         controls = QHBoxLayout()
         for text, name, command in (
@@ -73,12 +91,32 @@ class PatternPreviewPanel(QWidget):
         controls.addWidget(self.seek_frame)
         controls.addWidget(seek)
         controls.addStretch()
-        root.addLayout(controls)
+        return controls
+
+    def _build_body(self) -> QScrollArea:
+        """The three side-by-side boxes, scrollable at short dock heights."""
 
         body_container = QWidget()
         body_container.setObjectName("previewBody")
         body = QGridLayout(body_container)
         body.setContentsMargins(0, 0, 0, 0)
+        body.addWidget(self._build_stats_box(), 0, 0)
+        body.addWidget(self._build_target_box(), 0, 1)
+        body.addWidget(self._build_live_box(), 0, 2)
+        body.setColumnStretch(0, 1)
+        body.setColumnStretch(1, 2)
+        body.setColumnStretch(2, 2)
+        body_scroll = QScrollArea()
+        body_scroll.setObjectName("previewBodyScroll")
+        body_scroll.setWidgetResizable(True)
+        body_scroll.setFrameShape(QScrollArea.NoFrame)
+        body_scroll.setMinimumHeight(72)
+        body_scroll.setWidget(body_container)
+        return body_scroll
+
+    def _build_stats_box(self) -> QGroupBox:
+        """Read-only runtime telemetry, one row per reported field."""
+
         stats_box = QGroupBox("Runtime")
         stats_form = QFormLayout(stats_box)
         self.stats_labels = {}
@@ -99,7 +137,10 @@ class PatternPreviewPanel(QWidget):
             value.setObjectName(f"previewStat_{key}")
             self.stats_labels[key] = value
             stats_form.addRow(label, value)
-        body.addWidget(stats_box, 0, 0)
+        return stats_box
+
+    def _build_target_box(self) -> QGroupBox:
+        """Player position, RNG seed and gizmo visibility — inputs to the run."""
 
         target_box = QGroupBox("Target / diagnostics")
         target_form = QFormLayout(target_box)
@@ -145,7 +186,10 @@ class PatternPreviewPanel(QWidget):
             lambda visible: self.commandRequested.emit("set-gizmos", {"visible": visible})
         )
         target_form.addRow(self.gizmos)
-        body.addWidget(target_box, 0, 1)
+        return target_box
+
+    def _build_live_box(self) -> QGroupBox:
+        """One property path pushed into the running preview without a restart."""
 
         self.live_box = QGroupBox("Live Inspector property")
         live_form = QFormLayout(self.live_box)
@@ -159,27 +203,7 @@ class PatternPreviewPanel(QWidget):
         live_form.addRow("Path", self.property_path)
         live_form.addRow("JSON value", self.property_value)
         live_form.addRow(apply_property)
-        body.addWidget(self.live_box, 0, 2)
-        body.setColumnStretch(0, 1)
-        body.setColumnStretch(1, 2)
-        body.setColumnStretch(2, 2)
-        body_scroll = QScrollArea()
-        body_scroll.setObjectName("previewBodyScroll")
-        body_scroll.setWidgetResizable(True)
-        body_scroll.setFrameShape(QScrollArea.NoFrame)
-        body_scroll.setMinimumHeight(72)
-        body_scroll.setWidget(body_container)
-        root.addWidget(body_scroll, 1)
-
-        self.status_label = QLabel("Preview process is stopped")
-        self.status_label.setObjectName("previewStatus")
-        self.status_label.setWordWrap(True)
-        self.error_label = QLabel("")
-        self.error_label.setObjectName("previewError")
-        self.error_label.setWordWrap(True)
-        self.error_label.setStyleSheet("color: #ff9ca8;")
-        root.addWidget(self.status_label)
-        root.addWidget(self.error_label)
+        return self.live_box
 
     def set_language_manager(self, manager: LanguageManager) -> None:
         self._language_manager = manager

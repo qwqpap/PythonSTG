@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .commands import MergeableCommand
 from .document import EditorNode
 
 
@@ -111,7 +112,7 @@ class RenameNodeCommand:
 
 
 @dataclass
-class SetNodePropertyCommand:
+class SetNodePropertyCommand(MergeableCommand):
     root: EditorNode
     node_id: str
     key: str
@@ -120,6 +121,9 @@ class SetNodePropertyCommand:
     _captured: bool = field(default=False, init=False, repr=False)
     _had_previous: bool = field(default=False, init=False, repr=False)
     _previous: Any = field(default=None, init=False, repr=False)
+    merge_owner = ("root",)
+    merge_identity = ("node_id", "key")
+    merge_values = ("value",)
 
     def execute(self) -> None:
         node = require_node(self.root, self.node_id)
@@ -138,17 +142,9 @@ class SetNodePropertyCommand:
         else:
             node.properties.pop(self.key, None)
 
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetNodePropertyCommand):
-            return False
-        if self.root is not other.root or self.node_id != other.node_id or self.key != other.key:
-            return False
-        self.value = other.value
-        return True
-
 
 @dataclass
-class SetNodePropertiesCommand:
+class SetNodePropertiesCommand(MergeableCommand):
     root: EditorNode
     node_id: str
     values: dict[str, Any]
@@ -159,6 +155,10 @@ class SetNodePropertiesCommand:
         init=False,
         repr=False,
     )
+    merge_owner = ("root",)
+    merge_identity = ("node_id",)
+    merge_same_keys = ("values",)
+    merge_values = ("values",)
 
     def execute(self) -> None:
         node = require_node(self.root, self.node_id)
@@ -179,16 +179,6 @@ class SetNodePropertiesCommand:
                 node.properties[key] = value
             else:
                 node.properties.pop(key, None)
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetNodePropertiesCommand):
-            return False
-        if self.root is not other.root or self.node_id != other.node_id:
-            return False
-        if set(self.values) != set(other.values):
-            return False
-        self.values = dict(other.values)
-        return True
 
 
 @dataclass

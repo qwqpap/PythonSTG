@@ -1,6 +1,6 @@
 import json
 
-from PyQt5.QtWidgets import QLabel, QLineEdit
+from src.qt_compat.QtWidgets import QLabel, QLineEdit
 
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow

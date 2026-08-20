@@ -162,7 +162,10 @@ class VariableMappingDialog(QDialog):
         form.addWidget(QLabel("Operation"), 2, 0)
         self.operation_combo = QComboBox()
         self.operation_combo.setObjectName("mappingOperation")
-        self.operation_combo.addItems(list(VARIABLE_OPERATIONS))
+        # Operation names are shown to the author and therefore translated, so
+        # the internal token travels as item data instead of as display text.
+        for operation in VARIABLE_OPERATIONS:
+            self.operation_combo.addItem(operation, operation)
         form.addWidget(self.operation_combo, 2, 1)
         actions = QHBoxLayout()
         self.add_button = QPushButton("Add / update")
@@ -303,14 +306,14 @@ class VariableMappingDialog(QDialog):
         target_index = self.target_combo.findData(value.target_id)
         if target_index >= 0:
             self.target_combo.setCurrentIndex(target_index)
-        operation_index = self.operation_combo.findText(value.operation)
+        operation_index = self.operation_combo.findData(value.operation)
         if operation_index >= 0:
             self.operation_combo.setCurrentIndex(operation_index)
 
     def _add_or_update(self) -> None:
         source_id = self.source_combo.currentData()
         target_id = self.target_combo.currentData()
-        operation = self.operation_combo.currentText()
+        operation = self.operation_combo.currentData()
         source = self._variables_by_id.get(source_id)
         target = self._variables_by_id.get(target_id)
         if source is None or target is None:

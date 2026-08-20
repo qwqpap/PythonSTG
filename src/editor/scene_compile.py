@@ -1,8 +1,11 @@
 """M3 compiler for one simple Scene Spell backed by a Pattern resource.
 
 This is intentionally not the Phase 4 StageProgram.  It resolves exactly one
-enabled PatternInstance under a selected Spell, applies its parent Emitter
-origin as an instance transform, and compiles through the formal Pattern path.
+enabled PatternInstance under a selected Spell, applies its spawn position as an
+instance transform, and compiles through the formal Pattern path.  Reference
+resolution and the spawn-origin rule are shared with the StageProgram compiler
+(see :mod:`src.editor.pattern_resolve`) so both paths agree on where a Pattern
+comes from and where it fires.
 """
 
 from __future__ import annotations
@@ -10,13 +13,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.authoring import ResourceStore
-from src.authoring.resources import ResourceDocumentError, ResourceReference
-from src.core.project_context import ProjectContext, ProjectContextError
+from src.core.project_context import ProjectContext
 from src.pattern import PatternCompileError, PatternDocument, PatternProgram, compile_pattern
 
 from .document import EditorNode, SceneDocument
-from .pattern_commands import pattern_with_property
-from .scene_commands import find_parent, require_node
+from .pattern_resolve import (
+    PatternResolveError,
+    apply_spawn_origin,
+    load_pattern_document,
+    node_maps,
+    spawn_origin_node,
+)
+from .scene_commands import require_node
 
 
 @dataclass(frozen=True)
@@ -118,14 +126,12 @@ def compile_simple_spell(
             "Assign a Pattern resource to this PatternInstance.",
         )
     try:
-        reference = ResourceReference.parse(resource_value)
-        if reference.subresource is not None:
-            raise ResourceDocumentError("PatternDocument references cannot contain fragments")
-        source = reference.resolve(project, must_exist=True)
-        document = ResourceStore(project).load(source)
-        if not isinstance(document, PatternDocument):
-            raise ResourceDocumentError("Referenced resource is not a PatternDocument")
-    except (OSError, ValueError, ResourceDocumentError, ProjectContextError) as exc:
+        reference_uri, document = load_pattern_document(
+            project,
+            ResourceStore(project),
+            resource_value,
+        )
+    except PatternResolveError as exc:
         raise _error(
             scene,
             instance,
@@ -134,14 +140,19 @@ def compile_simple_spell(
             str(exc),
         ) from exc
 
-    location = find_parent(scene.root, instance.id)
-    if location is not None and location[0].type == "Emitter":
-        emitter = location[0]
-        x = float(emitter.properties.get("x", 192.0))
-        y = float(emitter.properties.get("y", 224.0))
-        runtime_x, runtime_y = scene.coordinate_space.authoring_to_runtime(x, y)
-        document = pattern_with_property(document, "shape.origin_x", runtime_x)
-        document = pattern_with_property(document, "shape.origin_y", runtime_y)
+    _nodes, parents = node_maps(scene.root)
+    origin_node = spawn_origin_node(instance, parents)
+    if origin_node is not None:
+        try:
+            document = apply_spawn_origin(scene, document, origin_node)
+        except PatternResolveError as exc:
+            raise _error(
+                scene,
+                origin_node,
+                "invalid_emitter_position",
+                "properties",
+                str(exc),
+            ) from exc
 
     try:
         program = compile_pattern(document, project=project)
@@ -164,7 +175,7 @@ def compile_simple_spell(
         scene_id=scene.id,
         spell_node_id=spell.id,
         pattern_instance_id=instance.id,
-        pattern_resource=reference.uri,
+        pattern_resource=reference_uri,
         document=document,
         program=program,
     )

@@ -790,13 +790,6 @@ class VariableStore:
             result.setdefault(scope, {})[owner] = copy.deepcopy(values)
         return result
 
-    def flat_snapshot(self) -> dict[str, Any]:
-        """Return a debug-friendly name -> value overlay without mutating state."""
-        result: dict[str, Any] = {}
-        for values in self._stores.values():
-            result.update(copy.deepcopy(values))
-        return result
-
     def restore_compatible_snapshot(
         self,
         snapshot: Mapping[str, Any],

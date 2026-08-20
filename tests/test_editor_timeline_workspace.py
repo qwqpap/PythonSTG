@@ -1,8 +1,9 @@
-from PyQt5.QtCore import QPoint, QPointF, Qt
-from PyQt5.QtGui import QMouseEvent, QWheelEvent
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtTest import QTest
-from PyQt5.QtWidgets import QPlainTextEdit, QPushButton, QTableWidget
+from src.qt_compat.QtCore import QPoint, QPointF, Qt
+from src.qt_compat.QtGui import QMouseEvent, QWheelEvent
+from src.qt_compat.QtWidgets import QApplication
+from src.qt_compat.QtTest import QTest
+from src.qt_compat.QtWidgets import QPlainTextEdit, QPushButton, QTableWidget
+from src.qt_compat.QtWidgets import QGraphicsItem
 
 from src.core.project_context import ProjectContext
 from src.editor import TimelineClip, TimelineKeyframe, TimelineTrack, make_node
@@ -263,13 +264,15 @@ def test_scene_viewport_runtime_pose_is_read_only_and_restores_authoring_positio
 
     viewport.set_runtime_state({sprite.id: {"x": 0.5, "y": -0.5}})
     assert sprite_item._runtime_pose is True
-    assert int(sprite_item.flags()) & int(sprite_item.ItemIsMovable) == 0
+    assert not (
+        sprite_item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+    )
     assert (sprite_item.x(), sprite_item.y()) == (288.0, 336.0)
     assert document.to_dict() == before
 
     viewport.clear_runtime_state()
     assert sprite_item._runtime_pose is False
-    assert int(sprite_item.flags()) & int(sprite_item.ItemIsMovable)
+    assert sprite_item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsMovable
     assert (sprite_item.x(), sprite_item.y()) == (
         float(sprite.properties["x"]),
         float(sprite.properties["y"]),

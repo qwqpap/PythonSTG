@@ -8,6 +8,7 @@ from typing import Any
 
 from src.authoring.variables import VariableOutputMapping, VariableRef, VariableSpec
 
+from .commands import MergeableCommand
 from .document import SceneDocument
 
 
@@ -107,12 +108,16 @@ class RemoveVariableCommand:
 
 
 @dataclass
-class SetVariablePropertiesCommand:
+class SetVariablePropertiesCommand(MergeableCommand):
     document: SceneDocument
     variable_id: str
     values: dict[str, Any]
     label: str = "Edit variable"
     _previous: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("variable_id",)
+    merge_same_keys = ("values",)
+    merge_values = ("values",)
 
     _ALLOWED = frozenset(
         {
@@ -159,16 +164,6 @@ class SetVariablePropertiesCommand:
             raise VariableMutationError(f"Variable does not exist: {self.variable_id}")
         for key, value in self._previous.items():
             setattr(variable, key, deepcopy(value))
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetVariablePropertiesCommand):
-            return False
-        if self.document is not other.document or self.variable_id != other.variable_id:
-            return False
-        if set(self.values) != set(other.values):
-            return False
-        self.values = deepcopy(other.values)
-        return True
 
 
 def _state_mappings(document: SceneDocument, state_id: str | None):

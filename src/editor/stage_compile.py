@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.authoring import ResourceStore
-from src.authoring.resources import ResourceDocumentError, ResourceReference
 from src.authoring.variables import (
     VARIABLE_OPERATIONS,
     VariableError,
@@ -17,7 +16,7 @@ from src.authoring.variables import (
     VariableRef,
     VariableSpec,
 )
-from src.core.project_context import ProjectContext, ProjectContextError
+from src.core.project_context import ProjectContext
 from src.game.stage.program import (
     PatternSchedule,
     StageAction,
@@ -48,7 +47,13 @@ from .document import (
     TimelineTrack,
 )
 from .node_types import NODE_TYPE_REGISTRY
-from .pattern_commands import pattern_with_property
+from .pattern_resolve import (
+    PatternResolveError,
+    apply_spawn_origin,
+    load_pattern_document,
+    node_maps,
+    spawn_origin_node,
+)
 
 
 STAGE_PROGRAM_VERSION = 3
@@ -120,36 +125,6 @@ def _failure(
     )
 
 
-def _node_maps(
-    root: EditorNode,
-) -> tuple[dict[str, EditorNode], dict[str, EditorNode | None]]:
-    nodes: dict[str, EditorNode] = {}
-    parents: dict[str, EditorNode | None] = {}
-
-    def visit(node: EditorNode, parent: EditorNode | None) -> None:
-        nodes[node.id] = node
-        parents[node.id] = parent
-        for child in node.children:
-            visit(child, node)
-
-    visit(root, None)
-    return nodes, parents
-
-
-def _position_node(
-    target: EditorNode | None,
-    parents: dict[str, EditorNode | None],
-) -> EditorNode | None:
-    node = target
-    while node is not None:
-        if node.type == "Emitter" or (
-            "x" in node.properties and "y" in node.properties
-        ):
-            return node
-        node = parents.get(node.id)
-    return None
-
-
 def _pattern_resource(target: EditorNode | None, clip: TimelineClip) -> str:
     explicit = str(clip.payload.get("pattern") or "").strip()
     if explicit:
@@ -195,18 +170,8 @@ def _load_pattern(
             state=state,
         )
     try:
-        reference = ResourceReference.parse(value)
-        if reference.subresource is not None:
-            raise ResourceDocumentError(
-                "PatternDocument references cannot contain fragments"
-            )
-        source = reference.resolve(project, must_exist=True)
-        document = store.load(source)
-        if not isinstance(document, PatternDocument):
-            raise ResourceDocumentError(
-                f"Referenced resource is {getattr(document, 'type', type(document).__name__)!r}, not pystg.pattern"
-            )
-    except (OSError, ValueError, ResourceDocumentError, ProjectContextError) as exc:
+        return load_pattern_document(project, store, value)
+    except PatternResolveError as exc:
         raise _failure(
             scene,
             "invalid_pattern_resource",
@@ -217,7 +182,6 @@ def _load_pattern(
             node=target,
             state=state,
         ) from exc
-    return reference.uri, document
 
 
 def _movement_value(scene: SceneDocument, value: Any) -> dict[str, float]:
@@ -427,17 +391,9 @@ def _variable_spec_for(
     specs: tuple[VariableSpec, ...],
     reference: VariableRef,
 ) -> VariableSpec | None:
-    candidates = [item for item in specs if item.name == reference.name]
-    if reference.scope is not None:
-        candidates = [item for item in candidates if item.scope == reference.scope]
-    if reference.owner_id is not None:
-        candidates = [
-            item for item in candidates
-            if item.owner_id in (None, reference.owner_id)
-        ]
-        exact = [item for item in candidates if item.owner_id == reference.owner_id]
-        if exact:
-            candidates = exact
+    """Resolve a reference to exactly one spec, or None if it stays ambiguous."""
+
+    candidates = _variable_candidates(specs, reference)
     return candidates[0] if len(candidates) == 1 else None
 
 
@@ -516,12 +472,16 @@ def _variable_conflict_diagnostics(
         if action.kind != "Variable":
             continue
         payload = action.payload
+        path = f"states.{action.state_id}.actions.{action.clip_id}.payload.variable"
         try:
             ref = _variable_ref_from_payload(payload, path=f"states.{action.state_id}.actions.{action.clip_id}")
-        except ValueError:
+        except ValueError as exc:
+            # The clip path raises for the same malformed payload.  Dropping the
+            # action silently would compile a stage that quietly omits the write
+            # the author asked for, with nothing pointing at the cause.
+            diagnostics.append(StageCompileDiagnostic("error", "invalid_variable_automation", scene.id, action.track_id, action.clip_id, None, path, str(exc), state_id=action.state_id))
             continue
         spec = _variable_spec_for(specs, ref)
-        path = f"states.{action.state_id}.actions.{action.clip_id}.payload.variable"
         if spec is None:
             candidates = _variable_candidates(specs, ref)
             reason = (
@@ -770,7 +730,7 @@ def compile_stage(
             "StageProgram v2 requires the formal 60 Hz pattern runtime.",
         )
 
-    nodes, parents = _node_maps(scene.root)
+    nodes, parents = node_maps(scene.root)
     runtime_nodes: list[StageNode] = []
     for node in scene.root.walk():
         properties = deepcopy(node.properties)
@@ -870,15 +830,11 @@ def compile_stage(
                     state,
                     state_path,
                 )
-                position_node = _position_node(target, parents)
+                position_node = spawn_origin_node(target, parents)
                 if position_node is not None:
                     try:
-                        x = float(position_node.properties.get("x", 192.0))
-                        y = float(position_node.properties.get("y", 224.0))
-                        runtime_x, runtime_y = scene.coordinate_space.authoring_to_runtime(x, y)
-                        document = pattern_with_property(document, "shape.origin_x", runtime_x)
-                        document = pattern_with_property(document, "shape.origin_y", runtime_y)
-                    except (TypeError, ValueError) as exc:
+                        document = apply_spawn_origin(scene, document, position_node)
+                    except PatternResolveError as exc:
                         raise _failure(
                             scene,
                             "invalid_emitter_position",

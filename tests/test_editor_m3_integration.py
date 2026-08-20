@@ -1,7 +1,7 @@
 import json
 
-from PyQt5.QtCore import QUrl
-from PyQt5.QtWidgets import QFileDialog
+from src.qt_compat.QtCore import QUrl
+from src.qt_compat.QtWidgets import QFileDialog
 
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext

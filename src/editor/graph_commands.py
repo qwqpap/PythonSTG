@@ -8,6 +8,7 @@ from typing import Any
 from src.pattern import BehaviorGraph, BehaviorGraphNode, PatternDocument
 from src.pattern.graph import PORT_TYPES
 
+from .commands import MergeableCommand
 from .pattern_commands import _copy_pattern
 
 
@@ -256,7 +257,7 @@ class SetGraphNodePropertiesCommand:
 
 
 @dataclass
-class SetGraphNodePositionCommand:
+class SetGraphNodePositionCommand(MergeableCommand):
     document: PatternDocument
     node_id: str
     x: float
@@ -265,6 +266,9 @@ class SetGraphNodePositionCommand:
     _previous_position: tuple[float, float] | None = field(
         default=None, init=False, repr=False
     )
+    merge_owner = ("document",)
+    merge_identity = ("node_id",)
+    merge_values = ("x", "y")
 
     def execute(self) -> None:
         graph = _require_graph(self.document)
@@ -296,12 +300,3 @@ class SetGraphNodePositionCommand:
                 )
                 return
         raise GraphMutationError(f"Unknown graph node: {self.node_id}")
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetGraphNodePositionCommand):
-            return False
-        if self.document is not other.document or self.node_id != other.node_id:
-            return False
-        self.x = other.x
-        self.y = other.y
-        return True

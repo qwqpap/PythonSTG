@@ -58,6 +58,7 @@ _ZH_CN: dict[str, str] = {
     "Apply Binding": "应用动态设置",
     "Remove Selected Binding": "删除所选动态设置",
     "Bind an exact Pattern property to a constant, curve, variable, or expression.": "让弹幕参数跟随常量、曲线、变量或表达式变化。",
+    "2.0, res://curve…, rank, or expression": "2.0、res://曲线…、rank 或表达式",
     "States": "阶段",
     "Transitions": "阶段切换",
     "StageFlow": "关卡流程",
@@ -245,6 +246,32 @@ _ZH_CN: dict[str, str] = {
     "Runtime Preview": "运行时预览",
     "Assets": "资源",
     "Bullet Aliases": "弹幕别名",
+    # Tools menu: external editor plugin titles and their tooltips.
+    "Texture Assets": "纹理资产",
+    "Player": "玩家",
+    "Enemy Aliases": "敌人别名",
+    "Danmaku Script": "弹幕脚本",
+    "Dialog Balloon": "对话气泡",
+    "Dialog Portrait": "对话立绘",
+    "Main Menu": "主菜单",
+    "Portrait Layout": "立绘布局",
+    "Browse project files and JSON sprite/animation subresources.": (
+        "浏览工程文件与 JSON 精灵/动画子资源。"
+    ),
+    "Edit bullet type and color to sprite mappings.": "编辑子弹类型与颜色到精灵的映射。",
+    "Edit atlases, sprite regions, animations and laser configuration.": (
+        "编辑图集、精灵区域、动画与激光配置。"
+    ),
+    "Edit player animation, stats, shots and options.": "编辑玩家动画、属性、射击与 Option。",
+    "Edit enemy sprite aliases and atlas zones.": "编辑敌人精灵别名与图集区域。",
+    "Edit data-driven stage background layers.": "编辑数据驱动的关卡背景层。",
+    "Edit bullet patterns, timelines and generated async code.": (
+        "编辑弹幕、时间线与生成的异步代码。"
+    ),
+    "Edit dialog balloon assembly and layout.": "编辑对话气泡的组装与布局。",
+    "Edit dialog portrait placement and appearance.": "编辑对话立绘的位置与外观。",
+    "Edit the GLFW/ImGui main-menu layout.": "编辑 GLFW/ImGui 主菜单布局。",
+    "Edit the GLFW/ImGui portrait render layout.": "编辑 GLFW/ImGui 立绘渲染布局。",
     "Simple Spell Setup": "简单符卡设置",
     "Stage": "关卡",
     "Scene Root": "场景根节点",
@@ -300,10 +327,7 @@ _ZH_CN: dict[str, str] = {
     "Event": "事件",
     "Property": "属性",
     "ScriptEvent": "脚本事件",
-    "Recipe": "配方",
-    "Graph": "行为图",
-    "Authoring mode: Recipe (fields) or Graph (behavior nodes)": "创作模式：配方（字段）或行为图（行为节点）",
-    "Fold back to Recipe": "折叠回配方",
+    "Back to Parameters": "返回调整参数",
     "Guides": "辅助线",
     "Formal Preview": "正式预览",
     "Bullet": "弹幕",
@@ -320,10 +344,8 @@ _ZH_CN: dict[str, str] = {
     "Drag E/P gizmos. Drop an Assets sprite to assign.": "拖动发射点和玩家位置控制柄。也可以从资源面板拖入精灵。",
     "Choose bullet sprite…": "选择弹幕精灵…",
     "Choose bullet sprite...": "选择弹幕精灵…",
-    "This pattern is in Recipe mode. Expand it into the typed behavior graph to edit nodes, ports, and connections.": "此弹幕处于配方模式。展开为类型化行为图后即可编辑节点、端口和连接。",
-    "Expand to Graph": "展开为行为图",
+    "This pattern is still described by its parameters. Open it as nodes to edit each step and how they connect.": "此弹幕目前只由参数描述。以节点方式打开后，即可编辑每一步以及它们之间的连接。",
     "No node selected": "未选择节点",
-    "No graph node selected": "未选择行为图节点",
     "No UI node selected": "未选择 UI 节点",
     "Name": "名称",
     "Type": "类型",
@@ -379,6 +401,7 @@ _ZH_CN: dict[str, str] = {
     "Target": "目标",
     "Channel": "通道",
     "Payload": "载荷",
+    "Payload [JSON]": "载荷 [JSON]",
     "Apply Payload": "应用载荷",
     "Keyframes": "关键帧",
     "Frame": "帧",
@@ -420,6 +443,38 @@ _ZH_CN: dict[str, str] = {
     "Search resources…": "搜索资源…",
     "Search resources...": "搜索资源…",
     "All types": "全部类型",
+    # Resource browser kind filter items come from ``kind.title()``.
+    "Image": "图片",
+    "Animation": "动画",
+    "Ui": "界面",
+    "Json": "JSON",
+    "Font": "字体",
+    "Shader": "着色器",
+    "Text": "文本",
+    # Variable declaration vocabulary: types, scopes, and reducers.
+    "bool": "布尔",
+    "int": "整数",
+    "float": "小数",
+    "string": "文本",
+    "vector2": "二维向量",
+    "color": "颜色",
+    "resource": "资源",
+    "complex": "复合",
+    "clip": "片段",
+    "reaction": "反应",
+    "behavior": "行为",
+    "engine_snapshot": "引擎快照",
+    "override": "覆盖",
+    "add": "相加",
+    "multiply": "相乘",
+    "blend": "混合",
+    "none": "无",
+    # Variable mapping operations.
+    "set": "赋值",
+    "toggle": "切换",
+    "reset": "重置",
+    "State Path": "状态路径",
+    "Migrate": "升级版本",
     "Refresh": "刷新",
     "All resources": "全部资源",
     "Select a resource": "选择资源",
@@ -657,14 +712,24 @@ def _translate_actions(root: QWidget, manager: LanguageManager) -> None:
         translated = manager.translate(source)
         action.setText(translated)
         _set_rendered(action, "_pystg_i18n_text", translated)
-        if action.toolTip():
-            tooltip = _remember(action, "_pystg_i18n_tooltip", action.toolTip())
-            translated_tooltip = manager.translate(tooltip)
-            action.setToolTip(translated_tooltip)
-            _set_rendered(action, "_pystg_i18n_tooltip", translated_tooltip)
+        tooltip = action.toolTip()
+        if not tooltip or tooltip == source.replace("&", ""):
+            # Qt derives a menu action's tooltip from its text when none was set.
+            # Setting it explicitly here would freeze the English wording onto an
+            # otherwise translated action; leaving it implicit keeps it in step.
+            continue
+        remembered = _remember(action, "_pystg_i18n_tooltip", tooltip)
+        translated_tooltip = manager.translate(remembered)
+        action.setToolTip(translated_tooltip)
+        _set_rendered(action, "_pystg_i18n_tooltip", translated_tooltip)
 
 
 def _translate_combo(combo: QComboBox, manager: LanguageManager) -> None:
+    if combo.isEditable():
+        # An editable combo's text is author input that is written straight back
+        # into the document, exactly like a line edit's contents.  Translating it
+        # would rename whatever the author typed.
+        return
     sources = combo.property("_pystg_i18n_items")
     current = [combo.itemText(index) for index in range(combo.count())]
     sources = _remember_list(combo, "_pystg_i18n_items", current)

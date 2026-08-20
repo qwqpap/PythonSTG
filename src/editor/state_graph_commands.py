@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from .commands import MergeableCommand
 from .document import (
     SceneDocument,
     StateGraphSpec,
@@ -169,12 +170,15 @@ class AddStateCommand:
 
 
 @dataclass
-class RenameStateCommand:
+class RenameStateCommand(MergeableCommand):
     document: SceneDocument
     state_id: str
     name: str
     label: str = "Rename state"
     _previous: str | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("state_id",)
+    merge_values = ("name",)
 
     def execute(self) -> None:
         state = require_state(self.document, self.state_id)
@@ -186,14 +190,6 @@ class RenameStateCommand:
         if self._previous is None:
             raise StateGraphMutationError("Cannot undo State rename before execution")
         require_state(self.document, self.state_id).name = self._previous
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, RenameStateCommand):
-            return False
-        if self.document is not other.document or self.state_id != other.state_id:
-            return False
-        self.name = other.name
-        return True
 
 
 @dataclass
@@ -385,12 +381,16 @@ class RemoveTransitionCommand:
 
 
 @dataclass
-class SetTransitionPropertiesCommand:
+class SetTransitionPropertiesCommand(MergeableCommand):
     document: SceneDocument
     transition_id: str
     values: dict[str, Any]
     label: str = "Edit state transition"
     _previous: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    merge_owner = ("document",)
+    merge_identity = ("transition_id",)
+    merge_same_keys = ("values",)
+    merge_values = ("values",)
 
     _ALLOWED = frozenset(
         {"name", "target_state_id", "trigger", "after_frames", "priority"}
@@ -422,18 +422,6 @@ class SetTransitionPropertiesCommand:
         )
         for key, value in self._previous.items():
             setattr(transition, key, deepcopy(value))
-
-    def merge_with(self, other: object) -> bool:
-        if not isinstance(other, SetTransitionPropertiesCommand):
-            return False
-        if (
-            self.document is not other.document
-            or self.transition_id != other.transition_id
-            or set(self.values) != set(other.values)
-        ):
-            return False
-        self.values = deepcopy(other.values)
-        return True
 
 
 __all__ = [

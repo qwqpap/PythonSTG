@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from PyQt5.QtWidgets import QDoubleSpinBox, QMenu, QPushButton
+from src.qt_compat.QtWidgets import QDoubleSpinBox, QMenu, QPushButton
 
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
@@ -111,11 +111,31 @@ def test_real_usability_report_schema_requires_five_independent_beginners(tmp_pa
     assert error.value.path == "participants"
 
 
-def test_no_checked_in_report_means_automation_cannot_claim_n6_usability():
-    from pathlib import Path
+def test_n6_usability_claim_and_report_must_agree():
+    """The roadmap may claim N6.4 only when a validating report backs it.
 
-    root = Path(__file__).resolve().parents[1]
-    assert not (root / "reports" / "n6_usability.json").exists()
+    Asserting that ``reports/n6_usability.json`` is absent would make this gate
+    self-defeating: the day a genuine study is checked in, the suite would fail
+    for the wrong reason and the honest move would be to delete the test.  What
+    must hold in both worlds is that the claim and the evidence agree.
+    """
+
+    from tools.verify_n6_usability import validate_report
+
+    report_path = ROOT / "reports" / "n6_usability.json"
+    todo = (ROOT / "docs" / "EDITOR_IMPLEMENTATION_TODO.md").read_text(encoding="utf-8")
+    row = next(line for line in todo.splitlines() if line.startswith("| N6.4 "))
+    claimed = "`[x]`" in row
+
+    if not report_path.exists():
+        assert not claimed, "N6.4 is checked off with no reports/n6_usability.json"
+        return
+
+    # A checked-in report is held to the real schema and thresholds; an invalid
+    # one raises out of validate_report and fails this gate.
+    result = validate_report(json.loads(report_path.read_text(encoding="utf-8")))
+    assert result["passed"], result
+    assert claimed, "a passing usability report exists but N6.4 is still unchecked"
 
 
 def test_level_ui_exposes_exact_preset_parameter_and_binding_controls(

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 
-from src.authoring.variables import VARIABLE_REDUCERS, VARIABLE_SCOPES, VariableSpec
+from src.authoring.variables import (
+    DEFAULT_VARIABLE_TYPES,
+    VARIABLE_REDUCERS,
+    VARIABLE_SCOPES,
+    VariableSpec,
+)
 from src.qt_compat.QtCore import Qt, pyqtSignal
 from src.qt_compat.QtWidgets import (
     QCheckBox,
@@ -46,11 +51,20 @@ class VariableEditor(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 6)
         layout.setSpacing(4)
+        layout.addLayout(self._build_declaration_form())
+        layout.addLayout(self._build_property_form())
+        layout.addWidget(self._build_table(), 1)
+        layout.addLayout(self._build_footer())
 
-        # Keep authoring controls in a compact grid rather than one long
-        # horizontal strip.  The Variables dock is also used at the editor's
-        # 960px minimum width; a single row silently clipped scope/writer
-        # controls in the native window.
+    def _build_declaration_form(self) -> QGridLayout:
+        """Name/type/scope/default plus Add — everything a declaration needs.
+
+        Keep authoring controls in a compact grid rather than one long
+        horizontal strip.  The Variables dock is also used at the editor's
+        960px minimum width; a single row silently clipped scope/writer
+        controls in the native window.
+        """
+
         header = QGridLayout()
         header.setHorizontalSpacing(6)
         header.setVerticalSpacing(4)
@@ -64,13 +78,20 @@ class VariableEditor(QWidget):
         header.addWidget(QLabel("Type"), 1, 0)
         self.type_combo = QComboBox()
         self.type_combo.setObjectName("variableType")
-        self.type_combo.addItems(["bool", "int", "float", "string", "vector2", "color", "resource", "complex"])
+        # Item text is author-facing and therefore translated; the declaration
+        # written into the document must stay the internal token, so every entry
+        # carries its own value as item data and is only ever read that way.
+        # The type list comes from the registry that validates declarations, so
+        # a plugin-registered type is offered here without a second edit.
+        for variable_type in DEFAULT_VARIABLE_TYPES:
+            self.type_combo.addItem(variable_type, variable_type)
         self.type_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         header.addWidget(self.type_combo, 1, 1)
         header.addWidget(QLabel("Scope"), 1, 2)
         self.scope_combo = QComboBox()
         self.scope_combo.setObjectName("variableScope")
-        self.scope_combo.addItems(list(VARIABLE_SCOPES))
+        for scope in VARIABLE_SCOPES:
+            self.scope_combo.addItem(scope, scope)
         self.scope_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         header.addWidget(self.scope_combo, 1, 3)
         header.addWidget(QLabel("Default"), 2, 0)
@@ -89,7 +110,10 @@ class VariableEditor(QWidget):
         # the type selector only needs a short token such as ``bool``.
         header.setColumnStretch(1, 1)
         header.setColumnStretch(3, 2)
-        layout.addLayout(header)
+        return header
+
+    def _build_property_form(self) -> QGridLayout:
+        """Access lists, reducer, the boolean options and Apply."""
 
         properties = QGridLayout()
         properties.setHorizontalSpacing(6)
@@ -137,7 +161,10 @@ class VariableEditor(QWidget):
         properties.addWidget(edit, 5, 1, 1, 3)
         properties.setColumnStretch(1, 2)
         properties.setColumnStretch(3, 1)
-        layout.addLayout(properties)
+        return properties
+
+    def _build_table(self) -> QTableWidget:
+        """One row per declaration, last column carrying the runtime value."""
 
         self.table = QTableWidget(0, 10)
         self.table.setObjectName("variableTable")
@@ -153,7 +180,10 @@ class VariableEditor(QWidget):
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.currentCellChanged.connect(self._selection_changed)
-        layout.addWidget(self.table, 1)
+        return self.table
+
+    def _build_footer(self) -> QHBoxLayout:
+        """Runtime readout, then the actions that need a selected row."""
 
         footer = QHBoxLayout()
         self.runtime_label = QLabel("Runtime: none")
@@ -175,7 +205,7 @@ class VariableEditor(QWidget):
         self.mapping_button.setToolTip("Edit Behavior output mappings")
         self.mapping_button.clicked.connect(self.mappingRequested)
         footer.addWidget(self.mapping_button)
-        layout.addLayout(footer)
+        return footer
 
     def set_document(self, document: SceneDocument | None, *, state_id: str | None = None) -> None:
         self.document = document
@@ -259,8 +289,8 @@ class VariableEditor(QWidget):
         if variable is None:
             return
         self.name_edit.setText(variable.name)
-        self.type_combo.setCurrentText(variable.type)
-        self.scope_combo.setCurrentText(variable.scope)
+        self.type_combo.setCurrentIndex(max(0, self.type_combo.findData(variable.type)))
+        self.scope_combo.setCurrentIndex(max(0, self.scope_combo.findData(variable.scope)))
         self.default_edit.setText(json.dumps(variable.default, ensure_ascii=False, sort_keys=True))
         self.writers_edit.setText(",".join(variable.writable_by))
         self.readers_edit.setText(",".join(variable.readers))
@@ -277,7 +307,9 @@ class VariableEditor(QWidget):
             default = json.loads(self.default_edit.text() or "null")
         except json.JSONDecodeError:
             return
-        self.addVariableRequested.emit(name, self.type_combo.currentText(), default, self.scope_combo.currentText())
+        self.addVariableRequested.emit(
+            name, self.type_combo.currentData(), default, self.scope_combo.currentData()
+        )
 
     def _edit_requested(self) -> None:
         variable_id = self._selected_id()
@@ -291,8 +323,8 @@ class VariableEditor(QWidget):
             variable_id,
             {
                 "name": self.name_edit.text().strip(),
-                "type": self.type_combo.currentText(),
-                "scope": self.scope_combo.currentText(),
+                "type": self.type_combo.currentData(),
+                "scope": self.scope_combo.currentData(),
                 "default": default,
                 "writable_by": tuple(item.strip() for item in self.writers_edit.text().split(",") if item.strip()),
                 "readers": tuple(item.strip() for item in self.readers_edit.text().split(",") if item.strip()),

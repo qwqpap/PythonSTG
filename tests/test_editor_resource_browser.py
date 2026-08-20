@@ -3,9 +3,9 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QPointF, Qt
-from PyQt5.QtGui import QColor, QDropEvent, QPixmap
-from PyQt5.QtWidgets import QApplication, QLabel
+from src.qt_compat.QtCore import QPointF, Qt
+from src.qt_compat.QtGui import QColor, QDropEvent, QPixmap
+from src.qt_compat.QtWidgets import QApplication, QLabel
 
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow, NodeGraphicsItem, SceneViewport
