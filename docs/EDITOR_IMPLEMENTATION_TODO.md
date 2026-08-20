@@ -1,6 +1,6 @@
 # PySTG 下一代编辑器未来实施 TODO（固定版）
 
-> 状态：Active；N7 已暂停，下一任务是 ER2。本文是仓库唯一的未来实施清单，也是 Agent 的交接协议。
+> 状态：Active；N7 已暂停，下一任务是 ER3。本文是仓库唯一的未来实施清单，也是 Agent 的交接协议。
 > 产品依据：[EDITOR_PRODUCT_VISION.md](EDITOR_PRODUCT_VISION.md)；工程边界：[EDITOR_ARCHITECTURE.md](EDITOR_ARCHITECTURE.md)。
 > 本版固定日期：2026-08-20。历史路线图和完成日志只通过 Git 追溯，不再作为任务来源。
 
@@ -205,7 +205,7 @@ git diff --check
 | N6.3 | 分层展开与连续编辑 | `[x]` | N6.2 |
 | ER0 | 文档、边界 Contract 与真实基线 | `[x]` | N6.3 |
 | ER1 | 有类型的编辑状态 | `[x]` | ER0 |
-| ER2 | Coordinator 与局部失效 | `[ ]` | ER1 |
+| ER2 | Coordinator 与局部失效 | `[x]` | ER1 |
 | ER3 | Authoring/Command/Compiler 包边界 | `[ ]` | ER2 |
 | ER4 | 唯一 PreviewSession | `[ ]` | ER3 |
 | ER5 | 唯一插件贡献入口 | `[ ]` | ER4 |
@@ -439,7 +439,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 ### ER2 Coordinator 与局部失效
 
-**状态/依赖**：`[ ]`；依赖 ER1。
+**状态/依赖**：`[x]`；依赖 ER1。
 
 **允许路径**：`src/editor/application/`、`src/editor/shell/`、`src/editor/app.py`、`src/editor/main_window_*.py`、`src/editor/state/`、focused tests。
 
@@ -456,7 +456,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 **验收文件**：新建 `tests/test_editor_coordinator.py`；回归 `tests/test_editor_app_smoke.py`、`tests/test_editor_authoring_integration.py`、`tests/test_editor_scene_commands.py`、`tests/test_editor_timeline_commands.py`。
 
-**Evidence / Blocker（尚未完成）**：保持 `[ ]`。
+**Evidence（2026-08-21）**：环境为 Windows 11 `10.0.26200`、Python 3.12.7、PySide6 6.8.1.1、Intel64 Family 6 Model 151；命令固定使用 `C:\Users\m1573\anaconda3\python.exe`。Contract / Structural：新增冻结 `tests/test_editor_coordinator.py`，用真实 `DocumentManager` / `SceneDocument` 验证无 QWidget 的不可变 typed Intent、显式拒绝、一次提交一个 Command、同一路径 Undo/Redo、有限局部失效和受约束 full sync；`$env:QT_QPA_PLATFORM='offscreen'; python -m pytest -o addopts= -q tests/test_editor_coordinator.py tests/test_editor_app_smoke.py tests/test_editor_authoring_integration.py tests/test_editor_scene_commands.py tests/test_editor_timeline_commands.py` 为 32 passed。窗口改为 `QMainWindow` + 组合式 shell service，不继承八个 `SlotsMixin`、不导入领域 Command、不调用 Panel 私有方法；普通 mutation 无 `_refresh()`，唯一全量刷新只响应 `DocumentController` 的 initial open / document activation / schema migration；Command 提交集中在 `EditorCoordinator._submit()`，Undo/Redo 也经 `dispatch()`。`python -m pytest -o addopts= -q tests/test_editor_architecture_boundaries.py tests/test_architecture_contracts.py tests/test_editor_regression_contracts.py` 为 127 passed、仅保留 6 个 ER3–ER6 预期 Contract 红项（headless authoring/preview 与 `AuthoringDocument` 属 ER3、裸 preview `QProcess` 属 ER4、双 registry 属 ER5、graph/pattern 循环属 ER6），ER2 的 SlotsMixin 边界已转绿。Runtime：N2/N3 命令 `$env:QT_QPA_PLATFORM='offscreen'; python -m pytest -o addopts= -q tests/test_typed_variables.py tests/test_variable_runtime.py tests/test_variable_scopes_and_reducers.py tests/test_variable_seek.py tests/test_variable_hotreload.py tests/test_lifecycle_events.py tests/test_frame_boundary_events.py tests/test_lifecycle_batching.py tests/test_reactions.py tests/test_reaction_scheduler.py tests/test_lifecycle_timeline_hooks.py tests/test_background_reactions.py` 为 43 passed；全量 `$env:QT_QPA_PLATFORM='offscreen'; python -m pytest -o addopts= -q --tb=short` 为 699 passed、仅同一组 6 个后续 ER 预期 Contract failure，无 ER2 或既有产品回归。`python -m compileall -q main.py src game_content tools tests` 通过；`python tools/validate_assets.py --format json` 检查 74 JSON、16 sprite configs、745 sprites、142 images，0 error/warning；`git diff --check`、`git diff --cached --check` 通过；没有 `skip` / `xfail`，没有修改或删除既有测试。Native visual/runtime：清除 `QT_QPA_PLATFORM` 后，`python tools/verify_native_editor_n6.py --screenshot %TEMP%/pystg-er2-final-6081a3b96ec946e8be8730aa3aa86c10/native-1480x920.png --compact-screenshot %TEMP%/pystg-er2-final-6081a3b96ec946e8be8730aa3aa86c10/native-960x640.png` 真实双尺寸通过，独立验证 Agent 人工复核无面板堆叠、紧凑时间线可编辑且中文渐进导航无实现术语；`python tools/verify_native_editor_n4.py --screenshot %TEMP%/pystg-er2-final-6081a3b96ec946e8be8730aa3aa86c10/native-n4.png` 经正式 `compile_stage → StageRunner → runtime feedback` 得到 1 条 Reactive trace。Performance：`python tools/profile_n5_presets.py --output %TEMP%/pystg-er2-final-6081a3b96ec946e8be8730aa3aa86c10/n5-profile.json` 得到 14 presets、1836 spawned、101 batch writes、0 per-bullet callbacks、41.406 ms（上限 2500 ms）。Usability：not run，按依赖顺序在 ER8 后执行 N6.4。独立只读验证 Agent 复验以上全部类别后给出 APPROVE，无 ER2 blocker；实现 checkpoint `cb8f35b`，完成 commit `72a0b00`，无关 `.claude/settings.local.json` 保持未提交且未改动。
 
 ### ER3 Authoring、Command 与 Compiler 包边界
 
