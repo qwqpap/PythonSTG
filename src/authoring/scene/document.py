@@ -28,23 +28,7 @@ from src.authoring.variables import (
 )
 
 
-class _LegacyCompatibleSchemaVersion(int):
-    """Public constant that remains comparable to the retired v3 contract.
-
-    N1 callers used ``CURRENT_SCHEMA_VERSION == 3`` as a historical assertion.
-    The actual authoring envelope is v4; keeping this compatibility comparison
-    lets old integrations fail only when they try to write a v3 document as
-    new content, while N2 can assert the real value is 4.
-    """
-
-    def __new__(cls, value: int = 4):
-        return int.__new__(cls, value)
-
-    def __eq__(self, other: object) -> bool:
-        return int.__eq__(self, other) or (int(self) == 4 and other == 3)
-
-
-CURRENT_SCHEMA_VERSION = _LegacyCompatibleSchemaVersion(SCENE_RESOURCE_SCHEMA_VERSION)
+CURRENT_SCHEMA_VERSION = SCENE_RESOURCE_SCHEMA_VERSION
 SCENE_DOCUMENT_TYPE = SCENE_RESOURCE_TYPE
 
 
@@ -1151,7 +1135,7 @@ class SceneDocument:
         self.name = name
         self.root = root
         self.id = id or new_document_id()
-        self.schema_version = _LegacyCompatibleSchemaVersion(int(schema_version))
+        self.schema_version = int(schema_version)
         self.type = type
         self.symbol_name = symbol_name
         self.timeline = list(timeline or [])

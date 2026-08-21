@@ -1,19 +1,21 @@
 from src.core.project_context import ProjectContext
 from src.editor import (
     AddNodeCommand,
-    DocumentStore,
     MoveNodeCommand,
     RemoveNodeCommand,
     RenameNodeCommand,
-    SceneEditorSession,
     SceneMutationError,
     SetNodePropertyCommand,
     make_node,
 )
+from src.editor.document_manager import DocumentManager
 
 
 def _session(tmp_path):
-    return SceneEditorSession(DocumentStore(ProjectContext(tmp_path)))
+    # The canonical single document lifecycle: DocumentManager owns exactly one
+    # ManagedDocument (and its sole CommandStack).  ``.active`` is the document
+    # under edit -- the same object the native workbench mutates through Intents.
+    return DocumentManager(ProjectContext(tmp_path)).active
 
 
 def test_scene_commands_round_trip_through_undo_redo(tmp_path):
@@ -48,8 +50,13 @@ def test_scene_commands_round_trip_through_undo_redo(tmp_path):
 def test_move_reparents_and_restores_original_order(tmp_path):
     session = _session(tmp_path)
     root = session.document.root
+    # SpellCard is only a valid child of SceneRoot/Stage/Sprite, so both
+    # reparent targets are Sprites: the canonical ManagedDocument lifecycle
+    # validates node-type parentage on every apply (the retired session did
+    # not).  What this test exercises -- reparenting a node between two
+    # containers and restoring the original order on undo -- is unchanged.
     left = make_node("Sprite", name="Left")
-    right = make_node("EnemySpawner", name="Right")
+    right = make_node("Sprite", name="Right")
     child = make_node("SpellCard", name="Child")
     root.children[:] = [left, right]
     left.children.append(child)

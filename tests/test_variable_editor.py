@@ -17,14 +17,14 @@ from src.editor.variable_commands import (
 
 
 def test_variable_commands_are_undoable_and_preserve_identity() -> None:
-    # Construct through the normal editor factory so validation follows the
-    # same path as the native workbench.
+    # Drive the canonical DocumentManager/ManagedDocument lifecycle so
+    # validation follows the same path as the native workbench.
     from src.core.project_context import ProjectContext
-    from src.editor.storage import DocumentStore
+    from src.editor.document_manager import DocumentManager
     import tempfile
 
     with tempfile.TemporaryDirectory() as root:
-        editor = SceneEditorSession(DocumentStore(ProjectContext(root)))
+        editor = DocumentManager(ProjectContext(root)).active
         document = editor.document
         variable = VariableSpec("rank", "float", 1.0, writable_by=("safe_action",))
         editor.apply(AddVariableCommand(document, variable))

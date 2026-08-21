@@ -60,7 +60,7 @@ def test_scene_v2_fixture_migrates_losslessly_to_canonical_v3_fixture():
     first = SceneDocument.from_dict(source)
     second = SceneDocument.from_dict(source)
 
-    assert first.schema_version == CURRENT_SCHEMA_VERSION == 3
+    assert first.schema_version == CURRENT_SCHEMA_VERSION == 4
     assert first.to_dict() == second.to_dict() == expected
     assert "tracks" not in first.to_dict()
     assert first.tracks is first.state_graph.initial_state.tracks
