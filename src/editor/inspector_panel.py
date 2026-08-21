@@ -26,7 +26,7 @@ from .document import EditorNode, TimelineClip, TimelineTrack
 from .node_types import PropertySpec, property_specs
 from .resource_browser import RESOURCE_MIME_TYPE
 from .i18n import LanguageManager
-from .graph_workspace import GRAPH_NODE_PROPERTY_SPECS
+from .graphics.graph_canvas import GRAPH_NODE_PROPERTY_SPECS
 from src.ui.document import ANIMATABLE_PROPERTIES
 
 

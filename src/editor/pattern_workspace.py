@@ -242,7 +242,7 @@ class PatternWorkspace(QWidget):
     def _build_graph_toolbar(self) -> QWidget:
         """Node-creation strip, hidden until a graph view is on screen."""
 
-        from .graph_workspace import CREATABLE_NODE_CATEGORIES
+        from .graphics.graph_canvas import CREATABLE_NODE_CATEGORIES
 
         self.graph_toolbar_widget = QWidget()
         self.graph_toolbar_widget.setObjectName("graphToolbar")
@@ -270,7 +270,7 @@ class PatternWorkspace(QWidget):
     def _build_view_stack(self) -> QStackedWidget:
         """The one central stack every authoring task switches between."""
 
-        from .graph_workspace import GraphCanvas, GraphPlaceholder
+        from .graphics.graph_canvas import GraphCanvas, GraphPlaceholder
 
         self.canvas = PatternCanvas()
         self.canvas.originPositionRequested.connect(self.originPositionRequested)
