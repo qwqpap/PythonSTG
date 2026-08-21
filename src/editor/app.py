@@ -68,14 +68,13 @@ from .application.queries import find_timeline_clip, find_timeline_track
 from .timeline_workspace import TimelineEditor
 from .variable_workspace import VariableEditor
 from .state_graph_workspace import StateGraphEditor
-from .plugin_sdk import PluginRegistry as SDKPluginRegistry
 from .i18n import (
     LANGUAGE_CHINESE,
     LANGUAGE_ENGLISH,
     LanguageManager,
     translate_widget_tree,
 )
-from .workbench import PluginRegistry as EditorPluginRegistry
+from .plugins import EditorPluginRegistry
 from .inspector_panel import InspectorPanel
 from .main_window_support import APP_NAME, build_preview_command
 from .scene_view import NodeGraphicsItem, SceneTreeWidget, SceneViewport
@@ -116,16 +115,12 @@ class EditorMainWindow(QMainWindow):
         self.project = project
         self.language_manager = LanguageManager(self)
         self.language_manager.languageChanged.connect(self._language_changed)
-        # The SDK registries are the same objects used by document loading and
-        # scene validation.  Legacy workbench widgets remain a separate view
-        # catalog, but plugin contributions now have a real runtime owner.
+        # These resource/node type registries are the same objects wired into
+        # the document manager below and, through the plugin facade, into the
+        # SDK registry -- so plugin-contributed types land where scene
+        # validation reads them.  Never replace them with a detached copy.
         self.resource_type_registry = build_default_resource_type_registry()
         self.node_type_registry = build_default_node_type_registry()
-        self.plugin_sdk_registry = SDKPluginRegistry(
-            project,
-            resource_types=self.resource_type_registry,
-            node_types=self.node_type_registry,
-        )
         self.document_manager = DocumentManager(
             project,
             registry=self.resource_type_registry,
@@ -180,11 +175,17 @@ class EditorMainWindow(QMainWindow):
         self._plugin_widgets: dict[str, QWidget] = {}
         self._document_widgets: dict[str, QWidget] = {}
         self._bottom_dock_resize_guard = False
-        # The legacy registry continues to own built-in Qt tool widgets.  The
-        # SDK registry above owns project-local resource/node/runtime
-        # contributions and is deliberately the same registry instance wired
-        # into DocumentManager; never replace it with a detached copy.
-        self.plugin_registry = EditorPluginRegistry(project)
+        # One plugin-contribution facade: it owns the Qt view catalog (built-in
+        # tool widgets) and, composed inside it, the transactional SDK registry
+        # for project-local contributions.  The SDK registry receives the same
+        # resource/node type registries wired into DocumentManager above.  The
+        # window reaches the SDK surface through this single accessor.
+        self.plugin_registry = EditorPluginRegistry(
+            project,
+            resource_types=self.resource_type_registry,
+            node_types=self.node_type_registry,
+        )
+        self.plugin_sdk_registry = self.plugin_registry.sdk
         self._register_plugins()
         self._build_actions()
         self._build_ui()
@@ -1315,7 +1316,7 @@ class EditorMainWindow(QMainWindow):
             if not process.waitForFinished(1500):
                 process.kill()
         if not self._sdk_plugins_deactivated:
-            self.plugin_sdk_registry.deactivate_all()
+            self.plugin_registry.shutdown()
             self._sdk_plugins_deactivated = True
         event.accept()
 
