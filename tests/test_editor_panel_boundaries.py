@@ -9,10 +9,24 @@ leak across the boundary, so this gate forbids any panel->panel import edge in
 either direction (a strictly stronger statement than "no import cycles", which
 already lives in ``test_editor_architecture_boundaries``).
 
-The check is AST-only: it never imports product code, and it resolves the module
-named on both sides of ``from X import Y`` so a relative or function-local import
-is caught the same as a top-level absolute one.  It complements -- and does not
-duplicate -- the domain-command and direct-mutation gates in the ER0 suite.
+This file carries two complementary ER6 gates:
+
+* a **structural** gate (AST-only): it never imports product code, and it
+  resolves the module named on both sides of ``from X import Y`` so a relative
+  or function-local import is caught the same as a top-level absolute one --
+  forbidding any panel->panel edge; and
+* a **behavioural** gate: it drives a genuine press/move/release gesture on the
+  timeline canvas inside the assembled window and asserts, against the single
+  ``EditorCoordinator.dispatch`` chokepoint, that dragging commits *no* Intent
+  and releasing commits *exactly one* undoable ``TimelineIntent`` -- the ER6
+  §577 #2/#3 metrics ("panels never mutate the document or push a Command
+  directly"; "releasing the mouse commits exactly one Intent; graph wiring,
+  node drag, timeline move/trim and UI gizmos are all Undo/Redo-reversible").
+  The structural helpers stay import-light: this gate's Qt and product imports
+  are function-local, so the AST tests still run in a Qt-free environment.
+
+Both gates complement -- and do not duplicate -- the domain-command and
+direct-mutation gates in the ER0 suite.
 """
 
 from __future__ import annotations
@@ -156,3 +170,134 @@ def test_panels_do_not_import_sibling_panels() -> None:
     assert not violations, "panels import sibling panels:\n" + "\n".join(
         sorted(set(violations))
     )
+
+
+def test_timeline_clip_drag_commits_exactly_one_undoable_intent_on_release(
+    tmp_path, qapp_session
+) -> None:
+    """ER6 §577 #2/#3 runtime gate: a real drag mutates only via the coordinator.
+
+    Metric #2 ("a panel never mutates the document or pushes a Command
+    directly") and #3 ("releasing the mouse commits exactly one Intent; the move
+    is Undo/Redo-reversible") are behavioural, not structural, so no AST check
+    can establish them.  This gate drives a genuine press/move/release gesture on
+    the timeline canvas inside the assembled window and asserts against the sole
+    coordinator chokepoint (``EditorCoordinator.dispatch``):
+
+    * moving the mouse mid-gesture commits *no* Intent -- the panel holds a
+      transient pose and never touches the document while the drag is live;
+    * releasing commits *exactly one* ``TimelineIntent(MOVE_CLIP)`` through the
+      coordinator -- the single mutation path a panel is allowed; and
+    * the resulting move is reversible with Undo and re-appliable with Redo.
+
+    The clip is selected first with a zero-delta click.  A click never moves the
+    clip, so ``TimelineClipItem.mouseReleaseEvent`` (which only emits a geometry
+    commit when ``start != self.start_frame``) produces no Intent; and because
+    the drag's own press then finds the selection unchanged, the guarded
+    ``_timeline_clip_selected`` slot does not dispatch a SELECT_CLIP and does not
+    rebuild the scene under the live mouse grab.
+    """
+
+    from src.core.project_context import ProjectContext
+    from src.editor import TimelineClip, TimelineTrack
+    from src.editor.app import EditorMainWindow
+    from src.editor.application import TimelineAction, TimelineIntent
+    from src.editor.panels.timeline_workspace import CLIP_HEIGHT, TimelineClipItem
+    from src.qt_compat.QtCore import QPoint, QPointF, Qt
+    from src.qt_compat.QtGui import QMouseEvent
+    from src.qt_compat.QtTest import QTest
+    from src.qt_compat.QtWidgets import QApplication
+
+    window = EditorMainWindow(ProjectContext(tmp_path))
+    window.resize(900, 360)
+    window.show()
+    qapp_session.processEvents()
+
+    track = TimelineTrack(
+        name="Body",
+        kind="Pattern",
+        channel="main",
+        clips=[
+            TimelineClip(
+                name="Ring",
+                kind="Pattern",
+                start_frame=60,
+                duration_frames=120,
+                channel="main",
+                payload={"pattern": "ring"},
+            )
+        ],
+    )
+    window.session.document.tracks = [track]
+    window._refresh()
+    window.timeline.set_zoom(1.0)
+    qapp_session.processEvents()
+    clip_id = track.clips[0].id
+    view = window.timeline.view
+
+    def current_center():
+        # Re-fetch the item every time: selecting a clip rebuilds the scene, so a
+        # position cached before the first gesture would target a stale item.
+        item = next(
+            value
+            for value in view.graphics_scene.items()
+            if isinstance(value, TimelineClipItem) and value.clip_id == clip_id
+        )
+        return view.mapFromScene(item.scenePos() + QPointF(40, CLIP_HEIGHT / 2))
+
+    # Select first with a zero-delta click so the drag's press leaves the
+    # selection unchanged (no SELECT_CLIP dispatch, no mid-gesture rebuild).
+    QTest.mouseClick(view.viewport(), Qt.LeftButton, pos=current_center())
+    qapp_session.processEvents()
+
+    dispatched: list = []
+    real_dispatch = window.editor_coordinator.dispatch
+
+    def counting_dispatch(intent):
+        dispatched.append(intent)
+        return real_dispatch(intent)
+
+    window.editor_coordinator.dispatch = counting_dispatch
+    try:
+        center = current_center()
+        moved = center + QPoint(30, 0)
+
+        QTest.mousePress(view.viewport(), Qt.LeftButton, pos=center)
+        qapp_session.processEvents()
+        assert dispatched == [], "pressing an already-selected clip dispatched an intent"
+
+        QApplication.sendEvent(
+            view.viewport(),
+            QMouseEvent(
+                QMouseEvent.MouseMove,
+                moved,
+                view.viewport().mapToGlobal(moved),
+                Qt.NoButton,
+                Qt.LeftButton,
+                Qt.NoModifier,
+            ),
+        )
+        qapp_session.processEvents()
+        assert dispatched == [], "dragging committed an intent before the mouse was released"
+
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, pos=moved)
+        qapp_session.processEvents()
+    finally:
+        window.editor_coordinator.dispatch = real_dispatch
+
+    assert len(dispatched) == 1, (
+        f"releasing the mouse must commit exactly one Intent, got {dispatched!r}"
+    )
+    intent = dispatched[0]
+    assert isinstance(intent, TimelineIntent)
+    assert intent.action == TimelineAction.MOVE_CLIP
+
+    assert window.session.document.tracks[0].clips[0].start_frame == 90
+    assert window.session.undo()
+    assert window.session.document.tracks[0].clips[0].start_frame == 60
+    assert window.session.redo()
+    assert window.session.document.tracks[0].clips[0].start_frame == 90
+
+    window.session.revert()
+    window.close()
+    qapp_session.processEvents()
