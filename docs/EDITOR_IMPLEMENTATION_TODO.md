@@ -460,7 +460,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 ### ER3 Authoring、Command 与 Compiler 包边界
 
-**状态/依赖**：`[ ]`；依赖 ER2。
+**状态/依赖**：`[x]`；依赖 ER2（已完成）。
 
 **允许路径**：`src/authoring/`、新建 `src/compiler/`、现有无 Qt 的 `src/editor/document.py`、`commands.py`、`*_commands.py`、`stage_compile.py`、`scene_compile.py` 及其兼容出口、`src/preview/` 的 import 适配、focused tests。
 
@@ -478,7 +478,18 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 **验收文件**：`tests/test_editor_architecture_boundaries.py`、`tests/test_editor_documents.py`、`tests/test_editor_scene_compile.py`、`tests/test_editor_document_manager.py`、`tests/test_preview_controller.py`。
 
-**Evidence / Blocker（尚未完成）**：保持 `[ ]`。
+**Evidence / Blocker（已完成 `[x]`，独立验证 APPROVE）**：
+
+- 环境：`C:\Users\m1573\anaconda3\python.exe`（Python 3.12.7），PySide6 6.8.1.1 offscreen（`QT_QPA_PLATFORM=offscreen`），`pytest -o addopts= -p no:cacheprovider`，Windows 11 10.0.26200。
+- **Structural（迁移基线→迁移后）**：迁移前 `pytest tests/test_editor_architecture_boundaries.py tests/test_editor_documents.py tests/test_editor_scene_compile.py tests/test_editor_document_manager.py tests/test_preview_controller.py` → 6 failed, 41 passed；迁移后 → 45 passed, 3 failed。ER3 转绿的 3 项已绿：`test_headless_packages_do_not_import_editor_or_qt[authoring]`、`[preview]`、`test_managed_document_uses_runtime_authoring_document_protocol`。独立验证以 AST 遍历全部 31 个 `.py`（含函数内导入）确认 `src.authoring`/`src.compiler`/`src.preview` 对 `src.editor` 与 `PySide6/PyQt5/PyQt6/shiboken6` 的导入为 **0**；`registry.py:152` 的 `src.editor` 仅为错误信息字符串字面量，非导入节点。`test_headless_packages_do_not_import_editor_or_qt` 全部 10 个参数化通过。
+- **Runtime（四类文档 Qt-free）**：独立验证在无 Qt、无 `src.editor` 的进程内构造并 `.validate()` Scene/Pattern/UI/Background 四类文档，`isinstance(_, AuthoringDocument)` 均为 True，`sys.modules` 中 Qt 与 `src.editor` 均为空；Background 先以非 UUID id 触发校验失败，确认 validate 为真实校验。`AuthoringDocument` 确认为 `typing.Protocol` + `@runtime_checkable`，固定 `id/type/schema_version/to_dict/from_dict(classmethod)/validate`。
+- **Identity（迁移前后一致）**：独立验证对 15 个迁移模块逐一 diff HEAD 原文，均为**纯 import-path 改动**（3 个字节相同：`commands/base.py`、`scene/document.py`、`scene/node_types.py`；其余仅改相对导入指向新位置），无任何逻辑行变更；identity 敏感 runtime 测试 `test_stage_program`、`test_editor_scene_compile`、`test_replay_determinism`、`test_variable_runtime`、`test_state_graph_runtime` → 28 passed, 0 failed。
+- **Scope 纪律**：`git diff -M HEAD -- tests/` 为空，测试零改动/零 skip/xfail；15 个旧路径 shim 均为无逻辑（8 行：docstring + 单行 `from <new_location> import *  # noqa: F401,F403`），git 记录为 rename + 新 shim。
+- **editor_factory 决策**：`build_default_resource_type_registry()` 不再导入 Qt；UI/Background 的 `editor_factory` 经 authoring 侧无 Qt 贡献钩子 `register_editor_factory`，由 `src.editor` 导入时按 type ID 注册（§6/§8 贡献反转，方向 editor→authoring 合法，Qt import 惰性；ER5 将其收拢进 EditorPluginRegistry facade）。`test_ui_and_background_registry_entries_are_full_runtime_contributions` 保持绿，未削弱。
+- **迁移映射**：`document.py`→`src/authoring/scene/document.py`、`node_types.py`→`src/authoring/scene/node_types.py`、`commands.py`→`commands/base.py`、`*_commands.py`→`src/authoring/commands/{scene,pattern,timeline,graph,ui,background,variables,state_graph,preset}.py`、`pattern_resolve.py`/`stage_compile.py`/`scene_compile.py`→`src/compiler/{pattern_resolve,stage,scene_spell}.py`；旧 `src/editor/*` 路径全部为无逻辑 re-export shim。
+- **全量套件**：3 failed, 703 passed（对比 ER2 基线 699 passed + 6 预期 Contract failure：ER3 转绿 3 项 + `[compiler]` 边界参数就位，零回归）。剩余 3 红为 ER4/ER5/ER6 前向标记：`test_editor_main_window_does_not_own_raw_preview_qprocess`、`test_editor_main_window_has_one_plugin_registry_facade`、`test_editor_graph_modules_have_no_import_cycles`。
+- **未跑（非 ER3 验收类别）**：Native visual/Interaction 对 ER3 为 N/A（headless 重构，无 Qt UI 行为变更）；Performance/Usability 未跑，按流程延至 ER8/N6.4。
+- **独立验证**：由未参与 ER3 实现的只读 Agent（Read/Grep/pytest/git/python 一次性脚本，未改任何产品代码或测试）执行，四项硬指标全部 CONFIRMED，Verdict = APPROVE。
 
 ### ER4 唯一 PreviewSession
 

@@ -14,6 +14,7 @@ from src.authoring.resources import (
     SCENE_RESOURCE_TYPE,
     UI_RESOURCE_TYPE,
 )
+from src.authoring.document_types import AuthoringDocument
 from src.core.project_context import ProjectContext
 from src.pattern import PatternDocument
 
@@ -50,7 +51,7 @@ def _clone_document(document: Any) -> Any:
 @dataclass
 class ManagedDocument:
     store: ResourceStore
-    document: SceneDocument | PatternDocument
+    document: AuthoringDocument
     path: Path | None = None
     node_registry: Any | None = field(default=None, repr=False)
     commands: CommandStack = field(default_factory=CommandStack)

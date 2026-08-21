@@ -14,8 +14,8 @@ import numpy as np
 
 from src.authoring import ResourceReference, ResourceStore
 from src.core.project_context import ProjectContext
-from src.editor.document import DocumentError, SceneDocument
-from src.editor.stage_compile import StageCompileError
+from src.authoring.scene.document import DocumentError, SceneDocument
+from src.compiler import StageCompileError
 from src.game.stage.context import StageContext
 from src.game.stage.program import (
     StageProgram,

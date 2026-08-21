@@ -117,6 +117,45 @@ class ResourceTypeRegistry(Mapping[str, ResourceTypeSpec]):
         return self.spec_for_payload(data).asset_kind
 
 
+#: Editor (Qt) factories contributed by :mod:`src.editor` via contribution
+#: inversion.  Authoring owns the slot and resolves factories lazily; it never
+#: imports Qt or the editor itself.  ``src.editor`` populates this on import.
+_EDITOR_FACTORIES: dict[str, Contribution] = {}
+
+
+def register_editor_factory(type_name: str, factory: Contribution) -> None:
+    """Register the Qt editor factory for ``type_name`` (called by the editor).
+
+    This is the authoring-side hook of the editor -> authoring contribution
+    inversion (EDITOR_ARCHITECTURE.md §6/§8): the editor layer registers its Qt
+    workspaces here, so the headless registry can advertise a callable
+    ``editor_factory`` without importing Qt.
+    """
+
+    _EDITOR_FACTORIES[type_name] = factory
+
+
+def _editor_factory_for(type_name: str) -> Contribution:
+    """Return a stable, Qt-free indirection to the registered editor factory.
+
+    The returned callable resolves the concrete factory lazily when invoked, so
+    a resource type that supports a Qt editor always advertises a callable
+    ``editor_factory`` even before :mod:`src.editor` is imported; calling it
+    without a registered factory raises a clear error.
+    """
+
+    def _make_editor(*args: Any, **kwargs: Any) -> Any:
+        factory = _EDITOR_FACTORIES.get(type_name)
+        if factory is None:
+            raise ResourceDocumentError(
+                f"no editor factory registered for resource type {type_name!r}; "
+                "import src.editor to install the Qt editor contributions"
+            )
+        return factory(*args, **kwargs)
+
+    return _make_editor
+
+
 def build_default_resource_type_registry() -> ResourceTypeRegistry:
     registry = ResourceTypeRegistry(build_default_migration_registry())
     for type_name, display_name, asset_kind in (
@@ -127,7 +166,7 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
         (CURVE_RESOURCE_TYPE, "Curve", "curve"),
     ):
         if type_name == SCENE_RESOURCE_TYPE:
-            from src.editor.document import SceneDocument
+            from src.authoring.scene.document import SceneDocument
 
             def load_scene(payload):
                 # The common envelope contract also permits header-only/generic
@@ -146,7 +185,7 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
                     raise ResourceDocumentError(
                         "a ProjectContext is required to compile a SceneDocument"
                     )
-                from src.editor.stage_compile import compile_stage
+                from src.compiler import compile_stage
 
                 return compile_stage(project, document, **kwargs)
 
@@ -187,11 +226,6 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
             )
         elif type_name == UI_RESOURCE_TYPE:
             from src.ui.document import UIDocument
-
-            def make_ui_editor(*args, **kwargs):
-                from src.editor.ui_workspace import UIWorkspace
-
-                return UIWorkspace(*args, **kwargs)
 
             def compile_ui(document, *, viewport_width=384, viewport_height=448, **kwargs):
                 document.validate()
@@ -245,18 +279,13 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
                     display_name=display_name,
                     asset_kind=asset_kind,
                     loader=load_ui,
-                    editor_factory=make_ui_editor,
+                    editor_factory=_editor_factory_for(UI_RESOURCE_TYPE),
                     compiler=compile_ui,
                     preview_handler=preview_ui,
                 )
             )
         elif type_name == BACKGROUND_RESOURCE_TYPE:
             from src.game.background_render.document import BackgroundDocument
-
-            def make_background_editor(*args, **kwargs):
-                from src.editor.ui_workspace import BackgroundWorkspace
-
-                return BackgroundWorkspace(*args, **kwargs)
 
             def compile_background(document, **_kwargs):
                 """Return the typed document consumed by the formal renderer."""
@@ -328,7 +357,7 @@ def build_default_resource_type_registry() -> ResourceTypeRegistry:
                     display_name=display_name,
                     asset_kind=asset_kind,
                     loader=load_background,
-                    editor_factory=make_background_editor,
+                    editor_factory=_editor_factory_for(BACKGROUND_RESOURCE_TYPE),
                     compiler=compile_background,
                     preview_handler=preview_background,
                 )

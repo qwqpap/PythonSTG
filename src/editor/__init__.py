@@ -195,3 +195,30 @@ __all__ = [
     "find_transition",
     "graph_for_state",
 ]
+
+
+# Contribution inversion (EDITOR_ARCHITECTURE.md §6/§8): install this editor's Qt
+# workspaces into the headless authoring registry's editor-factory slots.  The
+# factories import Qt lazily, so importing ``src.editor`` stays Qt-free; only
+# actually building a workspace pulls in :mod:`src.editor.ui_workspace`.
+from src.authoring.registry import register_editor_factory as _register_editor_factory
+from src.authoring.resources import (
+    BACKGROUND_RESOURCE_TYPE as _BACKGROUND_RESOURCE_TYPE,
+    UI_RESOURCE_TYPE as _UI_RESOURCE_TYPE,
+)
+
+
+def _make_ui_workspace(*args, **kwargs):
+    from src.editor.ui_workspace import UIWorkspace
+
+    return UIWorkspace(*args, **kwargs)
+
+
+def _make_background_workspace(*args, **kwargs):
+    from src.editor.ui_workspace import BackgroundWorkspace
+
+    return BackgroundWorkspace(*args, **kwargs)
+
+
+_register_editor_factory(_UI_RESOURCE_TYPE, _make_ui_workspace)
+_register_editor_factory(_BACKGROUND_RESOURCE_TYPE, _make_background_workspace)
