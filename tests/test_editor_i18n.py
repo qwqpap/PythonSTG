@@ -188,7 +188,7 @@ def test_chinese_stage_template_localizes_defaults_but_preserves_runtime_kinds(
 def test_chinese_dynamic_change_picker_hides_internal_paths_but_preserves_data(
     qapp_session,
 ):
-    from src.editor.pattern_workspace import PatternWorkspace
+    from src.editor.panels.pattern_workspace import PatternWorkspace
 
     workspace = PatternWorkspace()
     manager = LanguageManager(language=LANGUAGE_CHINESE)

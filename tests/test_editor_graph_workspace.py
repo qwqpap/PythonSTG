@@ -33,7 +33,7 @@ from src.editor.graph_workspace import (
     _drag_can_connect,
     can_connect,
 )
-from src.editor.pattern_workspace import PatternWorkspace
+from src.editor.panels.pattern_workspace import PatternWorkspace
 from src.pattern import (
     GRAPH_NODE_CATEGORIES,
     BehaviorGraph,

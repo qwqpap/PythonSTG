@@ -13,7 +13,7 @@ from src.editor.app import EditorMainWindow, SceneViewport
 from src.editor.graph_commands import ExpandToGraphCommand
 from src.editor.graph_workspace import GraphCanvas
 from src.editor.node_types import build_default_node_type_registry
-from src.editor.pattern_workspace import PatternWorkspace
+from src.editor.panels.pattern_workspace import PatternWorkspace
 from src.editor.panels.timeline_workspace import TimelineGraphicsView
 from src.editor.i18n import LANGUAGE_CHINESE, LanguageManager
 from src.pattern import BehaviorGraph, PatternDocument

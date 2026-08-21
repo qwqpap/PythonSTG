@@ -11,7 +11,7 @@ from .application import (
     PatternAction,
     PatternIntent,
 )
-from .pattern_workspace import PatternWorkspace
+from .panels.pattern_workspace import PatternWorkspace
 from .shell import WindowService
 
 

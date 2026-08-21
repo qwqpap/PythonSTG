@@ -6,7 +6,7 @@ from src.qt_compat.QtWidgets import QFileDialog
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
-from src.editor.pattern_workspace import PatternWorkspace
+from src.editor.panels.pattern_workspace import PatternWorkspace
 from src.editor.scene_compile import SceneSpellCompileError, compile_simple_spell
 from src.pattern import BulletSpec, PatternDocument
 

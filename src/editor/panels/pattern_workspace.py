@@ -21,8 +21,8 @@ from src.qt_compat.QtWidgets import (
 
 from src.pattern import PatternDocument, PresetDescriptor, PresetResolver, VirtualPresetNode
 
-from .graphics.pattern_canvas import PatternCanvas, PatternGizmoItem
-from .i18n import LanguageManager
+from ..graphics.pattern_canvas import PatternCanvas, PatternGizmoItem
+from ..i18n import LanguageManager
 
 
 # ``PatternGizmoItem`` and ``PatternCanvas`` were lowered into the shared
@@ -242,7 +242,7 @@ class PatternWorkspace(QWidget):
     def _build_graph_toolbar(self) -> QWidget:
         """Node-creation strip, hidden until a graph view is on screen."""
 
-        from .graphics.graph_canvas import CREATABLE_NODE_CATEGORIES
+        from ..graphics.graph_canvas import CREATABLE_NODE_CATEGORIES
 
         self.graph_toolbar_widget = QWidget()
         self.graph_toolbar_widget.setObjectName("graphToolbar")
@@ -270,7 +270,7 @@ class PatternWorkspace(QWidget):
     def _build_view_stack(self) -> QStackedWidget:
         """The one central stack every authoring task switches between."""
 
-        from .graphics.graph_canvas import GraphCanvas, GraphPlaceholder
+        from ..graphics.graph_canvas import GraphCanvas, GraphPlaceholder
 
         self.canvas = PatternCanvas()
         self.canvas.originPositionRequested.connect(self.originPositionRequested)
@@ -483,7 +483,7 @@ class PatternWorkspace(QWidget):
         return self._tr(labels.get(parameter.target, fallback))
 
     def _reset_level_picker(self, has_preset: bool) -> None:
-        from .progressive_authoring import AUTHORING_LEVELS
+        from ..progressive_authoring import AUTHORING_LEVELS
 
         current = self._authoring_level
         self._level_switching = True

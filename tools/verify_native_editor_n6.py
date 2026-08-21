@@ -13,7 +13,7 @@ from src.core.project_context import ProjectContext
 from src.editor.action_catalog import ActionQuery
 from src.editor.app import EditorMainWindow
 from src.editor.i18n import LANGUAGE_CHINESE
-from src.editor.pattern_workspace import PatternWorkspace
+from src.editor.panels.pattern_workspace import PatternWorkspace
 from src.qt_compat.QtCore import Qt, QTimer
 from src.qt_compat.QtGui import QKeyEvent
 from src.qt_compat.QtWidgets import QApplication, QPushButton

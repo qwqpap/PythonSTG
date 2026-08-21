@@ -54,7 +54,7 @@ from .document_manager import (
     DocumentManagerError,
     ManagedDocument,
 )
-from .pattern_workspace import PatternWorkspace
+from .panels.pattern_workspace import PatternWorkspace
 from .ui_workspace import BackgroundWorkspace, UIWorkspace
 from .application import (
     DocumentController,

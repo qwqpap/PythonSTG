@@ -24,7 +24,7 @@ from src.editor.progressive_authoring import (
     level_snapshot,
 )
 from src.pattern import BindingSpec, PatternCompiler, PatternDocument
-from src.editor.pattern_workspace import PatternWorkspace
+from src.editor.panels.pattern_workspace import PatternWorkspace
 from src.editor.preset_commands import ApplyPresetCommand
 from src.pattern import PresetLibrary, PresetResolver
 

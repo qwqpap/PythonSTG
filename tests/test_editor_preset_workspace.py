@@ -4,7 +4,7 @@ from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
 from src.editor.commands import CommandStack
-from src.editor.pattern_workspace import PatternWorkspace, PresetReactionSlotEditor
+from src.editor.panels.pattern_workspace import PatternWorkspace, PresetReactionSlotEditor
 from src.editor.preset_commands import (
     ApplyPresetMigrationCommand,
     ApplyPresetCommand,

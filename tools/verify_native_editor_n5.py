@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
-from src.editor.pattern_workspace import PatternWorkspace
+from src.editor.panels.pattern_workspace import PatternWorkspace
 from src.qt_compat.QtCore import QTimer
 from src.qt_compat.QtWidgets import QApplication
 
