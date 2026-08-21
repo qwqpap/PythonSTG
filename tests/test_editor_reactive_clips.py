@@ -9,7 +9,7 @@ from src.qt_compat.QtWidgets import QComboBox, QLabel
 from src.core.project_context import ProjectContext
 from src.editor import SceneEditorSession, TimelineClip, TimelineTrack
 from src.editor.app import EditorMainWindow
-from src.editor.timeline_workspace import CLIP_HEIGHT, TimelineClipItem, TimelineEditor
+from src.editor.panels.timeline_workspace import CLIP_HEIGHT, TimelineClipItem, TimelineEditor
 
 
 def _reactive_clip():

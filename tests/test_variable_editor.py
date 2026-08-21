@@ -7,7 +7,7 @@ import pytest
 from src.authoring.variables import VariableOutputMapping, VariableRef, VariableSpec
 from src.editor import SceneEditorSession
 from src.editor.app import EditorMainWindow
-from src.editor.variable_mapping_workspace import VariableBindingDialog, VariableMappingDialog
+from src.editor.panels.variable_mapping_workspace import VariableBindingDialog, VariableMappingDialog
 from src.qt_compat.QtCore import Qt
 from src.editor.variable_commands import (
     AddVariableCommand,
@@ -45,7 +45,7 @@ def test_runtime_overlay_does_not_change_document_defaults(qapp_session) -> None
     scene = SceneEditorSession.new_document("Overlay")
     scene.variables.append(VariableSpec("rank", "float", 1.0))
     before = scene.to_dict()
-    from src.editor.variable_workspace import VariableEditor
+    from src.editor.panels.variable_workspace import VariableEditor
 
     editor = VariableEditor()
     editor.set_document(scene)

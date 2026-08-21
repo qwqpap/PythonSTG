@@ -65,9 +65,9 @@ from .application import (
     UndoIntent,
 )
 from .application.queries import find_timeline_clip, find_timeline_track
-from .timeline_workspace import TimelineEditor
-from .variable_workspace import VariableEditor
-from .state_graph_workspace import StateGraphEditor
+from .panels.timeline_workspace import TimelineEditor
+from .panels.variable_workspace import VariableEditor
+from .panels.state_graph_workspace import StateGraphEditor
 from .i18n import (
     LANGUAGE_CHINESE,
     LANGUAGE_ENGLISH,

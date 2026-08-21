@@ -9,7 +9,7 @@ from src.core.project_context import ProjectContext
 from src.editor import TimelineClip, TimelineKeyframe, TimelineTrack, make_node
 from src.editor.app import EditorMainWindow, SceneViewport
 from src.editor.timeline_commands import AddClipCommand, AddTrackCommand
-from src.editor.timeline_workspace import (
+from src.editor.panels.timeline_workspace import (
     CLIP_HEIGHT,
     TRACK_HEADER_WIDTH,
     TRACK_HEIGHT,

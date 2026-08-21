@@ -19,9 +19,9 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 
-from .action_search import SpaceTapSearchMixin
-from .document import SceneDocument, TimelineClip, TimelineTrack
-from .i18n import LanguageManager
+from ..action_search import SpaceTapSearchMixin
+from ..document import SceneDocument, TimelineClip, TimelineTrack
+from ..i18n import LanguageManager
 
 
 RULER_HEIGHT = 28.0

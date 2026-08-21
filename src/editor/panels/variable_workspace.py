@@ -27,7 +27,7 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 
-from .document import SceneDocument
+from ..document import SceneDocument
 
 
 class VariableEditor(QWidget):

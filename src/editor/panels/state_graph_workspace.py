@@ -20,8 +20,8 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 
-from .document import SceneDocument, StateGraphSpec, StateSpec
-from .i18n import LANGUAGE_CHINESE, LanguageManager
+from ..document import SceneDocument, StateGraphSpec, StateSpec
+from ..i18n import LANGUAGE_CHINESE, LanguageManager
 
 
 class StateGraphEditor(QWidget):

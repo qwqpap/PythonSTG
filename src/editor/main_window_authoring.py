@@ -9,7 +9,7 @@ from .application import AuthoringAction, AuthoringIntent, IntentRejectedError
 from .application.queries import compatible_variable_bindings, find_variable
 from .document import DocumentError, SceneDocument
 from .shell import WindowService
-from .variable_mapping_workspace import VariableBindingDialog, VariableMappingDialog
+from .panels.variable_mapping_workspace import VariableBindingDialog, VariableMappingDialog
 
 
 class AuthoringService(WindowService):

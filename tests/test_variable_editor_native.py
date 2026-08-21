@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from src.authoring.variables import VariableSpec
 from src.editor import SceneEditorSession
-from src.editor.variable_workspace import VariableEditor
+from src.editor.panels.variable_workspace import VariableEditor
 
 
 def test_variable_editor_exposes_typed_properties_and_read_only_overlay(qapp_session):
