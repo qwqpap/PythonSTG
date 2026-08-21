@@ -47,7 +47,7 @@ from .action_search import ActionSearchDialog
 from .document import DocumentError, EditorNode, SceneDocument
 from .node_types import build_default_node_type_registry
 from .preview_panel import PatternPreviewPanel
-from .preview_process import PatternPreviewProcess
+from .preview import PreviewSession
 from .runtime_preview import RuntimePreviewHost
 from .document_manager import (
     DocumentManager,
@@ -150,8 +150,7 @@ class EditorMainWindow(QMainWindow):
         self._fallback_selected_id = ""
         self._selected_id = self.session.document.root.id
         self._syncing_selection = False
-        self._preview_process: QProcess | None = None
-        self._pattern_preview_client = PatternPreviewProcess(project, parent=self)
+        self._preview_session = PreviewSession(project, parent=self)
         self._active_pattern_document: PatternDocument | None = None
         self._active_pattern_session: ManagedDocument | None = None
         self._active_pattern_resource = ""
@@ -198,6 +197,21 @@ class EditorMainWindow(QMainWindow):
         )
         self.resize(1480, 920)
         self.setMinimumSize(960, 640)
+
+    @property
+    def _pattern_preview_client(self):
+        """The formal NDJSON preview client owned by the preview session.
+
+        Exposed as a property so the single owner stays :class:`PreviewSession`
+        while the slot code (and the editor tests that swap in a fake) keep
+        addressing it as ``self._pattern_preview_client``.
+        """
+
+        return self._preview_session.formal_client
+
+    @_pattern_preview_client.setter
+    def _pattern_preview_client(self, client) -> None:
+        self._preview_session.formal_client = client
 
     def _load_builtin_preset_library(self) -> PresetLibrary:
         path = self.project.root / "game_content" / "presets" / "builtin_patterns.pystg.json"
@@ -1291,13 +1305,9 @@ class EditorMainWindow(QMainWindow):
             if widget is not None and not widget.close():
                 event.ignore()
                 return
-        if self._preview_process is not None and self._preview_process.state() != QProcess.NotRunning:
-            self._preview_process.terminate()
-            if not self._preview_process.waitForFinished(1500):
-                self._preview_process.kill()
         self._clear_stage_runtime_feedback()
         self._active_stage_session = None
-        self._pattern_preview_client.close()
+        self._preview_session.close()
         for process in tuple(self._tool_processes.values()):
             if process.state() == QProcess.NotRunning:
                 continue

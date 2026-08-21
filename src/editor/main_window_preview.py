@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import sys
-from src.qt_compat.QtCore import QProcess
 from src.pattern import PatternDocument
 from .document import SceneDocument
+from .preview import PreviewStartError
 from .runtime_preview import RuntimePreviewHost
 from .document_manager import ManagedDocument
 from .scene_compile import SceneSpellCompileError, compile_simple_spell
@@ -35,6 +35,10 @@ class PreviewService(WindowService):
         )
         client.runningChanged.connect(self.preview_panel.set_running)
         client.runningChanged.connect(self._preview_running_changed)
+        # The preview session outlives any formal-client swap, so its
+        # legacy-run signals are wired once here and stay connected.
+        self._preview_session.legacyOutput.connect(self._log)
+        self._preview_session.legacyFinished.connect(self._preview_finished)
 
     def _ensure_runtime_preview_host(self) -> RuntimePreviewHost:
         host = self._runtime_preview_host
@@ -134,7 +138,10 @@ class PreviewService(WindowService):
                 }
             )
             return
-        if not self._pattern_preview_client.start():
+        if not self._preview_session.start_formal(
+            document_id=session.document.id,
+            resource_id=session.resource_uri or f"unsaved://{session.document.id}",
+        ):
             return
         self._show_runtime_preview_host(select=True)
         if self._active_stage_session is not session:
@@ -162,7 +169,10 @@ class PreviewService(WindowService):
                 {"code": "no_pattern", "message": "Select a Pattern resource first"}
             )
             return
-        if not self._pattern_preview_client.start():
+        if not self._preview_session.start_formal(
+            document_id=getattr(self._active_pattern_document, "id", None),
+            resource_id=self._active_pattern_resource or None,
+        ):
             return
         # Keep the Pattern workspace visible while the formal renderer runs in
         # its dedicated Runtime Preview tab.  The Stage flow selects that tab
@@ -356,7 +366,7 @@ class PreviewService(WindowService):
                 f"{preview.pattern_instance_id}"
             )
             return
-        if self._preview_process is not None and self._preview_process.state() != QProcess.NotRunning:
+        if self._preview_session.is_legacy_running:
             self.statusBar().showMessage(
                 self.language_manager.translate("Preview is already running"),
                 3000,
@@ -373,34 +383,17 @@ class PreviewService(WindowService):
             self._show_error("Preview unavailable", exc)
             return
 
-        process = QProcess(self._window)
-        process.setProgram(sys.executable)
-        process.setArguments(arguments)
-        process.setWorkingDirectory(str(self.project.root))
-        process.setProcessChannelMode(QProcess.MergedChannels)
-        process.readyReadStandardOutput.connect(self._read_preview_output)
-        process.finished.connect(self._preview_finished)
-        process.errorOccurred.connect(
-            lambda error: self._log(f"[preview:error] process error {int(error)}")
-        )
-        self._preview_process = process
-        process.start()
-        if not process.waitForStarted(3000):
-            self._show_error("Preview failed", ValueError(process.errorString()))
-            self._preview_process = None
+        # The preview session owns the raw game-run process; the window never
+        # holds a bare preview QProcess.  Starting it also stops any formal
+        # preview so only one preview is ever active.
+        try:
+            process = self._preview_session.start_legacy(sys.executable, arguments)
+        except PreviewStartError as exc:
+            self._show_error("Preview failed", ValueError(str(exc)))
             return
         self._log(f"[preview] started {label} (PID {process.processId()})")
         self.statusBar().showMessage(f"Started {label}", 3000)
 
-    def _read_preview_output(self) -> None:
-        if self._preview_process is None:
-            return
-        data = bytes(self._preview_process.readAllStandardOutput())
-        text = data.decode("utf-8", errors="replace").rstrip()
-        if text:
-            self._log(text)
-
-    def _preview_finished(self, exit_code: int, exit_status) -> None:
-        self._read_preview_output()
+    def _preview_finished(self, exit_code: int) -> None:
         self._log(f"[preview] exited with code {exit_code}")
         self.statusBar().showMessage(f"Preview exited ({exit_code})", 3000)
