@@ -211,7 +211,7 @@ git diff --check
 | ER5 | 唯一插件贡献入口 | `[x]` | ER4 |
 | ER6 | Panel 边界与图形循环 | `[x]` | ER5 |
 | ER7 | 兼容层、schema 与重复生命周期清理 | `[x]` | ER6 |
-| ER8 | 架构整体验收 | `[ ]` | ER7 |
+| ER8 | 架构整体验收 | `[x]` | ER7 |
 | N6.4 | Usability gate | `[ ]` | ER8 |
 | N7.0 | Behavior Descriptor/权限 Contract | `[ ]` | N6.4 |
 | N7.1 | Safe API | `[ ]` | N7.0 |
@@ -625,7 +625,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 ### ER8 架构整体验收
 
-**状态/依赖**：`[ ]`；依赖 ER7。该任务由未参与 ER1–ER7 实现的验证 Agent 执行，产品代码只读。
+**状态/依赖**：`[x]`；依赖 ER7。该任务由未参与 ER1–ER7 实现的验证 Agent 执行，产品代码只读。
 
 **允许路径**：门禁命令、验收报告和本文当前 Evidence/Blocker。任何产品修复必须退回对应 ER 所有者，ER8 不得边验收边修改。
 
@@ -643,7 +643,19 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 **验收文件**：ER0–ER7 所有 focused 文件、现有 N2/N3/N6 gate、`tools/verify_native_editor_n4.py`、`tools/verify_native_editor_n5.py`、`tools/verify_native_editor_n6.py`、`tools/profile_n5_presets.py`。
 
-**Evidence / Blocker（尚未完成）**：保持 `[ ]`。
+**Evidence（独立验收 Agent，未参与 ER1–ER7 实现，产品/测试代码全程只读；七类证据齐备）**：
+
+- **环境 / 身份**：`C:\Users\m1573\anaconda3\python.exe`（Python 3.12.7、PySide6、numba 0.60.0 / numpy 1.26.4），Windows 11 10.0.26200；分支 `codex/er2-coordinator-wip`，HEAD `0271ad7`（ER7 收口）；pre-ER0 diff 基线 `b95fc57`（God-class 拆分之父）。headless 门禁（pytest/compileall/profiler）设 `QT_QPA_PLATFORM=offscreen`、pytest flags `-o addopts= -p no:cacheprovider`；原生 harness 不设该变量（真实 windows 平台）。自研探针与一次性 harness 即用即删，未改任何 tracked 产品/测试文件、未提交。
+- **1 Structural**：`pytest tests/test_editor_architecture_boundaries.py tests/test_editor_panel_boundaries.py` = **29 passed, exit 0**。无禁止 import（10 个 headless 包不 import editor/Qt）；compat allowlist 清零——命令边界分类器仅认 `src.authoring.commands*`，`command_helpers`/`src.game.commands`/`third_party.scene_commands` 均 False；`test_editor_graph_modules_have_no_import_cycles` 无环绿；Panel 零越权（不 import 域命令、不直接改文档）；协调者单一化 + 单一插件门面 + 无裸 preview QProcess。与 ER7 基线 29 一致（ER7 清理迁移期 allowlist 删 2 条 parametrize，由 ER6 时的 31 收敛为 29）。
+- **2 Runtime**：diff-check `git diff --name-only b95fc57..HEAD -- src/render src/game` = **0 文件**（游戏运行时引擎 render/game 零改动，最强禁止路径结论）；反规避 `git diff --diff-filter=D --name-only b95fc57..HEAD -- tests` = **0**（无删测试）、全 `tests/` 的 `pytest.mark.(skip|xfail)` = **0**；assets `python tools/validate_assets.py --format json` → `ok:true errors:0 warnings:0`（json 74 / sprite_config 16 / sprites 745 / images 142），exit 0；N2/N3 focused（12 文件——N2 变量 8：typed_variables/variable_editor/variable_runtime/variable_scopes_and_reducers/variable_editor_native/variable_seek/variable_hotreload/replay_determinism；N3 事件反应 4：frame_boundary_events/lifecycle_events/reactions/reaction_scheduler）= **42 passed, exit 0**；**全量套件** `pytest -q -ra` = **728 passed in 551.95s (0:09:11), exit 0**（summary 仅 “728 passed”，0 skip/xfail/error）；`python -m compileall -q src` = **exit 0**。
+- **3 Native visual**（真实 windows 平台，`QT_QPA_PLATFORM` 未设）：`platformName=windows`、isVisible=True、windowHandle_set=True、topLevel=1；截图字节 1480×920 EN=**44589**、960×640 EN=**39715**、1480×920 CN=**48720**（均真实位图）；语言 EN↔CN `cjk_texts 2→178→2`、菜单 `['&File'..]↔['文件(&F)'..]`；无堆叠（切换后 topLevel=1）；干净关闭 closed=True、visible_toplevels_after_close=0；末行 `er8_native_visual_ok`，EXIT=0。
+- **4 Native interaction**（真实 windows 平台；QTest 真实鼠标/滚轮手势 + 包裹 `coordinator.dispatch` 计数 Intent，非直调 slot）：时间线/场景 harness——MOVE intents=1 start 60→90 undo→60 redo→90；TRIM intents=1 duration 120→150 undo/redo；SEEK playhead 0→102(≈100) 仅瞬时 `SetTimelinePlayheadIntent`、authoring_doc 未变；ZOOM(ctrl+wheel) 1.000→1.250 瞬时 `SET_ZOOM`、authoring_doc 未变；SCENE_DRAG intents=1 pos(192,224)→(288,288) undo/redo。teardown `window.close()` 命中产品未保存确认模态（预期守卫，非缺陷）故阻塞→kill（干净启停已由 visual harness 取证）。Graph 端口拖线 harness——移除 shape→aim 边 edges 5→4，真实鼠标 out→in 拖线 → 恰 1 个 `ADD_GRAPH_EDGE` 经 coordinator，edges 4→5，undo→4 redo→5；末行 `er8_native_interaction_B_ok`，`os._exit(0)` 干净退出。
+- **5 Formal preview**：pytest（offscreen）`test_preview_session + test_preview_editor_integration + test_devtools_spell_preview + test_preview_controller + test_preview_process` = **40 passed, exit 0**，覆盖 Pattern/Stage 载入、play/pause/seek/reset（fixed-tick 命令契约 + spell seek/restart/pause）、overlay/stats 只读快照与失败回滚不写文档、异常退出+编辑器关闭幂等（QProcess crash 可诉且幂等清理、malformed input 不冻结、close/stop idempotent、runtime error 不逃逸、超额输出有界）。overlay-identity 原生证据 `tools/verify_native_editor_n4.py`（真实平台）：editor 命令 author 出 Reactive clip → formal `compile_stage`（断言未丢 reactive_clip）→ `StageRunner.start/emit/tick`（断言 reaction 真触发）→ overlay 从 `runner.reactive_overlay` **读出**（trace/active_instances 非空，脚本从不写 overlay）→ 经 `_handle_pattern_preview_event` 投递（断言 clip 激活且 `to_dict()==before` 文档未变）→ 真实双击（断言 `reactive_navigation[0]=='reaction'` 且文档未变），末行 `native_editor_n4_ok kind=Reactive traces=1`，`os._exit(0)` 干净退出。
+- **6 Performance**：`python tools/profile_n5_presets.py` **exit 0**（脚本内建门禁：`per_bullet_callbacks != 0 或 elapsed_ms >= 2500` 即 exit 1，故 exit 0 强证逐弹回调=0 且总耗时 < 回归上限）。目标硬件 Windows-11-10.0.26200-SP0 / Intel64 Family 6 Model 151（Alder Lake）/ Python 3.12.7；**Numba 启用**（numba 0.60.0，`optimized_pool` 顶层 `from numba import njit`、核函数为已编译 `CPUDispatcher`（`@njit(cache=True)`），非 fallback）。固定 14 预设走正式 `PresetResolver.compile` + `PatternRunner`：spawned=**1836**、batch_writes=**101**、per_bullet_callbacks=**0**、elapsed=**40.447ms**（回归上限 2500ms）；峰值 rice-wall（米弹墙）512 弹 / 8 批写 / 4.895ms。批量写入保持（每预设 batch_writes≥1）、逐弹 Python 回调链=0。
+- **7 Clean checkout**：`git worktree add` 全新检出 `0271ad7`，在其中（cwd 与 `PYTHONPATH` 均指向该 worktree，冷 `__pycache__`/Numba 缓存，offscreen）重跑 ER0–ER7 focused 并集（26 文件）+ N2/N3（12 文件）= **338 passed in 176.18s, exit 0**，`compileall -q src` = **exit 0**——证明不依赖未提交文件、主工作目录或预热态；`git worktree remove --force` 清理 exit 0。**caveat（非-blocker、非产品缺陷）**：本地 git 对象库两个 loose blob bit-rot（`assets/audio/music/04.wav`=df975ee5、`05.wav`=a343bb25；`git fsck --full` 仅此二者，无任何 `.py` 损坏），故干净检出用 `--no-checkout` + `git checkout 0271ad7 -- . ':(exclude)…04.wav' ':(exclude)…05.wav'` 绕过——两个损坏音频与全部代码门禁无关，属基础设施 bit-rot 而非 ER1–ER7 产物。
+- **独立验证**：七类证据分别取得真实证据、无残余 code/test blocker；offscreen 仅作 Structural/Runtime 证据，Native visual/interaction 与 Formal-preview overlay-identity 均在真实 windows 平台取原生证据，Performance 由脚本门禁强证逐弹回调=0，Clean-checkout 在冷全新检出复现。offscreen、截图、单一 pytest 数字、实现 Agent 自报均未替代对应证据。全程未改任何产品/测试代码、未翻动第 214 行总表与本节状态行、未提交；一次性 harness（`tools/_er8_*`）取证后删除。
+
+Verdict = **APPROVE**
 
 ## 9. N6.4：Usability gate
 
