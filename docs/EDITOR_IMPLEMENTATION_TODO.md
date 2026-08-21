@@ -210,7 +210,7 @@ git diff --check
 | ER4 | 唯一 PreviewSession | `[x]` | ER3 |
 | ER5 | 唯一插件贡献入口 | `[x]` | ER4 |
 | ER6 | Panel 边界与图形循环 | `[x]` | ER5 |
-| ER7 | 兼容层、schema 与重复生命周期清理 | `[ ]` | ER6 |
+| ER7 | 兼容层、schema 与重复生命周期清理 | `[x]` | ER6 |
 | ER8 | 架构整体验收 | `[ ]` | ER7 |
 | N6.4 | Usability gate | `[ ]` | ER8 |
 | N7.0 | Behavior Descriptor/权限 Contract | `[ ]` | N6.4 |
@@ -594,7 +594,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 ### ER7 兼容层、schema 与重复生命周期清理
 
-**状态/依赖**：`[ ]`；依赖 ER6。
+**状态/依赖**：`[x]`；依赖 ER6。
 
 **允许路径**：`src/authoring/`、`src/compiler/`、旧 `src/editor/` 兼容出口、`src/editor/session.py`、`document_manager.py`、schema/migration 和 focused tests。
 
@@ -611,7 +611,17 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 **验收文件**：新建 `tests/test_editor_schema_migration.py`；回归 `tests/test_scene_v4_contract.py`、`tests/test_editor_documents.py`、`tests/test_editor_document_manager.py`、`tests/test_editor_regression_contracts.py`。
 
-**Evidence / Blocker（尚未完成）**：保持 `[ ]`。
+**Evidence**（独立验收 Agent，未参与 ER7 实现，产品代码全程只读）：
+
+- **环境**：`C:\Users\m1573\anaconda3\python.exe`（Python 3.12），Qt 测试设 `QT_QPA_PLATFORM=offscreen`，pytest flags `-o addopts= -p no:cacheprovider`；分支 `codex/er2-coordinator-wip`，HEAD `1df2eed`；ER7 实现提交 `98aac38 → cca111d → 6872988 → 1df2eed`，验证基线 ER6 docs `99b15c0`。工作树除会话启动时既有的 `.claude/settings.local.json` 外干净（自研 AST 探针即用即删、无残留、未改任何 tracked 文件）。
+- **门禁（全部亲自跑）**：全量套件 `728 passed in 554.59s (0:09:14)`（exit 0，全程无 fail/error/skip/xfail）；ER7 焦点集（`test_editor_schema_migration` + `test_scene_v4_contract` + `test_editor_documents` + `test_editor_document_manager` + `test_editor_regression_contracts`）`118 passed`；边界集（`test_editor_architecture_boundaries` + `test_editor_panel_boundaries`）`29 passed`；`python -m compileall -q src` 干净 exit 0。
+- **Schema（硬指标#1：版本 4 ≠ 3、纯 int）**：`git diff 99b15c0..HEAD -- src/authoring/scene/document.py` 显示 `_LegacyCompatibleSchemaVersion(int)` 包装类（其 `__eq__` 曾使 `4==3` 成立）**已整体删除**，`CURRENT_SCHEMA_VERSION = SCENE_RESOURCE_SCHEMA_VERSION`、`self.schema_version = int(schema_version)`。独立断言：`type(CURRENT_SCHEMA_VERSION) is int`、`==4`、`!=3`、`==3` 现为 **False**（毒化等价消除），`SCENE_RESOURCE_SCHEMA_VERSION==4`（int）。`git show 99b15c0:…document.py` 确认包装类曾存在、HEAD 已无。CONFIRMED。
+- **Schema（硬指标#2：显式迁移 + round-trip）**：`migrate_document`（document.py:1495）薄封装 `build_default_migration_registry().migrate(data, expected_type=SCENE_DOCUMENT_TYPE)`（`MigrationError`→`DocumentError`），非恒等透传；`MigrationRegistry.migrate` 逐版本 `while version<target` 走查、每步校验 +1 与类型不变、缺步 `MigrationError`、`version>target` 拒未来版本；`build_default_migration_registry` 显式注册 `migrate_scene_v3_to_v4`。独立跑 `docs/schemas/fixtures/scene-v3.pystg.json`（1840B，schema_version=3）：`migrate_document` 得 v4，且仅 `migrate_scene_v3_to_v4` 写入的标记 `_legacy_v3_source=True` / `variable_compatibility=legacy_last_wins` 出现（证明迁移体真跑而非恒等），源 dict 不变（纯函数）；`SceneDocument.from_dict(…,canonical=True).to_canonical_dict()` 再 `from_dict` 为**固定点**（round-trip 稳定于 v4）。CONFIRMED。
+- **Boundary/Identity（硬指标#3：内部零依赖旧 editor 文档/compiler/command 路径）**：`git show 6872988 --stat` 列出 **15** 个 `src/editor/*.py` shim 删除，与规格 15 名逐一吻合（commands, document, node_types, scene_commands, pattern_commands, preset_commands, timeline_commands, ui_commands, variable_commands, background_commands, graph_commands, state_graph_commands, scene_compile, stage_compile, pattern_resolve）；`git diff --diff-filter=A 99b15c0..HEAD` 仅新增 `tests/test_editor_schema_migration.py`。全仓 grep（绝对 `from/import src.editor.<shim>`、相对 `from .<shim>` / `..<shim>`、`from . import <shim>`、`importlib.import_module("src.editor.<shim>")`）对 15 shim **零引用**——唯二绝对命中在 `test_editor_architecture_boundaries.py:157/194` 为**注释**；相对命中全部落在其它包真实模块（`src.authoring.scene.document` / `src.compiler.pattern_resolve` / `src.pattern.document`），`src/editor/` 内零 shim 引用；已甄别 `src.editor.document_manager`（真实模块，非 shim）不误判。被删 shim 在 `99b15c0` 均为纯 `from <canonical> import *`（如 `scene_commands`→`src.authoring.commands.scene`、`pattern_resolve`→`src.compiler.pattern_resolve`），故内部调用者从 shim 重指 canonical 为**零语义变更**。`src/editor/__init__.py` 保留全部公共导出名（`Command`/`CommandStack`/`SceneEditorSession`/各命令类/`CURRENT_SCHEMA_VERSION`…），仅将 re-export 来源改指 canonical——**包级公共入口保留**（外部兼容责任），子模块 shim 删除。CONFIRMED。
+- **Lifecycle（硬指标#4：一个文档一个生命周期一个 CommandStack）**：`src/editor/session.py` 的 `SceneEditorSession` 已降为**仅** `new_document` 静态工厂——open/save/apply/undo/redo/replace 实例生命周期全删（docstring 明示已并入 `ManagedDocument`、实例化 “intentionally unsupported”）；`ManagedDocument` 为 dataclass，恰持一个 `commands: CommandStack`（`apply/undo/redo/save/revert/release_editor_state` 全经此单栈）；`DocumentManager` 维护 `list[ManagedDocument]`、每文档独立。焦点回归 `test_manager_owns_independent_documents_savepoints_and_state` 与新 `test_opening_a_v3_scene_yields_one_v4_lifecycle_with_one_command_stack`（断言 open v3→v4、`len(manager)==1`、`isinstance(commands, CommandStack)`、二文档 `commands is not` 彼此）覆盖。CONFIRMED。
+- **禁止路径 / 不改语义守卫**：`git diff --stat 99b15c0..HEAD -- src/authoring src/compiler src/render src/game` **仅** `src/authoring/scene/document.py`（schema 常量 / 包装类删除，ER7 预授权）+ `src/compiler/scene_spell.py`；`src/render`、`src/game` **零触及**。逐行核对：document.py = 删包装类 + 纯 int 化，无迁移 / schema 语义改动；scene_spell.py = **仅 docstring** 引用修正（`src.editor.pattern_resolve`→`src.compiler.pattern_resolve`）。未触 compiler/runtime、renderer API、N7 权限模型。其余 `src/editor/*`（21 文件，净 +69/-234）为 import 重指 + session 收敛，样本（coordinator/app/`__init__`）无新增非-import 产品逻辑。
+- **§13/§2.7.5 反弱化审查**：边界分类器 `_is_command_module` 由“canonical **或** 迁移期 `src.editor.*_commands` allowlist”收紧为**仅** canonical `src.authoring.commands`，并删两行 parametrize（`("src.editor.commands",True)` / `("src.editor.scene_commands",True)`）——判为**合法契约收紧、非 §13 弱化**：ER7 step4 明令“清理迁移期 allowlist”，被删两行断言的模块路径在 shim 删除后**已不存在**（保留即断言死路径），契约系**收紧**而非放松。实证非空洞：直接加载边界测试模块跑其真实分类器——canonical 路径（`src.authoring.commands[.scene]`）仍返 True、死 shim 路径返 False、near-miss（`src.authoring.command_helpers`/`third_party.scene_commands`）仍返 False；并合成一个 `from src.authoring.commands.scene import …` 的 panel、经测试**自身**的 `_panel_paths/_imports/_is_command_module` 链，被正确 **FLAGGED**，证明 `test_panels_do_not_import_domain_commands` 对一切存活路径仍具保护力（探针即用即删）。重指测试为纯 import 路径重定位 + 生命周期适配（`SceneEditorSession(DocumentStore(...))`→`DocumentManager(...).active`，接口一致）；ER7 测试 diff 断言净 **+28/-3**，被删 3 行全为依赖旧毒化等价的 `schema_version==3`，已更正为 `==4`（更诚实/更强）；`test_editor_scene_commands` 一处 reparent 目标 `EnemySpawner`→`Sprite` 系 canonical `ManagedDocument.apply` **新增**父子合法性校验（旧 session 不校验）所致的**更严格**适配、测试意图不变、该文件零删断言。ER7 测试 diff **无新增** skip/xfail/pytest.mark/except/raises。新 `test_editor_schema_migration.py` 四例均非空洞（含 `_LegacyCompatibleSchemaVersion` 复活守卫、迁移标记断言、round-trip 固定点、真实 workbench 单生命周期/单 CommandStack），与 `test_scene_v4_contract.py`（wire-shape / 拒未知与未来版本 / opt-in 兼容 / header-only）**互补不冲突**。
+- **独立验证**：由未参与 ER7 实现的只读 Agent（Read/Grep/pytest/git/自研 AST 脚本，未改任何产品/测试/工具代码）执行；四条硬指标全部 CONFIRMED；门禁全绿（全量 728 passed / 焦点 118 / 边界 29 / compileall exit 0）；禁止路径守卫通过（render/game 零触，authoring/compiler 仅预授权 schema 常量 + docstring）；边界收紧经实证判为合法契约收紧而非 §13 弱化。Verdict = **APPROVE**。
 
 ### ER8 架构整体验收
 
