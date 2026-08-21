@@ -28,7 +28,7 @@ from src.pattern.graph import PORT_TYPES
 
 from .action_search import SpaceTapSearchMixin
 from .i18n import LanguageManager
-from .pattern_workspace import PatternCanvas
+from .graphics.pattern_canvas import PatternCanvas
 
 GRAPH_CATEGORY_COLORS = {
     "source": "#4ade80",
