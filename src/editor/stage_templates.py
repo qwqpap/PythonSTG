@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from .document import (
+from src.authoring.scene.document import (
     SceneDocument,
     StateGraphSpec,
     StateSpec,
@@ -14,7 +14,7 @@ from .document import (
     TimelineTrack,
     TransitionSpec,
 )
-from .node_types import make_node
+from src.authoring.scene.node_types import make_node
 
 
 TemplateKind = Literal["midstage", "two_phase_boss"]

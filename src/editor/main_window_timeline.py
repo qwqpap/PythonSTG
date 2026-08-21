@@ -13,7 +13,7 @@ from .application import (
     TimelineIntent,
 )
 from .application.queries import find_timeline_clip, find_timeline_track
-from .document import SceneDocument
+from src.authoring.scene.document import SceneDocument
 from .shell import WindowService
 
 

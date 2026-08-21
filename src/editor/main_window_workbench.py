@@ -16,9 +16,9 @@ from .application import (
     SelectNodeIntent,
     SetNodePropertyIntent,
 )
-from .document import SceneDocument
+from src.authoring.scene.document import SceneDocument
 from .resource_browser import ResourceBrowserPanel
-from .scene_compile import SceneSpellCompileError
+from src.compiler.scene_spell import SceneSpellCompileError
 from .application.queries import require_timeline_track
 from .workbench import EditorPlugin, default_external_plugins
 from .shell import WindowService

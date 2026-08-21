@@ -11,7 +11,7 @@ from src.authoring.resources import ResourceDocumentError, ResourceReference
 from src.game.background_render.document import BackgroundDocument
 from src.pattern import PatternDocument
 from src.ui.document import UIDocument
-from .document import DocumentError, SceneDocument
+from src.authoring.scene.document import DocumentError, SceneDocument
 from .runtime_preview import RuntimePreviewHost
 from .document_manager import DocumentManagerError, ManagedDocument
 from .panels.pattern_workspace import PatternWorkspace

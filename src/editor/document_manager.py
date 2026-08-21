@@ -18,8 +18,8 @@ from src.authoring.document_types import AuthoringDocument
 from src.core.project_context import ProjectContext
 from src.pattern import PatternDocument
 
-from .commands import Command, CommandStack
-from .document import EditorNode, SceneDocument
+from src.authoring.commands.base import Command, CommandStack
+from src.authoring.scene.document import EditorNode, SceneDocument
 from .session import SceneEditorSession
 from .state import DocumentEditorState
 
@@ -127,7 +127,7 @@ class ManagedDocument:
         if isinstance(self.document, SceneDocument):
             registry = self.node_registry
             if registry is None:
-                from .node_types import NODE_TYPE_REGISTRY
+                from src.authoring.scene.node_types import NODE_TYPE_REGISTRY
 
                 registry = NODE_TYPE_REGISTRY
             registry.validate_tree(self.document.root)

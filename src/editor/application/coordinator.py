@@ -8,13 +8,13 @@ from src.pattern import BindingSpec, PatternDocument, PresetResolver
 from src.authoring.variables import VariableOutputMapping, VariableSpec
 from src.game.background_render.document import BackgroundDocument
 from src.ui.document import UIDocument, UIDocumentNode
-from src.editor.background_commands import (
+from src.authoring.commands.background import (
     AddBackgroundLayerCommand,
     RemoveBackgroundLayerCommand,
     SetBackgroundBindingCommand,
     SetBackgroundPropertyCommand,
 )
-from src.editor.state_graph_commands import (
+from src.authoring.commands.state_graph import (
     AddStateCommand,
     AddTransitionCommand,
     DuplicateStateCommand,
@@ -24,8 +24,8 @@ from src.editor.state_graph_commands import (
     RenameStateCommand,
     SetTransitionPropertiesCommand,
 )
-from src.editor.commands import Command, CompositeCommand
-from src.editor.document import (
+from src.authoring.commands.base import Command, CompositeCommand
+from src.authoring.scene.document import (
     EditorNode,
     SceneDocument,
     StateSpec,
@@ -35,8 +35,8 @@ from src.editor.document import (
     TransitionSpec,
 )
 from src.editor.document_manager import DocumentManager, ManagedDocument
-from src.editor.node_types import make_node, property_specs
-from src.editor.scene_commands import (
+from src.authoring.scene.node_types import make_node, property_specs
+from src.authoring.commands.scene import (
     AddNodeCommand,
     AssignResourceCommand,
     MoveNodeCommand,
@@ -47,7 +47,7 @@ from src.editor.scene_commands import (
     find_parent,
 )
 from src.editor.stage_templates import ApplyStageTemplateCommand
-from src.editor.graph_commands import (
+from src.authoring.commands.graph import (
     AddGraphEdgeCommand,
     AddGraphNodeCommand,
     ExpandToGraphCommand,
@@ -57,12 +57,12 @@ from src.editor.graph_commands import (
     SetGraphNodePositionCommand,
     SetGraphNodePropertiesCommand,
 )
-from src.editor.pattern_commands import (
+from src.authoring.commands.pattern import (
     RemovePatternBindingCommand,
     SetPatternBindingCommand,
     SetPatternPropertyCommand,
 )
-from src.editor.preset_commands import (
+from src.authoring.commands.preset import (
     ApplyPresetCommand,
     ApplyPresetMigrationCommand,
     MaterializePresetCommand,
@@ -70,7 +70,7 @@ from src.editor.preset_commands import (
     SetPresetSlotOverrideCommand,
 )
 from src.editor.progressive_authoring import authoring_level
-from src.editor.timeline_commands import (
+from src.authoring.commands.timeline import (
     AddClipCommand,
     AddKeyframeCommand,
     AddTrackCommand,
@@ -87,12 +87,12 @@ from src.editor.timeline_commands import (
     require_track,
     timeline_tracks,
 )
-from src.editor.ui_commands import (
+from src.authoring.commands.ui import (
     AddUINodeCommand,
     RemoveUINodeCommand,
     SetUINodePropertyCommand,
 )
-from src.editor.variable_commands import (
+from src.authoring.commands.variables import (
     AddOutputMappingCommand,
     AddVariableCommand,
     RemoveOutputMappingCommand,

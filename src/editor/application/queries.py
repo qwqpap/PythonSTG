@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from src.editor.document import EditorNode, SceneDocument, TimelineClip, TimelineTrack
-from src.editor.scene_commands import find_parent as _find_parent
-from src.editor.variable_commands import (
+from src.authoring.scene.document import EditorNode, SceneDocument, TimelineClip, TimelineTrack
+from src.authoring.commands.scene import find_parent as _find_parent
+from src.authoring.commands.variables import (
     compatible_variable_bindings as _compatible_variable_bindings,
 )
-from src.editor.variable_commands import find_variable as _find_variable
-from src.editor.timeline_commands import find_clip as _find_clip
-from src.editor.timeline_commands import find_track as _find_track
-from src.editor.timeline_commands import require_track as _require_track
+from src.authoring.commands.variables import find_variable as _find_variable
+from src.authoring.commands.timeline import find_clip as _find_clip
+from src.authoring.commands.timeline import find_track as _find_track
+from src.authoring.commands.timeline import require_track as _require_track
 
 
 def find_timeline_clip(

@@ -21,8 +21,8 @@ from src.core.project_context import ProjectContext
 from src.authoring.coordinates import CoordinateSpace
 from ..asset_index import load_subresource_preview
 from ..action_search import SpaceTapSearchMixin
-from ..document import EditorNode, SceneDocument
-from ..node_types import NODE_TYPES
+from src.authoring.scene.document import EditorNode, SceneDocument
+from src.authoring.scene.node_types import NODE_TYPES
 from ..resource_browser import RESOURCE_MIME_TYPE
 from ..i18n import LanguageManager
 

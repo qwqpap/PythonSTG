@@ -8,7 +8,7 @@ from pathlib import Path
 from src.core.atomic_io import atomic_write_json
 from src.core.project_context import ProjectContext, get_project_context
 
-from .document import DocumentError, SceneDocument
+from src.authoring.scene.document import DocumentError, SceneDocument
 
 
 class DocumentStore:

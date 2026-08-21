@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import sys
 from src.pattern import PatternDocument
-from .document import SceneDocument
+from src.authoring.scene.document import SceneDocument
 from .preview import PreviewStartError
 from .runtime_preview import RuntimePreviewHost
 from .document_manager import ManagedDocument
-from .scene_compile import SceneSpellCompileError, compile_simple_spell
+from src.compiler.scene_spell import SceneSpellCompileError, compile_simple_spell
 from .i18n import LANGUAGE_ENGLISH, translate_widget_tree
 from .main_window_support import _scene_has_stage_content, build_preview_command
 from .panels.scene_view import SceneViewport

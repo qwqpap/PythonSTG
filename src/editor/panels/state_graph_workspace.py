@@ -20,7 +20,7 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 
-from ..document import SceneDocument, StateGraphSpec, StateSpec
+from src.authoring.scene.document import SceneDocument, StateGraphSpec, StateSpec
 from ..i18n import LANGUAGE_CHINESE, LanguageManager
 
 

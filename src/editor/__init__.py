@@ -1,7 +1,7 @@
 """Editor-facing document, storage, and command APIs."""
 
-from .commands import Command, CommandStack, CompositeCommand
-from .document import (
+from src.authoring.commands.base import Command, CommandStack, CompositeCommand
+from src.authoring.scene.document import (
     CURRENT_SCHEMA_VERSION,
     MAX_STATE_GRAPH_DEPTH,
     DocumentError,
@@ -18,7 +18,7 @@ from .document import (
     TransitionSpec,
 )
 from .storage import DocumentStore
-from .node_types import (
+from src.authoring.scene.node_types import (
     NODE_TYPES,
     NODE_TYPE_REGISTRY,
     NodeTypeRegistry,
@@ -28,7 +28,7 @@ from .node_types import (
     make_default_root,
     make_node,
 )
-from .scene_commands import (
+from src.authoring.commands.scene import (
     AddNodeCommand,
     AssignResourceCommand,
     MoveNodeCommand,
@@ -40,7 +40,7 @@ from .scene_commands import (
     find_node,
     find_parent,
 )
-from .pattern_commands import (
+from src.authoring.commands.pattern import (
     PatternMutationError,
     SetPatternPropertyCommand,
     pattern_with_property,
@@ -51,13 +51,13 @@ from .document_manager import (
     ManagedDocument,
     UnsavedDocumentError,
 )
-from .scene_compile import (
+from src.compiler.scene_spell import (
     SceneCompileDiagnostic,
     SceneSpellCompileError,
     SceneSpellPreview,
     compile_simple_spell,
 )
-from .timeline_commands import (
+from src.authoring.commands.timeline import (
     AddClipCommand,
     AddKeyframeCommand,
     AddTrackCommand,
@@ -76,7 +76,7 @@ from .timeline_commands import (
     timeline_tracks,
 )
 from .session import SceneEditorSession
-from .variable_commands import (
+from src.authoring.commands.variables import (
     AddOutputMappingCommand,
     AddVariableCommand,
     RemoveOutputMappingCommand,
@@ -88,7 +88,7 @@ from .variable_commands import (
     find_mapping,
     find_variable,
 )
-from .state_graph_commands import (
+from src.authoring.commands.state_graph import (
     AddStateCommand,
     AddTransitionCommand,
     DuplicateStateCommand,

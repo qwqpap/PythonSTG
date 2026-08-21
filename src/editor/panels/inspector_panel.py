@@ -22,8 +22,8 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 from src.pattern import PatternDocument
-from ..document import EditorNode, TimelineClip, TimelineTrack
-from ..node_types import PropertySpec, property_specs
+from src.authoring.scene.document import EditorNode, TimelineClip, TimelineTrack
+from src.authoring.scene.node_types import PropertySpec, property_specs
 from ..resource_browser import RESOURCE_MIME_TYPE
 from ..i18n import LanguageManager
 from ..graphics.graph_canvas import GRAPH_NODE_PROPERTY_SPECS

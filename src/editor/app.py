@@ -44,8 +44,8 @@ from src.ui.document import UIDocument
 
 from .action_catalog import ActionExecutor, build_editor_action_catalog
 from .action_search import ActionSearchDialog
-from .document import DocumentError, EditorNode, SceneDocument
-from .node_types import build_default_node_type_registry
+from src.authoring.scene.document import DocumentError, EditorNode, SceneDocument
+from src.authoring.scene.node_types import build_default_node_type_registry
 from .preview_panel import PatternPreviewPanel
 from .preview import PreviewSession
 from .runtime_preview import RuntimePreviewHost

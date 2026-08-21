@@ -270,7 +270,7 @@ class PluginRegistry:
 
             resource_types = build_default_resource_type_registry()
         if node_types is None:
-            from src.editor.node_types import build_default_node_type_registry
+            from src.authoring.scene.node_types import build_default_node_type_registry
 
             node_types = build_default_node_type_registry()
         self.resource_types = resource_types

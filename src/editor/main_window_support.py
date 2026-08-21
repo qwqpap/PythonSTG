@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from src.core.project_context import ProjectContext
 from src.authoring.resources import ResourceDocumentError, ResourceReference
-from .document import EditorNode, SceneDocument
+from src.authoring.scene.document import EditorNode, SceneDocument
 
 
 APP_NAME = "PySTG Editor"

@@ -20,7 +20,7 @@ from src.qt_compat.QtWidgets import (
 )
 
 from ..action_search import SpaceTapSearchMixin
-from ..document import SceneDocument, TimelineClip, TimelineTrack
+from src.authoring.scene.document import SceneDocument, TimelineClip, TimelineTrack
 from ..i18n import LanguageManager
 
 

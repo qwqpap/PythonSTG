@@ -18,7 +18,7 @@ from .application import (
     SetSceneNodePropertiesIntent,
 )
 from .application.queries import find_scene_parent
-from .document import SceneDocument
+from src.authoring.scene.document import SceneDocument
 from .shell import WindowService
 
 
