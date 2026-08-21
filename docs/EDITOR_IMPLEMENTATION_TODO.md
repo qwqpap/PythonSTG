@@ -209,7 +209,7 @@ git diff --check
 | ER3 | Authoring/Command/Compiler 包边界 | `[x]` | ER2 |
 | ER4 | 唯一 PreviewSession | `[x]` | ER3 |
 | ER5 | 唯一插件贡献入口 | `[x]` | ER4 |
-| ER6 | Panel 边界与图形循环 | `[ ]` | ER5 |
+| ER6 | Panel 边界与图形循环 | `[x]` | ER5 |
 | ER7 | 兼容层、schema 与重复生命周期清理 | `[ ]` | ER6 |
 | ER8 | 架构整体验收 | `[ ]` | ER7 |
 | N6.4 | Usability gate | `[ ]` | ER8 |
@@ -558,7 +558,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 ### ER6 Panel 边界与图形循环
 
-**状态/依赖**：`[ ]`；依赖 ER5。
+**状态/依赖**：`[x]`；依赖 ER5（已完成）。
 
 **允许路径**：`src/editor/panels/`、`src/editor/graphics/`、待迁移的当前 workspace/view/panel 文件、公开 Intent/Port 接线、focused tests。
 
@@ -578,7 +578,19 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 **验收文件**：新建 `tests/test_editor_panel_boundaries.py`；回归 `tests/test_editor_graph_workspace.py`、`tests/test_editor_timeline_workspace.py`、`tests/test_editor_preset_workspace.py`、`tests/test_editor_m6_workspace.py`、`tests/test_editor_m6_integration.py` 及真实鼠标 native gate。
 
-**Evidence / Blocker（尚未完成）**：ER6.0–ER6.4 全部完成前保持 `[ ]`。
+**Evidence / Blocker（已完成 `[x]`，独立验证 APPROVE）**：
+
+- **环境**：`C:\Users\m1573\anaconda3\python.exe`（Python 3.12.7），PySide6 6.8.1.1，Windows 11 10.0.26200；Qt 测试设 `QT_QPA_PLATFORM=offscreen`，pytest flags `-o addopts= -p no:cacheprovider`。实现 checkpoint `3e8faaf → fbc7c44`，门禁 commit `f400b9e`；基线 ER5 docs `b47ffa1`。工作树除启动时既有的 `.claude/settings.local.json` 外干净。
+- **子任务（各由独立 Panel Agent 完成，逐 gate 领取）**：ER6.0 `3e8faaf`（抽出共享 `PatternCanvas` 至 `src/editor/graphics/pattern_canvas.py`）+ `68b0fc3`（下沉 graph 图元至 `src/editor/graphics/graph_canvas.py`，消除 `graph_workspace ↔ pattern_workspace` 循环）；ER6.1 `b3adc9f`（迁 Scene + Inspector）；ER6.2 `ae6e917`（迁 Timeline / State Graph / Variables / Variable-mapping）；ER6.3 `41c30c7`（迁 Pattern + Behavior Graph）；ER6.4 `fbc7c44`（迁 UI + Background 至 `src/editor/panels/`）。
+- **Structural（硬指标#1：Panel 间无具体实现导入/私有调用）**：新建 `tests/test_editor_panel_boundaries.py`，含 AST-only 结构门 + 运行时行为门（结构辅助函数不 import 产品代码，Qt/产品 import 均为函数内局部，故 AST 测试在无 Qt 环境仍可跑）。结构门 `_import_references` 以自研 `ast.walk` 解析器遍历 `src/editor/panels/**.py`，解析 `from X import Y` 两侧模块名，函数内 import 与相对 import（`.x`/`..x`）与顶层绝对 import 同等归一，`test_panels_do_not_import_sibling_panels` 断言**零** panel→panel 边（双向）。分类器守卫 `test_panel_classifier_finds_the_known_panels` 断言真实见到 `panels.pattern_workspace`/`panels.scene_view`/`panels.inspector_panel`（非空集）。独立验证以合成 sibling import 反证结构门对 `from ..panels.timeline_workspace import ...` 与 `from . import inspector_panel` 两种形式均真红（非空洞）。循环已消除：`src/editor/graph_workspace.py` 降为仅导 `.graphics.graph_canvas` 的 re-export shim，`panels/pattern_workspace.py` 导 `..graphics.graph_canvas` 与 `..graphics.pattern_canvas`、不导任何 sibling。跑 `test_editor_panel_boundaries.py` + `test_editor_architecture_boundaries.py` → **31 passed**（含 `test_editor_graph_modules_have_no_import_cycles` 由红转绿）。
+- **Runtime（硬指标#2/#3：Panel 不直接改文档/push Command，释放鼠标只提交一次可 Undo Intent）**：行为门 `test_timeline_clip_drag_commits_exactly_one_undoable_intent_on_release` spy 真实 `EditorCoordinator.dispatch` 单一 chokepoint，对 live `view.viewport()` 打真实 `QTest.mousePress` / `QApplication.sendEvent(QMouseEvent.MouseMove)` / `QTest.mouseRelease`（非直调 slot），断言：press 后与 mid-drag 后 `dispatched == []`（panel 仅持瞬态 pose，拖拽期间不触文档）；释放后 `len == 1` 且 `isinstance(TimelineIntent)`、`action == MOVE_CLIP`；文档 `start_frame` 60→90、`undo()`→60、`redo()`→90。无第二预览路径、无下游 slot 捷径。
+- **硬指标#4（图连线 / 节点拖动 / 时间线移动/修剪 / UI gizmo 均可 Undo/Redo）**：由既有回归覆盖——图连线 `test_add_edge_rejects_type_mismatch_and_undo_removes` + `test_real_mouse_port_drag_tracks_pointer_and_connects`；节点拖动 `test_set_node_position_command_coalesces` + `test_window_graph_edits_are_undoable_and_survive_reopen`；时间线移动/修剪 `test_clip_supports_real_mouse_move_and_both_edge_trims` + `test_graphics_timeline_add_duplicate_delete_and_undo` + 上述新 window 门；UI/背景 gizmo `test_ui_node_edits_undo_redo_through_the_window`、`test_ui_canvas_resize_is_a_geometry_commit`、`test_background_transform_command_undo_redo_preserves_all_components`。独立验证跑 §579 完整集（`panel_boundaries` + `architecture_boundaries` + `graph_workspace` + `timeline_workspace` + `preset_workspace` + `m6_workspace` + `m6_integration` + `authoring_integration`）→ **90 passed in 70.63s**；主协调 Agent 另跑含 `m3_integration`/`reactive_clips` 的更大回归集 → **101 passed in 136.80s**（exit 0）。
+  - **诚实 caveat**：时间线 **trim** 的端到端 Undo/Redo 未单独断言（仅断言其几何请求），但与 move 共享同一 `clipGeometryRequested → MoveResizeClipCommand` 可逆路径（move 已端到端证明可逆）；独立验证判为非-blocker。
+- **Identity / Scope**：`graphics/graph_canvas.py`、`graphics/pattern_canvas.py` 为逐字节抽取（唯一差异为新增 module docstring）；重命名的 panel（`inspector_panel`/`timeline_workspace`/`scene_view`/`variable_workspace`/`state_graph_workspace`）仅相对 import rebase（`.x`→`..x`）+ inspector 下沉重指 `from ..graphics.graph_canvas import GRAPH_NODE_PROPERTY_SPECS`；`ui_workspace.py`/`variable_mapping_workspace.py` 为纯 git rename（0 内容改动）。主协调 Agent 亲自核对：迁移全程 `b47ffa1..fbc7c44` 仅触 `src/editor/{__init__,app,graph_workspace,graphics,main_window_authoring/documents/pattern/preview,panels}` + `tests/` + `tools/`；全程 `b47ffa1..f400b9e` 对 `src/{authoring,compiler,render,game}/` **零触及**（`git diff --name-only ... | grep '^src/(authoring|compiler|render|game)/'` 空）——**未改** 作者 schema、compiler/runtime、renderer API、N7 权限模型。门禁 commit `f400b9e` 仅 `tests/test_editor_panel_boundaries.py` + `tools/verify_native_editor_er6.py`（2 文件）。
+- **Native visual / Interaction（真实屏幕）**：`tools/verify_native_editor_er6.py`（真实鼠标 native gate）。**真实屏幕运行**（`QT_QPA_PLATFORM` 未设、`SESSIONNAME=Console`）：同环境探针返回 `platformName = windows`、`window visible on-screen = True`、`windowHandle set = True`（加载真实 Win32 `qwindows` 平台插件，非 offscreen/minimal，stderr 无 fallback/error）；gate 打印 `native_editor_er6_ok clip=3997804b-f64b-4448-8c5e-e41f461b5c35 action=MOVE_CLIP intents=1 start=60->90 screenshot=C:\Users\m1573\AppData\Local\Temp\pystg-er6-native-drag.png`，`EXIT_CODE=0`。截图 **63,532 字节（非空）**，验证者开图确认：底部 Timeline 面板 `Body / Pattern` 轨的紫色 "Ring" clip 右移离原点（约 1.5 s = 60fps 下 frame 90），Inspector 读数 **Start [frame] = 90**（Duration 120，channel `main`，payload `{"pattern":"ring"}`），工具栏 Undo 按钮标签 **"Undo Move/resize timeline clip"**（栈上唯一命令即手势产生的 MOVE_CLIP）。offscreen 复跑亦得 `native_editor_er6_ok … action=MOVE_CLIP intents=1 start=60->90`（exit 0）。该真实屏幕运行取代早前"on-screen not run"caveat，与 ER0–ER2 的 N4/N6 native gate 同一标准。
+- **Performance / Usability**：**not run**，按依赖顺序延至 ER8/N6.4。
+- **无循环规避**：全部 ER6 验收测试与 native gate 无 `skip`/`xfail`/`pytest.mark` 屏蔽、无吞异常；行为门无法伪造（任何旁路会使 Intent 计数 ≠ 1 而失败），结构门经实证对真实 sibling import 真红。
+- **独立验证**：由未参与 ER6 实现的只读 Agent（Read/Grep/pytest/git/自研 AST 脚本，未改任何产品代码或测试）执行；四条硬指标全部 CONFIRMED——迁移为纯 import-path 重定位（逐字节抽取 + 相对 import rebase + 纯 rename + shim），无 panel↔panel 边，行为门 bypass-proof，结构门经反证非空洞；`git show --stat f400b9e` 仅触 tests/tools。Verdict = **APPROVE**。
 
 ### ER7 兼容层、schema 与重复生命周期清理
 
