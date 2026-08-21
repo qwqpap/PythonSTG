@@ -60,7 +60,7 @@ def test_ui_document_opens_inside_tab_switch_without_crashing(
     window._open_document(tmp_path / "game_content/ui/hud.pystg.json")
     qapp_session.processEvents()
 
-    from src.editor.ui_workspace import UIWorkspace
+    from src.editor.panels.ui_workspace import UIWorkspace
 
     workspace = window.central_tabs.currentWidget()
     assert isinstance(workspace, UIWorkspace)
@@ -100,7 +100,7 @@ def test_background_document_opens_with_layer_summary(tmp_path, qapp_session):
     window._open_document(tmp_path / "game_content/backgrounds/lake.pystg.json")
     qapp_session.processEvents()
 
-    from src.editor.ui_workspace import BackgroundWorkspace
+    from src.editor.panels.ui_workspace import BackgroundWorkspace
 
     workspace = window.central_tabs.currentWidget()
     assert isinstance(workspace, BackgroundWorkspace)

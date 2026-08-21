@@ -15,7 +15,7 @@ from .document import DocumentError, SceneDocument
 from .runtime_preview import RuntimePreviewHost
 from .document_manager import DocumentManagerError, ManagedDocument
 from .panels.pattern_workspace import PatternWorkspace
-from .ui_workspace import BackgroundWorkspace, UIWorkspace
+from .panels.ui_workspace import BackgroundWorkspace, UIWorkspace
 from .main_window_support import RESOURCE_FILTER, _scene_has_stage_content
 from .panels.scene_view import SceneViewport
 

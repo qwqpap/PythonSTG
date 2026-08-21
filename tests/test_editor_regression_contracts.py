@@ -752,7 +752,7 @@ def test_ui_and_background_registry_entries_are_full_runtime_contributions() -> 
 def test_ui_canvas_exposes_undoable_gizmo_and_resource_drop_contracts(
     qapp_session,
 ) -> None:
-    module = importlib.import_module("src.editor.ui_workspace")
+    module = importlib.import_module("src.editor.panels.ui_workspace")
     canvas = module.UICanvas()
     document, child = _ui_document_with_child()
     canvas.set_document(document, (384, 448))
@@ -768,7 +768,7 @@ def test_ui_canvas_exposes_undoable_gizmo_and_resource_drop_contracts(
 
 
 def test_ui_canvas_gizmo_commits_geometry_back_to_document(qapp_session) -> None:
-    module = importlib.import_module("src.editor.ui_workspace")
+    module = importlib.import_module("src.editor.panels.ui_workspace")
     canvas = module.UICanvas()
     document, child = _ui_document_with_child()
     canvas.set_document(document, (384, 448))

@@ -27,7 +27,7 @@ from src.editor.app import EditorMainWindow
 from src.editor.preview_process import PatternPreviewProcess
 from src.editor.runtime_preview import RuntimePreviewHost
 from src.editor.session import SceneEditorSession
-from src.editor.ui_workspace import BackgroundCanvas, UICanvas
+from src.editor.panels.ui_workspace import BackgroundCanvas, UICanvas
 from src.game.background_render.document import BackgroundDocument
 from src.ui.document import UIDocument, UIDocumentNode
 
