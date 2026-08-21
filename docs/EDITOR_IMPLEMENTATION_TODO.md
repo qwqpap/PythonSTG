@@ -207,7 +207,7 @@ git diff --check
 | ER1 | 有类型的编辑状态 | `[x]` | ER0 |
 | ER2 | Coordinator 与局部失效 | `[x]` | ER1 |
 | ER3 | Authoring/Command/Compiler 包边界 | `[ ]` | ER2 |
-| ER4 | 唯一 PreviewSession | `[ ]` | ER3 |
+| ER4 | 唯一 PreviewSession | `[x]` | ER3 |
 | ER5 | 唯一插件贡献入口 | `[ ]` | ER4 |
 | ER6 | Panel 边界与图形循环 | `[ ]` | ER5 |
 | ER7 | 兼容层、schema 与重复生命周期清理 | `[ ]` | ER6 |
@@ -493,7 +493,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 ### ER4 唯一 PreviewSession
 
-**状态/依赖**：`[ ]`；依赖 ER3。
+**状态/依赖**：`[x]`；依赖 ER3。
 
 **允许路径**：`src/editor/preview/`、`src/preview/`、当前 `src/editor/preview_process.py`、`runtime_preview.py`、预览相关 shell 接线与 focused tests。
 
@@ -508,9 +508,14 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 **硬指标**：同一时间只有一个活动预览；反馈不会路由到错误文档；stop/reset/crash/close 清理进程和 overlay；legacy 结果不标为 formal；正式 Pattern/Stage 仍经 JSON 协议和正式 runtime。
 
-**验收文件**：新建 `tests/test_preview_session.py`；回归 `tests/test_preview_process.py`、`tests/test_preview_protocol.py`、`tests/test_preview_editor_integration.py`、native preview gate。
+**Evidence / Blocker（已完成 `[x]`，独立验证 APPROVE）**：
 
-**Evidence / Blocker（尚未完成）**：保持 `[ ]`。
+- **Structural**：AST 门禁 `test_editor_main_window_does_not_own_raw_preview_qprocess` 单独运行 1 passed；`self._preview_process` 从 `src/editor` 全删（grep `_preview_process\b` 零命中）；裸 legacy `QProcess` 移入 *composed* `PreviewSession`（`src/editor/preview/session.py:166`），窗口经 `self._preview_session = PreviewSession(project, parent=self)`（`app.py:153`）持有，`_window_owner_classes()` 只扫窗口基类层级，故 composed 成员合法不越界；`_pattern_preview_client` 改为委托 `self._preview_session.formal_client` 的 property（`app.py:202-214`），`main_window_preview.py` 删除 `QProcess` 导入。
+- **Runtime**：`C:\Users\m1573\anaconda3\python.exe -m pytest -q -o addopts= -p no:cacheprovider tests/test_preview_session.py`（10 passed）；`tests/test_preview_process.py tests/test_preview_protocol.py tests/test_preview_editor_integration.py`（14 passed）；ER4 五文件套件 50 passed / 2 failed，2 红为 ER5/ER6 前向门禁（`test_editor_main_window_has_one_plugin_registry_facade`、`test_editor_graph_modules_have_no_import_cycles`），零回归。正式 Pattern/Stage 仍走 `PatternPreviewProcess`+NDJSON（`preview_process.py` 未改）；legacy 无 authoring identity，`[preview]` 与 `[pattern-preview]` 通道分离，非零退出经 `legacyFinished` 上抛不吞。
+- **Native visual**：preview native gate **not run**（headless、`QT_QPA_PLATFORM=offscreen` 环境无法截屏渲染）。
+- **Performance / Usability**：**not run**，按依赖顺序延至 ER8/N6.4。
+- **环境**：commit `8f85557`（对比 ER3 基线 `4a07614`）；工作树干净（仅 `.claude/settings.local.json` 本地设置改动，非产品代码）；Python 3.12.7 (anaconda3)、PySide6 6.8.1.1、Windows 11 10.0.26200、`QT_QPA_PLATFORM=offscreen`。
+- **独立验证**：由未参与 ER4 实现的只读 Agent 执行（Read/Grep/pytest/git，未改任何产品代码或测试），8 项硬指标逐条 CONFIRMED——唯一预览进程所有权、formal↔legacy 互斥、legacy 无 identity、stop/close/自然退出/crash 清理、legacy 结果不标 formal、formal 仍走 JSON 协议+正式 runtime、`RuntimePreviewHost` 仅嵌入不拥有进程、外部编辑工具进程独立于预览。Verdict = **APPROVE**（备注：提交信息写 "11 cases" 实际 10，仅措辞误差，覆盖无缺）。
 
 ### ER5 唯一插件贡献入口
 
