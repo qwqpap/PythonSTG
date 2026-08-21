@@ -75,9 +75,9 @@ from .i18n import (
     translate_widget_tree,
 )
 from .plugins import EditorPluginRegistry
-from .inspector_panel import InspectorPanel
+from .panels.inspector_panel import InspectorPanel
 from .main_window_support import APP_NAME, build_preview_command
-from .scene_view import NodeGraphicsItem, SceneTreeWidget, SceneViewport
+from .panels.scene_view import NodeGraphicsItem, SceneTreeWidget, SceneViewport
 from .main_window_authoring import AuthoringService
 from .main_window_documents import DocumentService
 from .main_window_pattern import PatternService

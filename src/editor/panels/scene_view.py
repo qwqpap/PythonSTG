@@ -19,12 +19,12 @@ from src.qt_compat.QtWidgets import (
 )
 from src.core.project_context import ProjectContext
 from src.authoring.coordinates import CoordinateSpace
-from .asset_index import load_subresource_preview
-from .action_search import SpaceTapSearchMixin
-from .document import EditorNode, SceneDocument
-from .node_types import NODE_TYPES
-from .resource_browser import RESOURCE_MIME_TYPE
-from .i18n import LanguageManager
+from ..asset_index import load_subresource_preview
+from ..action_search import SpaceTapSearchMixin
+from ..document import EditorNode, SceneDocument
+from ..node_types import NODE_TYPES
+from ..resource_browser import RESOURCE_MIME_TYPE
+from ..i18n import LanguageManager
 
 
 class SceneTreeWidget(QTreeWidget):

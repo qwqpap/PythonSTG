@@ -127,9 +127,11 @@ def test_panel_classifier_finds_the_known_panels() -> None:
     """Guard the classifier itself: it must see real panels, not an empty set."""
 
     modules = _panel_modules()
+    # pattern_workspace still lives at the editor root (migrates in ER6.3);
+    # Scene and Inspector already moved into panels/ in ER6.1.
     assert "src.editor.pattern_workspace" in modules
-    assert "src.editor.inspector_panel" in modules
-    assert "src.editor.scene_view" in modules
+    assert "src.editor.panels.scene_view" in modules
+    assert "src.editor.panels.inspector_panel" in modules
 
 
 def test_panels_do_not_import_sibling_panels() -> None:

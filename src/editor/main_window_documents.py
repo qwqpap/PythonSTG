@@ -17,7 +17,7 @@ from .document_manager import DocumentManagerError, ManagedDocument
 from .pattern_workspace import PatternWorkspace
 from .ui_workspace import BackgroundWorkspace, UIWorkspace
 from .main_window_support import RESOURCE_FILTER, _scene_has_stage_content
-from .scene_view import SceneViewport
+from .panels.scene_view import SceneViewport
 
 
 class DocumentService(WindowService):
