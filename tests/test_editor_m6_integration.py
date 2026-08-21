@@ -13,7 +13,7 @@ import pytest
 from src.authoring import ResourceStore, build_default_resource_type_registry
 from src.core.project_context import ProjectContext
 from src.editor.document_manager import DocumentManager
-from src.editor.ui_commands import SetUINodePropertyCommand
+from src.authoring.commands.ui import SetUINodePropertyCommand
 from src.game.background_render.data_driven_background import DataDrivenBackground
 from src.game.background_render.document import BackgroundDocument
 from src.ui.document import UIDocument, UIDocumentNode

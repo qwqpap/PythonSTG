@@ -34,14 +34,14 @@ from src.authoring.resources import (
 )
 from src.authoring.storage import ResourceStore
 from src.core.project_context import ProjectContext
-from src.editor.graph_commands import (
+from src.authoring.commands.graph import (
     AddGraphEdgeCommand,
     AddGraphNodeCommand,
     RemoveGraphEdgeCommand,
     RemoveGraphNodeCommand,
     SetGraphNodePositionCommand,
 )
-from src.editor.node_types import NodeTypeRegistry, NodeTypeSpec
+from src.authoring.scene.node_types import NodeTypeRegistry, NodeTypeSpec
 from src.editor.plugin_sdk import (
     PLUGIN_API_VERSION,
     PluginManifest,
@@ -790,7 +790,7 @@ def test_ui_canvas_gizmo_commits_geometry_back_to_document(qapp_session) -> None
 
 
 def test_background_edit_command_round_trips_through_undo() -> None:
-    module = importlib.import_module("src.editor.background_commands")
+    module = importlib.import_module("src.authoring.commands.background")
     command_type = module.SetBackgroundPropertyCommand
     document = _background_document(
         {

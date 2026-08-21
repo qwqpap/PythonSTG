@@ -9,7 +9,7 @@ from src.editor import SceneEditorSession
 from src.editor.app import EditorMainWindow
 from src.editor.panels.variable_mapping_workspace import VariableBindingDialog, VariableMappingDialog
 from src.qt_compat.QtCore import Qt
-from src.editor.variable_commands import (
+from src.authoring.commands.variables import (
     AddVariableCommand,
     RemoveVariableCommand,
     SetVariablePropertiesCommand,

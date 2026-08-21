@@ -113,7 +113,7 @@ def test_default_reactive_clip_actually_arms_on_the_formal_runtime(tmp_path, qap
     anything.
     """
 
-    from src.editor.stage_compile import compile_stage
+    from src.compiler.stage import compile_stage
     from src.game.bullet.optimized_pool import OptimizedBulletPool
     from src.game.events import EventBus
     from src.game.stage.context import StageContext

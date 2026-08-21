@@ -14,7 +14,7 @@ from src.editor import (
     UnsavedDocumentError,
     make_node,
 )
-from src.editor.document import SceneDocument
+from src.authoring.scene.document import SceneDocument
 from src.pattern import PatternDocument
 
 

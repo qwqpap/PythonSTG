@@ -59,8 +59,8 @@ def test_runtime_snapshot_is_a_copy_and_reset_is_deterministic() -> None:
 
 def test_formal_stage_runner_applies_variable_timeline_and_safe_action(tmp_path) -> None:
     from src.core.project_context import ProjectContext
-    from src.editor.document import TimelineClip, TimelineTrack
-    from src.editor.stage_compile import compile_stage
+    from src.authoring.scene.document import TimelineClip, TimelineTrack
+    from src.compiler.stage import compile_stage
     from src.editor import SceneEditorSession, StateActionSpec
     from src.game.stage.program import StageRunner
 
@@ -111,8 +111,8 @@ def test_formal_stage_runner_applies_variable_timeline_and_safe_action(tmp_path)
 
 def test_variable_conflict_requires_explicit_reducer(tmp_path) -> None:
     from src.core.project_context import ProjectContext
-    from src.editor.document import TimelineClip, TimelineTrack
-    from src.editor.stage_compile import StageCompileError, compile_stage
+    from src.authoring.scene.document import TimelineClip, TimelineTrack
+    from src.compiler.stage import StageCompileError, compile_stage
     from src.editor import SceneEditorSession
 
     scene = SceneEditorSession.new_document("Conflict")

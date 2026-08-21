@@ -395,7 +395,7 @@ def test_background_transform_command_undo_redo_preserves_all_components(
     project = _project(tmp_path)
     document = _background_document()
     path = ResourceStore(project).save(document, "game_content/backgrounds/luna.pystg.json")
-    from src.editor.background_commands import SetBackgroundPropertyCommand
+    from src.authoring.commands.background import SetBackgroundPropertyCommand
     from src.editor.document_manager import DocumentManager
 
     manager = DocumentManager(project, create_initial_scene=False)

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import pytest
 
 from src.core.project_context import ProjectContext
-from src.editor.commands import CommandStack
-from src.editor.document import (
+from src.authoring.commands.base import CommandStack
+from src.authoring.scene.document import (
     CURRENT_SCHEMA_VERSION,
     DocumentError,
     EditorNode,

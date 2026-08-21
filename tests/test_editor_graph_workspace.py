@@ -18,7 +18,7 @@ from src.qt_compat.QtWidgets import QFormLayout
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
-from src.editor.graph_commands import (
+from src.authoring.commands.graph import (
     AddGraphEdgeCommand,
     AddGraphNodeCommand,
     ExpandToGraphCommand,

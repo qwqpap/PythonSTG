@@ -34,7 +34,7 @@ import pytest
 
 from src.authoring.registry import build_default_resource_type_registry
 from src.core.project_context import ProjectContext
-from src.editor.node_types import build_default_node_type_registry
+from src.authoring.scene.node_types import build_default_node_type_registry
 from src.editor.plugin_sdk import (
     PLUGIN_API_VERSION,
     PluginManifest,

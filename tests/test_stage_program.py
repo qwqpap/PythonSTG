@@ -6,14 +6,14 @@ import pytest
 
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
-from src.editor.document import (
+from src.authoring.scene.document import (
     SceneDocument,
     TimelineClip,
     TimelineKeyframe,
     TimelineTrack,
 )
-from src.editor.node_types import make_default_root, make_node
-from src.editor.stage_compile import StageCompileError, compile_stage
+from src.authoring.scene.node_types import make_default_root, make_node
+from src.compiler.stage import StageCompileError, compile_stage
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.stage.context import StageContext
 from src.game.stage.program import StageRunner, StageRunnerState

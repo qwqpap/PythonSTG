@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
-from src.editor.stage_compile import compile_stage
+from src.compiler.stage import compile_stage
 from src.editor.panels.timeline_workspace import CLIP_HEIGHT, TimelineClipItem
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.events import EventBus

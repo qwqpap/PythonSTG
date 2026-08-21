@@ -12,9 +12,9 @@ from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
 
-from src.editor.commands import CommandStack
-from src.editor.graph_commands import ExpandToGraphCommand
-from src.editor.pattern_commands import (
+from src.authoring.commands.base import CommandStack
+from src.authoring.commands.graph import ExpandToGraphCommand
+from src.authoring.commands.pattern import (
     RemovePatternBindingCommand,
     SetPatternBindingCommand,
 )
@@ -25,7 +25,7 @@ from src.editor.progressive_authoring import (
 )
 from src.pattern import BindingSpec, PatternCompiler, PatternDocument
 from src.editor.panels.pattern_workspace import PatternWorkspace
-from src.editor.preset_commands import ApplyPresetCommand
+from src.authoring.commands.preset import ApplyPresetCommand
 from src.pattern import PresetLibrary, PresetResolver
 
 

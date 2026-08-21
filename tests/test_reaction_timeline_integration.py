@@ -6,8 +6,8 @@ import pytest
 
 from src.core.project_context import ProjectContext
 from src.editor import SceneEditorSession, TimelineClip, TimelineTrack
-from src.editor.document import DocumentError
-from src.editor.stage_compile import StageCompileError, compile_stage
+from src.authoring.scene.document import DocumentError
+from src.compiler.stage import StageCompileError, compile_stage
 from src.game.events import EventBus
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.stage.context import StageContext

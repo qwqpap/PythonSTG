@@ -5,8 +5,8 @@ from src.qt_compat.QtCore import QProcess
 
 from src.core.project_context import ProjectContext
 from src.editor.preview_process import PatternPreviewProcess, _qt_enum_value
-from src.editor.document import SceneDocument, TimelineClip, TimelineTrack
-from src.editor.node_types import make_default_root
+from src.authoring.scene.document import SceneDocument, TimelineClip, TimelineTrack
+from src.authoring.scene.node_types import make_default_root
 from src.pattern import PatternDocument
 
 

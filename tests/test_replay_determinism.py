@@ -5,7 +5,7 @@ from __future__ import annotations
 from src.authoring.variables import VariableSpec
 from src.core.project_context import ProjectContext
 from src.editor import SceneEditorSession, StateActionSpec, TimelineClip, TimelineTrack
-from src.editor.stage_compile import compile_stage
+from src.compiler.stage import compile_stage
 from src.game.stage.program import StageRunner
 
 

@@ -10,7 +10,7 @@ from src.qt_compat.QtWidgets import QApplication, QLabel
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow, NodeGraphicsItem, SceneViewport
 from src.editor.asset_index import AssetRecord
-from src.editor.node_types import make_node
+from src.authoring.scene.node_types import make_node
 from src.editor.resource_browser import (
     RECORD_ROLE,
     RESOURCE_MIME_TYPE,

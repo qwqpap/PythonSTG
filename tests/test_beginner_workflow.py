@@ -10,8 +10,8 @@ import pytest
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor import SceneEditorSession
-from src.editor.commands import CommandStack
-from src.editor.stage_compile import StageCompileError, compile_stage
+from src.authoring.commands.base import CommandStack
+from src.compiler.stage import StageCompileError, compile_stage
 from src.editor.stage_templates import (
     ApplyStageTemplateCommand,
     StageTemplateError,

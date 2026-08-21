@@ -1,7 +1,7 @@
 from src.core.project_context import ProjectContext
 from src.editor import SceneEditorSession, TimelineClip, TimelineKeyframe, TimelineTrack
 from src.editor.document_manager import DocumentManager
-from src.editor.timeline_commands import (
+from src.authoring.commands.timeline import (
     AddClipCommand,
     AddKeyframeCommand,
     AddTrackCommand,

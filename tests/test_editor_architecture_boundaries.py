@@ -190,12 +190,12 @@ def _panel_paths() -> tuple[Path, ...]:
 
 
 def _is_command_module(module: str) -> bool:
-    leaf = module.rsplit(".", 1)[-1]
-    target_domain_package = _starts_with(module, "src.authoring.commands")
-    transitional_editor_module = _starts_with(module, "src.editor") and (
-        leaf == "commands" or leaf.endswith("_commands")
-    )
-    return target_domain_package or transitional_editor_module
+    # After ER7 the only domain Command modules live under
+    # ``src.authoring.commands``.  The transitional ``src.editor.commands`` /
+    # ``src.editor.*_commands`` re-export shims were deleted once every repo
+    # caller moved to the canonical package, so the classifier recognises that
+    # package alone -- no migration-era allowlist remains.
+    return _starts_with(module, "src.authoring.commands")
 
 
 @pytest.mark.parametrize(
@@ -204,8 +204,6 @@ def _is_command_module(module: str) -> bool:
         ("src.authoring.commands", True),
         ("src.authoring.commands.scene", True),
         ("src.authoring.commands.timeline.internal", True),
-        ("src.editor.commands", True),
-        ("src.editor.scene_commands", True),
         ("src.authoring.command_helpers", False),
         ("src.game.commands", False),
         ("third_party.scene_commands", False),

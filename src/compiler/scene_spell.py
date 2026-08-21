@@ -4,7 +4,7 @@ This is intentionally not the Phase 4 StageProgram.  It resolves exactly one
 enabled PatternInstance under a selected Spell, applies its spawn position as an
 instance transform, and compiles through the formal Pattern path.  Reference
 resolution and the spawn-origin rule are shared with the StageProgram compiler
-(see :mod:`src.editor.pattern_resolve`) so both paths agree on where a Pattern
+(see :mod:`src.compiler.pattern_resolve`) so both paths agree on where a Pattern
 comes from and where it fires.
 """
 

@@ -5,7 +5,7 @@ import pytest
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor import SceneEditorSession, make_node
-from src.editor.scene_compile import SceneSpellCompileError, compile_simple_spell
+from src.compiler.scene_spell import SceneSpellCompileError, compile_simple_spell
 from src.pattern import BulletSpec, PatternDocument
 
 

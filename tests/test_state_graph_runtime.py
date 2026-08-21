@@ -14,7 +14,7 @@ from src.editor import (
     TimelineTrack,
     TransitionSpec,
 )
-from src.editor.stage_compile import StageCompileError, compile_stage
+from src.compiler.stage import StageCompileError, compile_stage
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.stage.context import StageContext
 from src.game.stage.program import StageRunner, StageRunnerState

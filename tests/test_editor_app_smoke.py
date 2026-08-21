@@ -7,7 +7,7 @@ from src.qt_compat.QtWidgets import QApplication, QLineEdit
 
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow, build_preview_command
-from src.editor.node_types import make_node
+from src.authoring.scene.node_types import make_node
 from src.editor.session import SceneEditorSession
 
 

@@ -1,7 +1,7 @@
 import pytest
 
-from src.editor.document import EditorNode
-from src.editor.node_types import (
+from src.authoring.scene.document import EditorNode
+from src.authoring.scene.node_types import (
     NODE_TYPE_REGISTRY,
     NodeTypeRegistry,
     NodeTypeSpec,

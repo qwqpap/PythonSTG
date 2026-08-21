@@ -19,7 +19,7 @@ import pytest
 
 from src.core.project_context import ProjectContext
 from src.editor.document_manager import DocumentManager
-from src.editor.node_types import make_node
+from src.authoring.scene.node_types import make_node
 from src.editor.session import SceneEditorSession
 
 

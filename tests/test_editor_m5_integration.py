@@ -19,7 +19,7 @@ import pytest
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.document_manager import DocumentManager
-from src.editor.pattern_commands import SetPatternPropertyCommand
+from src.authoring.commands.pattern import SetPatternPropertyCommand
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.stage.context import StageContext
 from src.pattern import (

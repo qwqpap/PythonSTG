@@ -12,8 +12,8 @@ from src.editor.action_catalog import (
     ActionQuery,
     build_editor_action_catalog,
 )
-from src.editor.commands import CommandStack
-from src.editor.node_types import build_default_node_type_registry
+from src.authoring.commands.base import CommandStack
+from src.authoring.scene.node_types import build_default_node_type_registry
 from src.pattern.graph import NODE_TYPES, PORT_TYPES
 
 

@@ -4,8 +4,8 @@ from pathlib import Path
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.document_manager import DocumentManager
-from src.editor.timeline_commands import MoveResizeClipCommand
-from src.editor.stage_compile import compile_stage
+from src.authoring.commands.timeline import MoveResizeClipCommand
+from src.compiler.stage import compile_stage
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.stage.context import StageContext
 from src.game.stage.program import StageRunner

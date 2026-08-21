@@ -59,7 +59,7 @@ def test_reducers_support_numeric_vector_and_complex_values():
 def test_stage_compiler_applies_declared_reducer_in_fixed_track_order(tmp_path):
     from src.core.project_context import ProjectContext
     from src.editor import SceneEditorSession, TimelineClip, TimelineTrack
-    from src.editor.stage_compile import compile_stage
+    from src.compiler.stage import compile_stage
     from src.game.stage.program import StageRunner
 
     scene = SceneEditorSession.new_document("Reducer")
@@ -93,7 +93,7 @@ def test_behavior_output_mapping_validates_types_and_executes_formal_runner(tmp_
     from src.authoring.variables import VariableOutputMapping
     from src.core.project_context import ProjectContext
     from src.editor import SceneEditorSession
-    from src.editor.stage_compile import compile_stage
+    from src.compiler.stage import compile_stage
     from src.game.stage.program import StageRunner
 
     scene = SceneEditorSession.new_document("Mapping")

@@ -10,9 +10,9 @@ from src.core.project_context import ProjectContext
 from src.editor.action_catalog import ActionQuery, build_editor_action_catalog
 from src.editor.action_search import ActionSearchDialog
 from src.editor.app import EditorMainWindow, SceneViewport
-from src.editor.graph_commands import ExpandToGraphCommand
+from src.authoring.commands.graph import ExpandToGraphCommand
 from src.editor.graph_workspace import GraphCanvas
-from src.editor.node_types import build_default_node_type_registry
+from src.authoring.scene.node_types import build_default_node_type_registry
 from src.editor.panels.pattern_workspace import PatternWorkspace
 from src.editor.panels.timeline_workspace import TimelineGraphicsView
 from src.editor.i18n import LANGUAGE_CHINESE, LanguageManager

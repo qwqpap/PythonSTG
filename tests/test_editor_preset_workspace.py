@@ -3,9 +3,9 @@ from pathlib import Path
 from src.authoring import ResourceStore
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
-from src.editor.commands import CommandStack
+from src.authoring.commands.base import CommandStack
 from src.editor.panels.pattern_workspace import PatternWorkspace, PresetReactionSlotEditor
-from src.editor.preset_commands import (
+from src.authoring.commands.preset import (
     ApplyPresetMigrationCommand,
     ApplyPresetCommand,
     MaterializePresetCommand,
