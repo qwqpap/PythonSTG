@@ -296,7 +296,7 @@ def test_external_tool_teardown_does_not_stop_formal_preview(tmp_path, qapp_sess
 
         # An external editing tool finishing must never reach into the preview.
         window._tool_processes["player_editor"] = _FakeToolProcess()
-        window._tool_finished("player_editor", 0, None)
+        window.workbench_service._tool_finished("player_editor", 0, None)
 
         assert "player_editor" not in window._tool_processes
         assert window._preview_session.is_formal_running

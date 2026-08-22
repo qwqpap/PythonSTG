@@ -254,7 +254,7 @@ def test_runtime_state_feedback_is_overlay_only_and_stays_with_owner_document(
     window._preview_mode = "stage"
     window._preview_loaded_resource_id = owner.document.id
 
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "event": "statistics",
             "payload": {
@@ -275,10 +275,10 @@ def test_runtime_state_feedback_is_overlay_only_and_stays_with_owner_document(
     assert owner.document.to_dict() == before
     assert owner.is_dirty is before_dirty
 
-    window.new_scene()
+    window.document_service.new_scene()
     current = window.session
     current_path = window.state_graph.active_state_path
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "event": "statistics",
             "payload": {

@@ -81,11 +81,11 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
     window.show()
     app.processEvents()
 
-    window._timeline_add_track("Reactive")
+    window.timeline_service.timeline_add_track("Reactive")
     track = window.session.document.tracks[0]
     window.timeline.selected_track_id = track.id
     window.session.editor_state.selection.track_id = track.id
-    window._timeline_add_clip(track.id)
+    window.timeline_service.timeline_add_clip(track.id)
     app.processEvents()
     window.bottom_tabs.setCurrentWidget(window.timeline)
     clip = track.clips[0]
@@ -100,7 +100,7 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
     window._active_stage_session = window.session
     window._preview_mode = "stage"
     window._preview_loaded_resource_id = window.session.document.id
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "event": "statistics",
             "payload": {

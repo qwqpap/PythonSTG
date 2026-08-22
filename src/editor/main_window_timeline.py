@@ -15,9 +15,10 @@ from .application import (
 from .application.queries import find_timeline_clip, find_timeline_track
 from src.authoring.scene.document import SceneDocument
 from .shell import WindowService
+from .shell.ports import TimelinePort
 
 
-class TimelineService(WindowService):
+class TimelineService(WindowService[TimelinePort]):
     """Keep public timeline entry points while Coordinator owns mutations."""
 
     def _dispatch_timeline_intent(
@@ -31,34 +32,34 @@ class TimelineService(WindowService):
         refresh_inspector: bool = False,
     ) -> bool:
         try:
-            invalidation = self.editor_coordinator.dispatch(intent)
+            invalidation = self.port.editor_coordinator.dispatch(intent)
         except (IntentRejectedError, ValueError) as exc:
             if error_title is not None:
-                self._show_error(error_title, exc)
+                self.port._show_error(error_title, exc)
             return False
         if invalidation.scopes:
             if defer_invalidation:
                 if refresh_inspector:
-                    self.apply_invalidation(
+                    self.port.apply_invalidation(
                         intent.document_id,
                         InvalidationSet((InvalidationScope.INSPECTOR,)),
                     )
                 QTimer.singleShot(
                     0,
                     lambda document_id=intent.document_id, result=invalidation: (
-                        self.apply_invalidation(document_id, result)
+                        self.port.apply_invalidation(document_id, result)
                     ),
                 )
             else:
-                self.apply_invalidation(intent.document_id, invalidation)
+                self.port.apply_invalidation(intent.document_id, invalidation)
             if label:
-                self._log(label)
+                self.port._log(label)
             if sync_stage:
-                self._sync_active_stage_preview()
+                self.port.preview_service.sync_active_stage_preview()
         return bool(invalidation.scopes)
 
-    def _timeline_add_track(self, kind: str) -> None:
-        session = self.document_manager.active
+    def timeline_add_track(self, kind: str) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -70,10 +71,10 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_track_selected(self, track_id: str) -> None:
-        if getattr(self, "_timeline_selection_dispatching", False):
+    def timeline_track_selected(self, track_id: str) -> None:
+        if getattr(self.port, "_timeline_selection_dispatching", False):
             return
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -81,7 +82,7 @@ class TimelineService(WindowService):
         selection = session.editor_state.selection
         if selection.track_id == selected_track_id and selection.clip_id is None:
             return
-        self._timeline_selection_dispatching = True
+        self.port._timeline_selection_dispatching = True
         try:
             self._dispatch_timeline_intent(
                 TimelineIntent(
@@ -94,12 +95,12 @@ class TimelineService(WindowService):
                 refresh_inspector=True,
             )
         finally:
-            self._timeline_selection_dispatching = False
+            self.port._timeline_selection_dispatching = False
 
-    def _timeline_reactive_navigate(self, target: str, resource_id: str) -> None:
+    def timeline_reactive_navigate(self, target: str, resource_id: str) -> None:
         """Remember a local reaction/behavior target without merging views."""
 
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -116,12 +117,12 @@ class TimelineService(WindowService):
             label=f"Navigate to {target_name} {stable_resource_id}",
         )
 
-    def _timeline_track_properties_requested(
+    def timeline_track_properties_requested(
         self,
         track_id: str,
         values: dict[str, object],
     ) -> None:
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -140,8 +141,8 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_delete_track(self, track_id: str) -> None:
-        session = self.document_manager.active
+    def timeline_delete_track(self, track_id: str) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -157,8 +158,8 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_move_track(self, track_id: str, delta: int) -> None:
-        session = self.document_manager.active
+    def timeline_move_track(self, track_id: str, delta: int) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -175,8 +176,8 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_mute_track(self, track_id: str, muted: bool) -> None:
-        session = self.document_manager.active
+    def timeline_mute_track(self, track_id: str, muted: bool) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -195,13 +196,13 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_add_clip(self, track_id: str) -> None:
-        session = self.document_manager.active
+    def timeline_add_clip(self, track_id: str) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
         selected_track_id = str(track_id)
-        start_frame = int(self.timeline.playhead_frame)
+        start_frame = int(self.port.timeline.playhead_frame)
         track = find_timeline_track(
             session.document,
             selected_track_id,
@@ -224,8 +225,8 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_add_keyframe(self, clip_id: str, playhead_frame: int) -> None:
-        session = self.document_manager.active
+    def timeline_add_keyframe(self, clip_id: str, playhead_frame: int) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -252,14 +253,14 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_delete_keyframe(self, clip_id: str, playhead_frame: int) -> None:
-        session = self.document_manager.active
+    def timeline_delete_keyframe(self, clip_id: str, playhead_frame: int) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
         selected_clip_id = str(clip_id)
         frame = int(playhead_frame)
-        snap_distance = int(self.timeline.snap_spin.value())
+        snap_distance = int(self.port.timeline.snap_spin.value())
         found = find_timeline_clip(session.document, selected_clip_id)
         if found is None or not found[1].keyframes:
             return
@@ -283,13 +284,13 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_keyframe_geometry(
+    def timeline_keyframe_geometry(
         self,
         clip_id: str,
         keyframe_id: str,
         frame: int,
     ) -> None:
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -310,13 +311,13 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_clip_geometry(
+    def timeline_clip_geometry(
         self,
         clip_id: str,
         start_frame: int,
         duration_frames: int,
     ) -> None:
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -337,8 +338,8 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_duplicate_clip(self, clip_id: str) -> None:
-        session = self.document_manager.active
+    def timeline_duplicate_clip(self, clip_id: str) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -358,8 +359,8 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_delete_clip(self, clip_id: str) -> None:
-        session = self.document_manager.active
+    def timeline_delete_clip(self, clip_id: str) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -375,10 +376,10 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_clip_selected(self, track_id: str, clip_id: str) -> None:
-        if getattr(self, "_timeline_selection_dispatching", False):
+    def timeline_clip_selected(self, track_id: str, clip_id: str) -> None:
+        if getattr(self.port, "_timeline_selection_dispatching", False):
             return
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -390,7 +391,7 @@ class TimelineService(WindowService):
             and selection.clip_id == selected_clip_id
         ):
             return
-        self._timeline_selection_dispatching = True
+        self.port._timeline_selection_dispatching = True
         try:
             self._dispatch_timeline_intent(
                 TimelineIntent(
@@ -404,14 +405,14 @@ class TimelineService(WindowService):
                 refresh_inspector=True,
             )
         finally:
-            self._timeline_selection_dispatching = False
+            self.port._timeline_selection_dispatching = False
 
-    def _timeline_clip_properties_requested(
+    def timeline_clip_properties_requested(
         self,
         clip_id: str,
         values: dict[str, object],
     ) -> None:
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -430,13 +431,13 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_keyframe_properties_requested(
+    def timeline_keyframe_properties_requested(
         self,
         clip_id: str,
         keyframe_id: str,
         values: dict[str, object],
     ) -> None:
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id
@@ -457,8 +458,8 @@ class TimelineService(WindowService):
             sync_stage=True,
         )
 
-    def _timeline_playhead_changed(self, frame: int) -> None:
-        session = self.document_manager.active
+    def timeline_playhead_changed(self, frame: int) -> None:
+        session = self.port.document_manager.active
         if session is None:
             return
         document_id = session.document.id
@@ -470,19 +471,19 @@ class TimelineService(WindowService):
         ):
             return
         if (
-            self._pattern_preview_client.is_running
+            self.port._pattern_preview_client.is_running
             and isinstance(session.document, SceneDocument)
-            and self._preview_session.active_document_id == document_id
-            and self._preview_session.runtime_mode == "stage"
-            and self._preview_session.loaded_resource_id == document_id
+            and self.port._preview_session.active_document_id == document_id
+            and self.port._preview_session.runtime_mode == "stage"
+            and self.port._preview_session.loaded_resource_id == document_id
         ):
-            self._pattern_preview_client.send_command(
+            self.port._pattern_preview_client.send_command(
                 "seek",
                 {"frame": playhead_frame},
             )
 
-    def _timeline_zoom_changed(self, value: float) -> None:
-        session = self.document_manager.active
+    def timeline_zoom_changed(self, value: float) -> None:
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, SceneDocument):
             return
         document_id = session.document.id

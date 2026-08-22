@@ -158,7 +158,7 @@ def _send_stage_feedback(window, session, *, frame: int) -> None:
             document_id=session.document.id,
             resource_id=f"unsaved://{session.document.id}",
         )
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "protocol_version": 1,
             "request_id": None,
@@ -479,7 +479,7 @@ def test_preview_feedback_and_stop_clear_only_overlay_not_document_view(
             frame=999,
         )
 
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "protocol_version": 1,
             "request_id": None,
@@ -496,7 +496,7 @@ def test_preview_feedback_and_stop_clear_only_overlay_not_document_view(
     assert session.editor_state.timeline.playhead_frame == 73
 
     _send_stage_feedback(window, session, frame=121)
-    window._preview_running_changed(False)
+    window.preview_service._preview_running_changed(False)
     assert window.runtime_overlay is None
     assert session.editor_state.timeline.playhead_frame == 73
     window.close()
@@ -515,7 +515,7 @@ def test_closing_preview_owner_clears_overlay_and_document_state_ownership(
     _send_stage_feedback(window, session, frame=120)
     assert window.runtime_overlay is not None
 
-    window.close_active_document()
+    window.document_service.close_active_document()
 
     assert session not in window.document_manager.documents
     assert session.editor_state == DocumentEditorState()

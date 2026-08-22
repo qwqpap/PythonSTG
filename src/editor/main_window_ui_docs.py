@@ -15,9 +15,10 @@ from .application import (
 )
 from .main_window_support import _find_ui_node
 from .shell import WindowService
+from .shell.ports import UIDocumentPort
 
 
-class UIDocumentService(WindowService):
+class UIDocumentService(WindowService[UIDocumentPort]):
     """UI and background document slots: nodes, layers, transforms and bindings.
 
     Public compatibility methods translate Qt events into typed application
@@ -26,7 +27,7 @@ class UIDocumentService(WindowService):
     """
 
     def _active_document(self, document_type):
-        session = self.document_manager.active
+        session = self.port.document_manager.active
         if session is None or not isinstance(session.document, document_type):
             return None
         return session
@@ -40,16 +41,16 @@ class UIDocumentService(WindowService):
         label: str = "",
     ) -> bool:
         try:
-            result = self.editor_coordinator.dispatch(intent)
+            result = self.port.editor_coordinator.dispatch(intent)
         except (IntentRejectedError, ValueError) as exc:
-            self.preview_panel.handle_issue(
+            self.port.preview_panel.handle_issue(
                 {"code": issue_code, "message": str(exc)}
             )
-            self._log(f"[{log_prefix}:error] {exc}")
+            self.port._log(f"[{log_prefix}:error] {exc}")
             return False
-        self.apply_invalidation(intent.document_id, result)
+        self.port.apply_invalidation(intent.document_id, result)
         if label:
-            self._log(label)
+            self.port._log(label)
         return True
 
     def _submit_background_intent(
@@ -60,40 +61,40 @@ class UIDocumentService(WindowService):
         label: str = "",
     ) -> bool:
         try:
-            result = self.editor_coordinator.dispatch(intent)
+            result = self.port.editor_coordinator.dispatch(intent)
         except (IntentRejectedError, ValueError) as exc:
-            self.preview_panel.handle_issue(
+            self.port.preview_panel.handle_issue(
                 {"code": issue_code, "message": str(exc)}
             )
-            self._log(f"[background-edit:error] {exc}")
+            self.port._log(f"[background-edit:error] {exc}")
             return False
-        self._applying_background_invalidation = True
+        self.port._applying_background_invalidation = True
         try:
-            self.apply_invalidation(intent.document_id, result)
+            self.port.apply_invalidation(intent.document_id, result)
         finally:
-            self._applying_background_invalidation = False
+            self.port._applying_background_invalidation = False
         if label:
-            self._log(label)
+            self.port._log(label)
         return True
 
-    def _apply_ui_document_view_if_alive(self, widget, document) -> None:
+    def apply_ui_document_view_if_alive(self, widget, document) -> None:
         """Deferred entry point for _apply_ui_document_view.
 
         Runs one event loop turn after the document swap, by which point the
         window or the workspace widget may already be gone.
         """
 
-        if sip.isdeleted(self) or widget is None or sip.isdeleted(widget):
+        if sip.isdeleted(self.port.qt_parent) or widget is None or sip.isdeleted(widget):
             return
-        self._apply_ui_document_view(widget, document)
+        self.apply_ui_document_view(widget, document)
 
-    def _apply_ui_document_view(self, widget, document) -> None:
+    def apply_ui_document_view(self, widget, document) -> None:
         widget.set_document(document)
-        selected = self.session.editor_state.selection.ui_node_id
+        selected = self.port.session.editor_state.selection.ui_node_id
         if selected:
             widget.select_node(str(selected))
 
-    def _ui_node_selected(self, node_id: str) -> None:
+    def ui_node_selected(self, node_id: str) -> None:
         session = self._active_document(UIDocument)
         if session is None:
             return
@@ -108,7 +109,7 @@ class UIDocumentService(WindowService):
             log_prefix="ui-edit",
         )
 
-    def _ui_node_create_requested(
+    def ui_node_create_requested(
         self, parent_id: str, node_type: str, name: str
     ) -> None:
         session = self._active_document(UIDocument)
@@ -124,7 +125,7 @@ class UIDocumentService(WindowService):
             "container_v",
             "container_grid",
         }:
-            self._log(f"[ui-edit:error] unknown UI node type: {node_type}")
+            self.port._log(f"[ui-edit:error] unknown UI node type: {node_type}")
             return
         document_id = session.document.id
         self._submit_ui_document_intent(
@@ -140,12 +141,12 @@ class UIDocumentService(WindowService):
             label="Add UI node",
         )
 
-    def _ui_node_remove_requested(self, node_id: str) -> None:
+    def ui_node_remove_requested(self, node_id: str) -> None:
         session = self._active_document(UIDocument)
         if session is None:
             return
         if str(node_id) == session.document.root.id:
-            self._log("[ui-edit] root node cannot be removed")
+            self.port._log("[ui-edit] root node cannot be removed")
             return
         document_id = session.document.id
         self._submit_ui_document_intent(
@@ -159,7 +160,7 @@ class UIDocumentService(WindowService):
             label="Remove UI node",
         )
 
-    def _ui_node_property_requested(self, node_id: str, properties) -> None:
+    def ui_node_property_requested(self, node_id: str, properties) -> None:
         session = self._active_document(UIDocument)
         if session is None:
             return
@@ -176,7 +177,7 @@ class UIDocumentService(WindowService):
             label="Set UI node property",
         )
 
-    def _ui_node_geometry_requested(
+    def ui_node_geometry_requested(
         self,
         node_id: str,
         x: float,
@@ -205,7 +206,7 @@ class UIDocumentService(WindowService):
             label="Move UI node",
         )
 
-    def _ui_resource_dropped(self, node_id: str, resource_uri: str) -> None:
+    def ui_resource_dropped(self, node_id: str, resource_uri: str) -> None:
         """Assign a dropped project resource through the normal command path."""
         session = self._active_document(UIDocument)
         if session is None:
@@ -216,7 +217,7 @@ class UIDocumentService(WindowService):
         property_name = "texture" if node.node_type == "image" else "style"
         value = str(resource_uri).strip()
         if not value.startswith("res://"):
-            self._show_error(
+            self.port._show_error(
                 "Invalid UI resource",
                 ResourceDocumentError("UI resources must use res:// references"),
             )
@@ -234,8 +235,8 @@ class UIDocumentService(WindowService):
             label="Assign UI resource",
         )
 
-    def _background_layer_selected(self, index: int) -> None:
-        if getattr(self, "_applying_background_invalidation", False):
+    def background_layer_selected(self, index: int) -> None:
+        if getattr(self.port, "_applying_background_invalidation", False):
             return
         session = self._active_document(BackgroundDocument)
         if session is None:
@@ -250,7 +251,7 @@ class UIDocumentService(WindowService):
             issue_code="invalid_background_select",
         )
 
-    def _background_property_requested(self, path: str, value) -> None:
+    def background_property_requested(self, path: str, value) -> None:
         session = self._active_document(BackgroundDocument)
         if session is None:
             return
@@ -267,7 +268,7 @@ class UIDocumentService(WindowService):
             label=f"Set background property {path}",
         )
 
-    def _background_layer_transform_requested(
+    def background_layer_transform_requested(
         self, index: int, x: float, y: float, scale: float, rotation: float
     ) -> None:
         session = self._active_document(BackgroundDocument)
@@ -292,7 +293,7 @@ class UIDocumentService(WindowService):
             issue_code="invalid_background_transform",
         )
 
-    def _background_layer_create_requested(self) -> None:
+    def background_layer_create_requested(self) -> None:
         session = self._active_document(BackgroundDocument)
         if session is None:
             return
@@ -302,7 +303,7 @@ class UIDocumentService(WindowService):
             issue_code="invalid_background_add",
         )
 
-    def _background_layer_remove_requested(self, index: int) -> None:
+    def background_layer_remove_requested(self, index: int) -> None:
         session = self._active_document(BackgroundDocument)
         if session is None:
             return
@@ -316,7 +317,7 @@ class UIDocumentService(WindowService):
             issue_code="invalid_background_remove",
         )
 
-    def _background_binding_requested(self, target: str, expression: str) -> None:
+    def background_binding_requested(self, target: str, expression: str) -> None:
         session = self._active_document(BackgroundDocument)
         if session is None:
             return
@@ -331,7 +332,7 @@ class UIDocumentService(WindowService):
             issue_code="invalid_background_binding",
         )
 
-    def _ui_viewport_changed(self, width: int, height: int) -> None:
+    def ui_viewport_changed(self, width: int, height: int) -> None:
         session = self._active_document(UIDocument)
         if session is None:
             return

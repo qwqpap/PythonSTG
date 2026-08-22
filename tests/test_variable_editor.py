@@ -111,7 +111,7 @@ def test_editor_mapping_diff_is_one_undoable_transaction(tmp_path, qapp_session)
             target=VariableRef(target.name, scope=target.scope, type=target.type),
         )
         before = document.to_dict()
-        window._apply_variable_mapping_changes((mapping,), state_id=None)
+        window.authoring_service._apply_variable_mapping_changes((mapping,), state_id=None)
         assert len(document.output_mappings) == 1
         assert window.session.commands.undo_label == "Edit output mappings"
         assert document.to_dict() != before

@@ -223,7 +223,7 @@ def test_formal_stage_trace_moves_owner_overlay_and_timeline(
     window = EditorMainWindow(project)
     client = PatternPreviewProcess(project)
     try:
-        window._open_document(path)
+        window.document_service.open_document(path)
         qapp_session.processEvents()
         owner = window.session
         before = owner.document.to_dict()
@@ -248,7 +248,7 @@ def test_formal_stage_trace_moves_owner_overlay_and_timeline(
         window._active_stage_session = owner
         window._preview_mode = "stage"
         window._preview_loaded_resource_id = owner.document.id
-        window._handle_pattern_preview_event({"event": "statistics", "payload": stats})
+        window.preview_service._handle_pattern_preview_event({"event": "statistics", "payload": stats})
         qapp_session.processEvents()
 
         assert window.timeline.playhead_frame == 15
@@ -264,7 +264,7 @@ def test_formal_stage_trace_moves_owner_overlay_and_timeline(
         stop_id = client.send_command("stop")
         assert client.wait_for(lambda: bool(_matching(client, stop_id, "statistics")))
         stopped = _matching(client, stop_id, "statistics")[-1]["payload"]
-        window._handle_pattern_preview_event({"event": "statistics", "payload": stopped})
+        window.preview_service._handle_pattern_preview_event({"event": "statistics", "payload": stopped})
         qapp_session.processEvents()
         assert window.timeline.playhead_frame == 0
         assert owner_viewport._items[boss.id]._runtime_pose is False
@@ -311,7 +311,7 @@ def test_ui_window_mutation_resource_drop_and_undo_redo(tmp_path: Path, qapp_ses
     path = ResourceStore(project).save(document, "game_content/ui/hud.pystg.json")
     window = EditorMainWindow(project)
     try:
-        window._open_document(path)
+        window.document_service.open_document(path)
         qapp_session.processEvents()
         workspace = window.central_tabs.currentWidget()
         loaded = window.session.document
@@ -447,7 +447,7 @@ def test_background_binding_is_undoable_and_changes_formal_quads(
     path = ResourceStore(project).save(document, "game_content/backgrounds/luna.pystg.json")
     window = EditorMainWindow(project)
     try:
-        window._open_document(path)
+        window.document_service.open_document(path)
         qapp_session.processEvents()
         workspace = window.central_tabs.currentWidget()
         workspace.binding_target.setText("layers.0.transform.x")

@@ -57,7 +57,7 @@ def test_ui_document_opens_inside_tab_switch_without_crashing(
     )
 
     window = EditorMainWindow(project)
-    window._open_document(tmp_path / "game_content/ui/hud.pystg.json")
+    window.document_service.open_document(tmp_path / "game_content/ui/hud.pystg.json")
     qapp_session.processEvents()
 
     from src.editor.panels.ui_workspace import UIWorkspace
@@ -75,12 +75,12 @@ def test_ui_node_edits_undo_redo_through_the_window(tmp_path, qapp_session):
     ResourceStore(project).save(document, "game_content/ui/hud.pystg.json")
 
     window = EditorMainWindow(project)
-    window._open_document(tmp_path / "game_content/ui/hud.pystg.json")
+    window.document_service.open_document(tmp_path / "game_content/ui/hud.pystg.json")
     qapp_session.processEvents()
 
     node_id = document.root.children[0].id
-    window._ui_node_selected(node_id)
-    window._ui_node_property_requested(node_id, {"y": 40.0})
+    window.ui_document_service.ui_node_selected(node_id)
+    window.ui_document_service.ui_node_property_requested(node_id, {"y": 40.0})
     assert window.session.document.root.children[0].y == 40.0
     window.undo()
     assert window.session.document.root.children[0].y == 4.0
@@ -97,7 +97,7 @@ def test_background_document_opens_with_layer_summary(tmp_path, qapp_session):
     )
 
     window = EditorMainWindow(project)
-    window._open_document(tmp_path / "game_content/backgrounds/lake.pystg.json")
+    window.document_service.open_document(tmp_path / "game_content/backgrounds/lake.pystg.json")
     qapp_session.processEvents()
 
     from src.editor.panels.ui_workspace import BackgroundWorkspace

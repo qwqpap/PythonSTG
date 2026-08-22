@@ -369,7 +369,7 @@ def test_ui_gizmo_commits_one_undoable_intent_only_on_release(
     window = EditorMainWindow(project)
     window.resize(1100, 800)
     window.show()
-    window._open_document(path)
+    window.document_service.open_document(path)
     qapp_session.processEvents()
 
     workspace = window.central_tabs.currentWidget()

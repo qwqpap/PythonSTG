@@ -23,13 +23,13 @@ def test_editor_window_wires_tree_inspector_viewport_and_undo(tmp_path):
     assert root_item.text(1) == "SceneRoot"
     assert window.inspector.widget().findChild(QLineEdit, "inspectorName") is not None
 
-    window.add_node("Sprite")
+    window.scene_edit_service.add_node("Sprite")
     sprite_id = window._selected_id
     assert window.tree.topLevelItem(0).childCount() == 1
     assert sprite_id in window.viewport._items
     assert window.inspector._node_id == sprite_id
 
-    window.add_node("EnemySpawner")
+    window.scene_edit_service.add_node("EnemySpawner")
     spawner_id = window._selected_id
     assert window.session.node(sprite_id).children[0].id == spawner_id
     assert window.inspector._node_id == spawner_id
@@ -40,11 +40,11 @@ def test_editor_window_wires_tree_inspector_viewport_and_undo(tmp_path):
     window._refresh()
 
     window._selected_id = window.session.document.root.id
-    window.add_node("SpellCard")
+    window.scene_edit_service.add_node("SpellCard")
     spell_id = window._selected_id
-    window.indent_selected()
+    window.scene_edit_service.indent_selected()
     assert window.session.node(sprite_id).children[0].id == spell_id
-    window.outdent_selected()
+    window.scene_edit_service.outdent_selected()
     assert window.session.document.root.children[1].id == spell_id
     window.undo()
     window.undo()
@@ -53,7 +53,7 @@ def test_editor_window_wires_tree_inspector_viewport_and_undo(tmp_path):
     window._selected_id = sprite_id
     window._refresh()
 
-    window.set_node_property(sprite_id, "x", 128.0)
+    window.scene_edit_service.set_node_property(sprite_id, "x", 128.0)
     assert window.session.node(sprite_id).properties["x"] == 128.0
     assert window.session.is_dirty
     window.undo()

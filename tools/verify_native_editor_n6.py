@@ -50,7 +50,7 @@ def run(
     app.processEvents()
 
     before = window.session.document.to_dict()
-    window.create_stage_template("two_phase_boss")
+    window.scene_edit_service.create_stage_template("two_phase_boss")
     app.processEvents()
     if [state.name for state in window.session.document.state_graph.states] != [
         "登场", "通常阶段", "强化阶段", "结束"
@@ -104,12 +104,12 @@ def run(
         raise AssertionError("Scene search exposed an invalid root candidate")
     dialog.close()
 
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     app.processEvents()
     workspace = window.central_tabs.currentWidget()
     if not isinstance(workspace, PatternWorkspace):
         raise AssertionError("new Pattern did not open PatternWorkspace")
-    window._pattern_level_requested("l3")
+    window.pattern_service.pattern_level_requested("l3")
     app.processEvents()
     if window.session.document.graph is None or workspace.authoring_level() != "l3":
         raise AssertionError("L3 did not expand the same Pattern")
@@ -126,14 +126,14 @@ def run(
     )
     if target is None:
         raise AssertionError("Graph catalog did not offer the arc node")
-    window._execute_action(target)
+    window.workbench_service._execute_action(target)
     dialog.close()
     app.processEvents()
     if len(window.session.document.graph.nodes) != before_nodes + 1:
         raise AssertionError("search result did not create through the document command")
     if not window.session.undo() or len(window.session.document.graph.nodes) != before_nodes:
         raise AssertionError("search-created node was not undoable")
-    window._pattern_level_requested("l2")
+    window.pattern_service.pattern_level_requested("l2")
     app.processEvents()
     if workspace.authoring_level() != "l2" or workspace.stack.currentWidget() is not workspace.advanced_view:
         raise AssertionError("progressive return to L2 did not preserve the Pattern")

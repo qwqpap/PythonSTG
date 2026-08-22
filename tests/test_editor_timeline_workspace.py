@@ -46,7 +46,7 @@ def _window(tmp_path, qapp_session):
 
 
 def _add_event_clip(window):
-    window._timeline_add_track("Event")
+    window.timeline_service.timeline_add_track("Event")
     track = window.session.document.tracks[0]
     window.timeline.selected_track_id = track.id
     window.session.editor_state.selection.track_id = track.id
@@ -143,7 +143,7 @@ def test_scrubbing_seeks_preview_and_zoom_does_not_mutate_frames(tmp_path, qapp_
 def test_clip_inspector_payload_edit_uses_command_stack(tmp_path, qapp_session):
     window = _window(tmp_path, qapp_session)
     _track, clip = _add_event_clip(window)
-    window._timeline_clip_selected(window.session.document.tracks[0].id, clip.id)
+    window.timeline_service.timeline_clip_selected(window.session.document.tracks[0].id, clip.id)
     qapp_session.processEvents()
 
     payload = window.inspector.findChild(QPlainTextEdit, "timelineClipPayload")
@@ -171,7 +171,7 @@ def test_scene_with_tracks_launches_formal_stage_preview_document(
     window = _window(tmp_path, qapp_session)
     _add_event_clip(window)
 
-    window.run_preview()
+    window.preview_service.run_preview()
 
     assert [command for command, _payload in window._pattern_preview_client.commands[-2:]] == [
         "load",
@@ -201,7 +201,7 @@ def test_runtime_statistics_drive_playhead_active_clip_and_pose_without_seek_or_
     before_document = window.session.document.to_dict()
     before_dirty = window.session.is_dirty
 
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "event": "statistics",
             "payload": {
@@ -229,7 +229,7 @@ def test_runtime_statistics_drive_playhead_active_clip_and_pose_without_seek_or_
         if isinstance(item, TimelineClipItem) and item.clip_id == clip.id
     )
     assert clip_item.active is True
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "event": "status",
             "payload": {
@@ -295,11 +295,11 @@ def test_stage_preview_feedback_is_owned_by_loaded_scene_and_does_not_cross_tabs
     window._active_stage_session = owner
     window._preview_mode = "stage"
     window._preview_loaded_resource_id = owner.document.id
-    window.new_scene()
+    window.document_service.new_scene()
     current = window.session
     window.timeline.set_playhead(6, emit=False)
 
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "event": "statistics",
             "payload": {
@@ -340,10 +340,10 @@ def test_stage_runtime_feedback_moves_boss_in_owner_viewport_while_other_tab_is_
     window._active_stage_session = owner
     window._preview_mode = "stage"
     window._preview_loaded_resource_id = owner.document.id
-    window.new_scene()
+    window.document_service.new_scene()
     current = window.session
     window.timeline.set_playhead(7, emit=False)
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "event": "statistics",
             "payload": {
@@ -385,7 +385,7 @@ def test_stage_hot_reload_restores_playhead_and_previous_play_state(
     window._preview_state = "playing"
     window.timeline.set_playhead(0, emit=False)
     window._pattern_preview_client.commands.clear()
-    window._sync_active_stage_preview()
+    window.preview_service.sync_active_stage_preview()
     assert [command for command, _payload in window._pattern_preview_client.commands] == [
         "load",
         "seek",
@@ -396,7 +396,7 @@ def test_stage_hot_reload_restores_playhead_and_previous_play_state(
     window._preview_state = "paused"
     window.timeline.set_playhead(90, emit=False)
     window._pattern_preview_client.commands.clear()
-    window._sync_active_stage_preview()
+    window.preview_service.sync_active_stage_preview()
     assert window._pattern_preview_client.commands[1:] == [("seek", {"frame": 90})]
 
     window.session.revert()
@@ -633,7 +633,7 @@ def test_keyframe_inspector_table_edit_is_undoable(tmp_path, qapp_session):
     window.session.apply(AddTrackCommand(document, track))
     window.session.apply(AddClipCommand(document, track.id, clip))
     window._refresh()
-    window._timeline_clip_selected(track.id, clip.id)
+    window.timeline_service.timeline_clip_selected(track.id, clip.id)
     qapp_session.processEvents()
     table = window.inspector.findChild(QTableWidget, "timelineKeyframeTable")
 

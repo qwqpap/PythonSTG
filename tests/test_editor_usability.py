@@ -180,17 +180,17 @@ def test_editor_level_navigation_expands_once_and_returns_without_duplication(
         "game_content/patterns/progressive.pystg.json",
     )
     window = EditorMainWindow(project)
-    window._open_document(path)
+    window.document_service.open_document(path)
     session = window._active_pattern_session
     workspace = window.central_tabs.currentWidget()
 
-    window._pattern_level_requested("l3")
+    window.pattern_service.pattern_level_requested("l3")
     first_graph = session.document.graph
     assert first_graph is not None
     node_ids = tuple(node.id for node in first_graph.nodes)
-    window._pattern_level_requested("l2")
+    window.pattern_service.pattern_level_requested("l2")
     assert session.document.graph is first_graph
-    window._pattern_level_requested("l3")
+    window.pattern_service.pattern_level_requested("l3")
     assert tuple(node.id for node in session.document.graph.nodes) == node_ids
     assert workspace.authoring_level() == "l3"
     assert session.undo()
@@ -208,7 +208,7 @@ def test_scene_add_menu_exposes_both_beginner_skeletons_and_each_is_one_undo(
     assert "addTwoPhaseBossSkeleton" in action_names
 
     before = window.session.document.to_dict()
-    window.create_stage_template("midstage")
+    window.scene_edit_service.create_stage_template("midstage")
     assert [state.name for state in window.session.document.state_graph.states] == [
         "Wave A", "Wave B", "End"
     ]
@@ -223,7 +223,7 @@ def test_document_switch_hides_irrelevant_pattern_sidebars_and_restores_scene_la
 ):
     window = EditorMainWindow(ProjectContext(tmp_path))
     window.show()
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     qapp_session.processEvents()
     assert not window.scene_dock.isVisibleTo(window)
     assert not window.state_graph_dock.isVisibleTo(window)

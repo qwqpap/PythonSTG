@@ -72,10 +72,10 @@ def test_editor_adds_reactive_track_clip_through_command_stack(tmp_path, qapp_se
     window.resize(900, 650)
     window.show()
     qapp_session.processEvents()
-    window._timeline_add_track("Reactive")
+    window.timeline_service.timeline_add_track("Reactive")
     track = window.session.document.tracks[0]
     window.timeline.selected_track_id = track.id
-    window._timeline_add_clip(track.id)
+    window.timeline_service.timeline_add_clip(track.id)
     assert track.kind == "Reactive"
     assert track.clips[0].payload["activation"]["kind"] == "on_event"
     assert track.clips[0].payload["reaction"]["id"]
@@ -95,7 +95,7 @@ def test_reactive_clip_inspector_exposes_activation_reaction_and_owner(tmp_path,
     track = TimelineTrack(name="Hooks", kind="Reactive", channel="reaction", clips=[_reactive_clip()])
     window.session.document.tracks = [track]
     window._refresh()
-    window._timeline_clip_selected(track.id, track.clips[0].id)
+    window.timeline_service.timeline_clip_selected(track.id, track.clips[0].id)
     qapp_session.processEvents()
     assert window.inspector.findChild(QLabel, "timelineReactiveActivation").text() == "on_event"
     assert window.inspector.findChild(QLabel, "timelineReactiveReaction").text() == "fake-overload"
@@ -125,10 +125,10 @@ def test_default_reactive_clip_actually_arms_on_the_formal_runtime(tmp_path, qap
     window = EditorMainWindow(ProjectContext(tmp_path))
     window.show()
     qapp_session.processEvents()
-    window._timeline_add_track("Reactive")
+    window.timeline_service.timeline_add_track("Reactive")
     track = window.session.document.tracks[0]
     window.timeline.selected_track_id = track.id
-    window._timeline_add_clip(track.id)
+    window.timeline_service.timeline_add_clip(track.id)
     clip = track.clips[0]
 
     program = compile_stage(ProjectContext(tmp_path), window.session.document)

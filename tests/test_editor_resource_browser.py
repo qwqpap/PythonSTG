@@ -114,12 +114,12 @@ def test_workbench_contains_assets_and_assigns_resources(tmp_path):
     ) is not None
 
     record = window.resource_browser.index.find("res://assets/images/orb.png")
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
     sprite = window.session.node(window._selected_id)
     assert sprite.type == "Sprite"
     assert sprite.properties["texture"] == "res://assets/images/orb.png"
 
-    window._resource_dropped(
+    window.workbench_service.resource_dropped(
         {
             "kind": "image",
             "name": "orb.png",
@@ -140,10 +140,10 @@ def test_workbench_contains_assets_and_assigns_resources(tmp_path):
         factory=lambda: QLabel("embedded"),
     )
     window.plugin_registry._plugins["bullet_aliases"] = central
-    window.open_plugin("bullet_aliases")
+    window.workbench_service.open_plugin("bullet_aliases")
     assert window.central_tabs.count() == 2
     assert window.central_tabs.currentWidget().text() == "embedded"
-    window._close_central_tab(1)
+    window.document_service.close_central_tab(1)
     assert window.central_tabs.count() == 1
 
     window.session.reset()

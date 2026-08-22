@@ -52,20 +52,20 @@ def _window(tmp_path):
 def test_document_tabs_preserve_selection_context_savepoints_and_history(tmp_path, qapp_session):
     window, _fake = _window(tmp_path)
     scene = window.session
-    window.add_node("Emitter")
+    window.scene_edit_service.add_node("Emitter")
     emitter_id = window._selected_id
     scene.editor_state.timeline.zoom = 1.5
 
     record = window.resource_browser.index.find(
         "res://game_content/patterns/m3_ring.pystg.json"
     )
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
     pattern = window.session
 
     assert len(window.document_manager) == 2
     assert isinstance(window.central_tabs.currentWidget(), PatternWorkspace)
     assert pattern is not scene
-    window._pattern_property_requested("shape.count", 36)
+    window.pattern_service.pattern_property_requested("shape.count", 36)
     assert pattern.document.shape.count == 36
     assert pattern.is_dirty
     assert scene.editor_state.selection.node_id == emitter_id
@@ -89,27 +89,27 @@ def test_document_tabs_preserve_selection_context_savepoints_and_history(tmp_pat
 
 def test_pattern_workspace_template_gizmos_and_bullet_picker_are_undoable(tmp_path, qapp_session):
     window, fake = _window(tmp_path)
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     session = window.session
     workspace = window.central_tabs.currentWidget()
     assert isinstance(workspace, PatternWorkspace)
     assert workspace.bullet_picker.count() >= 2
 
-    window._apply_pattern_template("aimed_arc")
+    window.pattern_service.apply_pattern_template("aimed_arc")
     assert session.document.shape.kind == "arc"
     assert session.document.aim.mode == "player"
     window.undo()
     assert session.document.shape.kind == "ring"
     assert session.document.aim.mode == "fixed"
 
-    window._pattern_origin_requested(0.25, 0.5)
+    window.pattern_service.pattern_origin_requested(0.25, 0.5)
     assert session.document.shape.origin_x == 0.25
     assert session.document.shape.origin_y == 0.5
     window.undo()
     assert session.document.shape.origin_x == 0.0
     assert session.document.shape.origin_y == 0.65
 
-    window._pattern_player_requested(-0.2, -0.7)
+    window.pattern_service.pattern_player_requested(-0.2, -0.7)
     assert session.editor_state.pattern.player_position == (-0.2, -0.7)
     assert fake.commands[-1] == (
         "set-player-position",
@@ -124,7 +124,7 @@ def test_simple_spell_creation_assignment_undo_and_formal_preview(tmp_path, qapp
     pattern_record = window.resource_browser.index.find(
         "res://game_content/patterns/m3_ring.pystg.json"
     )
-    window.create_simple_spell_flow()
+    window.scene_edit_service.create_simple_spell_flow()
 
     root = window.session.document.root
     stage = root.children[0]
@@ -143,7 +143,7 @@ def test_simple_spell_creation_assignment_undo_and_formal_preview(tmp_path, qapp
 
     # Resource assignment is its own command, not only an incidental part of
     # the creation transaction.
-    window.set_node_property(instance.id, "pattern", pattern_record.resource_value)
+    window.scene_edit_service.set_node_property(instance.id, "pattern", pattern_record.resource_value)
     assert instance.properties["pattern"] == pattern_record.resource_value
     window.undo()
     assert instance.properties["pattern"] == ""
@@ -153,7 +153,7 @@ def test_simple_spell_creation_assignment_undo_and_formal_preview(tmp_path, qapp
     compiled = compile_simple_spell(window.project, window.session.document, spell.id)
     assert compiled.pattern_instance_id == instance.id
     window._selected_id = spell.id
-    window.run_preview()
+    window.preview_service.run_preview()
     assert [command for command, _payload in fake.commands[-2:]] == ["load", "play"]
     assert "document" in fake.commands[-2][1]
 
@@ -176,7 +176,7 @@ def test_pattern_workspace_remains_usable_at_supported_narrow_size(
     window, _fake = _window(tmp_path)
     window.resize(960, 640)
     window.show()
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     qapp_session.processEvents()
 
     workspace = window.central_tabs.currentWidget()
@@ -197,7 +197,7 @@ def test_pattern_workspace_remains_usable_at_supported_narrow_size(
 
 def test_scene_diagnostic_link_reselects_failing_node(tmp_path, qapp_session):
     window, _fake = _window(tmp_path)
-    window.create_simple_spell_flow()
+    window.scene_edit_service.create_simple_spell_flow()
     scene = window.session
     spell = scene.document.root.children[0].children[0].children[0]
     instance = spell.children[0].children[0]
@@ -205,11 +205,11 @@ def test_scene_diagnostic_link_reselects_failing_node(tmp_path, qapp_session):
     try:
         compile_simple_spell(window.project, scene.document, spell.id)
     except SceneSpellCompileError as error:
-        window._log_scene_diagnostics(error)
+        window.workbench_service.log_scene_diagnostics(error)
     else:
         raise AssertionError("missing Pattern resource should fail")
 
-    window._diagnostic_link_clicked(
+    window.workbench_service.diagnostic_link_clicked(
         QUrl(f"pystg-node:{scene.document.id}:{instance.id}")
     )
     assert window.session is scene
@@ -225,9 +225,9 @@ def test_clean_no_code_ring_flow_saves_reopens_and_formally_previews(
     monkeypatch,
 ):
     window, fake = _window(tmp_path)
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     session = window.session
-    window._apply_pattern_properties(
+    window.pattern_service.apply_pattern_properties(
         {
             "shape.kind": "ring",
             "shape.count": 32,
@@ -245,19 +245,19 @@ def test_clean_no_code_ring_flow_saves_reopens_and_formally_previews(
         lambda *args, **kwargs: (str(target), "PySTG Resources"),
     )
 
-    assert window.save_scene()
+    assert window.document_service.save_scene()
     assert not session.is_dirty
     document_id = session.document.id
     tab = window._document_widgets[document_id]
-    window._close_central_tab(window.central_tabs.indexOf(tab))
+    window.document_service.close_central_tab(window.central_tabs.indexOf(tab))
 
-    reopened = window._open_document(str(target))
+    reopened = window.document_service.open_document(str(target))
     assert reopened.document.shape.count == 32
     assert reopened.document.motion.speed == 3.0
     assert reopened.document.schedule.interval_frames == 10
     assert reopened.document.aim.mode == "player"
     assert reopened.document.bullet.resource == "res://assets/bullets.json#orb"
-    window.run_preview()
+    window.preview_service.run_preview()
     assert [command for command, _payload in fake.commands[-2:]] == ["load", "play"]
     assert fake.commands[-2][1]["document"]["shape"]["count"] == 32
     window.close()

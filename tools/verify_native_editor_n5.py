@@ -21,7 +21,7 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
     window = EditorMainWindow(ProjectContext(project_root))
     window.resize(1480, 920)
     window.show()
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     app.processEvents()
 
     workspace = window.central_tabs.currentWidget()
@@ -35,7 +35,7 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
         if item.display_name == "子弹分裂"
     )
     before_id = window.session.document.id
-    window._apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
+    window.pattern_service.apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
     app.processEvents()
     instance = window._preset_resolver.instance_from_document(window.session.document)
     if instance is None or instance.version != "1.0.0":
@@ -50,7 +50,7 @@ def run(*, project_root: Path, screenshot: Path | None = None) -> None:
     if screenshot is not None and not window.grab().save(str(screenshot)):
         raise RuntimeError(f"could not save native screenshot: {screenshot}")
 
-    window._preset_materialize_requested()
+    window.pattern_service.preset_materialize_requested()
     app.processEvents()
     if window._preset_resolver.instance_from_document(window.session.document) is not None:
         raise AssertionError("materialization left the document linked")

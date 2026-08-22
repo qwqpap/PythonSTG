@@ -94,19 +94,19 @@ def test_window_applies_builtin_preset_and_undo_redoes_materialization(
     path = ResourceStore(project).save(PatternDocument.new("Window Preset"), "patterns/window.pystg.json")
     window = EditorMainWindow(project)
     try:
-        window._open_document(path)
+        window.document_service.open_document(path)
         qapp_session.processEvents()
         workspace = window.central_tabs.currentWidget()
         assert isinstance(workspace, PatternWorkspace)
         descriptor = next(item for item in LIBRARY.presets if item.display_name == "扇形扫射")
 
-        window._apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
+        window.pattern_service.apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
         qapp_session.processEvents()
         assert window._preset_resolver.instance_from_document(window.session.document) is not None
         assert "preset" in workspace.available_modes()
         assert window.session.is_dirty
 
-        window._preset_materialize_requested()
+        window.pattern_service.preset_materialize_requested()
         assert window._preset_resolver.instance_from_document(window.session.document) is None
         assert window.undo()
         assert window._preset_resolver.instance_from_document(window.session.document) is not None
@@ -145,12 +145,12 @@ def test_preset_slot_editor_writes_one_undoable_slot_override(
     )
     window = EditorMainWindow(project)
     try:
-        window._open_document(path)
+        window.document_service.open_document(path)
         qapp_session.processEvents()
         descriptor = next(
             item for item in LIBRARY.presets if item.display_name == "圆形开花"
         )
-        window._apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
+        window.pattern_service.apply_pattern_template(f"{descriptor.preset_id}@{descriptor.version}")
         qapp_session.processEvents()
         slot = descriptor.slots[0]
 
@@ -210,10 +210,10 @@ def test_preset_migration_button_only_offers_reachable_versions(
     window = EditorMainWindow(project)
     try:
         window._preset_resolver = resolver
-        window._open_document(path)
+        window.document_service.open_document(path)
         qapp_session.processEvents()
-        window._apply_pattern_template(f"{base.preset_id}@1.0.0")
-        window._preset_parameter_requested("count", 48)
+        window.pattern_service.apply_pattern_template(f"{base.preset_id}@1.0.0")
+        window.pattern_service.preset_parameter_requested("count", 48)
         qapp_session.processEvents()
 
         workspace = window.central_tabs.currentWidget()

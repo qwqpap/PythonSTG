@@ -160,7 +160,7 @@ def test_graph_search_executes_real_command_and_undo(tmp_path, qapp_session):
     record = window.resource_browser.index.find(
         "res://game_content/patterns/search.pystg.json"
     )
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
     session = window._active_pattern_session
     ExpandToGraphCommand(session.document).execute()
     session.editor_state.pattern.graph_mode = True
@@ -173,7 +173,7 @@ def test_graph_search_executes_real_command_and_undo(tmp_path, qapp_session):
         if match.descriptor.id == "action.graph.shape.arc"
     )
 
-    window._execute_action(action)
+    window.workbench_service._execute_action(action)
     assert len(session.document.graph.nodes) == before + 1
     assert any(
         node.category == "shape" and node.node_type == "arc"
@@ -196,7 +196,7 @@ def test_scene_and_timeline_search_create_through_command_stack(
         )
         if match.descriptor.payload.get("node_type") == "Stage"
     )
-    window._execute_action(stage_action)
+    window.workbench_service._execute_action(stage_action)
     assert any(node.type == "Stage" for node in session.document.root.children)
     assert session.undo()
     assert not session.document.root.children
@@ -206,7 +206,7 @@ def test_scene_and_timeline_search_create_through_command_stack(
         for match in window.action_catalog.search(ActionQuery(context="timeline"))
         if match.descriptor.id == "action.timeline.track.event"
     )
-    window._execute_action(track_action)
+    window.workbench_service._execute_action(track_action)
     state = session.document.state_graph.find_state(
         session.document.state_graph.initial_state_id
     )
@@ -220,16 +220,16 @@ def test_window_space_uses_selected_parent_and_selected_track_context(
     tmp_path, qapp_session
 ):
     window = _window(tmp_path, qapp_session)
-    window._open_scene_action_search()
+    window.workbench_service.open_scene_action_search()
     assert window._action_search_dialog.query.parent_type == "SceneRoot"
     window._action_search_dialog.close()
 
-    window._timeline_add_track("Event")
+    window.timeline_service.timeline_add_track("Event")
     track = window.session.document.state_graph.find_state(
         window.session.document.state_graph.initial_state_id
     ).tracks[0]
     window.timeline.selected_track_id = track.id
-    window._open_action_search("timeline")
+    window.workbench_service.open_action_search("timeline")
     dialog = window._action_search_dialog
     clip_matches = [
         match.descriptor

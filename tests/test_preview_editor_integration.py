@@ -59,7 +59,7 @@ def test_pattern_asset_opens_preview_panel_and_live_inspector(tmp_path, qapp_ses
     window, fake = _window(tmp_path)
     record = window.resource_browser.index.find("res://assets/patterns/ring.pystg.json")
 
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
 
     assert window.bottom_tabs.currentWidget() is window.preview_panel
     assert window.preview_panel.resource_label.text() == "res://assets/patterns/ring.pystg.json"
@@ -72,7 +72,7 @@ def test_pattern_asset_opens_preview_panel_and_live_inspector(tmp_path, qapp_ses
 def test_inspector_change_reloads_and_failed_response_reverts_local_document(tmp_path, qapp_session):
     window, fake = _window(tmp_path)
     record = window.resource_browser.index.find("res://assets/patterns/ring.pystg.json")
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
 
     count_editor = _active_pattern_editor(window, "patternProperty_shape_count")
     count_editor.setText("7")
@@ -80,7 +80,7 @@ def test_inspector_change_reloads_and_failed_response_reverts_local_document(tmp
     request_id, command, payload = fake.commands[-1]
     assert command == "set-property"
     assert payload == {"path": "shape.count", "value": 7}
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "protocol_version": 1,
             "request_id": request_id,
@@ -94,7 +94,7 @@ def test_inspector_change_reloads_and_failed_response_reverts_local_document(tmp
     count_editor.setText("0")
     count_editor.editingFinished.emit()
     failed_id, command, _ = fake.commands[-1]
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "protocol_version": 1,
             "request_id": failed_id,
@@ -122,7 +122,7 @@ def test_preview_panel_displays_runtime_stats_and_errors(tmp_path, qapp_session)
         document_id=window.session.document.id,
         resource_id=f"unsaved://{window.session.document.id}",
     )
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "protocol_version": 1,
             "request_id": None,
@@ -139,7 +139,7 @@ def test_preview_panel_displays_runtime_stats_and_errors(tmp_path, qapp_session)
             },
         }
     )
-    window._handle_pattern_preview_event(
+    window.preview_service._handle_pattern_preview_event(
         {
             "protocol_version": 1,
             "request_id": "bad",
@@ -179,7 +179,7 @@ def test_preview_stop_button_stops_the_preview_session_process(tmp_path, qapp_se
     )
     assert window._preview_session.mode == PREVIEW_MODE_FORMAL
 
-    window._send_pattern_preview_command("stop", {})
+    window.preview_service.send_pattern_preview_command("stop", {})
     qapp_session.processEvents()
 
     assert fake.stop_calls == 1
@@ -199,7 +199,7 @@ def test_closing_preview_owner_stops_process_and_releases_identity(
         resource_id=f"unsaved://{owner.document.id}",
     )
 
-    window.close_active_document()
+    window.document_service.close_active_document()
     qapp_session.processEvents()
 
     assert owner not in window.document_manager.documents
@@ -221,7 +221,7 @@ def test_stage_feedback_must_match_preview_session_document_identity(
     )
 
     def feedback(frame):
-        window._handle_pattern_preview_event(
+        window.preview_service._handle_pattern_preview_event(
             {
                 "protocol_version": 1,
                 "request_id": None,

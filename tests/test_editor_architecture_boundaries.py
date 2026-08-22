@@ -803,6 +803,200 @@ def test_shell_services_do_not_proxy_or_inject_the_entire_window_surface() -> No
     )
 
 
+def test_shell_services_are_instances_not_class_level_method_transplants() -> None:
+    """ER2 composition requires owned service objects and direct public ports.
+
+    Assigning ``SomeService.callback`` into the ``EditorMainWindow`` class body
+    only changes when a mixin-style method transplant happens.  The resulting
+    function still receives the complete window as ``self`` and therefore is
+    not a service boundary.
+    """
+
+    main_path = EDITOR_ROOT / "shell" / "main_window.py"
+    main_tree = _tree(main_path)
+    window = next(
+        node
+        for node in main_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "EditorMainWindow"
+    )
+    service_names = {
+        "AuthoringService",
+        "DocumentService",
+        "PatternService",
+        "PreviewService",
+        "SceneEditService",
+        "TimelineService",
+        "UIDocumentService",
+        "WorkbenchService",
+    }
+    transplants: list[str] = []
+    for statement in window.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = statement.value
+        if isinstance(value, ast.Call) and _expr_name(value.func) == "staticmethod":
+            value = value.args[0] if value.args else value
+        if not isinstance(value, ast.Attribute) or not isinstance(value.value, ast.Name):
+            continue
+        if value.value.id in service_names:
+            transplants.append(_relative_location(main_path, statement.lineno))
+
+    constructed = {
+        _expr_name(node.func)
+        for node in ast.walk(window)
+        if isinstance(node, ast.Call) and _expr_name(node.func) in service_names
+    }
+    assert not transplants, (
+        "EditorMainWindow must not transplant service methods into its class "
+        "body; connect ports to service instances instead. Found at: "
+        + "; ".join(transplants)
+    )
+    assert constructed == service_names, (
+        "EditorMainWindow must own one real instance of every ER2 shell service; "
+        f"missing={sorted(service_names - constructed)}"
+    )
+
+    expected_ports = {
+        "AuthoringService": "AuthoringPort",
+        "DocumentService": "DocumentPort",
+        "PatternService": "PatternPort",
+        "PreviewService": "PreviewPort",
+        "SceneEditService": "SceneEditPort",
+        "TimelineService": "TimelinePort",
+        "UIDocumentService": "UIDocumentPort",
+        "WorkbenchService": "WorkbenchPort",
+    }
+    invalid_ports: list[str] = []
+    for node in ast.walk(window):
+        if not isinstance(node, ast.Call):
+            continue
+        service_name = _expr_name(node.func)
+        if service_name not in expected_ports:
+            continue
+        first = node.args[0] if node.args else None
+        actual = _expr_name(first.func) if isinstance(first, ast.Call) else ""
+        if actual != expected_ports[service_name]:
+            invalid_ports.append(
+                f"{_relative_location(main_path, node.lineno)}: "
+                f"{service_name} receives {actual or type(first).__name__}"
+            )
+    assert not invalid_ports, (
+        "Shell services must receive task-specific capability adapters, never "
+        "the EditorMainWindow object directly: " + "; ".join(invalid_ports)
+    )
+
+
+def test_window_service_is_a_real_explicit_port_boundary_not_an_empty_marker() -> None:
+    service_path = EDITOR_ROOT / "shell" / "service.py"
+    service = next(
+        node
+        for node in _tree(service_path).body
+        if isinstance(node, ast.ClassDef) and node.name == "WindowService"
+    )
+    init = next(
+        (
+            node
+            for node in service.body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        ),
+        None,
+    )
+    assert init is not None and len(init.args.args) >= 2, (
+        "WindowService cannot be an empty marker; instances must receive an "
+        "explicit typed shell port"
+    )
+
+    ports_path = EDITOR_ROOT / "shell" / "ports.py"
+    forbidden_magic: list[str] = []
+    for node in ast.walk(_tree(ports_path)):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in {"__getattr__", "__setattr__"}
+        ):
+            forbidden_magic.append(_relative_location(ports_path, node.lineno))
+    assert not forbidden_magic, (
+        "Capability adapters must enumerate their surface explicitly; found "
+        "magic proxy methods at: " + "; ".join(forbidden_magic)
+    )
+
+
+def test_main_window_delegates_actions_docks_and_lifecycle_implementations() -> None:
+    """The concrete QMainWindow is assembly, not the implementation container."""
+
+    main_path = EDITOR_ROOT / "shell" / "main_window.py"
+    owner = next(
+        node
+        for node in _tree(main_path).body
+        if isinstance(node, ast.ClassDef) and node.name == "EditorMainWindow"
+    )
+    implementation_methods = {
+        "_build_actions",
+        "_build_menus",
+        "_build_main_toolbar",
+        "_build_ui",
+        "_build_scene_dock",
+        "_build_bottom_dock",
+        "_populate_tree",
+        "_refresh_scene_document",
+        "_refresh_foreign_document",
+        "save_layout",
+        "restore_layout",
+    }
+    bloated = [
+        f"{node.name} ({node.end_lineno - node.lineno + 1} lines)"
+        for node in owner.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in implementation_methods
+        and node.end_lineno - node.lineno + 1 > 8
+    ]
+    helper_paths = [
+        EDITOR_ROOT / "shell" / "actions.py",
+        EDITOR_ROOT / "shell" / "docks.py",
+        EDITOR_ROOT / "shell" / "lifecycle.py",
+    ]
+    assert all(path.is_file() for path in helper_paths), "shell helper modules are missing"
+    assert not bloated, (
+        "EditorMainWindow must delegate shell implementation to composed "
+        "actions/docks/lifecycle services: " + ", ".join(bloated)
+    )
+
+
+def test_composed_services_call_only_public_collaborator_ports() -> None:
+    service_attributes = {
+        "authoring_service",
+        "document_service",
+        "pattern_service",
+        "preview_service",
+        "scene_edit_service",
+        "timeline_service",
+        "ui_document_service",
+        "workbench_service",
+    }
+    paths = [
+        *EDITOR_ROOT.glob("main_window_*.py"),
+        *(EDITOR_ROOT / "shell").glob("*.py"),
+    ]
+    violations: list[str] = []
+    for path in paths:
+        for node in ast.walk(_tree(path)):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            receiver = node.func.value
+            if (
+                node.func.attr.startswith("_")
+                and isinstance(receiver, ast.Attribute)
+                and receiver.attr in service_attributes
+            ):
+                violations.append(
+                    f"{_relative_location(path, node.lineno)} -> "
+                    f"{receiver.attr}.{node.func.attr}()"
+                )
+    assert not violations, (
+        "Composed services must use explicit public collaborator ports: "
+        + "; ".join(violations)
+    )
+
+
 def test_editor_app_is_a_thin_bootstrap_not_the_window_implementation() -> None:
     """Architecture section 3 fixes app.py to CLI/project/create_window only."""
 

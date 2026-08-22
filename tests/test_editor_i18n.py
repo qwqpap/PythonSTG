@@ -31,7 +31,7 @@ def test_editor_language_switch_retranslates_shell_and_preserves_document(
     tmp_path, qapp_session
 ):
     window = EditorMainWindow(ProjectContext(tmp_path))
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     qapp_session.processEvents()
 
     pattern = window.central_tabs.currentWidget()
@@ -97,7 +97,7 @@ def test_pattern_preset_uses_task_labels_instead_of_internal_parameter_ids(
 ):
     window = EditorMainWindow(ProjectContext(tmp_path))
     window.set_language(LANGUAGE_CHINESE)
-    window.new_pattern()
+    window.pattern_service.new_pattern()
     pattern = window.central_tabs.currentWidget()
     descriptor = next(
         item for item in window._preset_library.presets if item.display_name == "双螺旋"
@@ -142,7 +142,7 @@ def test_chinese_scene_menu_and_generated_flow_hide_internal_node_terms(
         "Pattern Instance",
     } & menu_texts
 
-    window.create_simple_spell_flow()
+    window.scene_edit_service.create_simple_spell_flow()
     qapp_session.processEvents()
     names = []
     item = window.tree.topLevelItem(0)
@@ -165,7 +165,7 @@ def test_chinese_stage_template_localizes_defaults_but_preserves_runtime_kinds(
 ):
     window = EditorMainWindow(ProjectContext(tmp_path))
     window.set_language(LANGUAGE_CHINESE)
-    window.create_stage_template("two_phase_boss")
+    window.scene_edit_service.create_stage_template("two_phase_boss")
     qapp_session.processEvents()
 
     document = window.session.document

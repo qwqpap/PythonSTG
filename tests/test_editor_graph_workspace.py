@@ -533,12 +533,12 @@ def test_window_expand_fold_handlers_sync_context_and_preview(tmp_path, qapp_ses
     record = window.resource_browser.index.find(
         "res://game_content/patterns/graph_ui.pystg.json"
     )
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
     session = window._active_pattern_session
     workspace = window._document_widgets[session.document.id]
     assert isinstance(workspace, PatternWorkspace)
 
-    window._graph_expand_requested()
+    window.pattern_service.graph_expand_requested()
     assert session.document.graph is not None
     assert session.editor_state.pattern.graph_mode is True
     assert workspace.mode() == "graph"
@@ -546,7 +546,7 @@ def test_window_expand_fold_handlers_sync_context_and_preview(tmp_path, qapp_ses
     load_payload = dict(fake.commands[-1][1])
     assert load_payload["document"]["graph"] is not None
 
-    window._graph_fold_requested()
+    window.pattern_service.graph_fold_requested()
     assert session.document.graph is None
     assert not session.editor_state.pattern.graph_mode
     window.close()
@@ -557,16 +557,16 @@ def test_window_graph_edits_are_undoable_and_survive_reopen(tmp_path, qapp_sessi
     record = window.resource_browser.index.find(
         "res://game_content/patterns/graph_ui.pystg.json"
     )
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
     session = window._active_pattern_session
-    window._graph_expand_requested()
+    window.pattern_service.graph_expand_requested()
 
     shape = next(
         node
         for node in session.document.graph.nodes
         if node.category == "shape"
     )
-    window._graph_node_property_requested(shape.id, {"count": 16})
+    window.pattern_service.graph_node_property_requested(shape.id, {"count": 16})
     shape = next(
         node
         for node in session.document.graph.nodes
@@ -607,16 +607,16 @@ def test_window_invalid_graph_edit_reports_issue_and_keeps_document(tmp_path, qa
     record = window.resource_browser.index.find(
         "res://game_content/patterns/graph_ui.pystg.json"
     )
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
     session = window._active_pattern_session
-    window._graph_expand_requested()
+    window.pattern_service.graph_expand_requested()
     graph = session.document.graph
     shape = next(node for node in graph.nodes if node.category == "shape")
     schedule = next(node for node in graph.nodes if node.category == "schedule")
 
     issues = []
     window.preview_panel.handle_issue = lambda issue: issues.append(issue)
-    window._graph_edge_requested(shape.id, schedule.id)
+    window.pattern_service.graph_edge_requested(shape.id, schedule.id)
 
     assert len(graph.edges) == 5
     assert issues and issues[0]["code"] == "invalid_graph_edit"
@@ -628,9 +628,9 @@ def test_graph_diagnostics_are_parsed_into_canvas_highlights(tmp_path, qapp_sess
     record = window.resource_browser.index.find(
         "res://game_content/patterns/graph_ui.pystg.json"
     )
-    window._resource_activated(record)
+    window.workbench_service.resource_activated(record)
     session = window._active_pattern_session
-    window._graph_expand_requested()
+    window.pattern_service.graph_expand_requested()
     workspace = window._document_widgets[session.document.id]
     shape = next(
         node for node in session.document.graph.nodes if node.category == "shape"
@@ -638,7 +638,7 @@ def test_graph_diagnostics_are_parsed_into_canvas_highlights(tmp_path, qapp_sess
     motion = next(
         node for node in session.document.graph.nodes if node.category == "motion"
     )
-    window._graph_node_property_requested(
+    window.pattern_service.graph_node_property_requested(
         motion.id, {"speed_expression": "frame + __import__('os')"}
     )
 
@@ -647,7 +647,7 @@ def test_graph_diagnostics_are_parsed_into_canvas_highlights(tmp_path, qapp_sess
     with pytest.raises(PatternCompileError):
         PatternCompiler().compile(session.document, project=project)
 
-    window._apply_graph_diagnostics(
+    window.pattern_service.apply_graph_diagnostics(
         [
             {
                 "code": "invalid_expression",
@@ -658,7 +658,7 @@ def test_graph_diagnostics_are_parsed_into_canvas_highlights(tmp_path, qapp_sess
     assert workspace.graph_canvas._node_items[motion.id]._error
     assert not workspace.graph_canvas._node_items[shape.id]._error
 
-    window._apply_graph_diagnostics([])
-    window._clear_graph_diagnostics()
+    window.pattern_service.apply_graph_diagnostics([])
+    window.pattern_service.clear_graph_diagnostics()
     assert not workspace.graph_canvas._node_items[motion.id]._error
     window.close()

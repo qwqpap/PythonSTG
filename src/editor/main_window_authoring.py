@@ -9,10 +9,11 @@ from .application import AuthoringAction, AuthoringIntent, IntentRejectedError
 from .application.queries import compatible_variable_bindings, find_variable
 from src.authoring.scene.document import DocumentError, SceneDocument
 from .shell import WindowService
+from .shell.ports import AuthoringPort
 from .panels.variable_mapping_workspace import VariableBindingDialog, VariableMappingDialog
 
 
-class AuthoringService(WindowService):
+class AuthoringService(WindowService[AuthoringPort]):
     def _submit_authoring_intent(
         self,
         intent: AuthoringIntent,
@@ -22,29 +23,29 @@ class AuthoringService(WindowService):
         sync_preview: bool = False,
     ) -> bool:
         try:
-            invalidation = self.editor_coordinator.dispatch(intent)
+            invalidation = self.port.editor_coordinator.dispatch(intent)
         except (IntentRejectedError, DocumentError, ValueError) as exc:
-            self._show_error(error_title, exc)
+            self.port._show_error(error_title, exc)
             return False
         if invalidation.scopes:
-            self.apply_invalidation(intent.document_id, invalidation)
+            self.port.apply_invalidation(intent.document_id, invalidation)
             if label:
-                self._log(label)
+                self.port._log(label)
             if sync_preview:
-                self._sync_active_stage_preview()
+                self.port.preview_service.sync_active_stage_preview()
         return bool(invalidation.scopes)
 
-    def _state_graph_state_selected(self, state_id: str) -> None:
+    def state_graph_state_selected(self, state_id: str) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.SELECT_STATE,
                 target_id=str(state_id),
-                amount=int(self.timeline.playhead_frame),
+                amount=int(self.port.timeline.playhead_frame),
             )
         )
 
-    def _variable_add_requested(
+    def variable_add_requested(
         self,
         name: str,
         type_id: str,
@@ -53,7 +54,7 @@ class AuthoringService(WindowService):
     ) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.ADD_VARIABLE,
                 values={
                     "name": str(name),
@@ -66,10 +67,10 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _variable_delete_requested(self, variable_id: str) -> None:
+    def variable_delete_requested(self, variable_id: str) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.REMOVE_VARIABLE,
                 target_id=str(variable_id),
             ),
@@ -77,11 +78,11 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _variable_edit_requested(self, variable_id: str, values: object) -> None:
+    def variable_edit_requested(self, variable_id: str, values: object) -> None:
         if isinstance(values, dict):
             self._submit_authoring_intent(
                 AuthoringIntent(
-                    self.session.document.id,
+                    self.port.session.document.id,
                     AuthoringAction.SET_VARIABLE,
                     target_id=str(variable_id),
                     values=dict(values),
@@ -90,14 +91,14 @@ class AuthoringService(WindowService):
                 sync_preview=True,
             )
 
-    def _variable_binding_requested(self, variable_id: str) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+    def variable_binding_requested(self, variable_id: str) -> None:
+        if not isinstance(self.port.session.document, SceneDocument):
             return
-        variable = find_variable(self.session.document, variable_id)
+        variable = find_variable(self.port.session.document, variable_id)
         if variable is None:
             return
         candidates = compatible_variable_bindings(
-            self.session.document,
+            self.port.session.document,
             type_id=variable.type,
             scope=variable.scope,
             owner_id=variable.owner_id,
@@ -106,26 +107,26 @@ class AuthoringService(WindowService):
         candidate_items = tuple({"id": item.id} for item in candidates)
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.SELECT_BINDING,
                 items=candidate_items,
             )
         )
-        picker = VariableBindingDialog(candidates, parent=self)
+        picker = VariableBindingDialog(candidates, parent=self.port.qt_parent)
         if picker.exec() != QDialog.Accepted or picker.selected_id is None:
             return
-        selected = find_variable(self.session.document, picker.selected_id)
+        selected = find_variable(self.port.session.document, picker.selected_id)
         if selected is None:
             return
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.SELECT_BINDING,
                 target_id=selected.id,
                 items=candidate_items,
             )
         )
-        self.statusBar().showMessage(
+        self.port.statusBar().showMessage(
             f"Binding candidate: {selected.name} ({selected.scope}, {selected.type})",
             5000,
         )
@@ -149,19 +150,19 @@ class AuthoringService(WindowService):
             return state.output_mappings
         return document.output_mappings
 
-    def _variable_mapping_requested(self) -> None:
-        if not isinstance(self.session.document, SceneDocument):
+    def variable_mapping_requested(self) -> None:
+        if not isinstance(self.port.session.document, SceneDocument):
             return
-        state_id = self.session.editor_state.selection.state_id
+        state_id = self.port.session.editor_state.selection.state_id
         try:
-            mappings = tuple(self._mapping_collection(self.session.document, state_id))
+            mappings = tuple(self._mapping_collection(self.port.session.document, state_id))
         except DocumentError as exc:
-            self._show_error("Output mappings unavailable", exc)
+            self.port._show_error("Output mappings unavailable", exc)
             return
         dialog = VariableMappingDialog(
-            self._variable_specs(self.session.document),
+            self._variable_specs(self.port.session.document),
             mappings,
-            parent=self,
+            parent=self.port.qt_parent,
         )
         if dialog.exec() == QDialog.Accepted:
             self._apply_variable_mapping_changes(dialog.mappings, state_id=state_id)
@@ -174,7 +175,7 @@ class AuthoringService(WindowService):
     ) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.SET_OUTPUT_MAPPINGS,
                 target_id=str(state_id or ""),
                 items=tuple(item.to_dict() for item in mappings),
@@ -183,10 +184,10 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_add_state(self, graph_id: str) -> None:
+    def state_graph_add_state(self, graph_id: str) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.ADD_STATE,
                 target_id=str(graph_id),
             ),
@@ -195,10 +196,10 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_rename_state(self, state_id: str, name: str) -> None:
+    def state_graph_rename_state(self, state_id: str, name: str) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.RENAME_STATE,
                 target_id=str(state_id),
                 values={"name": str(name)},
@@ -207,10 +208,10 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_duplicate_state(self, state_id: str) -> None:
+    def state_graph_duplicate_state(self, state_id: str) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.DUPLICATE_STATE,
                 target_id=str(state_id),
             ),
@@ -218,10 +219,10 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_delete_state(self, state_id: str) -> None:
+    def state_graph_delete_state(self, state_id: str) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.REMOVE_STATE,
                 target_id=str(state_id),
             ),
@@ -229,10 +230,10 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_move_state(self, state_id: str, delta: int) -> None:
+    def state_graph_move_state(self, state_id: str, delta: int) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.MOVE_STATE,
                 target_id=str(state_id),
                 amount=int(delta),
@@ -241,7 +242,7 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_add_transition(
+    def state_graph_add_transition(
         self,
         source_state_id: str,
         target_state_id: str,
@@ -250,7 +251,7 @@ class AuthoringService(WindowService):
     ) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.ADD_TRANSITION,
                 target_id=str(source_state_id),
                 related_id=str(target_state_id),
@@ -260,14 +261,14 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_edit_transition(
+    def state_graph_edit_transition(
         self,
         transition_id: str,
         values: dict[str, object],
     ) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.SET_TRANSITION,
                 target_id=str(transition_id),
                 values=dict(values),
@@ -276,10 +277,10 @@ class AuthoringService(WindowService):
             sync_preview=True,
         )
 
-    def _state_graph_delete_transition(self, transition_id: str) -> None:
+    def state_graph_delete_transition(self, transition_id: str) -> None:
         self._submit_authoring_intent(
             AuthoringIntent(
-                self.session.document.id,
+                self.port.session.document.id,
                 AuthoringAction.REMOVE_TRANSITION,
                 target_id=str(transition_id),
             ),

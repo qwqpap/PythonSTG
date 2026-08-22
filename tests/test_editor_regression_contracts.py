@@ -1247,13 +1247,13 @@ def test_editor_autosave_and_recovery_are_connected_to_document_sessions(
     store.save(PatternDocument.new("Recover me"), target)
     window = EditorMainWindow(project)
     try:
-        session = window._open_document(target)
+        session = window.document_service.open_document(target)
         session.document.motion = replace(session.document.motion, speed=3.5)
-        written = window.autosave_open_documents()
+        written = window.document_service.autosave_open_documents()
         sidecar = target.with_suffix(target.suffix + ".autosave.json")
         assert sidecar in written
         assert sidecar.is_file()
-        candidates = window.find_recovery_candidates()
+        candidates = window.document_service.find_recovery_candidates()
         assert any(candidate.original_path == target for candidate in candidates)
         assert any(candidate.autosave_path == sidecar for candidate in candidates)
     finally:
@@ -1296,7 +1296,7 @@ def test_workspace_layout_uses_validated_project_relative_document_paths(
     ResourceStore(project).save(PatternDocument.new("Layout"), target)
     window = EditorMainWindow(project)
     try:
-        window._open_document(target)
+        window.document_service.open_document(target)
         layout_path = tmp_path / "layout.json"
         window.save_layout(layout_path)
         payload = json.loads(layout_path.read_text(encoding="utf-8"))

@@ -113,7 +113,7 @@ def _populated_window(project: ProjectContext) -> EditorMainWindow:
 
     window = EditorMainWindow(project)
     window.set_language(LANGUAGE_CHINESE)
-    window.create_stage_template("two_phase_boss")
+    window.scene_edit_service.create_stage_template("two_phase_boss")
     document = window.session.document
     document.variables.append(VariableSpec("phase.rank", "float", 1.0))
     state = document.state_graph.states[1]
@@ -122,7 +122,7 @@ def _populated_window(project: ProjectContext) -> EditorMainWindow:
     window.timeline.set_document(document, state_id=state.id)
     window.variables.set_document(document)
     if state.tracks and state.tracks[0].clips:
-        window._timeline_clip_selected(state.tracks[0].id, state.tracks[0].clips[0].id)
+        window.timeline_service.timeline_clip_selected(state.tracks[0].id, state.tracks[0].clips[0].id)
     return window
 
 
@@ -134,7 +134,7 @@ def test_chinese_shell_leaves_no_author_facing_string_untranslated(
     window = _populated_window(project)
     try:
         if scene == "pattern":
-            window.new_pattern()
+            window.pattern_service.new_pattern()
         qapp_session.processEvents()
         manager = LanguageManager(language=LANGUAGE_CHINESE)
 

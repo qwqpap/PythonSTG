@@ -1,15 +1,18 @@
-"""Named service boundaries used by the Qt shell assembly.
-
-Service classes are behavior namespaces.  ``EditorMainWindow`` exposes their
-supported callbacks through an explicit class-level compatibility port; this
-module deliberately provides no arbitrary attribute proxy or runtime method
-injection.
-"""
+"""Base class for the shell's composed application services."""
 
 from __future__ import annotations
 
-class WindowService:
-    """Marker for shell behavior namespaces; it owns no window state."""
+from typing import Generic, TypeVar
+
+
+PortT = TypeVar("PortT")
+
+
+class WindowService(Generic[PortT]):
+    """A service that can only reach the explicit port supplied at assembly."""
+
+    def __init__(self, port: PortT) -> None:
+        self.port = port
 
 
 __all__ = ["WindowService"]
