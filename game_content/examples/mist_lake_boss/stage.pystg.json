@@ -1,0 +1,760 @@
+{
+  "schema_version": 4,
+  "type": "pystg.scene",
+  "id": "31da79f1-a013-504f-a867-f1485d9634bf",
+  "name": "雾湖灯祭",
+  "metadata": {
+    "preview_stage": "stage1",
+    "template": {
+      "kind": "two_phase_boss",
+      "version": 1
+    },
+    "duration_frames": 3000,
+    "description": "完整编辑器示例：登场、通常阶段、强化阶段、背景、BGM、变量与事件驱动转阶段。",
+    "example": "mist_lake_boss",
+    "difficulty": "Normal"
+  },
+  "root": {
+    "id": "25ab948b-d8ca-5e8a-ba5c-4b7f932d04e0",
+    "type": "SceneRoot",
+    "name": "雾湖灯祭",
+    "properties": {
+      "width": 384,
+      "height": 448,
+      "grid_size": 16,
+      "background": "#171a24"
+    },
+    "children": [
+      {
+        "id": "ac42e5ff-090e-5594-91ac-0cd16cdc9f1f",
+        "type": "Stage",
+        "name": "雾湖舞台",
+        "properties": {
+          "width": 384,
+          "height": 448,
+          "tick_rate": 60,
+          "background": ""
+        },
+        "children": [
+          {
+            "id": "cdaac8e5-4a48-5eab-81a4-8c792eb3b909",
+            "type": "Boss",
+            "name": "湖灯守望者",
+            "properties": {
+              "x": 192.0,
+              "y": 88.0,
+              "texture": "",
+              "visible": true
+            },
+            "children": [
+              {
+                "id": "f313bc2a-ec01-59c7-8bef-071248d1c818",
+                "type": "Spell",
+                "name": "湖光「月轮灯阵」",
+                "properties": {
+                  "duration_frames": 3000,
+                  "script": ""
+                },
+                "children": [
+                  {
+                    "id": "1bbacac4-5c1e-5f25-8a0a-d1f69155cbea",
+                    "type": "Emitter",
+                    "name": "月轮发射器",
+                    "properties": {
+                      "x": 192.0,
+                      "y": 96.0,
+                      "rotation": 0.0,
+                      "enabled": true
+                    },
+                    "children": [
+                      {
+                        "id": "ee64ea0f-384f-560a-b6c7-585ebf5b2fd1",
+                        "type": "PatternInstance",
+                        "name": "第一阶段：月轮",
+                        "properties": {
+                          "pattern": "res://game_content/examples/mist_lake_boss/moon_ring.pystg.json",
+                          "start_frame": 0,
+                          "enabled": true
+                        },
+                        "children": []
+                      },
+                      {
+                        "id": "262d57af-c43f-5b60-81a7-ff8add138155",
+                        "type": "PatternInstance",
+                        "name": "第二阶段：紫潮",
+                        "properties": {
+                          "pattern": "res://game_content/examples/mist_lake_boss/purple_tide.pystg.json",
+                          "start_frame": 0,
+                          "enabled": true
+                        },
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "state_graph": {
+    "id": "c1f6c5d0-32d5-5a7f-8b5e-094a6bc8bf80",
+    "name": "StageFlow",
+    "initial_state_id": "61dd1d86-1177-54ca-aa28-dd16a88265c2",
+    "states": [
+      {
+        "id": "61dd1d86-1177-54ca-aa28-dd16a88265c2",
+        "name": "登场：湖面点灯",
+        "order": 0,
+        "duration_frames": 180,
+        "entry_actions": [],
+        "exit_actions": [],
+        "tracks": [
+          {
+            "id": "bb424334-8c1c-50e2-bfc0-accb0d8fd8d9",
+            "name": "背景",
+            "kind": "Background",
+            "target_id": null,
+            "channel": "background",
+            "order": 0,
+            "muted": false,
+            "clips": [
+              {
+                "id": "e8fb7e17-84e3-53bb-a940-2505ab53b92c",
+                "name": "背景转场",
+                "kind": "Background",
+                "start_frame": 0,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "background",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "resource": "res://game_content/examples/mist_lake_boss/background.pystg.json",
+                  "fade_frames": 30
+                },
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "42ba3174-94a3-5b58-8b2c-dd34a68df7a3",
+            "name": "背景音乐",
+            "kind": "Audio",
+            "target_id": null,
+            "channel": "bgm",
+            "order": 1,
+            "muted": false,
+            "clips": [
+              {
+                "id": "9f79b17b-e2fa-592c-bb4e-ea4a8aee260d",
+                "name": "关卡背景音乐",
+                "kind": "Audio",
+                "start_frame": 0,
+                "duration_frames": 180,
+                "target_id": null,
+                "channel": "bgm",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "action": "play",
+                  "resource": "00",
+                  "loops": -1
+                },
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "2dbf3349-bae2-5872-af14-7d27361838ab",
+            "name": "登场事件",
+            "kind": "Event",
+            "target_id": null,
+            "channel": "stage",
+            "order": 2,
+            "muted": false,
+            "clips": [
+              {
+                "id": "ad93675c-abdb-5b92-bff6-a886e5dc899e",
+                "name": "显示关卡标题",
+                "kind": "Event",
+                "start_frame": 30,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "stage",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "event_type": "stage.title",
+                  "data": {
+                    "title": "雾湖灯祭",
+                    "subtitle": "Mist Lake Festival"
+                  }
+                },
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "transitions": [
+          {
+            "id": "6567dfaa-6dfa-539f-ae41-3157e40b869b",
+            "name": "登场完成",
+            "target_state_id": "6f92ba71-3447-561c-8f1f-00a70ebd5dd6",
+            "trigger": "complete",
+            "after_frames": null,
+            "priority": 0
+          }
+        ],
+        "child_graph": null,
+        "variables": [],
+        "output_mappings": []
+      },
+      {
+        "id": "6f92ba71-3447-561c-8f1f-00a70ebd5dd6",
+        "name": "通常：月轮灯阵",
+        "order": 1,
+        "duration_frames": 1200,
+        "entry_actions": [],
+        "exit_actions": [],
+        "tracks": [
+          {
+            "id": "8d93870e-9300-5340-90c3-d33900be198d",
+            "name": "月轮弹幕",
+            "kind": "Pattern",
+            "target_id": "ee64ea0f-384f-560a-b6c7-585ebf5b2fd1",
+            "channel": "danmaku",
+            "order": 0,
+            "muted": false,
+            "clips": [
+              {
+                "id": "8182316b-8b37-5189-bc06-9710ba38725d",
+                "name": "月轮八重奏",
+                "kind": "Pattern",
+                "start_frame": 0,
+                "duration_frames": 1200,
+                "target_id": null,
+                "channel": "danmaku",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {},
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "d1232ae8-6bf3-55b1-b8ca-92691b98f67b",
+            "name": "Boss 月面摆动",
+            "kind": "Movement",
+            "target_id": "cdaac8e5-4a48-5eab-81a4-8c792eb3b909",
+            "channel": "position",
+            "order": 1,
+            "muted": false,
+            "clips": [
+              {
+                "id": "13c63b90-8174-5d3a-b0bb-10a371b4f456",
+                "name": "左右缓慢巡游",
+                "kind": "Movement",
+                "start_frame": 0,
+                "duration_frames": 600,
+                "target_id": null,
+                "channel": "position",
+                "order": 0,
+                "loop_count": 2,
+                "enabled": true,
+                "payload": {},
+                "keyframes": [
+                  {
+                    "id": "b9d0272b-0e51-5f9a-9d57-33ab42c808a0",
+                    "frame": 0,
+                    "value": {
+                      "x": 112.0,
+                      "y": 88.0
+                    },
+                    "interpolation": "ease_in_out"
+                  },
+                  {
+                    "id": "5c8f96fd-7322-5769-bd30-46885849a416",
+                    "frame": 300,
+                    "value": {
+                      "x": 272.0,
+                      "y": 104.0
+                    },
+                    "interpolation": "ease_in_out"
+                  },
+                  {
+                    "id": "4b2a1cf6-68cc-5677-bbfb-0fc2be257ca1",
+                    "frame": 600,
+                    "value": {
+                      "x": 112.0,
+                      "y": 88.0
+                    },
+                    "interpolation": "ease_in_out"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "a39b23f3-29af-5da7-a59b-f0c788e69f9f",
+            "name": "敌人全灭后",
+            "kind": "Reactive",
+            "target_id": null,
+            "channel": "reaction",
+            "order": 4,
+            "muted": false,
+            "clips": [
+              {
+                "id": "2a025855-030c-53e1-913d-b1c13cd84b7b",
+                "name": "击破后进入强化阶段",
+                "kind": "Reactive",
+                "start_frame": 0,
+                "duration_frames": 1200,
+                "target_id": null,
+                "channel": "reaction",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "activation": {
+                    "kind": "on_event",
+                    "event_type": "encounter.cleared"
+                  },
+                  "reaction": {
+                    "id": "beginner.encounter-cleared",
+                    "event_type": "encounter.cleared",
+                    "action": "stage.state.complete",
+                    "scope": "state",
+                    "once_per_scope": true
+                  }
+                },
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "08065d26-05bc-506a-b0bd-504cf7e51798",
+            "name": "阶段变量",
+            "kind": "Variable",
+            "target_id": null,
+            "channel": "variables",
+            "order": 3,
+            "muted": false,
+            "clips": [
+              {
+                "id": "8110147e-5e0e-5619-98cb-beddb967ed1b",
+                "name": "设置阶段一",
+                "kind": "Variable",
+                "start_frame": 0,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "variables",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "variable": "boss.phase",
+                  "value": 1
+                },
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "01093ef0-8a27-5507-9357-481b7e4efaf2",
+            "name": "阶段事件",
+            "kind": "Event",
+            "target_id": null,
+            "channel": "stage",
+            "order": 4,
+            "muted": false,
+            "clips": [
+              {
+                "id": "6616a970-2d4b-5340-922f-8433c95562c9",
+                "name": "通常阶段开始",
+                "kind": "Event",
+                "start_frame": 0,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "stage",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "event_type": "boss.phase.started",
+                  "data": {
+                    "phase": 1,
+                    "spell": "月轮灯阵"
+                  }
+                },
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "transitions": [
+          {
+            "id": "19fe2352-bb94-550a-a731-bcc3e6ca8629",
+            "name": "通常阶段完成",
+            "target_state_id": "86e0e58c-b6fa-51f1-9d30-d3e91ec4412c",
+            "trigger": "complete",
+            "after_frames": null,
+            "priority": 0
+          }
+        ],
+        "child_graph": null,
+        "variables": [],
+        "output_mappings": []
+      },
+      {
+        "id": "86e0e58c-b6fa-51f1-9d30-d3e91ec4412c",
+        "name": "强化：紫潮追猎",
+        "order": 2,
+        "duration_frames": 1500,
+        "entry_actions": [],
+        "exit_actions": [],
+        "tracks": [
+          {
+            "id": "264af5aa-aa4c-5657-b7a7-ccf3ee5167da",
+            "name": "紫潮追踪弹幕",
+            "kind": "Pattern",
+            "target_id": "262d57af-c43f-5b60-81a7-ff8add138155",
+            "channel": "danmaku",
+            "order": 0,
+            "muted": false,
+            "clips": [
+              {
+                "id": "2f6ca42b-c8d9-5693-a18f-6157658f2e90",
+                "name": "三向紫潮",
+                "kind": "Pattern",
+                "start_frame": 0,
+                "duration_frames": 1500,
+                "target_id": null,
+                "channel": "danmaku",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {},
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "c825f1fd-b1ae-543d-9cca-f295668b8849",
+            "name": "雾湖背景再点亮",
+            "kind": "Background",
+            "target_id": null,
+            "channel": "background",
+            "order": 1,
+            "muted": false,
+            "clips": [
+              {
+                "id": "d6fb91e1-66d2-5106-8263-cdb87aa13a64",
+                "name": "强化阶段背景转场",
+                "kind": "Background",
+                "start_frame": 0,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "background",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "resource": "res://game_content/examples/mist_lake_boss/background.pystg.json",
+                  "fade_frames": 90
+                },
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "853d59cf-cbba-5671-bd93-2c41c6df65f1",
+            "name": "敌人全灭后",
+            "kind": "Reactive",
+            "target_id": null,
+            "channel": "reaction",
+            "order": 2,
+            "muted": false,
+            "clips": [
+              {
+                "id": "7d968532-e0ea-5c92-af11-6bc10cdad11c",
+                "name": "击破后结束关卡",
+                "kind": "Reactive",
+                "start_frame": 0,
+                "duration_frames": 1500,
+                "target_id": null,
+                "channel": "reaction",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "activation": {
+                    "kind": "on_event",
+                    "event_type": "encounter.cleared"
+                  },
+                  "reaction": {
+                    "id": "beginner.encounter-cleared",
+                    "event_type": "encounter.cleared",
+                    "action": "stage.state.complete",
+                    "scope": "state",
+                    "once_per_scope": true
+                  }
+                },
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "bc2c228f-ebb3-5339-9595-bebcaf73382e",
+            "name": "强化移动",
+            "kind": "Movement",
+            "target_id": "cdaac8e5-4a48-5eab-81a4-8c792eb3b909",
+            "channel": "position",
+            "order": 3,
+            "muted": false,
+            "clips": [
+              {
+                "id": "c48f8852-cb0d-5fa0-a6a0-d9b67a3ab47e",
+                "name": "三角高速移动",
+                "kind": "Movement",
+                "start_frame": 0,
+                "duration_frames": 450,
+                "target_id": null,
+                "channel": "position",
+                "order": 0,
+                "loop_count": 3,
+                "enabled": true,
+                "payload": {},
+                "keyframes": [
+                  {
+                    "id": "caa13ff9-30b1-5a74-8433-2542adab0806",
+                    "frame": 0,
+                    "value": {
+                      "x": 192.0,
+                      "y": 80.0
+                    },
+                    "interpolation": "linear"
+                  },
+                  {
+                    "id": "beb44050-4ca6-5d32-9698-ca0c6dbeca33",
+                    "frame": 150,
+                    "value": {
+                      "x": 88.0,
+                      "y": 128.0
+                    },
+                    "interpolation": "ease_in_out"
+                  },
+                  {
+                    "id": "4d6f8237-bcfd-5153-a6a4-f505715a16cd",
+                    "frame": 300,
+                    "value": {
+                      "x": 296.0,
+                      "y": 128.0
+                    },
+                    "interpolation": "ease_in_out"
+                  },
+                  {
+                    "id": "e96bda42-69a1-5d95-84a0-61d8368e6b91",
+                    "frame": 450,
+                    "value": {
+                      "x": 192.0,
+                      "y": 80.0
+                    },
+                    "interpolation": "ease_in_out"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "cf2c5f7b-8d79-5f7c-9a0c-63aca45ff5e4",
+            "name": "强化变量",
+            "kind": "Variable",
+            "target_id": null,
+            "channel": "variables",
+            "order": 4,
+            "muted": false,
+            "clips": [
+              {
+                "id": "c4975563-40d8-5c44-884e-d4b2a4aa8ab2",
+                "name": "设置阶段二",
+                "kind": "Variable",
+                "start_frame": 0,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "variables",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "variable": "boss.phase",
+                  "value": 2
+                },
+                "keyframes": []
+              },
+              {
+                "id": "0c617649-f39b-58f5-9b49-b0192d07afcb",
+                "name": "开启狂暴",
+                "kind": "Variable",
+                "start_frame": 0,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "variables",
+                "order": 1,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "variable": "boss.rage",
+                  "value": true
+                },
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "d6f356ad-9da5-5d4b-9d9a-01d43e200f41",
+            "name": "强化事件",
+            "kind": "Event",
+            "target_id": null,
+            "channel": "stage",
+            "order": 5,
+            "muted": false,
+            "clips": [
+              {
+                "id": "7908d0cc-2508-5a43-9550-48abaf5e3627",
+                "name": "强化阶段开始",
+                "kind": "Event",
+                "start_frame": 0,
+                "duration_frames": 1,
+                "target_id": null,
+                "channel": "stage",
+                "order": 0,
+                "loop_count": 1,
+                "enabled": true,
+                "payload": {
+                  "event_type": "boss.phase.started",
+                  "data": {
+                    "phase": 2,
+                    "spell": "紫潮追猎"
+                  }
+                },
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "transitions": [
+          {
+            "id": "797d958e-d70e-5433-982c-2b69e4d8d0bc",
+            "name": "强化阶段完成",
+            "target_state_id": "d0dafbb4-4866-5069-8913-3c55f5f41e7c",
+            "trigger": "complete",
+            "after_frames": null,
+            "priority": 0
+          }
+        ],
+        "child_graph": null,
+        "variables": [],
+        "output_mappings": []
+      },
+      {
+        "id": "d0dafbb4-4866-5069-8913-3c55f5f41e7c",
+        "name": "结束：雾散",
+        "order": 3,
+        "duration_frames": 120,
+        "entry_actions": [
+          {
+            "id": "4b7bd95c-34f3-5dfa-9475-4c8ed907587d",
+            "name": "关卡完成",
+            "kind": "Event",
+            "target_id": null,
+            "channel": "stage",
+            "order": 0,
+            "payload": {
+              "event_type": "stage.complete",
+              "data": {
+                "stage": "mist_lake_festival"
+              }
+            }
+          },
+          {
+            "id": "37b4845d-7fb2-544e-800b-56603f14ef72",
+            "name": "停止背景音乐",
+            "kind": "Audio",
+            "target_id": null,
+            "channel": "bgm",
+            "order": 1,
+            "payload": {
+              "action": "stop",
+              "fade_ms": 1200
+            }
+          }
+        ],
+        "exit_actions": [],
+        "tracks": [],
+        "transitions": [],
+        "child_graph": null,
+        "variables": [],
+        "output_mappings": []
+      }
+    ]
+  },
+  "variables": [
+    {
+      "id": "2dfef9f9-b588-588e-b520-453159b62077",
+      "name": "boss.phase",
+      "type": "int",
+      "default": 0,
+      "scope": "stage",
+      "writable_by": [
+        "timeline"
+      ],
+      "readers": [],
+      "animatable": true,
+      "record_in_replay": true,
+      "debug_display": "value",
+      "reducer": null,
+      "behavior_output": false
+    },
+    {
+      "id": "f15e2e36-d62f-5552-9405-86c70912a784",
+      "name": "boss.rage",
+      "type": "bool",
+      "default": false,
+      "scope": "stage",
+      "writable_by": [
+        "timeline"
+      ],
+      "readers": [],
+      "animatable": true,
+      "record_in_replay": true,
+      "debug_display": "value",
+      "reducer": null,
+      "behavior_output": false
+    },
+    {
+      "id": "2aa1caf7-b50e-586b-9dac-49f5bb7922d7",
+      "name": "difficulty.rank",
+      "type": "float",
+      "default": 1.0,
+      "scope": "stage",
+      "writable_by": [
+        "safe_action"
+      ],
+      "readers": [],
+      "animatable": false,
+      "record_in_replay": true,
+      "debug_display": "value",
+      "reducer": null,
+      "behavior_output": false
+    }
+  ],
+  "output_mappings": [],
+  "symbol_name": "mist_lake_festival"
+}
