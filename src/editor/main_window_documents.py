@@ -219,7 +219,7 @@ class DocumentService(WindowService):
     def open_resource(self) -> None:
         start = self.project.game_content / "scenes"
         path, _ = QFileDialog.getOpenFileName(
-            self._window,
+            self,
             self.language_manager.translate("Open PySTG Resource"),
             str(start),
             RESOURCE_FILTER,
@@ -310,7 +310,7 @@ class DocumentService(WindowService):
             else ("new_pattern.pystg.json" if folder == "patterns" else "untitled.pystg.json")
         )
         path, _ = QFileDialog.getSaveFileName(
-            self._window,
+            self,
             self.language_manager.translate("Save PySTG Resource"),
             str(suggested),
             RESOURCE_FILTER,
@@ -340,7 +340,7 @@ class DocumentService(WindowService):
         session = self.session
         if session.is_dirty:
             result = QMessageBox.warning(
-                self._window,
+                self,
                 self.language_manager.translate("Revert document"),
                 self.language_manager.translate(
                     f"Discard all changes to {session.display_name}?"
@@ -374,7 +374,7 @@ class DocumentService(WindowService):
         if not self.isVisible():
             return True
         result = QMessageBox.warning(
-            self._window,
+            self,
             self.language_manager.translate("Unsaved changes"),
             self.language_manager.translate(
                 f"Save changes to {session.display_name}?"

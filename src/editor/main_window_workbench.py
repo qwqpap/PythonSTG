@@ -64,7 +64,7 @@ class WorkbenchService(WindowService):
                 timeline_kind=timeline_kind,
             ),
             language_manager=self.language_manager,
-            parent=self._window,
+            parent=self,
         )
         dialog.actionChosen.connect(self._execute_action)
         self._action_search_dialog = dialog
@@ -184,7 +184,7 @@ class WorkbenchService(WindowService):
                 ValueError(f"Tool script does not exist: {plugin.script}"),
             )
             return
-        process = QProcess(self._window)
+        process = QProcess(self)
         process.setProgram(sys.executable)
         process.setArguments([str(plugin.script)])
         process.setWorkingDirectory(str(self.project.root))

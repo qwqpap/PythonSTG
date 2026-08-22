@@ -111,7 +111,7 @@ class AuthoringService(WindowService):
                 items=candidate_items,
             )
         )
-        picker = VariableBindingDialog(candidates, parent=self._window)
+        picker = VariableBindingDialog(candidates, parent=self)
         if picker.exec() != QDialog.Accepted or picker.selected_id is None:
             return
         selected = find_variable(self.session.document, picker.selected_id)
@@ -161,7 +161,7 @@ class AuthoringService(WindowService):
         dialog = VariableMappingDialog(
             self._variable_specs(self.session.document),
             mappings,
-            parent=self._window,
+            parent=self,
         )
         if dialog.exec() == QDialog.Accepted:
             self._apply_variable_mapping_changes(dialog.mappings, state_id=state_id)
