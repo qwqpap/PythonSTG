@@ -487,7 +487,7 @@ def test_background_binding_is_undoable_and_changes_formal_quads(
 def test_editor_close_deactivates_sdk_plugins(tmp_path: Path, qapp_session) -> None:
     window = EditorMainWindow(_project(tmp_path))
     called: list[bool] = []
-    window.plugin_sdk_registry.deactivate_all = lambda: called.append(True)
+    window.plugin_registry.sdk.deactivate_all = lambda: called.append(True)
     window.close()
     qapp_session.processEvents()
     assert called == [True]

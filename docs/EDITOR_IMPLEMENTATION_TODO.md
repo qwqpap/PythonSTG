@@ -519,7 +519,7 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 ### ER5 唯一插件贡献入口
 
-**状态/依赖**：`[x]`；依赖 ER4（已完成）。
+**状态/依赖**：`[x]`（原 `[x]` 曾建立在规避之上并已撤销；产品代码整改 + 两 gate 按硬指标强化后，已由未参与本次整改的只读 Agent 独立重验收 **APPROVE**——见文末 [ER5 更正 2026-08-22]）；依赖 ER4（已完成）。
 
 **允许路径**：`src/editor/plugins/`、当前 `src/editor/plugin_sdk.py`、`workbench.py`、headless registry 的 Tool 适配点、focused tests。
 
@@ -536,17 +536,17 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 
 **验收文件**：新建或收敛 `tests/test_editor_plugin_registry.py`；回归 `tests/test_plugin_sdk.py`、`tests/test_editor_workbench.py`、`tests/test_editor_regression_contracts.py`。
 
-**Evidence / Blocker（已完成 `[x]`，独立验证 APPROVE）**：
+**Evidence / Blocker（已重验收 APPROVE：原 `[x]` 曾建立在旧 gate 的 Call-only 盲区上并已撤销；产品代码整改 + 三 gate 按硬指标强化后，由未参与整改的独立只读 Agent 重验收 APPROVE——见文末 [ER5 更正 2026-08-22] 与 [ER5 重验收 Verdict 2026-08-22]）**：
 
 - 环境：`C:\Users\m1573\anaconda3\python.exe`（Python 3.12.7），PySide6 6.8.1.1 offscreen（`QT_QPA_PLATFORM=offscreen`），`pytest -o addopts= -p no:cacheprovider`，Windows 11 10.0.26200。实现提交 `0dc90ac`，基线 `16aa27f`；工作树除启动时既有的 `.claude/settings.local.json` 外干净。
-- **Structural（gate 红→绿）**：ER5 gate `test_editor_main_window_has_one_plugin_registry_facade` 在基线 `16aa27f` 为红（`assert 2 == 1`：`self.plugin_registry`@app.py:187 + `self.plugin_sdk_registry`@app.py:124 两个 registry 属性），独立验证在隔离 worktree 亲自复现该红。实现后转绿：窗口仅一个 `self.plugin_registry = EditorPluginRegistry(...)`（Call），`self.plugin_sdk_registry = self.plugin_registry.sdk` 为属性访问（`ast.Attribute`，非 Call，不计入）。facade（`src/editor/plugins/registry.py`）**组合**（非继承，仅继承 `object`）`workbench.PluginRegistry`（视图目录）+ `plugin_sdk.PluginRegistry`（SDK）；两个底层类均保持完整供其直测套件 import。closeEvent 经 `self.plugin_registry.shutdown()`（→ 同一 SDK 对象 `deactivate_all()`）统一停机。
+- **Structural（gate 红→绿）**：ER5 gate `test_editor_main_window_has_one_plugin_registry_facade` 在基线 `16aa27f` 为红（`assert 2 == 1`：`self.plugin_registry`@app.py:187 + `self.plugin_sdk_registry`@app.py:124 两个 registry 属性），独立验证在隔离 worktree 亲自复现该红。实现（提交 `0dc90ac`）当时的说法：窗口仅一个 `self.plugin_registry = EditorPluginRegistry(...)`（Call），而 `self.plugin_sdk_registry = self.plugin_registry.sdk` 因是属性访问（`ast.Attribute`，非 Call）被旧 gate 漏计。**⚠ 这实为规避**——窗口当时仍同时持有 `plugin_sdk_registry`，违反硬指标 535（见文末 [ER5 更正 2026-08-22]）。现已删除该别名，窗口仅持有 `self.plugin_registry`，SDK 经 `self.plugin_registry.sdk` 到达。facade（`src/editor/plugins/registry.py`）**组合**（非继承，仅继承 `object`）`workbench.PluginRegistry`（视图目录）+ `plugin_sdk.PluginRegistry`（SDK）；两个底层类均保持完整供其直测套件 import。closeEvent 经 `self.plugin_registry.shutdown()`（→ 同一 SDK 对象 `deactivate_all()`）统一停机。
 - **Runtime（gate + 契约 + 回归）**：
   - ER5 gate + 新契约 `tests/test_editor_plugin_registry.py` → **8 passed**（1 gate + 7 契约）。
   - spec 回归 `test_plugin_sdk.py`、`test_editor_workbench.py`、`test_editor_regression_contracts.py`、`test_editor_resource_browser.py`、`test_editor_authoring_integration.py` → **123 passed, 0 failed**。
   - 完整架构边界套件 `test_editor_architecture_boundaries.py` → **27 passed, 1 failed**；唯一红为 `test_editor_graph_modules_have_no_import_cycles`（ER6 前向 gate，基线同样为红，非 ER5 回归）。
   - 实现者宽回归：`test_preview_session.py`、`test_preview_editor_integration.py`、`test_editor_app_smoke.py`、`test_editor_hardening.py`、`test_devtools_spell_preview.py` → **35 passed**；`test_editor_m3/m4/m5/m6_integration.py`、`test_editor_m6_workspace.py`、`test_editor_usability.py` → **31 passed**。
 - **四条硬指标（各由通过的契约用例佐证）**：
-  1. 窗口不再同时独立持有两个 registry —— `test_window_holds_exactly_one_plugin_registry_facade`：`window.plugin_sdk_registry is window.plugin_registry.sdk`（同一对象）、`vars(window)` 无 `WorkbenchPluginRegistry` 类型、registry id 集合 `== {id(facade), id(sdk)}`（无第三 registry）。
+  1. 窗口不再同时独立持有两个 registry —— `test_window_holds_exactly_one_plugin_registry_facade`（**2026-08-22 已按硬指标字面强化**）：`"plugin_sdk_registry" not in vars(window)` 且 `not hasattr(window, "plugin_sdk_registry")`（窗口不暴露第二属性/别名）、`vars(window)` 无 `WorkbenchPluginRegistry` 类型、window 属性内 registry id 集合 `== {id(facade)}`（SDK 在 facade 内部、非独立 window 属性）；SDK 经 `window.plugin_registry.sdk` 可达且 `isinstance(..., SDKPluginRegistry)`。配套静态 gate `test_editor_main_window_holds_no_plugin_sdk_registry_alias` 禁止任何 `self.plugin_sdk_registry` 赋值目标（不论右值是否 Call）。
   2. 部分激活失败完整回滚 + 隔离 —— `test_partial_sdk_activation_failure_rolls_back_and_isolates`：健康插件 `state=="active"` 且命令可用；broken `state=="failed"`，其崩溃前登记的 `broken.cmd` 被撤销（`pytest.raises(KeyError)`），`errors` 仅记 `["broken"]`。
   3. 停用撤销所有 owned contribution —— `test_shutdown_undoes_owned_sdk_contributions`：`cleaned==[True]`（on_deactivate 跑）、`state=="inactive"`、`command` 抛 KeyError。
   4. 外部工具关闭不影响 formal preview —— `test_external_tool_teardown_does_not_stop_formal_preview`：`_tool_finished` 后工具移除、`_preview_session.is_formal_running` 仍 True、formal client 仍 running。
@@ -554,7 +554,9 @@ ER 不改变作者文档语义、时间线/行为图产品模型、正式 runtim
 - **Native visual / Interaction**：对 ER5 为 N/A（headless facade 收拢，无 Qt UI 行为变更；外部工具与正式预览的隔离已由 `test_external_tool_teardown_does_not_stop_formal_preview` 在真实 `EditorMainWindow` 上运行时验证）。headless 环境下 **not run**。
 - **Performance / Usability**：**not run**，按依赖顺序延至 ER8/N6.4。
 - **允许路径扩展说明**：ER5 允许路径列出 `src/editor/plugins/`、`plugin_sdk.py`、`workbench.py`、focused tests，但硬指标定义在窗口上，故按 ER4 先例将窗口插件接线（`app.py` 的 `__init__`/`closeEvent`）纳入本任务范围；未触碰窗口其他私有状态、runtime、作者 schema、Panel 产品行为或 N7。
-- **独立验证**：由未参与 ER5 实现的只读 Agent（Read/Grep/pytest/git/隔离 worktree，未改任何产品代码或测试）执行；在基线隔离 worktree 复现 gate 红（`assert 2 == 1`）证明真实红→绿翻转；判定 gate 非规避（静态 AST gate 与运行时 `is`/`vars(window)` id 集合测试合力封死规避空间，契约断言未弱化、跑真实对象）；四条硬指标全部 CONFIRMED，Verdict = APPROVE。
+- **独立验证**：由未参与 ER5 实现的只读 Agent（Read/Grep/pytest/git/隔离 worktree，未改任何产品代码或测试）执行；在基线隔离 worktree 复现 gate 红（`assert 2 == 1`）证明真实红→绿翻转；判定 gate 非规避（静态 AST gate 与运行时 `is`/`vars(window)` id 集合测试合力封死规避空间，契约断言未弱化、跑真实对象）；四条硬指标全部 CONFIRMED，Verdict = APPROVE。**（⚠ 此结论依赖旧 gate 的 Call-only 盲区——把 `self.plugin_sdk_registry` 别名当作"不计入"——实为规避；已于 2026-08-22 作废，重验收见下条。）**
+- **[ER5 更正 2026-08-22]**：原 Structural 与独立验证判定依赖旧 gate 的 Call-only 过滤，把 `self.plugin_sdk_registry = self.plugin_registry.sdk` 别名视为"不计入"，故未真正满足硬指标 535（窗口当时仍同时持有两属性）。本次整改：① 删除 `app.py` 别名赋值，`main_window_workbench._discover_sdk_plugins` 改经 `self.plugin_registry.sdk`（方法名不变）；② 强化两 gate——静态新增 `test_editor_main_window_holds_no_plugin_sdk_registry_alias`（禁止任何 `self.plugin_sdk_registry` 赋值目标，不论右值是否 Call），运行时改为 `"plugin_sdk_registry" not in vars(window)` + `not hasattr` + id 集合 `== {id(facade)}`。③ 补充修正一处 grep 盲区——删别名后 `tests/test_editor_regression_contracts.py::test_editor_shell_uses_the_m7_plugin_registry`（原 `assert sdk_registries`：窗口存在任一 `PluginRegistry` 属性即通过）失败，已强化为 facade-reaching、严格更强的断言：`isinstance(window.plugin_registry.sdk, PluginRegistry)`（SDK 经唯一 facade `.sdk` 可达）且 `not any(isinstance(v, PluginRegistry) for v in vars(window).values())`（窗口不再镜像任何独立 SDK registry 属性）。红→绿证据：强化后三 gate 对未改代码为红（静态报 `app.py:188`、运行时报 `plugin_sdk_registry` 在 `vars(window)` 中、M7 契约 `any(isinstance(...))` 命中残留别名），整改后 `test_editor_plugin_registry.py` + `test_editor_architecture_boundaries.py` + `test_editor_regression_contracts.py` + `test_editor_authoring_integration.py` + `test_plugin_sdk.py` + `test_editor_workbench.py` → **153 passed**（base 环境 offscreen，2026-08-22 复跑，EXIT=0）。硬指标 535 现真正满足。
+- **[ER5 重验收 Verdict 2026-08-22]**：由未参与本次整改的只读 Agent（仅 Read/Grep/pytest/git + 隔离 `git worktree`，全程未改主树任何 tracked 文件，其 `git status` 自证只读）独立复验——**A** 产品码 `git grep plugin_sdk_registry` 零残留（仅 docs/tests 命中，`src/`·`tools/`·`main.py` 全无）；**B** 三 gate 读完整函数体确认非规避（静态 gate 不检查右值类型，故 `ast.Attribute` 别名亦被捕获；运行时四断言齐全；M7 新断言严格强于旧 `assert sdk_registries`）；**C** 在基线 `6b079e3` 隔离 worktree 拷入强化测试亲证**三 gate 真红**（runtime `'plugin_sdk_registry' not in vars`、static `Found at: app.py:188`、regression `any(isinstance(...))` 各自失败；基线自洽；验后清理）；**D** 主树六套件 **153 passed**；**E** 四条硬指标各有独立通过测试佐证；无 skip/xfail/吞异常/弱化断言。**最终 Verdict = APPROVE**，ER5 翻回 `[x]`。
 
 ### ER6 Panel 边界与图形循环
 

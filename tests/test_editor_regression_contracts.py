@@ -1211,12 +1211,17 @@ def test_editor_shell_uses_the_m7_plugin_registry(tmp_path, qapp_session) -> Non
 
     window = EditorMainWindow(_editor_project(tmp_path))
     try:
-        sdk_registries = [
-            value
-            for value in vars(window).values()
-            if isinstance(value, PluginRegistry)
-        ]
-        assert sdk_registries, "EditorMainWindow does not own the M7 PluginRegistry"
+        # ER5 hard metric (docs/EDITOR_IMPLEMENTATION_TODO.md:535): the M7 SDK
+        # ``PluginRegistry`` is reached only through the single plugin facade
+        # (``plugin_registry.sdk``), never mirrored onto the window as a second,
+        # independent attribute.  This still pins that the shell *uses* the real
+        # M7 registry -- now via the facade -- and additionally forbids a
+        # standalone SDK registry on the window, a strictly stronger contract
+        # than the pre-facade ``assert sdk_registries``.
+        assert isinstance(window.plugin_registry.sdk, PluginRegistry)
+        assert not any(
+            isinstance(value, PluginRegistry) for value in vars(window).values()
+        )
     finally:
         window.close()
 

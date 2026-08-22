@@ -129,14 +129,15 @@ class WorkbenchService(WindowService):
 
     def _discover_sdk_plugins(self) -> None:
         """Register and activate project-local SDK manifests in isolation."""
-        for manifest in self.plugin_sdk_registry.discover().values():
+        sdk = self.plugin_registry.sdk
+        for manifest in sdk.discover().values():
             try:
-                self.plugin_sdk_registry.register(manifest)
+                sdk.register(manifest)
             except Exception as exc:  # noqa: BLE001 - one bad plugin is isolated
                 # The SDK keeps the structured error; this log is only the
                 # editor-facing diagnostic and must not stop the shell.
                 self._log(f"[plugin:error] {manifest.id}: {exc}")
-        self.plugin_sdk_registry.activate_all()
+        sdk.activate_all()
         self._refresh_node_add_menu()
 
     @staticmethod

@@ -14,8 +14,9 @@ These tests pin the *facade* contract independently of the two underlying
 registries, whose own behaviour stays covered by ``test_plugin_sdk.py`` and
 ``test_editor_workbench.py``:
 
-* one facade, and the window's ``plugin_sdk_registry`` accessor is the very same
-  SDK object the facade owns -- never a second, independent registry;
+* one facade, and the window exposes no separate ``plugin_sdk_registry``
+  attribute -- the SDK is reached only through the facade's ``.sdk`` accessor,
+  never mirrored onto the window as a second, independent registry;
 * the SDK component shares the exact resource/node registries wired into the
   document manager (never a detached copy);
 * a partial activation failure rolls back only the broken plugin and isolates
@@ -225,20 +226,26 @@ def test_window_holds_exactly_one_plugin_registry_facade(tmp_path, qapp_session)
     window = EditorMainWindow(_editor_project(tmp_path))
     try:
         assert isinstance(window.plugin_registry, EditorPluginRegistry)
-        # The SDK accessor is the facade's own component, not a 2nd registry.
-        assert window.plugin_sdk_registry is window.plugin_registry.sdk
-        assert isinstance(window.plugin_sdk_registry, SDKPluginRegistry)
+        # The window holds NO second ``plugin_sdk_registry`` attribute/alias --
+        # neither in its instance dict nor reachable as any attribute/property.
+        assert "plugin_sdk_registry" not in vars(window)
+        assert not hasattr(window, "plugin_sdk_registry")
+        # The SDK surface is the facade's own component, reached only via ``.sdk``.
+        assert isinstance(window.plugin_registry.sdk, SDKPluginRegistry)
         # The workbench catalog is encapsulated by the facade, never a direct
         # window attribute -- so the window juggles no independent registries.
         assert not any(
             type(value) is WorkbenchPluginRegistry for value in vars(window).values()
         )
+        # The window's own attributes hold exactly one registry object: the
+        # single facade.  The SDK lives *inside* the facade, not as a second
+        # window attribute.
         registries = {
             id(value)
             for value in vars(window).values()
             if isinstance(value, (EditorPluginRegistry, SDKPluginRegistry))
         }
-        assert registries == {id(window.plugin_registry), id(window.plugin_sdk_registry)}
+        assert registries == {id(window.plugin_registry)}
     finally:
         window.close()
 

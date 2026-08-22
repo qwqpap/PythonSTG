@@ -633,6 +633,33 @@ def test_editor_main_window_has_one_plugin_registry_facade() -> None:
     )
 
 
+def test_editor_main_window_holds_no_plugin_sdk_registry_alias() -> None:
+    """ER5 hard metric (docs/EDITOR_IMPLEMENTATION_TODO.md:535): the window must
+    not hold *both* ``plugin_registry`` and a second ``plugin_sdk_registry``
+    attribute.  The SDK surface is reached only through the single facade's
+    ``.sdk`` accessor -- never mirrored onto the window as its own instance
+    attribute, whatever the right-hand side: a ``PluginRegistry(...)`` Call *or*
+    a plain attribute alias such as ``self.plugin_registry.sdk``.  The
+    ``...has_one_plugin_registry_facade`` test above only inspects Call
+    right-hand sides, so it cannot see the alias form; this companion pins it,
+    matching the hard metric literally ("窗口不再同时持有 ...").
+    """
+    violations: list[str] = []
+    for path, owner in _window_owner_classes():
+        for node in ast.walk(owner):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            for target in targets:
+                if _self_attribute(target) == "plugin_sdk_registry":
+                    violations.append(_relative_location(path, node.lineno))
+    assert not violations, (
+        "EditorMainWindow must not hold a second self.plugin_sdk_registry "
+        "attribute; the SDK is reached via self.plugin_registry.sdk. Found at: "
+        + "; ".join(sorted(violations))
+    )
+
+
 def _contains_any_or_untyped_mapping(annotation: Any) -> bool:
     if annotation is Any:
         return True

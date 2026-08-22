@@ -179,13 +179,13 @@ class EditorMainWindow(QMainWindow):
         # tool widgets) and, composed inside it, the transactional SDK registry
         # for project-local contributions.  The SDK registry receives the same
         # resource/node type registries wired into DocumentManager above.  The
-        # window reaches the SDK surface through this single accessor.
+        # window reaches the SDK surface via ``self.plugin_registry.sdk`` -- no
+        # second window attribute mirrors it (ER5 hard metric).
         self.plugin_registry = EditorPluginRegistry(
             project,
             resource_types=self.resource_type_registry,
             node_types=self.node_type_registry,
         )
-        self.plugin_sdk_registry = self.plugin_registry.sdk
         self._register_plugins()
         self._build_actions()
         self._build_ui()
