@@ -212,22 +212,33 @@ class PluginRegistrationContext:
             raise PluginSDKError("deactivation callback must be callable")
         self._cleanup.append(callback)
 
-    def rollback(self) -> None:
-        for undo in reversed(self._undo):
+    @staticmethod
+    def _run_all(callbacks: list[Callable[[], None]]) -> list[Exception]:
+        errors: list[Exception] = []
+        for callback in reversed(callbacks):
             try:
-                undo()
-            except (KeyError, ValueError):
-                pass
-        self._undo.clear()
-        self._cleanup.clear()
+                callback()
+            except Exception as exc:  # noqa: BLE001 - plugin isolation boundary
+                errors.append(exc)
+        return errors
 
-    def deactivate(self) -> None:
-        for callback in reversed(self._cleanup):
-            callback()
-        for undo in reversed(self._undo):
-            undo()
+    def rollback(self) -> tuple[Exception, ...]:
+        """Run activation cleanup and undo every partial contribution."""
+
+        errors = self._run_all(self._cleanup)
+        errors.extend(self._run_all(self._undo))
         self._undo.clear()
         self._cleanup.clear()
+        return tuple(errors)
+
+    def deactivate(self) -> tuple[Exception, ...]:
+        """Run all cleanup and contribution undo callbacks despite failures."""
+
+        errors = self._run_all(self._cleanup)
+        errors.extend(self._run_all(self._undo))
+        self._undo.clear()
+        self._cleanup.clear()
+        return tuple(errors)
 
 
 def _invoke_activation(callback: Callable[..., Any], context: PluginRegistrationContext) -> None:
@@ -263,6 +274,7 @@ class PluginRegistry:
         *,
         resource_types: Any | None = None,
         node_types: Any | None = None,
+        identity_available: Callable[[str], bool] | None = None,
     ) -> None:
         self.project = project
         if resource_types is None:
@@ -275,6 +287,7 @@ class PluginRegistry:
             node_types = build_default_node_type_registry()
         self.resource_types = resource_types
         self.node_types = node_types
+        self._identity_available = identity_available
         self._manifests: dict[str, PluginManifest] = {}
         self._states: dict[str, str] = {}
         self._contexts: dict[str, PluginRegistrationContext] = {}
@@ -304,6 +317,8 @@ class PluginRegistry:
         manifest.validate()
         if manifest.id in self._manifests:
             raise PluginSDKError(f"duplicate plugin id: {manifest.id}")
+        if self._identity_available is not None and not self._identity_available(manifest.id):
+            raise PluginSDKError(f"duplicate plugin identity: {manifest.id}")
         self._manifests[manifest.id] = manifest
         self._states[manifest.id] = "inactive"
         return manifest
@@ -335,19 +350,22 @@ class PluginRegistry:
             if manifest.activation is not None:
                 _invoke_activation(manifest.activation, context)
         except Exception as exc:  # noqa: BLE001 - plugin isolation boundary
-            context.rollback()
+            rollback_errors = context.rollback()
             self._contexts.pop(plugin_id, None)
             self._states[plugin_id] = "failed"
             self.errors.append((plugin_id, exc))
+            self.errors.extend((plugin_id, error) for error in rollback_errors)
             return
         self._contexts[plugin_id] = context
         self._states[plugin_id] = "active"
 
     def deactivate(self, plugin_id: str) -> None:
         self.get(plugin_id)
-        context = self._contexts.pop(plugin_id, None)
+        context = self._contexts.get(plugin_id)
         if context is not None:
-            context.deactivate()
+            errors = context.deactivate()
+            self.errors.extend((plugin_id, error) for error in errors)
+            self._contexts.pop(plugin_id, None)
         self._states[plugin_id] = "inactive"
 
     def deactivate_all(self) -> None:

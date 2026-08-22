@@ -32,7 +32,8 @@ from src.core.project_context import ProjectContext
 
 from ..plugin_sdk import PluginRegistry as SDKPluginRegistry
 from ..workbench import EditorPlugin, PluginMode
-from ..workbench import PluginRegistry as ViewCatalog
+from .sdk_adapter import build_sdk_registry, shutdown_sdk_registry
+from .workbench_adapter import WorkbenchAdapter
 
 
 class EditorPluginRegistry:
@@ -47,15 +48,16 @@ class EditorPluginRegistry:
     ) -> None:
         self.project = project
         # The Qt-side catalog of bottom/central panels and external tools.
-        self._catalog = ViewCatalog(project)
+        self._workbench = WorkbenchAdapter(project)
         # The transactional SDK registry.  Passing the resource/node type
         # registries through keeps them the *same* instances the document
         # manager uses -- never a detached copy -- so plugin-contributed
         # resource/node types land in the registries scene validation reads.
-        self._sdk = SDKPluginRegistry(
+        self._sdk = build_sdk_registry(
             project,
             resource_types=resource_types,
             node_types=node_types,
+            identity_available=lambda plugin_id: not self._workbench.contains(plugin_id),
         )
 
     # -- SDK contribution surface --------------------------------------------
@@ -74,20 +76,22 @@ class EditorPluginRegistry:
         they are deliberately not part of the plugin-contribution lifecycle.
         """
 
-        self._sdk.deactivate_all()
+        shutdown_sdk_registry(self._sdk)
 
     # -- Qt view catalog surface ---------------------------------------------
     def register(self, plugin: EditorPlugin) -> EditorPlugin:
-        return self._catalog.register(plugin)
+        if self._sdk.state(plugin.id) != "unknown":
+            raise ValueError(f"duplicate plugin identity: {plugin.id}")
+        return self._workbench.register(plugin)
 
     def get(self, plugin_id: str) -> EditorPlugin:
-        return self._catalog.get(plugin_id)
+        return self._workbench.get(plugin_id)
 
     def all(self) -> tuple[EditorPlugin, ...]:
-        return self._catalog.all()
+        return self._workbench.all()
 
     def by_mode(self, mode: PluginMode) -> tuple[EditorPlugin, ...]:
-        return self._catalog.by_mode(mode)
+        return self._workbench.by_mode(mode)
 
     @property
     def _plugins(self) -> dict[str, EditorPlugin]:
@@ -97,4 +101,4 @@ class EditorPluginRegistry:
         resource-browser test to swap in an embedded central panel) still work.
         """
 
-        return self._catalog._plugins
+        return self._workbench.plugins

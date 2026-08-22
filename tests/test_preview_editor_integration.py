@@ -4,6 +4,7 @@ from src.qt_compat.QtWidgets import QLabel, QLineEdit
 
 from src.core.project_context import ProjectContext
 from src.editor.app import EditorMainWindow
+from src.editor.preview import PREVIEW_MODE_FORMAL, PREVIEW_MODE_UNLOADED
 from src.pattern import PatternDocument
 
 
@@ -12,6 +13,7 @@ class FakePreviewClient:
         self.is_running = True
         self.commands = []
         self.closed = False
+        self.stop_calls = 0
 
     def start(self):
         return True
@@ -23,6 +25,12 @@ class FakePreviewClient:
 
     def close(self):
         self.closed = True
+        self.is_running = False
+
+    def stop(self, timeout_ms=1500):
+        del timeout_ms
+        self.stop_calls += 1
+        self.is_running = False
 
 
 def _window(tmp_path):
@@ -110,6 +118,10 @@ def test_inspector_change_reloads_and_failed_response_reverts_local_document(tmp
 def test_preview_panel_displays_runtime_stats_and_errors(tmp_path, qapp_session):
     del qapp_session
     window, _fake = _window(tmp_path)
+    assert window._preview_session.start_formal(
+        document_id=window.session.document.id,
+        resource_id=f"unsaved://{window.session.document.id}",
+    )
     window._handle_pattern_preview_event(
         {
             "protocol_version": 1,
@@ -155,4 +167,92 @@ def test_preview_panel_reports_starting_and_stopped_process_states(tmp_path, qap
 
     window.preview_panel.set_running(False)
     assert window.preview_panel.status_label.text() == "Preview process is stopped"
+    window.close()
+
+
+def test_preview_stop_button_stops_the_preview_session_process(tmp_path, qapp_session):
+    window, fake = _window(tmp_path)
+    owner = window.session
+    assert window._preview_session.start_formal(
+        document_id=owner.document.id,
+        resource_id=f"unsaved://{owner.document.id}",
+    )
+    assert window._preview_session.mode == PREVIEW_MODE_FORMAL
+
+    window._send_pattern_preview_command("stop", {})
+    qapp_session.processEvents()
+
+    assert fake.stop_calls == 1
+    assert not fake.is_running
+    assert window._preview_session.mode == PREVIEW_MODE_UNLOADED
+    assert window._preview_session.active_document_id is None
+    window.close()
+
+
+def test_closing_preview_owner_stops_process_and_releases_identity(
+    tmp_path, qapp_session
+):
+    window, fake = _window(tmp_path)
+    owner = window.session
+    assert window._preview_session.start_formal(
+        document_id=owner.document.id,
+        resource_id=f"unsaved://{owner.document.id}",
+    )
+
+    window.close_active_document()
+    qapp_session.processEvents()
+
+    assert owner not in window.document_manager.documents
+    assert fake.stop_calls == 1
+    assert not fake.is_running
+    assert window._preview_session.mode == PREVIEW_MODE_UNLOADED
+    assert window._preview_session.active_document_id is None
+    window.close()
+
+
+def test_stage_feedback_must_match_preview_session_document_identity(
+    tmp_path, qapp_session
+):
+    window, fake = _window(tmp_path)
+    owner = window.session
+    assert window._preview_session.start_formal(
+        document_id=owner.document.id,
+        resource_id=f"unsaved://{owner.document.id}",
+    )
+
+    def feedback(frame):
+        window._handle_pattern_preview_event(
+            {
+                "protocol_version": 1,
+                "request_id": None,
+                "event": "statistics",
+                "payload": {
+                    "mode": "stage",
+                    "state": "playing",
+                    "resource_id": owner.document.id,
+                    "frame": frame,
+                    "active_clip_ids": [],
+                    "state_path": [],
+                    "variable_snapshot": {},
+                    "reactive_overlay": {},
+                },
+            }
+        )
+
+    feedback(12)
+    assert window.runtime_overlay is not None
+    assert window.runtime_overlay.frame == 12
+
+    # Rebinding the formal session to another document invalidates all feedback
+    # carrying the old owner's resource id, even if stale window fields still
+    # point at that owner.
+    assert window._preview_session.start_formal(
+        document_id="different-document",
+        resource_id="res://different",
+    )
+    assert fake.is_running
+    feedback(99)
+    qapp_session.processEvents()
+
+    assert window.runtime_overlay is None or window.runtime_overlay.frame == 12
     window.close()

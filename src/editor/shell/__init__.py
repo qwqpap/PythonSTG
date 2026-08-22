@@ -1,5 +1,5 @@
-"""Qt shell assembly helpers."""
+"""Qt shell assembly and service boundaries."""
 
-from .service import WindowService, install_service_methods
+from .service import WindowService
 
-__all__ = ["WindowService", "install_service_methods"]
+__all__ = ["WindowService"]

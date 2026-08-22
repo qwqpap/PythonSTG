@@ -24,7 +24,7 @@ import time
 
 import pytest
 
-from src.qt_compat.QtCore import QProcess
+from src.qt_compat.QtCore import QObject, QProcess, pyqtSignal
 from src.qt_compat.QtWidgets import QApplication
 
 from src.core.project_context import ProjectContext
@@ -44,10 +44,13 @@ from src.editor.preview import (
 _BLOCK = ["-c", "import sys; sys.stdin.read()"]
 
 
-class FakeFormalClient:
+class FakeFormalClient(QObject):
     """Stand-in for PatternPreviewProcess with just the surface the session uses."""
 
+    runningChanged = pyqtSignal(bool)
+
     def __init__(self) -> None:
+        super().__init__()
         self.running = False
         self.started = 0
         self.stopped = 0
@@ -60,15 +63,24 @@ class FakeFormalClient:
     def start(self) -> bool:
         self.running = True
         self.started += 1
+        self.runningChanged.emit(True)
         return True
 
     def stop(self, timeout_ms: int = 1500) -> None:
         self.running = False
         self.stopped += 1
+        self.runningChanged.emit(False)
 
     def close(self) -> None:
         self.running = False
         self.closed += 1
+        self.runningChanged.emit(False)
+
+    def finish_naturally(self) -> None:
+        """Model the formal worker exiting without an explicit session stop."""
+
+        self.running = False
+        self.runningChanged.emit(False)
 
 
 def _pump_until(predicate, timeout_ms: int = 5000) -> bool:
@@ -168,6 +180,25 @@ def test_stop_tears_down_formal_and_clears_identity(qapp_session, tmp_path):
 
     session.stop()
     assert fake.stopped == 1
+    assert session.mode == PREVIEW_MODE_UNLOADED
+    assert session.active_document_id is None
+    assert session.active_resource_id is None
+    assert not session.is_active
+
+
+def test_formal_natural_exit_clears_mode_and_document_identity(
+    qapp_session, tmp_path
+):
+    """A child exit must transition the owning session, not only the Qt panel."""
+
+    session = PreviewSession(ProjectContext(tmp_path))
+    fake = FakeFormalClient()
+    session.formal_client = fake
+    assert session.start_formal(document_id="doc-exited", resource_id="res://exited")
+
+    fake.finish_naturally()
+    qapp_session.processEvents()
+
     assert session.mode == PREVIEW_MODE_UNLOADED
     assert session.active_document_id is None
     assert session.active_resource_id is None

@@ -114,7 +114,7 @@ class UICanvas(QGraphicsView):
             None,
         )
 
-    def _item_geometry_changed(self, item: "_UICanvasItem") -> None:
+    def _commit_item_geometry(self, item: "_UICanvasItem") -> None:
         if self._suppress_geometry:
             return
         node = self._node_for_id(item.node_id)
@@ -126,22 +126,14 @@ class UICanvas(QGraphicsView):
         y = float(position.y() + rect.y())
         width = float(rect.width())
         height = float(rect.height())
-        # Emit before the fallback mutation.  The editor host can therefore
-        # capture the old values in an Undo command; a standalone canvas still
-        # remains a truthful authoring surface when no host is connected.
-        self.nodeGeometryCommitted.emit(
-            str(node.id), x, y, width, height
-        )
         if (
-            float(node.x) != x
-            or float(node.y) != y
-            or float(node.width) != width
-            or float(node.height) != height
+            float(node.x) == x
+            and float(node.y) == y
+            and float(node.width) == width
+            and float(node.height) == height
         ):
-            node.x = x
-            node.y = y
-            node.width = width
-            node.height = height
+            return
+        self.nodeGeometryCommitted.emit(str(node.id), x, y, width, height)
 
     def item_for_node(self, node_id: str):
         return self._items.get(str(node_id))
@@ -199,6 +191,7 @@ class _UICanvasItem(QGraphicsRectItem):
         self._resize_corner: str | None = None
         self._resize_start = None
         self._resize_rect = None
+        self._move_active = False
         self.setAcceptHoverEvents(True)
 
     @staticmethod
@@ -238,6 +231,8 @@ class _UICanvasItem(QGraphicsRectItem):
             event.accept()
             return
         super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            self._move_active = True
 
     def mouseMoveEvent(self, event) -> None:
         if self._resize_corner is None or self._resize_start is None or self._resize_rect is None:
@@ -257,7 +252,6 @@ class _UICanvasItem(QGraphicsRectItem):
         else:
             rect.setBottom(max(rect.top() + minimum, rect.bottom() + delta.y()))
         self.setRect(rect)
-        self._canvas._item_geometry_changed(self)
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
@@ -265,15 +259,16 @@ class _UICanvasItem(QGraphicsRectItem):
             self._resize_corner = None
             self._resize_start = None
             self._resize_rect = None
+            self._canvas._commit_item_geometry(self)
             event.accept()
             return
         super().mouseReleaseEvent(event)
+        if self._move_active:
+            self._move_active = False
+            self._canvas._commit_item_geometry(self)
 
     def itemChange(self, change, value):
-        result = super().itemChange(change, value)
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            self._canvas._item_geometry_changed(self)
-        return result
+        return super().itemChange(change, value)
 
 
 def _populate_tree(document: UIDocument, widget: QTreeWidget) -> None:

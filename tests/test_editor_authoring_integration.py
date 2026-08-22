@@ -296,12 +296,12 @@ def test_ui_canvas_resize_is_a_geometry_commit(qapp_session) -> None:
         _MouseEvent(QPointF(corner.x() + 20.0, corner.y() + 12.0))
     )
 
-    assert committed
-    assert child.width > original_width
-    assert child.height > original_height
-    assert committed[-1][0] == child.id
-    assert committed[-1][3] == pytest.approx(child.width)
-    assert committed[-1][4] == pytest.approx(child.height)
+    assert len(committed) == 1
+    assert child.width == original_width
+    assert child.height == original_height
+    assert committed[0][0] == child.id
+    assert committed[0][3] > original_width
+    assert committed[0][4] > original_height
     canvas.close()
 
 

@@ -16,6 +16,7 @@ from src.authoring import ResourceReference, ResourceStore
 from src.core.project_context import ProjectContext
 from src.authoring.scene.document import DocumentError, SceneDocument
 from src.compiler import StageCompileError
+from src.compiler.facade import compile_document
 from src.game.stage.context import StageContext
 from src.game.stage.program import (
     StageProgram,
@@ -253,20 +254,10 @@ class PatternPreviewController:
     def _compile_candidate(
         self, document: PatternDocument | SceneDocument
     ) -> PatternProgram | StageProgram:
-        if isinstance(document, PatternDocument):
-            return self.compiler.compile(
-                document,
-                project=self.project,
-                sprite_index_resolver=self.sprite_index_resolver,
-            )
-        contribution = self.store.registry[document.type].compiler
-        if contribution is None:
-            raise DocumentError(
-                f"No compiler is registered for resource type {document.type!r}"
-            )
-        return contribution(
+        return compile_document(
             document,
             project=self.project,
+            pattern_compiler=self.compiler,
             sprite_index_resolver=self.sprite_index_resolver,
         )
 

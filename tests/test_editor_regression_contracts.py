@@ -767,7 +767,7 @@ def test_ui_canvas_exposes_undoable_gizmo_and_resource_drop_contracts(
     assert bool(item.flags() & selectable)
 
 
-def test_ui_canvas_gizmo_commits_geometry_back_to_document(qapp_session) -> None:
+def test_ui_canvas_programmatic_geometry_change_is_not_an_authoring_commit(qapp_session) -> None:
     module = importlib.import_module("src.editor.panels.ui_workspace")
     canvas = module.UICanvas()
     document, child = _ui_document_with_child()
@@ -780,13 +780,9 @@ def test_ui_canvas_gizmo_commits_geometry_back_to_document(qapp_session) -> None
     item.setPos(7.0, 9.0)
     qapp_session.processEvents()
 
-    assert committed, "moving a UI item must create an undoable geometry commit"
-    node_id, x, y, width, height = committed[-1]
-    assert node_id == child.id
-    assert child.x == pytest.approx(x)
-    assert child.y == pytest.approx(y)
-    assert child.width == pytest.approx(width)
-    assert child.height == pytest.approx(height)
+    assert committed == []
+    assert child.x == pytest.approx(10.0)
+    assert child.y == pytest.approx(20.0)
 
 
 def test_background_edit_command_round_trips_through_undo() -> None:

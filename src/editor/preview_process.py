@@ -10,7 +10,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable
 
-from src.qt_compat.QtCore import QObject, QProcess, QProcessEnvironment, pyqtSignal
+from src.qt_compat.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, pyqtSignal
 from src.qt_compat.QtWidgets import QApplication
 
 from src.core.project_context import ProjectContext
@@ -26,6 +26,8 @@ def _qt_enum_value(value) -> int:
 class PatternPreviewProcess(QObject):
     MAX_STDOUT_LINE_BYTES = 64 * 1024
     MAX_STDERR_FORWARD_BYTES = 64 * 1024
+    MAX_QUEUED_REQUESTS = 256
+    HELLO_TIMEOUT_MS = 3000
 
     eventReceived = pyqtSignal(dict)
     protocolError = pyqtSignal(dict)
@@ -55,6 +57,9 @@ class PatternPreviewProcess(QObject):
         self._stopping = False
         self._stderr_forwarded = 0
         self._stderr_truncated = False
+        self._hello_timer = QTimer(self)
+        self._hello_timer.setSingleShot(True)
+        self._hello_timer.timeout.connect(self._hello_timeout)
 
     @property
     def is_running(self) -> bool:
@@ -106,6 +111,7 @@ class PatternPreviewProcess(QObject):
             return False
         self.runningChanged.emit(True)
         self._write_request("hello", {}, request_id=f"hello-{uuid.uuid4()}")
+        self._hello_timer.start(self.HELLO_TIMEOUT_MS)
         return True
 
     def _write_request(self, command: str, payload: dict, *, request_id: str) -> None:
@@ -135,6 +141,14 @@ class PatternPreviewProcess(QObject):
             }
         )
         if not self.ready and command != "shutdown":
+            if len(self._queued) >= self.MAX_QUEUED_REQUESTS:
+                self._protocol_issue(
+                    "request_queue_full",
+                    f"preview request queue is limited to {self.MAX_QUEUED_REQUESTS}",
+                    limit=self.MAX_QUEUED_REQUESTS,
+                    command=command,
+                )
+                raise RuntimeError("preview request queue is full")
             self._queued.append(message)
         else:
             assert self.process is not None
@@ -175,6 +189,7 @@ class PatternPreviewProcess(QObject):
                 continue
             self._events.append(message)
             if message.get("event") == "hello":
+                self._hello_timer.stop()
                 self.ready = True
                 self.readyChanged.emit(True)
                 assert self.process is not None
@@ -215,9 +230,20 @@ class PatternPreviewProcess(QObject):
         message = self.process.errorString() if self.process is not None else "process error"
         self._protocol_issue("process_error", message, qt_error=_qt_enum_value(error))
 
+    def _hello_timeout(self) -> None:
+        if self.ready or not self.is_running:
+            return
+        self._protocol_issue(
+            "hello_timeout",
+            f"preview worker did not answer hello within {self.HELLO_TIMEOUT_MS} ms",
+            timeout_ms=self.HELLO_TIMEOUT_MS,
+        )
+        self.stop()
+
     def _finished(self, exit_code: int, exit_status) -> None:
         self._read_stdout()
         self._read_stderr()
+        self._hello_timer.stop()
         status_value = _qt_enum_value(exit_status)
         normal = (
             status_value == _qt_enum_value(QProcess.NormalExit)
@@ -231,6 +257,8 @@ class PatternPreviewProcess(QObject):
                 exit_status=status_value,
             )
         self.ready = False
+        self._queued.clear()
+        self.process = None
         self.readyChanged.emit(False)
         self.runningChanged.emit(False)
 
@@ -253,7 +281,10 @@ class PatternPreviewProcess(QObject):
         if self.process is None:
             return
         if self.process.state() == QProcess.NotRunning:
+            self._hello_timer.stop()
             self.ready = False
+            self._queued.clear()
+            self.process = None
             return
         self._stopping = True
         try:
@@ -265,6 +296,7 @@ class PatternPreviewProcess(QObject):
                     self.process.kill()
                     self.process.waitForFinished(500)
         finally:
+            self._hello_timer.stop()
             self.ready = False
             self._queued.clear()
 

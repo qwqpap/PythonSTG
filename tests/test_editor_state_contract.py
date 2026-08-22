@@ -119,12 +119,45 @@ def _window(tmp_path):
     return EditorMainWindow(ProjectContext(tmp_path))
 
 
-def _send_stage_feedback(window, session, *, frame: int) -> None:
-    """Drive the existing preview feedback entry point with a real document."""
+class _Signal:
+    def __init__(self) -> None:
+        self._callbacks = []
 
-    window._active_stage_session = session
-    window._preview_mode = "stage"
-    window._preview_loaded_resource_id = session.document.id
+    def connect(self, callback) -> None:
+        self._callbacks.append(callback)
+
+    def disconnect(self, callback) -> None:
+        self._callbacks.remove(callback)
+
+    def emit(self, value) -> None:
+        for callback in tuple(self._callbacks):
+            callback(value)
+
+
+class _FormalClient:
+    def __init__(self) -> None:
+        self.runningChanged = _Signal()
+        self.is_running = False
+
+    def start(self) -> bool:
+        self.is_running = True
+        self.runningChanged.emit(True)
+        return True
+
+    def stop(self) -> None:
+        self.is_running = False
+        self.runningChanged.emit(False)
+
+
+def _send_stage_feedback(window, session, *, frame: int) -> None:
+    """Drive feedback through PreviewSession's owner/identity boundary."""
+
+    if window._preview_session.active_document_id != session.document.id:
+        window._pattern_preview_client = _FormalClient()
+        assert window._preview_session.start_formal(
+            document_id=session.document.id,
+            resource_id=f"unsaved://{session.document.id}",
+        )
     window._handle_pattern_preview_event(
         {
             "protocol_version": 1,
@@ -487,5 +520,5 @@ def test_closing_preview_owner_clears_overlay_and_document_state_ownership(
     assert session not in window.document_manager.documents
     assert session.editor_state == DocumentEditorState()
     assert window.runtime_overlay is None
-    assert window._active_stage_session is None
+    assert window._preview_session.active_document_id is None
     window.close()

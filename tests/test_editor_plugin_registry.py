@@ -139,14 +139,46 @@ def test_facade_view_catalog_registers_and_queries_editor_plugins(tmp_path):
     assert facade._plugins["panel"] is panel
 
 
+def test_facade_rejects_duplicate_identity_across_sdk_and_workbench(tmp_path):
+    """The facade has one plugin identity namespace, not two hidden registries."""
+
+    facade = EditorPluginRegistry(_project(tmp_path))
+    facade.register(
+        EditorPlugin(
+            id="shared",
+            title="Shared view",
+            description="",
+            mode="bottom",
+            factory=lambda: None,
+        )
+    )
+    with pytest.raises(ValueError, match="duplicate|identity"):
+        facade.sdk.register(_manifest("shared"))
+
+    reverse = EditorPluginRegistry(_project(tmp_path))
+    reverse.sdk.register(_manifest("shared"))
+    with pytest.raises(ValueError, match="duplicate|identity"):
+        reverse.register(
+            EditorPlugin(
+                id="shared",
+                title="Shared view",
+                description="",
+                mode="bottom",
+                factory=lambda: None,
+            )
+        )
+
+
 # -- unified SDK lifecycle ---------------------------------------------------
 def test_partial_sdk_activation_failure_rolls_back_and_isolates(tmp_path):
     facade = EditorPluginRegistry(_project(tmp_path))
+    cleaned: list[str] = []
 
     def healthy_activate(context):
         context.register_command("healthy.cmd", lambda: "ok")
 
     def broken_activate(context):
+        context.on_deactivate(lambda: cleaned.append("broken"))
         context.register_command("broken.cmd", lambda: "never")
         raise RuntimeError("plugin crashed on activate")
 
@@ -161,6 +193,7 @@ def test_partial_sdk_activation_failure_rolls_back_and_isolates(tmp_path):
     assert facade.sdk.state("broken") == "failed"
     with pytest.raises(KeyError):
         facade.sdk.command("broken.cmd")
+    assert cleaned == ["broken"]
     assert [plugin_id for plugin_id, _ in facade.sdk.errors] == ["broken"]
 
 

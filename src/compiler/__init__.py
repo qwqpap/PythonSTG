@@ -29,6 +29,8 @@ from src.compiler.stage import (
     StageCompileError,
     compile_stage,
 )
+from src.compiler.facade import UnsupportedDocumentTypeError, compile_document
+from src.compiler.diagnostics import CompilerDiagnostic, normalize_diagnostics
 
 __all__ = [
     "STAGE_PROGRAM_VERSION",
@@ -44,4 +46,8 @@ __all__ = [
     "load_pattern_document",
     "node_maps",
     "spawn_origin_node",
+    "compile_document",
+    "UnsupportedDocumentTypeError",
+    "CompilerDiagnostic",
+    "normalize_diagnostics",
 ]

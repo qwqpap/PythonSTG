@@ -119,6 +119,50 @@ def test_registry_deactivates_plugins(tmp_path):
     assert registry.state("sample") == "inactive"
 
 
+def test_deactivation_cleanup_failure_still_undoes_every_contribution(tmp_path):
+    """One faulty cleanup cannot strand contributions or block other plugins."""
+
+    registry = PluginRegistry(_project(tmp_path))
+    cleaned = []
+
+    def broken_activate(context):
+        context.register_command("broken.command", lambda: "broken")
+        context.on_deactivate(lambda: cleaned.append("broken-tail"))
+
+        def fail_cleanup():
+            raise RuntimeError("cleanup exploded")
+
+        context.on_deactivate(fail_cleanup)
+
+    def healthy_activate(context):
+        context.register_command("healthy.command", lambda: "healthy")
+        context.on_deactivate(lambda: cleaned.append("healthy"))
+
+    registry.register(_manifest("broken-cleanup", activation=broken_activate))
+    registry.register(_manifest("healthy-cleanup", activation=healthy_activate))
+    registry.activate_all()
+
+    registry.deactivate_all()
+
+    assert registry.state("broken-cleanup") == "inactive"
+    assert registry.state("healthy-cleanup") == "inactive"
+    assert cleaned == ["broken-tail", "healthy"]
+    with pytest.raises(KeyError):
+        registry.command("broken.command")
+    with pytest.raises(KeyError):
+        registry.command("healthy.command")
+    assert any(
+        plugin_id == "broken-cleanup" and "cleanup exploded" in str(error)
+        for plugin_id, error in registry.errors
+    )
+
+    # A completed failure-isolated deactivation leaves the plugin able to mint a
+    # fresh registration context rather than losing its only cleanup handle.
+    registry.activate("broken-cleanup")
+    assert registry.state("broken-cleanup") == "active"
+    assert registry.command("broken.command")() == "broken"
+
+
 def test_discovery_scans_project_plugins_directory(tmp_path):
     project = _project(tmp_path)
     plugins_dir = tmp_path / "plugins"

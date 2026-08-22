@@ -227,6 +227,115 @@ def test_panels_do_not_import_domain_commands() -> None:
     )
 
 
+_EDITOR_DOMAIN_COMMAND_ADAPTERS = frozenset(
+    {
+        # The coordinator is the one application-layer adapter explicitly
+        # responsible for translating typed intents into domain Commands.
+        # Shell/window modules are deliberately not broadly exempted.
+        "src.editor.application.coordinator",
+    }
+)
+
+
+def _document_command_definitions(path: Path) -> tuple[str, ...]:
+    """Find structural Command definitions without trusting module/class names."""
+
+    violations: list[str] = []
+    for node in _tree(path).body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        methods = {
+            item.name
+            for item in node.body
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        if not {"execute", "undo"}.issubset(methods):
+            continue
+
+        annotations = [
+            item.annotation
+            for item in node.body
+            if isinstance(item, ast.AnnAssign)
+        ]
+        initializers = [
+            item
+            for item in node.body
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and item.name == "__init__"
+        ]
+        annotations.extend(
+            argument.annotation
+            for initializer in initializers
+            for argument in (
+                *initializer.args.posonlyargs,
+                *initializer.args.args,
+                *initializer.args.kwonlyargs,
+            )
+            if argument.arg != "self"
+        )
+        if any(_annotation_mentions_document(annotation) for annotation in annotations):
+            violations.append(
+                f"{_relative_location(path, node.lineno)} defines {node.name}"
+            )
+    return tuple(violations)
+
+
+def _imported_domain_command_names(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """Return directly imported Command names and command-module aliases."""
+
+    symbols: set[str] = set()
+    modules: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and _is_command_module(node.module or ""):
+            for alias in node.names:
+                if alias.name == "Command" or alias.name.endswith("Command"):
+                    symbols.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if _is_command_module(alias.name):
+                    modules.add(alias.asname or alias.name)
+    return symbols, modules
+
+
+def _domain_command_instantiations(path: Path) -> tuple[str, ...]:
+    tree = _tree(path)
+    symbols, modules = _imported_domain_command_names(tree)
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = _expr_name(node.func)
+        is_imported_symbol = called in symbols
+        is_module_member = any(
+            called.startswith(module + ".")
+            and called.rsplit(".", 1)[-1].endswith("Command")
+            for module in modules
+        )
+        if is_imported_symbol or is_module_member:
+            violations.append(
+                f"{_relative_location(path, node.lineno)} instantiates {called}"
+            )
+    return tuple(violations)
+
+
+def test_editor_domain_commands_live_only_in_authoring_command_modules() -> None:
+    """Editor filenames cannot hide domain Command implementations or callers."""
+
+    violations: list[str] = []
+    for path in _python_files(EDITOR_ROOT):
+        module = _module_name(path)
+        if module in _EDITOR_DOMAIN_COMMAND_ADAPTERS:
+            continue
+        violations.extend(_document_command_definitions(path))
+        violations.extend(_domain_command_instantiations(path))
+
+    assert not violations, (
+        "domain Commands must be defined under src.authoring.commands and only "
+        "instantiated by an explicit application adapter:\n"
+        + "\n".join(sorted(set(violations)))
+    )
+
+
 def _annotation_mentions_document(annotation: ast.expr | None) -> bool:
     return annotation is not None and "Document" in ast.unparse(annotation)
 
@@ -657,6 +766,122 @@ def test_editor_main_window_holds_no_plugin_sdk_registry_alias() -> None:
         "EditorMainWindow must not hold a second self.plugin_sdk_registry "
         "attribute; the SDK is reached via self.plugin_registry.sdk. Found at: "
         + "; ".join(sorted(violations))
+    )
+
+
+def test_shell_services_do_not_proxy_or_inject_the_entire_window_surface() -> None:
+    """Composition must expose explicit ports, not recreate Mixins dynamically."""
+
+    service_path = EDITOR_ROOT / "shell" / "service.py"
+    classes = {
+        node.name: node
+        for node in _tree(service_path).body
+        if isinstance(node, ast.ClassDef)
+    }
+    service = classes.get("WindowService")
+    assert service is not None, "the shell service boundary is missing"
+    magic_proxies = {
+        node.name
+        for node in service.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in {"__getattr__", "__setattr__"}
+    }
+
+    dynamic_injection: list[str] = []
+    for node in ast.walk(_tree(service_path)):
+        if not isinstance(node, ast.Call):
+            continue
+        if _expr_name(node.func).rsplit(".", 1)[-1] != "setattr":
+            continue
+        if node.args and isinstance(node.args[0], ast.Name) and node.args[0].id == "window":
+            dynamic_injection.append(_relative_location(service_path, node.lineno))
+
+    assert not magic_proxies and not dynamic_injection, (
+        "WindowService recreates a SlotsMixin/God-object boundary by proxying "
+        "or injecting the complete window surface: "
+        f"magic={sorted(magic_proxies)}, injections={dynamic_injection}"
+    )
+
+
+def test_editor_app_is_a_thin_bootstrap_not_the_window_implementation() -> None:
+    """Architecture section 3 fixes app.py to CLI/project/create_window only."""
+
+    app_path = EDITOR_ROOT / "app.py"
+    tree = _tree(app_path)
+    concrete_windows = [
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "EditorMainWindow"
+    ]
+    allowed_functions = {"create_window", "main"}
+    extra_functions = [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name not in allowed_functions
+    ]
+    assert not concrete_windows and not extra_functions, (
+        "src/editor/app.py must remain a thin bootstrap; move the concrete "
+        f"window to shell/main_window.py (classes={concrete_windows}, "
+        f"extra_functions={extra_functions})"
+    )
+
+
+def test_preview_runtime_state_has_one_owner() -> None:
+    """Runtime identity/overlay state belongs to PreviewSession, never the window."""
+
+    forbidden = {
+        "_active_stage_session",
+        "_preview_loaded_resource_id",
+        "_preview_mode",
+        "_preview_state",
+        "_runtime_overlay",
+        "_preview_pending_properties",
+    }
+    violations: list[str] = []
+    for path, owner in _window_owner_classes():
+        for node in ast.walk(owner):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            for target in targets:
+                attribute = _self_attribute(target)
+                if attribute in forbidden:
+                    violations.append(
+                        f"{_relative_location(path, node.lineno)} -> self.{attribute}"
+                    )
+    assert not violations, (
+        "preview runtime state is duplicated on EditorMainWindow instead of "
+        "being owned by PreviewSession:\n" + "\n".join(sorted(violations))
+    )
+
+
+def test_compiler_facade_is_the_preview_controller_dispatch_boundary() -> None:
+    """The compiler facade must dispatch real documents and have a formal caller."""
+
+    facade = importlib.import_module("src.compiler.facade")
+    assert callable(getattr(facade, "compile_document", None)), (
+        "src.compiler.facade is only a re-export placeholder; it needs a real "
+        "compile_document dispatch entry"
+    )
+
+    controller_path = SRC_ROOT / "preview" / "controller.py"
+    controller_tree = _tree(controller_path)
+    candidates = [
+        node
+        for node in ast.walk(controller_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_compile_candidate"
+    ]
+    assert len(candidates) == 1
+    calls = {
+        _expr_name(node.func).rsplit(".", 1)[-1]
+        for node in ast.walk(candidates[0])
+        if isinstance(node, ast.Call)
+    }
+    assert "compile_document" in calls, (
+        "PreviewController bypasses src.compiler.facade.compile_document and "
+        "continues to dispatch compiler implementations itself"
     )
 
 

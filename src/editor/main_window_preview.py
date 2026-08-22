@@ -12,7 +12,6 @@ from src.compiler.scene_spell import SceneSpellCompileError, compile_simple_spel
 from .i18n import LANGUAGE_ENGLISH, translate_widget_tree
 from .main_window_support import _scene_has_stage_content, build_preview_command
 from .panels.scene_view import SceneViewport
-from .state import RuntimeOverlayState
 from .shell import WindowService
 
 
@@ -72,14 +71,10 @@ class PreviewService(WindowService):
             return
         if self._runtime_preview_host is not None:
             self._runtime_preview_host.detach()
-        self._preview_loaded_resource_id = None
-        self._preview_mode = "unloaded"
-        self._preview_state = "stopped"
         self._clear_stage_runtime_feedback()
-        self._active_stage_session = None
 
     def _clear_stage_runtime_feedback(self) -> None:
-        self._runtime_overlay = None
+        self._preview_session.clear_runtime_feedback()
         self.timeline.set_active_clips(())
         self.timeline.set_reactive_overlay({})
         self.state_graph.set_active_state_path(())
@@ -108,9 +103,6 @@ class PreviewService(WindowService):
         self._active_pattern_session = session
         self._active_pattern_document = session.document
         self._active_pattern_resource = session.resource_uri or ""
-        self._active_stage_session = None
-        self._preview_loaded_resource_id = None
-        self._preview_mode = "pattern"
         self.preview_panel.set_resource(self._active_pattern_resource)
         self.bottom_tabs.setCurrentWidget(self.preview_panel)
         self._launch_active_pattern_preview()
@@ -144,11 +136,6 @@ class PreviewService(WindowService):
         ):
             return
         self._show_runtime_preview_host(select=True)
-        if self._active_stage_session is not session:
-            self._clear_stage_runtime_feedback()
-        self._active_stage_session = session
-        self._preview_loaded_resource_id = None
-        self._preview_mode = "stage"
         self.preview_panel.set_resource(
             session.resource_uri or f"unsaved://{session.document.id}"
         )
@@ -179,9 +166,6 @@ class PreviewService(WindowService):
         # because its timeline is authored in the scene workspace.
         self._show_runtime_preview_host()
         self._clear_stage_runtime_feedback()
-        self._active_stage_session = None
-        self._preview_loaded_resource_id = None
-        self._preview_mode = "pattern"
         self._pattern_preview_client.send_command(
             "load",
             {"document": self._active_pattern_document.to_dict()},
@@ -192,7 +176,11 @@ class PreviewService(WindowService):
         self._log(f"[pattern-preview] opening {label}")
 
     def _send_pattern_preview_command(self, command: str, payload: dict) -> None:
-        if command in {"reset", "stop"}:
+        if command == "stop":
+            self._clear_stage_runtime_feedback()
+            self._preview_session.stop()
+            return
+        if command == "reset":
             self._clear_stage_runtime_feedback()
         active_document = (
             self.document_manager.active.document
@@ -238,13 +226,13 @@ class PreviewService(WindowService):
             or not isinstance(session.document, SceneDocument)
             or not _scene_has_stage_content(session.document)
             or not self._pattern_preview_client.is_running
-            or self._active_stage_session is not session
-            or self._preview_mode != "stage"
-            or self._preview_loaded_resource_id != session.document.id
+            or self._preview_session.active_document_id != session.document.id
+            or self._preview_session.runtime_mode != "stage"
+            or self._preview_session.loaded_resource_id != session.document.id
         ):
             return
         frame = int(self.timeline.playhead_frame)
-        was_playing = self._preview_state == "playing"
+        was_playing = self._preview_session.runtime_state == "playing"
         self._pattern_preview_client.send_command(
             "load", {"document": session.document.to_dict()}
         )
@@ -253,23 +241,15 @@ class PreviewService(WindowService):
             self._pattern_preview_client.send_command("play")
 
     def _handle_pattern_preview_event(self, message: dict) -> None:
+        if not self._preview_session.observe_formal_event(message):
+            return
         self.preview_panel.handle_event(message)
-        request_id = message.get("request_id")
         payload = message.get("payload") or {}
-        if message.get("event") == "response" and request_id in self._preview_pending_properties:
-            self._preview_pending_properties.pop(request_id)
         event = message.get("event")
         if event in {"status", "statistics"}:
-            self._preview_state = str(payload.get("state") or self._preview_state)
-            self._preview_mode = str(payload.get("mode") or self._preview_mode)
-            resource_id = payload.get("resource_id")
-            if resource_id:
-                self._preview_loaded_resource_id = str(resource_id)
             self._sync_stage_runtime_feedback(payload)
         if event == "program_loaded":
-            mode = str(payload.get("mode") or "pattern")
-            self._preview_mode = mode
-            self._preview_loaded_resource_id = str(payload.get("resource_id") or "") or None
+            mode = self._preview_session.runtime_mode
             self._log(
                 f"[{mode}-preview] loaded {payload.get('name')} "
                 f"({str(payload.get('content_hash') or '')[:12]})"
@@ -287,16 +267,24 @@ class PreviewService(WindowService):
         # running.  This matters when the user switches tabs mid-playback: the
         # owner scene must keep receiving the authoritative pose/playhead so it
         # is correct as soon as the user returns to it.
-        session = self._active_stage_session
+        owner_id = self._preview_session.active_document_id
+        session = next(
+            (
+                candidate
+                for candidate in self.document_manager
+                if candidate.document.id == owner_id
+            ),
+            None,
+        )
         if (
             session is None
             or not isinstance(session.document, SceneDocument)
-            or self._preview_mode != "stage"
-            or self._preview_loaded_resource_id != session.document.id
+            or self._preview_session.runtime_mode != "stage"
+            or self._preview_session.loaded_resource_id != session.document.id
         ):
             return
         widget = self._document_widgets.get(session.document.id)
-        state = str(payload.get("state") or self._preview_state)
+        state = str(payload.get("state") or self._preview_session.runtime_state)
         node_state = payload.get("node_state")
         if state in {"stopped", "unloaded", "error"}:
             self._clear_stage_runtime_feedback()
@@ -304,8 +292,9 @@ class PreviewService(WindowService):
         frame = payload.get("frame")
         if not isinstance(frame, int) or isinstance(frame, bool) or frame < 0:
             return
-        overlay = RuntimeOverlayState.from_payload(session.document.id, payload)
-        self._runtime_overlay = overlay
+        overlay = self._preview_session.update_runtime_overlay(payload)
+        if overlay is None:
+            return
         if self.document_manager.active is session:
             self.timeline.set_playhead(overlay.frame, emit=False)
             self.timeline.set_active_clips(overlay.active_clip_ids)

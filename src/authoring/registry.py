@@ -119,7 +119,8 @@ class ResourceTypeRegistry(Mapping[str, ResourceTypeSpec]):
 
 #: Editor (Qt) factories contributed by :mod:`src.editor` via contribution
 #: inversion.  Authoring owns the slot and resolves factories lazily; it never
-#: imports Qt or the editor itself.  ``src.editor`` populates this on import.
+#: imports Qt or the editor itself.  ``EditorPluginRegistry`` installs these
+#: contributions when the Qt shell is assembled.
 _EDITOR_FACTORIES: dict[str, Contribution] = {}
 
 
@@ -149,7 +150,7 @@ def _editor_factory_for(type_name: str) -> Contribution:
         if factory is None:
             raise ResourceDocumentError(
                 f"no editor factory registered for resource type {type_name!r}; "
-                "import src.editor to install the Qt editor contributions"
+                "initialize EditorPluginRegistry to install Qt editor contributions"
             )
         return factory(*args, **kwargs)
 

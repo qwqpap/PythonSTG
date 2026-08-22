@@ -471,10 +471,10 @@ class TimelineService(WindowService):
             return
         if (
             self._pattern_preview_client.is_running
-            and session is self._active_stage_session
             and isinstance(session.document, SceneDocument)
-            and self._preview_mode == "stage"
-            and self._preview_loaded_resource_id == document_id
+            and self._preview_session.active_document_id == document_id
+            and self._preview_session.runtime_mode == "stage"
+            and self._preview_session.loaded_resource_id == document_id
         ):
             self._pattern_preview_client.send_command(
                 "seek",

@@ -84,7 +84,7 @@ class PatternService(WindowService):
             request_id = self._pattern_preview_client.send_command(
                 "set-property", {"path": path, "value": value}
             )
-            self._preview_pending_properties[request_id] = (str(path), value)
+            self._preview_session.record_pending_property(request_id, str(path), value)
 
     def _graph_mode_changed(self, mode: str) -> None:
         self._submit_pattern_intent(

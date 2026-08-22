@@ -33,6 +33,7 @@ from src.qt_compat.QtCore import QObject, QProcess, pyqtSignal
 from src.core.project_context import ProjectContext
 
 from ..preview_process import PatternPreviewProcess
+from ..state import RuntimeOverlayState
 
 
 PREVIEW_MODE_UNLOADED = "unloaded"
@@ -80,8 +81,14 @@ class PreviewSession(QObject):
         # be focused while a preview is still running.
         self._active_document_id: str | None = None
         self._active_resource_id: str | None = None
+        self._loaded_resource_id: str | None = None
+        self._runtime_mode = PREVIEW_MODE_UNLOADED
+        self._runtime_state = "stopped"
+        self._runtime_overlay: RuntimeOverlayState | None = None
+        self._pending_properties: dict[str, tuple[str, object]] = {}
         self._legacy_output_forwarded = 0
         self._legacy_output_truncated = False
+        self._connect_formal_client(self._formal_client)
 
     # -- formal client access (single source of truth, swappable) --------
     @property
@@ -90,7 +97,9 @@ class PreviewSession(QObject):
 
     @formal_client.setter
     def formal_client(self, client: Any) -> None:
+        self._disconnect_formal_client(self._formal_client)
         self._formal_client = client
+        self._connect_formal_client(client)
 
     # -- state introspection ---------------------------------------------
     @property
@@ -104,6 +113,22 @@ class PreviewSession(QObject):
     @property
     def active_resource_id(self) -> str | None:
         return self._active_resource_id
+
+    @property
+    def loaded_resource_id(self) -> str | None:
+        return self._loaded_resource_id
+
+    @property
+    def runtime_mode(self) -> str:
+        return self._runtime_mode
+
+    @property
+    def runtime_state(self) -> str:
+        return self._runtime_state
+
+    @property
+    def runtime_overlay(self) -> RuntimeOverlayState | None:
+        return self._runtime_overlay
 
     @property
     def is_formal_running(self) -> bool:
@@ -139,6 +164,7 @@ class PreviewSession(QObject):
             return False
         started = bool(client.start())
         if started:
+            self.clear_runtime_feedback()
             self._active_document_id = document_id
             self._active_resource_id = resource_id
             self._set_mode(PREVIEW_MODE_FORMAL)
@@ -176,6 +202,7 @@ class PreviewSession(QObject):
         # document identity and cannot be mistaken for the protocol path.
         self._active_document_id = None
         self._active_resource_id = None
+        self.clear_runtime_feedback()
         self._set_mode(PREVIEW_MODE_LEGACY)
         process.start()
         if not process.waitForStarted(started_timeout_ms):
@@ -193,6 +220,7 @@ class PreviewSession(QObject):
         self._stop_formal()
         self._active_document_id = None
         self._active_resource_id = None
+        self.clear_runtime_feedback()
         self._set_mode(PREVIEW_MODE_UNLOADED)
 
     def close(self) -> None:
@@ -206,13 +234,127 @@ class PreviewSession(QObject):
                 close()
         self._active_document_id = None
         self._active_resource_id = None
+        self.clear_runtime_feedback()
         self._set_mode(PREVIEW_MODE_UNLOADED)
+
+    def clear_runtime_feedback(self) -> None:
+        """Clear non-authoring runtime state without changing document state."""
+
+        self._loaded_resource_id = None
+        self._runtime_mode = PREVIEW_MODE_UNLOADED
+        self._runtime_state = "stopped"
+        self._runtime_overlay = None
+        self._pending_properties.clear()
+
+    def bind_runtime_feedback(
+        self,
+        document_id: str,
+        *,
+        resource_id: str | None = None,
+        runtime_mode: str | None = None,
+        runtime_state: str | None = None,
+        loaded_resource_id: str | None = None,
+    ) -> None:
+        """Bind externally produced formal feedback to one authoring owner.
+
+        Native and integration harnesses sometimes drive the worker directly.
+        They still establish identity through this session API, so the window
+        never regains a parallel preview state model.
+        """
+
+        self._active_document_id = str(document_id)
+        self._active_resource_id = resource_id
+        if runtime_mode is not None:
+            self._runtime_mode = str(runtime_mode)
+        if runtime_state is not None:
+            self._runtime_state = str(runtime_state)
+        if loaded_resource_id is not None:
+            self._loaded_resource_id = str(loaded_resource_id)
+        self._set_mode(PREVIEW_MODE_FORMAL)
+
+    def record_pending_property(
+        self, request_id: str, path: str, value: object
+    ) -> None:
+        self._pending_properties[str(request_id)] = (str(path), value)
+
+    def consume_pending_property(self, request_id: object) -> bool:
+        if not isinstance(request_id, str):
+            return False
+        return self._pending_properties.pop(request_id, None) is not None
+
+    def observe_formal_event(self, message: dict[str, Any]) -> bool:
+        """Validate one worker event against its owner and update session state."""
+
+        if self._mode != PREVIEW_MODE_FORMAL or self._active_document_id is None:
+            return False
+        event = str(message.get("event") or "")
+        payload = message.get("payload") or {}
+        if not isinstance(payload, dict):
+            return False
+        resource_id = payload.get("resource_id")
+        if (
+            event in {"program_loaded", "status", "statistics"}
+            and resource_id not in (None, "")
+            and str(resource_id) != self._active_document_id
+        ):
+            return False
+        if event == "response":
+            self.consume_pending_property(message.get("request_id"))
+        if event in {"status", "statistics"}:
+            self._runtime_state = str(payload.get("state") or self._runtime_state)
+            self._runtime_mode = str(payload.get("mode") or self._runtime_mode)
+            if resource_id:
+                self._loaded_resource_id = str(resource_id)
+        elif event == "program_loaded":
+            self._runtime_mode = str(payload.get("mode") or "pattern")
+            self._loaded_resource_id = str(resource_id or "") or None
+        elif event in {"compile_error", "runtime_error", "protocol_error"}:
+            self._runtime_overlay = None
+            self._runtime_state = "error"
+        return True
+
+    def update_runtime_overlay(self, payload: dict[str, Any]) -> RuntimeOverlayState | None:
+        """Store a validated immutable overlay for the active owner document."""
+
+        document_id = self._active_document_id
+        if (
+            document_id is None
+            or self._runtime_mode != "stage"
+            or self._loaded_resource_id != document_id
+        ):
+            return None
+        overlay = RuntimeOverlayState.from_payload(document_id, payload)
+        self._runtime_overlay = overlay
+        return overlay
 
     # -- internals --------------------------------------------------------
     def _set_mode(self, mode: str) -> None:
         if mode != self._mode:
             self._mode = mode
             self.modeChanged.emit(mode)
+
+    def _connect_formal_client(self, client: Any) -> None:
+        signal = getattr(client, "runningChanged", None)
+        connect = getattr(signal, "connect", None)
+        if callable(connect):
+            connect(self._formal_running_changed)
+
+    def _disconnect_formal_client(self, client: Any) -> None:
+        signal = getattr(client, "runningChanged", None)
+        disconnect = getattr(signal, "disconnect", None)
+        if callable(disconnect):
+            try:
+                disconnect(self._formal_running_changed)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _formal_running_changed(self, running: bool) -> None:
+        if running or self._mode != PREVIEW_MODE_FORMAL:
+            return
+        self._active_document_id = None
+        self._active_resource_id = None
+        self.clear_runtime_feedback()
+        self._set_mode(PREVIEW_MODE_UNLOADED)
 
     def _stop_formal(self) -> None:
         client = self._formal_client

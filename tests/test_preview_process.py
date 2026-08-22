@@ -142,13 +142,68 @@ def test_qprocess_crash_emits_actionable_issue_and_cleanup_is_idempotent(tmp_pat
     assert client.start(headless=True)
     assert client.wait_for(lambda: client.ready)
     assert client.process is not None
+    process = client.process
 
-    client.process.kill()
+    process.kill()
 
-    assert client.wait_for(lambda: client.process.state() == QProcess.NotRunning)
+    assert client.wait_for(lambda: process.state() == QProcess.NotRunning)
     assert client.wait_for(lambda: any(item["code"] == "process_crashed" for item in issues))
+    assert client.wait_for(lambda: client.process is None)
     client.close()
     client.close()
+
+
+def test_formal_worker_requires_hello_before_timeout(tmp_path, qapp_session):
+    """A live OS process that never completes the protocol handshake is failed."""
+
+    del qapp_session
+    worker = tmp_path / "silent_worker.py"
+    worker.write_text(
+        "import time\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    client = PatternPreviewProcess(_project(tmp_path), script_path=worker)
+    issues = []
+    client.protocolError.connect(issues.append)
+
+    try:
+        assert client.start(headless=True)
+        assert client.wait_for(
+            lambda: any(item.get("code") == "hello_timeout" for item in issues),
+            timeout_ms=5000,
+        )
+        assert not client.is_running
+        assert client.process is None
+    finally:
+        client.close()
+
+
+def test_commands_waiting_for_hello_have_a_hard_queue_limit(tmp_path, qapp_session):
+    """A silent worker cannot make pre-ready requests grow without bound."""
+
+    del qapp_session
+    worker = tmp_path / "silent_queue_worker.py"
+    worker.write_text(
+        "import time\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    client = PatternPreviewProcess(_project(tmp_path), script_path=worker)
+    issues = []
+    client.protocolError.connect(issues.append)
+
+    try:
+        assert client.start(headless=True)
+        for frame in range(1024):
+            try:
+                client.send_command("seek", {"frame": frame})
+            except RuntimeError:
+                break
+        assert len(client._queued) <= 256
+        assert any(item.get("code") == "request_queue_full" for item in issues)
+    finally:
+        client.close()
 
 
 def test_oversized_worker_output_is_bounded_and_reported(tmp_path, qapp_session):

@@ -178,10 +178,9 @@ class DocumentService(WindowService):
         if session is not None:
             if not self._confirm_discard(session):
                 return
-            if self._active_stage_session is session:
+            if self._preview_session.active_document_id == session.document.id:
                 self._clear_stage_runtime_feedback()
-                self._active_stage_session = None
-                self._preview_loaded_resource_id = None
+                self._preview_session.stop()
             _removed, active, invalidation = self.document_controller.close(
                 session.document.id,
                 discard=True,

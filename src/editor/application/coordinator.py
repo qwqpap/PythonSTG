@@ -46,7 +46,7 @@ from src.authoring.commands.scene import (
     SetNodePropertyCommand,
     find_parent,
 )
-from src.editor.stage_templates import ApplyStageTemplateCommand
+from src.authoring.commands.stage_template import ApplyStageTemplateCommand
 from src.authoring.commands.graph import (
     AddGraphEdgeCommand,
     AddGraphNodeCommand,
