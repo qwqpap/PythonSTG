@@ -226,7 +226,7 @@ def test_state_types_are_dataclasses_with_independent_typed_defaults() -> None:
     assert first.timeline.playhead_frame == 0
     assert first.timeline.zoom == 0.25
     assert first.pattern.player_position == (0.0, -0.8)
-    assert first.pattern.authoring_level == "l1"
+    assert first.pattern.authoring_level == "l0"
     assert first.background_selected_layer == 0
     assert first.ui_viewport is None
 

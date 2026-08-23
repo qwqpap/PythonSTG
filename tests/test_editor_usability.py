@@ -38,10 +38,10 @@ def test_progressive_levels_share_one_resource_and_one_runtime_identity():
     baseline = PatternCompiler().compile(document)
 
     assert [item.id for item in AUTHORING_LEVELS] == ["l0", "l1", "l2", "l3", "l4"]
-    assert available_levels(document, has_preset=False) == ("l1", "l2", "l3", "l4")
+    assert available_levels(document, has_preset=False) == ("l0", "l1", "l2", "l3", "l4")
     assert {
         level_snapshot(document, level)["resource_id"]
-        for level in ("l1", "l2", "l3", "l4")
+        for level in ("l0", "l1", "l2", "l3", "l4")
     } == {resource_id}
     assert PatternCompiler().compile(document) == baseline
 
@@ -158,6 +158,8 @@ def test_level_ui_exposes_exact_preset_parameter_and_binding_controls(
     )
 
     workspace.set_authoring_level("l0")
+    assert workspace.stack.currentWidget() is workspace.preset_choice_view
+    workspace.set_authoring_level("l1")
     assert workspace.stack.currentWidget() is workspace.preset_view
     assert workspace.findChild(QDoubleSpinBox, "presetParameter_speed") is not None
     workspace.set_authoring_level("l2")
@@ -203,7 +205,12 @@ def test_scene_add_menu_exposes_both_beginner_skeletons_and_each_is_one_undo(
     tmp_path, qapp_session
 ):
     window = EditorMainWindow(ProjectContext(tmp_path))
-    action_names = {action.objectName() for action in window._node_add_menu.actions()}
+    quick_action = next(
+        action
+        for action in window._node_add_menu.actions()
+        if action.objectName() == "beginnerQuickCreateMenu"
+    )
+    action_names = {action.objectName() for action in quick_action.menu().actions()}
     assert "addMidstageSkeleton" in action_names
     assert "addTwoPhaseBossSkeleton" in action_names
 

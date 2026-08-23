@@ -51,8 +51,8 @@ def test_editor_language_switch_retranslates_shell_and_preserves_document(
     # The author-facing controls carry task language only; the view mode is
     # internal state and no longer has a widget of its own to translate.
     assert pattern.fold_button.text() == "返回调整参数"
-    assert pattern.mode() == "recipe"
-    assert pattern.level_picker.itemText(0) == "调整参数"
+    assert pattern.mode() == "preset-choice"
+    assert pattern.level_picker.itemText(0) == "选择预设"
     shape_kind = window.inspector.findChild(QComboBox, "patternProperty_shape_kind")
     aim_mode = window.inspector.findChild(QComboBox, "patternProperty_aim_mode")
     assert shape_kind.currentText() == "圆形"
@@ -69,7 +69,7 @@ def test_editor_language_switch_retranslates_shell_and_preserves_document(
     assert launch.text() == "启动预览"
     assert pattern.source_summary.text() == "当前没有脚本扩展，此弹幕使用编辑器的标准行为。"
     assert pattern.template_picker.itemText(0).endswith("· 基础")
-    assert pattern.level_picker.itemText(0) == "调整参数"
+    assert pattern.level_picker.itemText(0) == "选择预设"
     assert window.session.document.to_dict() == before
     # Pattern authoring must not spend compact-window space on disabled Scene
     # tools.  The Inspector remains available for precise parameter edits.
