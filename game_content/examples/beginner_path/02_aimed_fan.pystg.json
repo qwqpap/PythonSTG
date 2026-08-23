@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "type": "pystg.pattern",
+  "id": "22000000-0000-4000-8000-000000000002",
+  "name": "练习 2：追踪渐变扇形",
+  "metadata": {
+    "description": "朝向玩家的扇形弹幕，每轮改变角度与速度。",
+    "tutorial_level": 2,
+    "script_required": false
+  },
+  "symbol_name": "beginner_aimed_fan",
+  "seed": 2026082302,
+  "bullet": {
+    "bullet_type": "knife",
+    "color": "purple",
+    "resource": null
+  },
+  "shape": {
+    "kind": "arc",
+    "count": 11,
+    "origin_x": 0.0,
+    "origin_y": 0.62,
+    "angle_span": 96.0,
+    "line_length": 1.0,
+    "line_angle": 0.0
+  },
+  "aim": {
+    "mode": "player",
+    "angle": 270.0
+  },
+  "schedule": {
+    "delay_frames": 0,
+    "interval_frames": 18,
+    "burst_count": 12,
+    "loop_count": null
+  },
+  "motion": {
+    "speed": 1.7,
+    "friction": 0.0,
+    "spin": 0.0,
+    "time_scale": 1.0,
+    "max_lifetime": 6.0,
+    "render_scale": 1.0,
+    "bounce_x": false,
+    "bounce_y": false
+  },
+  "modifiers": {
+    "angle_offset_per_burst": 6.0,
+    "speed_offset_per_burst": 0.06,
+    "random_speed_variation": 0.04
+  },
+  "bindings": [],
+  "graph": null,
+  "script": null
+}
