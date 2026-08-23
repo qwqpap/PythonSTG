@@ -667,7 +667,7 @@ Verdict = **APPROVE ER0–ER8**
 
 **验收文件**：`tests/test_editor_usability.py`、N6 focused gate、真实 PySide6 截图和 `reports/n6_usability.json`。
 
-**Evidence / Blocker（尚未完成）**：ER0–ER8 已在 `baa7969` 通过独立验收，研究协议固定在 `docs/N6_USABILITY_PROTOCOL.md`；`tools/verify_n6_usability.py` 要求 5 名唯一、无 PySTG 经验、无维护者口头指导、无脚本并满足 4/5 时间阈值。当前仍没有真实 `reports/n6_usability.json`，Agent 不得合成，因此本项保持 `[ ]`；N7 不得开始。
+**Evidence / Blocker（2026-08-23，自动化整改完成；人工研究未完成）**：ER0–ER8 已在 `baa7969` 通过独立验收；新手任务首页、Pattern 的“选择预设→调整参数→添加动态变化→编辑节点→查看脚本源码”、道中/Boss 阶段引导、引导/完整工作区共享生命周期、保存反馈和正式预览反馈由候选 `e2204c4` 实现，两份预先冻结的 Contract 为 `7d0b5be`、`0a0c4dd`。Structural/Runtime：主协调全量 `762 passed`；独立 verifier 复跑新手/i18n/M3 为 40 passed、Preview/architecture/panel boundaries 为 180 passed，并以真实 formal `QProcess` 观察到 `hello → response → program_loaded → status → statistics`，确认主动预览进入 `RuntimePreviewHost` 和控制面板、惰性预览不抢编辑焦点；compileall、83 份 JSON/16 个 sprite config/745 个 sprite/142 张图片的资产校验和 diff-check 均通过。Native automated：未设置 `QT_QPA_PLATFORM` 的 N4/N5/N6/ER6 与 `tools/verify_native_editor_beginner.py --project .` 均通过，后者得到 5 个首页操作、5 个 Pattern 深度、4 个 Boss 阶段、960×640、同一 document/CommandStack；按约定未生成截图，不作人工视觉声明。Performance：固定 N5 workload 为 1836 spawned、101 batch writes、0 per-bullet callbacks，主协调 44.230ms、独立 verifier 48.108ms，均低于 2500ms。未参与实现的 verifier 最终 Verdict=`APPROVE`，且确认无 schema/compiler/runtime/renderer 重设计、无测试弱化、`.claude/settings.local.json` 未进入提交。Usability：**NOT RUN**；研究协议仍固定在 `docs/N6_USABILITY_PROTOCOL.md`，当前没有真实 `reports/n6_usability.json`，Agent 不得合成，因此 N6.4 保持 `[ ]`，N7 不得开始。
 
 ## 10. N7：Behavior Descriptor 与 Safe/Runtime/Engine 权限
 
