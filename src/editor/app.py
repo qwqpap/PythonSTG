@@ -27,7 +27,7 @@ __all__ = [
 
 
 def create_window(project: ProjectContext) -> EditorMainWindow:
-    return EditorMainWindow(project)
+    return EditorMainWindow(project, start_page=True)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -31,10 +31,17 @@ class DocumentService(WindowService[DocumentPort]):
     ``SpaceTapSearchMixin`` is used by ``SceneViewport``.
     """
 
-    def add_document_tab(self, session: ManagedDocument) -> QWidget:
+    def add_document_tab(
+        self,
+        session: ManagedDocument,
+        *,
+        show: bool = True,
+    ) -> QWidget:
         existing = self.port._document_widgets.get(session.document.id)
         if existing is not None:
             self.port.central_tabs.setCurrentWidget(existing)
+            if show:
+                self.port.show_document_workbench()
             return existing
         if isinstance(session.document, SceneDocument):
             widget: QWidget = SceneViewport(
@@ -121,6 +128,8 @@ class DocumentService(WindowService[DocumentPort]):
         self.port._document_widgets[session.document.id] = widget
         index = self.port.central_tabs.addTab(widget, session.display_name)
         self.port.central_tabs.setCurrentIndex(index)
+        if show:
+            self.port.show_document_workbench()
         return widget
 
     def managed_for_widget(self, widget: QWidget | None) -> ManagedDocument | None:
@@ -143,6 +152,7 @@ class DocumentService(WindowService[DocumentPort]):
         session = self.managed_for_widget(widget)
         if session is None:
             return
+        self.port.show_document_workbench()
         invalidation = self.port.document_controller.activate(session.document.id)
         if isinstance(session.document, SceneDocument):
             self.port.viewport = self.port.central_tabs.widget(index)

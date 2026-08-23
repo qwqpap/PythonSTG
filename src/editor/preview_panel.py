@@ -33,12 +33,14 @@ class PatternPreviewPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("patternPreviewPanel")
         self._resource = ""
+        self._beginner_mode = False
         self._language_manager: LanguageManager | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
         root.addLayout(self._build_header())
         root.addLayout(self._build_transport())
-        root.addWidget(self._build_body(), 1)
+        self.body_scroll = self._build_body()
+        root.addWidget(self.body_scroll, 1)
         self.status_label = QLabel("Preview process is stopped")
         self.status_label.setObjectName("previewStatus")
         self.status_label.setWordWrap(True)
@@ -215,11 +217,29 @@ class PatternPreviewPanel(QWidget):
             else text
         )
 
+    @property
+    def beginner_mode(self) -> bool:
+        """Whether the panel is presenting only first-run preview controls."""
+
+        return self._beginner_mode
+
+    def set_beginner_mode(self, enabled: bool) -> None:
+        """Hide diagnostic editors without changing the formal preview model."""
+
+        self._beginner_mode = bool(enabled)
+        self.body_scroll.setVisible(not self._beginner_mode)
+        # The displayed resource is presentation state.  Re-render it here so
+        # switching workspaces never leaves an internal ``unsaved://`` URI in
+        # the guided surface, while the full workbench retains the raw value.
+        self.set_resource(self._resource)
+
     def set_resource(self, resource: str) -> None:
         self._resource = resource
-        self.resource_label.setText(
-            resource or self._tr("No authoring resource selected")
-        )
+        if self._beginner_mode and resource.startswith("unsaved://"):
+            label = self._tr("Current work · not saved yet")
+        else:
+            label = resource or self._tr("No authoring resource selected")
+        self.resource_label.setText(label)
 
     def set_mode(self, mode: str) -> None:
         is_stage = mode == "stage"
@@ -260,9 +280,21 @@ class PatternPreviewPanel(QWidget):
         )
         if running:
             self.error_label.clear()
+            self.error_label.setToolTip("")
 
     def handle_issue(self, issue: dict) -> None:
-        self.error_label.setText(f'{issue.get("code", "preview")}: {issue.get("message", "")}'.strip())
+        code = str(issue.get("code") or "preview")
+        message = str(issue.get("message") or "")
+        technical = f"{code}: {message}".strip()
+        self.error_label.setToolTip(technical)
+        if self._beginner_mode and code == "no_stage_timeline":
+            self.error_label.setText(
+                self._tr(
+                    "Preview unavailable: add something to the timeline first."
+                )
+            )
+            return
+        self.error_label.setText(technical)
 
     def handle_event(self, message: dict) -> None:
         event = message.get("event")
@@ -297,6 +329,7 @@ class PatternPreviewPanel(QWidget):
             self._show_preview_error(payload.get("error") or payload)
         elif event == "program_loaded":
             self.error_label.clear()
+            self.error_label.setToolTip("")
             self.set_mode(str(payload.get("mode") or "pattern"))
             self.seed_edit.setText(str(payload.get("seed", 0)))
 

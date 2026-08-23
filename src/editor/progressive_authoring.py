@@ -39,10 +39,10 @@ def available_levels(
 ) -> tuple[str, ...]:
     """Return navigation availability without changing the document."""
 
-    values = ["l1", "l2", "l3", "l4"]
-    if has_preset:
-        values.insert(0, "l0")
-    return tuple(values)
+    # Choosing a preset is a real first step, especially when no preset has
+    # been applied yet.  Hiding L0 in that state made the only entry to preset
+    # selection disappear from a brand-new Pattern.
+    return tuple(level.id for level in AUTHORING_LEVELS)
 
 
 def level_snapshot(document: PatternDocument, level_id: str) -> dict[str, object]:

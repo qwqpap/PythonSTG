@@ -18,6 +18,7 @@ from src.qt_compat.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QStackedWidget,
     QTabWidget,
     QTextBrowser,
     QToolBar,
@@ -53,6 +54,7 @@ from ..document_manager import (
     ManagedDocument,
 )
 from ..panels.pattern_workspace import PatternWorkspace
+from ..panels.beginner_workspace import BeginnerHomeWorkspace, BeginnerTaskGuide
 from ..panels.ui_workspace import BackgroundWorkspace, UIWorkspace
 from ..application import (
     DocumentController,
@@ -74,7 +76,7 @@ from ..i18n import (
 )
 from ..plugins import EditorPluginRegistry
 from ..panels.inspector_panel import InspectorPanel
-from ..main_window_support import APP_NAME, build_preview_command
+from ..main_window_support import APP_NAME, _scene_has_stage_content, build_preview_command
 from ..panels.scene_view import NodeGraphicsItem, SceneTreeWidget, SceneViewport
 from ..main_window_authoring import AuthoringService
 from ..main_window_documents import DocumentService
@@ -109,10 +111,15 @@ class ShellDocks(WindowService[DocksPort]):
         self.build_central_tabs()
         self.build_scene_dock()
         self.build_state_graph_dock()
+        self.build_beginner_guide_dock()
         self.build_inspector_dock()
         self.build_variables_dock()
         self.build_bottom_dock()
         self.port.statusBar().showMessage(str(self.port.project.root))
+        if self.port._start_page_enabled:
+            self.show_beginner_home()
+        else:
+            self.set_full_workspace(True)
 
     def build_central_tabs(self) -> None:
         """Create the central document tab widget."""
@@ -121,9 +128,41 @@ class ShellDocks(WindowService[DocksPort]):
         self.port.central_tabs.setTabsClosable(True)
         self.port.central_tabs.tabCloseRequested.connect(self.port.document_service.close_central_tab)
         self.port.central_tabs.currentChanged.connect(self.port.document_service.central_tab_changed)
-        initial_widget = self.port.document_service.add_document_tab(self.port.session)
+        self.port.central_tabs.blockSignals(True)
+        initial_widget = self.port.document_service.add_document_tab(
+            self.port.session,
+            show=False,
+        )
+        self.port.central_tabs.blockSignals(False)
         self.port.viewport = initial_widget
-        self.port.setCentralWidget(self.port.central_tabs)
+        self.port.beginner_home = BeginnerHomeWorkspace()
+        self.port.beginner_home.set_language_manager(self.port.language_manager)
+        self.port.beginner_home.patternRequested.connect(self.start_new_pattern)
+        self.port.beginner_home.midstageRequested.connect(
+            lambda: self.start_stage_template('midstage')
+        )
+        self.port.beginner_home.bossRequested.connect(
+            lambda: self.start_stage_template('two_phase_boss')
+        )
+        self.port.beginner_home.openRequested.connect(
+            self.port.document_service.open_resource
+        )
+        self.port.beginner_home.exampleRequested.connect(
+            self.port.document_service.open_document
+        )
+        self.port.beginner_home.fullWorkspaceRequested.connect(
+            lambda: self.set_full_workspace(True)
+        )
+        self.port.central_stack = QStackedWidget()
+        self.port.central_stack.setObjectName('centralWorkspaceStack')
+        self.port.central_stack.addWidget(self.port.beginner_home)
+        self.port.central_stack.addWidget(self.port.central_tabs)
+        self.port.central_stack.setCurrentWidget(
+            self.port.beginner_home
+            if self.port._start_page_enabled
+            else self.port.central_tabs
+        )
+        self.port.setCentralWidget(self.port.central_stack)
 
     def build_scene_dock(self) -> None:
         """Build the Scene hierarchy dock."""
@@ -139,22 +178,27 @@ class ShellDocks(WindowService[DocksPort]):
         add_button.setText('+ Add')
         add_button.setPopupMode(QToolButton.InstantPopup)
         add_menu = QMenu(add_button)
-        quick_flow = add_menu.addAction('Simple Spell Setup')
+        quick_menu = add_menu.addMenu('Quick Start')
+        quick_menu.menuAction().setObjectName('beginnerQuickCreateMenu')
+        quick_flow = quick_menu.addAction('Simple Spell Setup')
         quick_flow.setObjectName('addSimpleSpellFlow')
         quick_flow.triggered.connect(self.port.scene_edit_service.create_simple_spell_flow)
-        midstage = add_menu.addAction('Midstage Skeleton')
+        midstage = quick_menu.addAction('Midstage Skeleton')
         midstage.setObjectName('addMidstageSkeleton')
         midstage.triggered.connect(lambda: self.port.scene_edit_service.create_stage_template('midstage'))
-        boss = add_menu.addAction('Two-phase Boss Skeleton')
+        boss = quick_menu.addAction('Two-phase Boss Skeleton')
         boss.setObjectName('addTwoPhaseBossSkeleton')
         boss.triggered.connect(lambda: self.port.scene_edit_service.create_stage_template('two_phase_boss'))
-        add_menu.addSeparator()
+        advanced_menu = add_menu.addMenu('Advanced Nodes')
+        advanced_menu.menuAction().setObjectName('advancedNodeMenu')
         self.port._node_add_menu = add_menu
+        self.port._advanced_node_menu = advanced_menu
         self.port._node_menu_types: set[str] = set()
         for type_name, spec in self.port.node_type_registry.items():
             if type_name == 'SceneRoot':
                 continue
-            action = add_menu.addAction(spec.display_name)
+            action = advanced_menu.addAction(spec.display_name)
+            action.setObjectName(f'addNode_{type_name}')
             self.port._node_menu_types.add(type_name)
             action.triggered.connect(lambda checked=False, node_type=type_name: self.port.scene_edit_service.add_node(node_type))
         add_button.setMenu(add_menu)
@@ -203,6 +247,28 @@ class ShellDocks(WindowService[DocksPort]):
         self.port.addDockWidget(Qt.LeftDockWidgetArea, state_graph_dock)
         self.port.tabifyDockWidget(self.port.scene_dock, state_graph_dock)
         self.port.scene_dock.raise_()
+
+    def build_beginner_guide_dock(self) -> None:
+        """Build the task-oriented Scene guide used outside the full workbench."""
+
+        self.port.beginner_guide = BeginnerTaskGuide()
+        self.port.beginner_guide.set_language_manager(self.port.language_manager)
+        self.port.beginner_guide.stateRequested.connect(self.guide_state_requested)
+        self.port.beginner_guide.timelineRequested.connect(self.guide_timeline_requested)
+        self.port.beginner_guide.previewRequested.connect(
+            self.port.preview_service.launch_active_preview
+        )
+        self.port.beginner_guide.homeRequested.connect(self.show_beginner_home)
+        self.port.beginner_guide.fullWorkspaceRequested.connect(
+            lambda: self.set_full_workspace(True)
+        )
+        guide_dock = QDockWidget('Beginner Guide', self.port.qt_parent)
+        self.port.beginner_guide_dock = guide_dock
+        guide_dock.setObjectName('beginnerGuideDock')
+        guide_dock.setWidget(self.port.beginner_guide)
+        guide_dock.setMinimumWidth(280)
+        self.port.addDockWidget(Qt.LeftDockWidgetArea, guide_dock)
+        guide_dock.hide()
 
     def build_inspector_dock(self) -> None:
         """Build the Inspector dock."""
@@ -300,6 +366,86 @@ class ShellDocks(WindowService[DocksPort]):
         bottom_dock.setMinimumHeight(210)
         self.port.addDockWidget(Qt.BottomDockWidgetArea, bottom_dock)
         self.port.resizeDocks([bottom_dock], [220], Qt.Vertical)
+
+    def start_new_pattern(self) -> None:
+        self.port._full_workspace = False
+        self.port.pattern_service.new_pattern()
+        self.show_document_workbench()
+
+    def start_stage_template(self, kind: str) -> None:
+        self.port._full_workspace = False
+        self.port.document_service.new_scene()
+        self.port.scene_edit_service.create_stage_template(str(kind))
+        self.show_document_workbench()
+
+    def show_beginner_home(self) -> None:
+        self.port._full_workspace = False
+        self.port.preview_panel.set_beginner_mode(True)
+        self.port.central_stack.setCurrentWidget(self.port.beginner_home)
+        self._hide_authoring_docks()
+        self._sync_workspace_action()
+        translate_widget_tree(self.port.beginner_home, self.port.language_manager)
+
+    def show_document_workbench(self) -> None:
+        self.port.central_stack.setCurrentWidget(self.port.central_tabs)
+        if self.port.document_manager.active is not None and hasattr(self.port, 'bottom_dock'):
+            self.sync_document_docks(self.port.session.document)
+        self._sync_workspace_action()
+
+    def set_full_workspace(self, enabled: bool) -> None:
+        self.port._full_workspace = bool(enabled)
+        self.port.preview_panel.set_beginner_mode(not self.port._full_workspace)
+        self.port.central_stack.setCurrentWidget(self.port.central_tabs)
+        if hasattr(self.port, 'bottom_dock'):
+            self.sync_document_docks(self.port.session.document)
+        self._sync_workspace_action()
+
+    def _sync_workspace_action(self) -> None:
+        action = self.port.action_full_workspace
+        action.blockSignals(True)
+        action.setChecked(bool(self.port._full_workspace))
+        action.blockSignals(False)
+
+    def _hide_authoring_docks(self) -> None:
+        for dock in (
+            self.port.scene_dock,
+            self.port.state_graph_dock,
+            self.port.beginner_guide_dock,
+            self.port.inspector_dock,
+            self.port.variables_dock,
+            self.port.bottom_dock,
+        ):
+            dock.hide()
+
+    def _set_bottom_tab_visibility(self, *, full: bool, scene: bool) -> None:
+        for index in range(self.port.bottom_tabs.count()):
+            widget = self.port.bottom_tabs.widget(index)
+            visible = full or widget is self.port.preview_panel or (
+                scene and widget is self.port.timeline
+            )
+            if hasattr(self.port.bottom_tabs, 'setTabVisible'):
+                self.port.bottom_tabs.setTabVisible(index, visible)
+
+    def guide_state_requested(self, state_id: str) -> None:
+        self.port.authoring_service.state_graph_state_selected(str(state_id))
+        self._set_bottom_tab_visibility(full=False, scene=True)
+        self.port.bottom_tabs.setCurrentWidget(self.port.timeline)
+
+    def guide_timeline_requested(self, state_id: str) -> None:
+        self.guide_state_requested(str(state_id))
+        self.port.bottom_dock.show()
+
+    def show_preview_controls(self) -> None:
+        if not self.port._full_workspace:
+            for index in range(self.port.bottom_tabs.count()):
+                widget = self.port.bottom_tabs.widget(index)
+                if hasattr(self.port.bottom_tabs, 'setTabVisible'):
+                    self.port.bottom_tabs.setTabVisible(
+                        index,
+                        widget is self.port.preview_panel,
+                    )
+        self.port.bottom_dock.show()
+        self.port.bottom_tabs.setCurrentWidget(self.port.preview_panel)
 
     def apply_theme(self) -> None:
         QApplication.instance().setStyle('Fusion')
@@ -410,6 +556,11 @@ class ShellDocks(WindowService[DocksPort]):
             self.port._update_actions()
         if InvalidationScope.TITLE in scopes:
             self.update_title()
+        if active and isinstance(document, SceneDocument):
+            self.port.beginner_guide.set_document(
+                document,
+                selected_state_id=session.editor_state.selection.state_id,
+            )
 
     def refresh_active_inspector(self, document) -> None:
         session = self.port.session
@@ -568,19 +719,69 @@ class ShellDocks(WindowService[DocksPort]):
         widget.set_mode(mode, emit=False)
         level = state.authoring_level
         if widget.level_picker.findData(level) < 0:
-            level = 'l1'
+            level = 'l0'
         widget.set_authoring_level(level)
         if hasattr(self.port, 'resource_browser'):
             widget.set_available_bullets(self.port.resource_browser.index.records)
         translate_widget_tree(widget, self.port.language_manager)
 
     def sync_document_docks(self, document) -> None:
-        """Show only tools that can act on the active document."""
+        """Show the task surface or the full workbench for the active document."""
+
+        self.port.preview_panel.set_beginner_mode(not self.port._full_workspace)
+        current_widget = self.port.central_tabs.currentWidget()
+        if isinstance(current_widget, PatternWorkspace):
+            current_widget.set_guided_mode(not self.port._full_workspace)
+
+        if self.port.central_stack.currentWidget() is self.port.beginner_home:
+            self._hide_authoring_docks()
+            return
+
         is_scene = isinstance(document, SceneDocument)
-        for dock in (self.port.scene_dock, self.port.state_graph_dock, self.port.variables_dock):
-            dock.setVisible(is_scene)
-        self.port.inspector_dock.setVisible(True)
-        if is_scene:
+        if self.port._full_workspace:
+            self.port.beginner_guide_dock.hide()
+            for dock in (
+                self.port.scene_dock,
+                self.port.state_graph_dock,
+                self.port.variables_dock,
+            ):
+                dock.setVisible(is_scene)
+            self.port.inspector_dock.show()
+            self.port.bottom_dock.show()
+            self._set_bottom_tab_visibility(full=True, scene=is_scene)
+        elif is_scene:
+            for dock in (
+                self.port.scene_dock,
+                self.port.state_graph_dock,
+                self.port.variables_dock,
+            ):
+                dock.hide()
+            self.port.beginner_guide.set_document(
+                document,
+                selected_state_id=self.port.session.editor_state.selection.state_id,
+            )
+            self.port.beginner_guide_dock.show()
+            self.port.inspector_dock.show()
+            self.port.bottom_dock.setVisible(_scene_has_stage_content(document))
+            self._set_bottom_tab_visibility(full=False, scene=True)
+            if self.port.bottom_tabs.currentWidget() not in (
+                self.port.timeline,
+                self.port.preview_panel,
+            ):
+                self.port.bottom_tabs.setCurrentWidget(self.port.timeline)
+        else:
+            for dock in (
+                self.port.scene_dock,
+                self.port.state_graph_dock,
+                self.port.variables_dock,
+                self.port.beginner_guide_dock,
+                self.port.inspector_dock,
+                self.port.bottom_dock,
+            ):
+                dock.hide()
+            self._set_bottom_tab_visibility(full=False, scene=False)
+
+        if is_scene and self.port._full_workspace:
             self.port.tabifyDockWidget(self.port.scene_dock, self.port.state_graph_dock)
             self.port.tabifyDockWidget(self.port.inspector_dock, self.port.variables_dock)
             self.port.scene_dock.raise_()

@@ -91,7 +91,12 @@ class PreviewService(WindowService[PreviewPort]):
             if isinstance(widget, SceneViewport):
                 widget.clear_runtime_state()
 
-    def open_pattern_preview(self, resource_value: str) -> None:
+    def open_pattern_preview(
+        self,
+        resource_value: str,
+        *,
+        select_result: bool = False,
+    ) -> None:
         session = self.port.document_service.open_document(resource_value)
         if session is None:
             return
@@ -106,7 +111,7 @@ class PreviewService(WindowService[PreviewPort]):
         self.port._active_pattern_resource = session.resource_uri or ""
         self.port.preview_panel.set_resource(self.port._active_pattern_resource)
         self.port.bottom_tabs.setCurrentWidget(self.port.preview_panel)
-        self.launch_active_pattern_preview()
+        self.launch_active_pattern_preview(select_result=select_result)
 
     def launch_active_preview(self) -> None:
         session = self.port.document_manager.active
@@ -137,6 +142,7 @@ class PreviewService(WindowService[PreviewPort]):
         ):
             return
         self._show_runtime_preview_host(select=True)
+        self.port.show_preview_controls()
         self.port.preview_panel.set_resource(
             session.resource_uri or f"unsaved://{session.document.id}"
         )
@@ -151,7 +157,7 @@ class PreviewService(WindowService[PreviewPort]):
             f"[stage-preview] opening {session.resource_uri or session.document.name}"
         )
 
-    def launch_active_pattern_preview(self) -> None:
+    def launch_active_pattern_preview(self, *, select_result: bool = True) -> None:
         if self.port._active_pattern_document is None:
             self.port.preview_panel.handle_issue(
                 {"code": "no_pattern", "message": "Select a Pattern resource first"}
@@ -162,10 +168,12 @@ class PreviewService(WindowService[PreviewPort]):
             resource_id=self.port._active_pattern_resource or None,
         ):
             return
-        # Keep the Pattern workspace visible while the formal renderer runs in
-        # its dedicated Runtime Preview tab.  The Stage flow selects that tab
-        # because its timeline is authored in the scene workspace.
-        self._show_runtime_preview_host()
+        # A launch is an explicit request to see the result.  Select the same
+        # formal runtime host used by Stage preview and expose its compact
+        # transport surface so a first-time author gets immediate feedback.
+        self._show_runtime_preview_host(select=select_result)
+        if select_result:
+            self.port.show_preview_controls()
         self.clear_stage_runtime_feedback()
         self.port._pattern_preview_client.send_command(
             "load",
@@ -332,7 +340,7 @@ class PreviewService(WindowService[PreviewPort]):
         if node is not None and node.type == "PatternInstance":
             resource = str(node.properties.get("pattern") or "").strip()
             if resource:
-                self.open_pattern_preview(resource)
+                self.open_pattern_preview(resource, select_result=True)
                 return
         if node is not None and node.type == "Spell":
             try:

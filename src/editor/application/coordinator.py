@@ -917,7 +917,7 @@ class EditorCoordinator:
                 )
                 state.pattern.preset_mode = True
                 state.pattern.graph_mode = False
-                state.pattern.authoring_level = "l0"
+                state.pattern.authoring_level = "l1"
                 return result
             templates = {
                 "starter_ring": {
@@ -967,7 +967,7 @@ class EditorCoordinator:
                 _PATTERN_MUTATION_INVALIDATION,
             )
             state.pattern.preset_mode = True
-            state.pattern.authoring_level = "l0"
+            state.pattern.authoring_level = "l1"
             return result
 
         if action is PatternAction.SET_PRESET_SLOT:
@@ -983,7 +983,7 @@ class EditorCoordinator:
                 _PATTERN_MUTATION_INVALIDATION,
             )
             state.pattern.preset_mode = True
-            state.pattern.authoring_level = "l0"
+            state.pattern.authoring_level = "l1"
             return result
 
         if action is PatternAction.MIGRATE_PRESET:
@@ -998,7 +998,7 @@ class EditorCoordinator:
                 _PATTERN_MUTATION_INVALIDATION,
             )
             state.pattern.preset_mode = True
-            state.pattern.authoring_level = "l0"
+            state.pattern.authoring_level = "l1"
             return result
 
         if action is PatternAction.MATERIALIZE_PRESET:
@@ -1689,7 +1689,15 @@ class EditorCoordinator:
                 ),
             )
             result = self._submit(session, command, _SCENE_DOCUMENT_INVALIDATION)
-            session.editor_state.selection.node_id = document.root.id
+            # A template is a task starting point, not a request to inspect the
+            # technical SceneRoot.  Land on the authored Boss/enemy anchor so
+            # the Inspector and beginner phase guide both have an actionable
+            # target immediately after creation.
+            author_target = next(
+                (node for node in document.root.walk() if node.type == "Boss"),
+                document.root,
+            )
+            session.editor_state.selection.node_id = author_target.id
             session.editor_state.selection.state_id = document.state_graph.initial_state_id
             return result
 

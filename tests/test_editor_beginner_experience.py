@@ -267,6 +267,33 @@ def test_beginner_preview_error_is_actionable_but_keeps_technical_details(
         qapp_session.processEvents()
 
 
+def test_guided_stage_can_return_from_preview_controls_to_the_timeline(
+    tmp_path,
+    qapp_session,
+):
+    window = _actual_window(tmp_path, qapp_session)
+    try:
+        _button(window.beginner_home, "beginnerCreateBoss").click()
+        qapp_session.processEvents()
+
+        window.show_preview_controls()
+        qapp_session.processEvents()
+        timeline_index = window.bottom_tabs.indexOf(window.timeline)
+        preview_index = window.bottom_tabs.indexOf(window.preview_panel)
+        assert not window.bottom_tabs.isTabVisible(timeline_index)
+        assert window.bottom_tabs.isTabVisible(preview_index)
+
+        _button(window.beginner_guide, "beginnerEditTimeline").click()
+        qapp_session.processEvents()
+        assert window.bottom_tabs.isTabVisible(timeline_index)
+        assert window.bottom_tabs.currentWidget() is window.timeline
+    finally:
+        if window.session.is_dirty:
+            window.session.revert()
+        window.close()
+        qapp_session.processEvents()
+
+
 def test_save_feedback_tracks_not_saved_dirty_and_saved_states(
     tmp_path, qapp_session, monkeypatch
 ):

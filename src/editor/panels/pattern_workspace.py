@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.qt_compat.QtCore import Qt, pyqtSignal
 from src.qt_compat.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QGridLayout,
@@ -11,6 +12,7 @@ from src.qt_compat.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QDoubleSpinBox,
     QSpinBox,
     QPushButton,
@@ -152,10 +154,14 @@ class PatternWorkspace(QWidget):
         # availability flag, so both exist before any builder runs.
         self._language_manager: LanguageManager | None = None
         self._preset_mode_available = False
+        # Direct construction is the dense/full workbench compatibility mode.
+        # The real task-first shell opts this widget into guided presentation.
+        self._guided_mode = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addLayout(self._build_primary_toolbar())
-        layout.addLayout(self._build_authoring_toolbar())
+        layout.addLayout(self._build_step_toolbar())
+        layout.addWidget(self._build_authoring_toolbar())
         layout.addWidget(self._build_graph_toolbar())
         hint = QLabel("Drag E/P gizmos. Drop an Assets sprite to assign.")
         hint.setObjectName("patternWorkspaceHint")
@@ -168,8 +174,9 @@ class PatternWorkspace(QWidget):
         self._preset_nodes: tuple[VirtualPresetNode, ...] = ()
         self._player_position = (0.0, -0.8)
         self._level_switching = False
-        self._authoring_level = "l1"
+        self._authoring_level = "l0"
         self._source_resource = ""
+        self._available_presets: tuple[PresetDescriptor, ...] = ()
         self._reset_binding_pickers()
         self._reset_level_picker(False)
 
@@ -184,6 +191,7 @@ class PatternWorkspace(QWidget):
         primary_toolbar.addStretch()
         self.level_picker = QComboBox()
         self.level_picker.setObjectName("patternAuthoringLevel")
+        self.level_picker.setVisible(False)
         primary_toolbar.addWidget(self.level_picker)
         self.level_picker.currentIndexChanged.connect(self._level_changed)
         # Task names are the single author-facing progression.  The view mode is
@@ -196,13 +204,38 @@ class PatternWorkspace(QWidget):
         self.guides = QCheckBox("Guides")
         self.guides.setChecked(True)
         primary_toolbar.addWidget(self.guides)
-        preview = QPushButton("Formal Preview")
+        preview = QPushButton("Preview")
         preview.setObjectName("patternFormalPreview")
         preview.clicked.connect(self.previewRequested)
         primary_toolbar.addWidget(preview)
         return primary_toolbar
 
-    def _build_authoring_toolbar(self) -> QGridLayout:
+    def _build_step_toolbar(self) -> QHBoxLayout:
+        """Persistent, revisitable authoring steps instead of a mode picker."""
+
+        from ..progressive_authoring import AUTHORING_LEVELS
+
+        layout = QHBoxLayout()
+        layout.setSpacing(4)
+        self.step_group = QButtonGroup(self)
+        self.step_group.setExclusive(True)
+        self.step_buttons: dict[str, QPushButton] = {}
+        for level in AUTHORING_LEVELS:
+            button = QPushButton(level.label)
+            button.setObjectName(f"patternStep_{level.id}")
+            button.setCheckable(True)
+            button.setToolTip(level.help_text)
+            button.clicked.connect(
+                lambda checked=False, level_id=level.id: self.set_authoring_level(
+                    level_id, emit=True
+                )
+            )
+            self.step_group.addButton(button)
+            self.step_buttons[level.id] = button
+            layout.addWidget(button, 1)
+        return layout
+
+    def _build_authoring_toolbar(self) -> QWidget:
         """Bullet assignment and template application, one operation per row.
 
         The central canvas is intentionally narrow when both the Scene and
@@ -210,8 +243,12 @@ class PatternWorkspace(QWidget):
         single horizontal strip would overlap its controls.
         """
 
-        authoring_toolbar = QGridLayout()
-        authoring_toolbar.addWidget(QLabel("Bullet"), 0, 0)
+        self.authoring_toolbar_widget = QWidget()
+        self.authoring_toolbar_widget.setObjectName("patternStepActions")
+        authoring_toolbar = QGridLayout(self.authoring_toolbar_widget)
+        authoring_toolbar.setContentsMargins(0, 0, 0, 0)
+        self.bullet_label = QLabel("Bullet")
+        authoring_toolbar.addWidget(self.bullet_label, 0, 0)
         self.bullet_picker = QComboBox()
         self.bullet_picker.setObjectName("patternBulletPicker")
         # The field expands on desktop, but must still leave room for the
@@ -219,25 +256,26 @@ class PatternWorkspace(QWidget):
         self.bullet_picker.setMinimumWidth(100)
         self.bullet_picker.setToolTip("Bullet sprite resource (#fragment)")
         authoring_toolbar.addWidget(self.bullet_picker, 0, 1)
-        assign = QPushButton("Assign Bullet")
-        assign.setObjectName("patternAssignBullet")
-        assign.clicked.connect(self._assign_bullet)
-        authoring_toolbar.addWidget(assign, 0, 2)
-        authoring_toolbar.addWidget(QLabel("Template"), 1, 0)
+        self.assign_bullet = QPushButton("Assign Bullet")
+        self.assign_bullet.setObjectName("patternAssignBullet")
+        self.assign_bullet.clicked.connect(self._assign_bullet)
+        authoring_toolbar.addWidget(self.assign_bullet, 0, 2)
+        self.preset_label = QLabel("Preset")
+        authoring_toolbar.addWidget(self.preset_label, 1, 0)
         self.template_picker = QComboBox()
         self.template_picker.setObjectName("patternTemplatePicker")
         self.template_picker.addItem("Starter Ring", "starter_ring")
         self.template_picker.addItem("Aimed Arc", "aimed_arc")
         self.template_picker.addItem("Spiral", "spiral")
         authoring_toolbar.addWidget(self.template_picker, 1, 1)
-        apply_template = QPushButton("Apply Template")
-        apply_template.setObjectName("patternApplyTemplate")
-        apply_template.clicked.connect(
+        self.apply_template = QPushButton("Use This Preset")
+        self.apply_template.setObjectName("patternApplyTemplate")
+        self.apply_template.clicked.connect(
             lambda: self.templateRequested.emit(str(self.template_picker.currentData()))
         )
-        authoring_toolbar.addWidget(apply_template, 1, 2)
+        authoring_toolbar.addWidget(self.apply_template, 1, 2)
         authoring_toolbar.setColumnStretch(1, 1)
-        return authoring_toolbar
+        return self.authoring_toolbar_widget
 
     def _build_graph_toolbar(self) -> QWidget:
         """Node-creation strip, hidden until a graph view is on screen."""
@@ -291,6 +329,7 @@ class PatternWorkspace(QWidget):
         self.graph_placeholder.expandRequested.connect(self.graphExpandRequested)
 
         self.stack = QStackedWidget()
+        self.stack.addWidget(self._build_preset_choice_view())
         self.stack.addWidget(self.canvas)
         self.stack.addWidget(self.graph_canvas)
         self.stack.addWidget(self.graph_placeholder)
@@ -299,8 +338,38 @@ class PatternWorkspace(QWidget):
         self.stack.addWidget(self._build_source_view())
         return self.stack
 
+    def _build_preset_choice_view(self) -> QWidget:
+        self.preset_choice_view = QWidget()
+        layout = QVBoxLayout(self.preset_choice_view)
+        layout.setContentsMargins(8, 8, 8, 8)
+        heading = QLabel("Choose a starting Pattern")
+        heading.setObjectName("presetChoiceHeading")
+        heading.setStyleSheet("font-size:18px; font-weight:600;")
+        layout.addWidget(heading)
+        hint = QLabel(
+            "Pick an effect that is close to what you want. You can change every important value next."
+        )
+        hint.setObjectName("presetChoiceHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.preset_choice_list = QListWidget()
+        self.preset_choice_list.setObjectName("patternPresetChoices")
+        self.preset_choice_list.currentItemChanged.connect(
+            self._preset_choice_changed
+        )
+        self.preset_choice_list.itemDoubleClicked.connect(
+            lambda _item: self.apply_template.click()
+        )
+        layout.addWidget(self.preset_choice_list, 1)
+        self.preset_choice_description = QLabel("")
+        self.preset_choice_description.setObjectName("presetChoiceDescription")
+        self.preset_choice_description.setWordWrap(True)
+        self.preset_choice_description.setStyleSheet("color:#aeb7c8;")
+        layout.addWidget(self.preset_choice_description)
+        return self.preset_choice_view
+
     def _build_preset_view(self) -> QWidget:
-        """Read-only preset expansion plus its parameter, slot and version rows."""
+        """Common parameters first; internals stay available on demand."""
 
         self.preset_view = QWidget()
         preset_layout = QVBoxLayout(self.preset_view)
@@ -309,14 +378,23 @@ class PatternWorkspace(QWidget):
         self.preset_summary.setObjectName("presetSummary")
         self.preset_summary.setWordWrap(True)
         preset_layout.addWidget(self.preset_summary)
+        self.preset_parameter_form = QGridLayout()
+        preset_layout.addLayout(self.preset_parameter_form)
+
+        self.preset_advanced_toggle = QPushButton("Show Preset Internals")
+        self.preset_advanced_toggle.setObjectName("presetAdvancedToggle")
+        self.preset_advanced_toggle.setCheckable(True)
+        preset_layout.addWidget(self.preset_advanced_toggle)
+        self.preset_advanced_details = QWidget()
+        self.preset_advanced_details.setObjectName("presetAdvancedDetails")
+        advanced_layout = QVBoxLayout(self.preset_advanced_details)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
         self.preset_nodes = QListWidget()
         self.preset_nodes.setObjectName("presetVirtualNodes")
         self.preset_nodes.setToolTip("Read-only virtual expansion; no nodes are copied into the Pattern")
-        preset_layout.addWidget(self.preset_nodes, 1)
-        self.preset_parameter_form = QGridLayout()
-        preset_layout.addLayout(self.preset_parameter_form)
+        advanced_layout.addWidget(self.preset_nodes, 1)
         self.preset_slot_form = QGridLayout()
-        preset_layout.addLayout(self.preset_slot_form)
+        advanced_layout.addLayout(self.preset_slot_form)
         migrate_row = QHBoxLayout()
         self.preset_version = QLabel("")
         self.preset_version.setObjectName("presetVersion")
@@ -332,11 +410,16 @@ class PatternWorkspace(QWidget):
         self.preset_migrate_button.clicked.connect(self._request_preset_migration)
         migrate_row.addWidget(self.preset_migrate_button)
         migrate_row.addStretch()
-        preset_layout.addLayout(migrate_row)
+        advanced_layout.addLayout(migrate_row)
         materialize = QPushButton("Make Local Copy")
         materialize.setObjectName("presetMaterialize")
         materialize.clicked.connect(self.presetMaterializeRequested)
-        preset_layout.addWidget(materialize)
+        advanced_layout.addWidget(materialize)
+        self.preset_advanced_details.setVisible(False)
+        self.preset_advanced_toggle.toggled.connect(
+            self.preset_advanced_details.setVisible
+        )
+        preset_layout.addWidget(self.preset_advanced_details, 1)
         return self.preset_view
 
     def _build_advanced_view(self) -> QWidget:
@@ -489,21 +572,21 @@ class PatternWorkspace(QWidget):
         self._level_switching = True
         self.level_picker.clear()
         for level in AUTHORING_LEVELS:
-            if level.id == "l0" and not has_preset:
-                continue
             self.level_picker.addItem(level.label, level.id)
         index = self.level_picker.findData(current)
         if index < 0:
-            current = "l1"
+            current = "l0"
             index = self.level_picker.findData(current)
         self.level_picker.setCurrentIndex(max(0, index))
         self._authoring_level = current
+        for level_id, button in self.step_buttons.items():
+            button.setChecked(level_id == current)
         self._level_switching = False
 
     def _level_changed(self) -> None:
         if self._level_switching:
             return
-        level = str(self.level_picker.currentData() or "l1")
+        level = str(self.level_picker.currentData() or "l0")
         self.authoringLevelRequested.emit(level)
 
     def set_authoring_level(self, level: str, *, emit: bool = False) -> None:
@@ -515,10 +598,17 @@ class PatternWorkspace(QWidget):
         self._level_switching = True
         self.level_picker.setCurrentIndex(index)
         self._level_switching = False
+        for level_id, button in self.step_buttons.items():
+            button.setChecked(level_id == level)
         if level == "l0":
-            self.set_mode("preset", emit=False)
+            self._mode = "preset-choice"
+            self._show_view(self.preset_choice_view)
         elif level == "l1":
-            self.set_mode("recipe", emit=False)
+            if self._preset_descriptor is not None:
+                self._mode = "preset"
+                self._show_view(self.preset_view)
+            else:
+                self.set_mode("recipe", emit=False)
         elif level == "l2":
             self._mode = "advanced"
             self._show_view(self.advanced_view)
@@ -530,11 +620,35 @@ class PatternWorkspace(QWidget):
         if emit:
             self.authoringLevelRequested.emit(level)
 
+    def set_guided_mode(self, enabled: bool) -> None:
+        """Switch between one task row and the dense full-workbench toolbar."""
+
+        enabled = bool(enabled)
+        if self._guided_mode == enabled:
+            return
+        self._guided_mode = enabled
+        self._refresh_mode()
+
     def _show_view(self, widget: QWidget, *, graph_chrome: bool = False) -> None:
         """Swap the central view; only the graph tasks carry the graph chrome."""
 
         self.fold_button.setVisible(graph_chrome)
         self.graph_toolbar_widget.setVisible(graph_chrome)
+        choosing = not self._guided_mode or self._authoring_level == "l0"
+        parameters = not self._guided_mode or self._authoring_level == "l1"
+        for widget_item in (
+            self.preset_label,
+            self.template_picker,
+            self.apply_template,
+        ):
+            widget_item.setVisible(choosing)
+        for widget_item in (
+            self.bullet_label,
+            self.bullet_picker,
+            self.assign_bullet,
+        ):
+            widget_item.setVisible(parameters)
+        self.authoring_toolbar_widget.setVisible(choosing or parameters)
         self.stack.setCurrentWidget(widget)
 
     def authoring_level(self) -> str:
@@ -550,7 +664,9 @@ class PatternWorkspace(QWidget):
 
     def _refresh_mode(self) -> None:
         document = self._document
-        if self._mode == "preset":
+        if self._mode == "preset-choice":
+            self._show_view(self.preset_choice_view)
+        elif self._mode == "preset":
             self._show_view(self.preset_view)
         elif self._mode == "graph":
             if document is not None and document.graph is not None:
@@ -661,16 +777,53 @@ class PatternWorkspace(QWidget):
     def set_available_presets(
         self, descriptors: tuple[PresetDescriptor, ...]
     ) -> None:
+        self._available_presets = tuple(descriptors)
         current = self.template_picker.currentData()
+        selected_choice = (
+            self.preset_choice_list.currentItem().data(Qt.UserRole)
+            if self.preset_choice_list.currentItem() is not None
+            else current
+        )
         self.template_picker.clear()
+        self.preset_choice_list.clear()
         for descriptor in descriptors:
+            value = f"{descriptor.preset_id}@{descriptor.version}"
             self.template_picker.addItem(
                 f"{descriptor.display_name} · {self._tr(descriptor.category)}",
-                f"{descriptor.preset_id}@{descriptor.version}",
+                value,
             )
+            item = QListWidgetItem(
+                f"{descriptor.display_name}  ·  {self._tr(descriptor.category)}"
+            )
+            item.setData(Qt.UserRole, value)
+            item.setData(Qt.UserRole + 1, descriptor.description)
+            item.setToolTip(descriptor.description)
+            self.preset_choice_list.addItem(item)
         index = self.template_picker.findData(current)
+        self.template_picker.setCurrentIndex(max(0, index))
+        choice_index = next(
+            (
+                row
+                for row in range(self.preset_choice_list.count())
+                if self.preset_choice_list.item(row).data(Qt.UserRole)
+                == selected_choice
+            ),
+            0,
+        )
+        if self.preset_choice_list.count():
+            self.preset_choice_list.setCurrentRow(choice_index)
+
+    def _preset_choice_changed(self, current, _previous=None) -> None:
+        if current is None:
+            self.preset_choice_description.clear()
+            return
+        value = current.data(Qt.UserRole)
+        index = self.template_picker.findData(value)
         if index >= 0:
             self.template_picker.setCurrentIndex(index)
+        self.preset_choice_description.setText(
+            str(current.data(Qt.UserRole + 1) or "")
+        )
 
     def set_preset_expansion(
         self,
@@ -685,12 +838,13 @@ class PatternWorkspace(QWidget):
         if descriptor is None:
             self._preset_mode_available = False
             if self._mode == "preset":
-                self.set_mode("recipe", emit=False)
+                self._mode = "recipe"
             self._reset_level_picker(False)
             self._clear_preset_slots()
             self.preset_version.setText("")
             self.preset_migrate_target.clear()
             self.preset_migrate_button.setEnabled(False)
+            self.set_authoring_level(self._authoring_level)
             return
         self._preset_mode_available = True
         self._reset_level_picker(True)
@@ -742,6 +896,7 @@ class PatternWorkspace(QWidget):
             self.preset_parameter_form.addWidget(editor, row, 1)
         self._populate_preset_slots(descriptor, dict(slots or {}))
         self._populate_preset_migration(descriptor, tuple(migration_targets))
+        self.set_authoring_level(self._authoring_level)
 
     def _clear_preset_slots(self) -> None:
         while self.preset_slot_form.count():

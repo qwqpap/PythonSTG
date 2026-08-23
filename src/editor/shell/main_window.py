@@ -123,9 +123,20 @@ class EditorMainWindow(QMainWindow):
     runtime method injection and services never proxy arbitrary window state.
     """
 
-    def __init__(self, project: ProjectContext):
+    def __init__(
+        self,
+        project: ProjectContext,
+        *,
+        start_page: bool = False,
+    ):
         super().__init__()
         self.project = project
+        # ``create_window`` enables the task-first start page used by the real
+        # application.  Direct construction remains a full-workbench harness
+        # for focused editor tests and integrations that already select their
+        # own document before showing the window.
+        self._start_page_enabled = bool(start_page)
+        self._full_workspace = not self._start_page_enabled
         self.language_manager = LanguageManager(self)
         self.language_manager.languageChanged.connect(self._language_changed)
         # These resource/node type registries are the same objects wired into
@@ -298,6 +309,18 @@ class EditorMainWindow(QMainWindow):
 
     def open_plugin(self, plugin_id: str) -> None:
         self.workbench_service.open_plugin(plugin_id)
+
+    def show_beginner_home(self) -> None:
+        self.docks_service.show_beginner_home()
+
+    def show_document_workbench(self) -> None:
+        self.docks_service.show_document_workbench()
+
+    def set_full_workspace(self, enabled: bool) -> None:
+        self.docks_service.set_full_workspace(bool(enabled))
+
+    def show_preview_controls(self) -> None:
+        self.docks_service.show_preview_controls()
 
     def resizeEvent(self, event) -> None:
         """Keep the bottom workbench compact at the editor's minimum size.

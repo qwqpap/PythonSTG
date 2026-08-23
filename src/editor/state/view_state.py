@@ -119,7 +119,7 @@ class TimelineViewState(_ValidatedAssignments):
 class PatternViewState(_ValidatedAssignments):
     preset_mode: bool = False
     graph_mode: bool = False
-    authoring_level: Literal["l0", "l1", "l2", "l3", "l4"] = "l1"
+    authoring_level: Literal["l0", "l1", "l2", "l3", "l4"] = "l0"
     player_position: tuple[float, float] = (0.0, -0.8)
     runtime_source_path: str | None = None
 

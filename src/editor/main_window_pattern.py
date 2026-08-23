@@ -80,7 +80,11 @@ class PatternService(WindowService[PatternPort]):
         if not changed:
             return
         if not self.port._pattern_preview_client.is_running:
-            self.port.preview_service.launch_active_pattern_preview()
+            # Starting the formal client lazily for a live edit must not steal
+            # focus from the parameter the author is changing.
+            self.port.preview_service.launch_active_pattern_preview(
+                select_result=False
+            )
         else:
             request_id = self.port._pattern_preview_client.send_command(
                 "set-property", {"path": path, "value": value}

@@ -143,6 +143,10 @@ class DocumentPort(_ExplicitWindowPort):
         return self._window.central_tabs
 
     @property
+    def show_document_workbench(self) -> Any:
+        return self._window.show_document_workbench
+
+    @property
     def document_controller(self) -> Any:
         return self._window.document_controller
 
@@ -393,6 +397,10 @@ class PreviewPort(_ExplicitWindowPort):
     @property
     def session(self) -> Any:
         return self._window.session
+
+    @property
+    def show_preview_controls(self) -> Any:
+        return self._window.show_preview_controls
 
     @property
     def state_graph(self) -> Any:
@@ -711,6 +719,10 @@ class ActionsPort(_ExplicitWindowPort):
         return self._window._node_menu_types
 
     @property
+    def _advanced_node_menu(self) -> Any:
+        return self._window._advanced_node_menu
+
+    @property
     def _selected_id(self) -> Any:
         return self._window._selected_id
 
@@ -745,6 +757,22 @@ class ActionsPort(_ExplicitWindowPort):
     @action_indent.setter
     def action_indent(self, value: Any) -> None:
         self._window.action_indent = value
+
+    @property
+    def action_start(self) -> Any:
+        return self._window.action_start
+
+    @action_start.setter
+    def action_start(self, value: Any) -> None:
+        self._window.action_start = value
+
+    @property
+    def action_full_workspace(self) -> Any:
+        return self._window.action_full_workspace
+
+    @action_full_workspace.setter
+    def action_full_workspace(self, value: Any) -> None:
+        self._window.action_full_workspace = value
 
     @property
     def action_language_chinese(self) -> Any:
@@ -899,6 +927,22 @@ class ActionsPort(_ExplicitWindowPort):
         return self._window.menuBar
 
     @property
+    def save_status_label(self) -> Any:
+        return self._window.save_status_label
+
+    @save_status_label.setter
+    def save_status_label(self, value: Any) -> None:
+        self._window.save_status_label = value
+
+    @property
+    def set_full_workspace(self) -> Any:
+        return self._window.set_full_workspace
+
+    @property
+    def show_beginner_home(self) -> Any:
+        return self._window.show_beginner_home
+
+    @property
     def node_type_registry(self) -> Any:
         return self._window.node_type_registry
 
@@ -958,6 +1002,26 @@ class DocksPort(_ExplicitWindowPort):
     @property
     def _document_widgets(self) -> Any:
         return self._window._document_widgets
+
+    @property
+    def _advanced_node_menu(self) -> Any:
+        return self._window._advanced_node_menu
+
+    @_advanced_node_menu.setter
+    def _advanced_node_menu(self, value: Any) -> None:
+        self._window._advanced_node_menu = value
+
+    @property
+    def _full_workspace(self) -> Any:
+        return self._window._full_workspace
+
+    @_full_workspace.setter
+    def _full_workspace(self, value: Any) -> None:
+        self._window._full_workspace = value
+
+    @property
+    def _start_page_enabled(self) -> Any:
+        return self._window._start_page_enabled
 
     @property
     def _node_add_menu(self) -> Any:
@@ -1050,6 +1114,38 @@ class DocksPort(_ExplicitWindowPort):
     @bottom_tabs.setter
     def bottom_tabs(self, value: Any) -> None:
         self._window.bottom_tabs = value
+
+    @property
+    def beginner_home(self) -> Any:
+        return self._window.beginner_home
+
+    @beginner_home.setter
+    def beginner_home(self, value: Any) -> None:
+        self._window.beginner_home = value
+
+    @property
+    def beginner_guide(self) -> Any:
+        return self._window.beginner_guide
+
+    @beginner_guide.setter
+    def beginner_guide(self, value: Any) -> None:
+        self._window.beginner_guide = value
+
+    @property
+    def beginner_guide_dock(self) -> Any:
+        return self._window.beginner_guide_dock
+
+    @beginner_guide_dock.setter
+    def beginner_guide_dock(self, value: Any) -> None:
+        self._window.beginner_guide_dock = value
+
+    @property
+    def central_stack(self) -> Any:
+        return self._window.central_stack
+
+    @central_stack.setter
+    def central_stack(self, value: Any) -> None:
+        self._window.central_stack = value
 
     @property
     def central_tabs(self) -> Any:
@@ -1242,6 +1338,10 @@ class DocksPort(_ExplicitWindowPort):
     @property
     def workbench_service(self) -> Any:
         return self._window.workbench_service
+
+    @property
+    def action_full_workspace(self) -> Any:
+        return self._window.action_full_workspace
 
 
 

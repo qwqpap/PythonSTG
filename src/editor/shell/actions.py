@@ -13,6 +13,7 @@ from src.qt_compat.QtWidgets import (
     QApplication,
     QDockWidget,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -105,17 +106,27 @@ from .ports import ActionsPort
 class ShellActions(WindowService[ActionsPort]):
     def refresh_node_add_menu(self) -> None:
         """Expose newly activated SDK node contributions in the shell menu."""
-        menu = getattr(self.port, '_node_add_menu', None)
+        menu = getattr(self.port, '_advanced_node_menu', None)
         if menu is None:
             return
         for type_name, spec in self.port.node_type_registry.items():
             if type_name == 'SceneRoot' or type_name in self.port._node_menu_types:
                 continue
             action = menu.addAction(spec.display_name)
+            action.setObjectName(f'addNode_{type_name}')
             action.triggered.connect(lambda checked=False, node_type=type_name: self.port.scene_edit_service.add_node(node_type))
             self.port._node_menu_types.add(type_name)
 
     def build_actions(self) -> None:
+        self.port.action_start = self.action('Start', 'Ctrl+Shift+H', self.port.show_beginner_home)
+        self.port.action_start.setObjectName('actionStart')
+        self.port.action_full_workspace = self.action(
+            'Full Workspace',
+            None,
+            lambda checked=False: self.port.set_full_workspace(bool(checked)),
+        )
+        self.port.action_full_workspace.setObjectName('actionFullWorkspace')
+        self.port.action_full_workspace.setCheckable(True)
         self.port.action_new = self.action('New Scene', QKeySequence.New, self.port.document_service.new_scene)
         self.port.action_new_pattern = self.action('New Pattern', 'Ctrl+Shift+N', self.port.pattern_service.new_pattern)
         self.port.action_open = self.action('Open Resource…', QKeySequence.Open, self.port.document_service.open_resource)
@@ -154,6 +165,8 @@ class ShellActions(WindowService[ActionsPort]):
         edit_menu.addActions([self.port.action_undo, self.port.action_redo, self.port.action_rename, self.port.action_delete, self.port.action_move_up, self.port.action_move_down, self.port.action_outdent, self.port.action_indent])
         run_menu = self.port.menuBar().addMenu('&Run')
         run_menu.addActions([self.port.action_run, self.port.action_fit])
+        view_menu = self.port.menuBar().addMenu('&View')
+        view_menu.addActions([self.port.action_start, self.port.action_full_workspace])
         tools_menu = self.port.menuBar().addMenu('&Tools')
         for plugin in self.port.plugin_registry.all():
             action = tools_menu.addAction(plugin.title)
@@ -171,11 +184,19 @@ class ShellActions(WindowService[ActionsPort]):
         self.port.main_toolbar = main_toolbar
         main_toolbar.setObjectName('mainToolbar')
         main_toolbar.setMovable(False)
+        main_toolbar.addAction(self.port.action_start)
+        main_toolbar.addSeparator()
         main_toolbar.addActions([self.port.action_new, self.port.action_open, self.port.action_save])
         main_toolbar.addSeparator()
         main_toolbar.addActions([self.port.action_undo, self.port.action_redo])
         main_toolbar.addSeparator()
         main_toolbar.addAction(self.port.action_run)
+        main_toolbar.addSeparator()
+        main_toolbar.addAction(self.port.action_full_workspace)
+        self.port.save_status_label = QLabel('Saved')
+        self.port.save_status_label.setObjectName('saveStatusLabel')
+        self.port.save_status_label.setStyleSheet('color:#aeb7c8; padding:0 8px;')
+        main_toolbar.addWidget(self.port.save_status_label)
         self.port.addToolBar(main_toolbar)
 
     def update_actions(self) -> None:
@@ -192,3 +213,10 @@ class ShellActions(WindowService[ActionsPort]):
         self.port.action_outdent.setEnabled(is_scene and (not is_root))
         self.port.action_indent.setEnabled(is_scene and (not is_root))
         self.port.action_revert.setEnabled(self.port.session.is_dirty or self.port.session.path is not None)
+        if self.port.session.is_dirty:
+            save_status = 'Unsaved changes'
+        elif self.port.session.path is None:
+            save_status = 'Not saved yet'
+        else:
+            save_status = 'Saved'
+        self.port.save_status_label.setText(save_status)
