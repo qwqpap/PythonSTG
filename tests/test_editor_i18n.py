@@ -126,11 +126,13 @@ def test_chinese_scene_menu_and_generated_flow_hide_internal_node_terms(
     window.set_language(LANGUAGE_CHINESE)
     qapp_session.processEvents()
 
-    menu_texts = {
-        action.text()
-        for action in window._node_add_menu.actions()
-        if action.text()
-    }
+    def menu_actions(menu):
+        for action in menu.actions():
+            yield action
+            if action.menu() is not None:
+                yield from menu_actions(action.menu())
+
+    menu_texts = {action.text() for action in menu_actions(window._node_add_menu) if action.text()}
     assert {"关卡", "精灵", "敌人生成器", "脚本符卡", "符卡", "发射器", "弹幕实例"} <= menu_texts
     assert not {
         "Stage",

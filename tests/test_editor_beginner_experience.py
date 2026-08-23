@@ -10,7 +10,29 @@ from __future__ import annotations
 from src.core.project_context import ProjectContext
 from src.editor.app import create_window
 from src.editor.panels.pattern_workspace import PatternWorkspace
-from src.qt_compat.QtWidgets import QMenu, QPushButton
+from src.editor.runtime_preview import RuntimePreviewHost
+from src.qt_compat.QtWidgets import QFileDialog, QMenu, QPushButton
+
+
+class _FakePreviewClient:
+    def __init__(self) -> None:
+        self.is_running = True
+        self.commands: list[tuple[str, dict]] = []
+
+    def start(self):
+        self.is_running = True
+        return True
+
+    def send_command(self, command, payload=None):
+        self.commands.append((str(command), dict(payload or {})))
+        return f"request-{len(self.commands)}"
+
+    def stop(self, timeout_ms=1500):
+        del timeout_ms
+        self.is_running = False
+
+    def close(self):
+        self.is_running = False
 
 
 def _actual_window(tmp_path, qapp_session):
@@ -63,6 +85,8 @@ def test_actual_app_starts_at_a_five_choice_home_without_technical_docks(
         assert _button(window.beginner_home, "beginnerCreateMidstage").text() == "做一段道中"
         assert _button(window.beginner_home, "beginnerCreateBoss").text() == "做一个 Boss 战"
     finally:
+        if window.session.is_dirty:
+            window.session.revert()
         window.close()
         qapp_session.processEvents()
 
@@ -165,6 +189,8 @@ def test_boss_home_entry_lands_on_a_phase_task_and_guides_state_navigation(
         assert window.inspector_dock.isVisibleTo(window)
         assert not window.beginner_guide_dock.isVisibleTo(window)
     finally:
+        if window.session.is_dirty:
+            window.session.revert()
         window.close()
         qapp_session.processEvents()
 
@@ -186,5 +212,89 @@ def test_scene_add_menu_separates_quick_tasks_from_low_level_nodes(
         }
         assert any(action.objectName().startswith("addNode_") for action in advanced_menu.actions())
     finally:
+        window.close()
+        qapp_session.processEvents()
+
+
+def test_pattern_preview_opens_the_formal_runtime_with_beginner_controls(
+    tmp_path, qapp_session
+):
+    window = _actual_window(tmp_path, qapp_session)
+    fake = _FakePreviewClient()
+    window._pattern_preview_client = fake
+    try:
+        _button(window.beginner_home, "beginnerCreatePattern").click()
+        qapp_session.processEvents()
+        workspace = window.central_tabs.currentWidget()
+        _button(workspace, "patternFormalPreview").click()
+        qapp_session.processEvents()
+
+        assert [command for command, _payload in fake.commands[:2]] == ["load", "play"]
+        assert window._preview_session.active_document_id == window.session.document.id
+        assert isinstance(window.central_tabs.currentWidget(), RuntimePreviewHost)
+        assert window.bottom_dock.isVisibleTo(window)
+        assert window.bottom_tabs.currentWidget() is window.preview_panel
+        assert window.preview_panel.beginner_mode
+        assert "unsaved://" not in window.preview_panel.resource_label.text()
+        assert window.preview_panel.resource_label.text() == "Current work · not saved yet"
+        assert not window.preview_panel.body_scroll.isVisibleTo(window.preview_panel)
+    finally:
+        window._preview_session.stop()
+        window.close()
+        qapp_session.processEvents()
+
+
+def test_beginner_preview_error_is_actionable_but_keeps_technical_details(
+    tmp_path, qapp_session
+):
+    window = _actual_window(tmp_path, qapp_session)
+    try:
+        window.preview_panel.set_beginner_mode(True)
+        window.preview_panel.handle_issue(
+            {
+                "code": "no_stage_timeline",
+                "message": "Add at least one Timeline track before launching Stage preview",
+            }
+        )
+        assert (
+            window.preview_panel.error_label.text()
+            == "Preview unavailable: add something to the timeline first."
+        )
+        assert "no_stage_timeline" in window.preview_panel.error_label.toolTip()
+        assert "Timeline track" in window.preview_panel.error_label.toolTip()
+    finally:
+        window.close()
+        qapp_session.processEvents()
+
+
+def test_save_feedback_tracks_not_saved_dirty_and_saved_states(
+    tmp_path, qapp_session, monkeypatch
+):
+    window = _actual_window(tmp_path, qapp_session)
+    try:
+        _button(window.beginner_home, "beginnerCreatePattern").click()
+        qapp_session.processEvents()
+        workspace = window.central_tabs.currentWidget()
+        assert window.save_status_label.text() == "Not saved yet"
+
+        workspace.preset_choice_list.setCurrentRow(0)
+        _button(workspace, "patternApplyTemplate").click()
+        qapp_session.processEvents()
+        assert window.save_status_label.text() == "Unsaved changes"
+
+        target = tmp_path / "game_content" / "patterns" / "beginner_saved.pystg.json"
+        monkeypatch.setattr(
+            QFileDialog,
+            "getSaveFileName",
+            lambda *args, **kwargs: (str(target), ""),
+        )
+        window.action_save.trigger()
+        qapp_session.processEvents()
+        assert target.is_file()
+        assert window.save_status_label.text() == "Saved"
+        assert not window.session.is_dirty
+    finally:
+        if window.session.is_dirty:
+            window.session.revert()
         window.close()
         qapp_session.processEvents()
