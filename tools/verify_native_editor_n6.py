@@ -14,8 +14,9 @@ from src.editor.action_catalog import ActionQuery
 from src.editor.app import EditorMainWindow
 from src.editor.i18n import LANGUAGE_CHINESE
 from src.editor.panels.pattern_workspace import PatternWorkspace
-from src.qt_compat.QtCore import Qt, QTimer
-from src.qt_compat.QtGui import QKeyEvent
+from src.qt_compat.QtCore import QPoint, Qt, QTimer
+from src.qt_compat.QtGui import QKeyEvent, QMouseEvent
+from src.qt_compat.QtTest import QTest
 from src.qt_compat.QtWidgets import QApplication, QPushButton
 
 
@@ -133,6 +134,61 @@ def run(
         raise AssertionError("search result did not create through the document command")
     if not window.session.undo() or len(window.session.document.graph.nodes) != before_nodes:
         raise AssertionError("search-created node was not undoable")
+
+    # A real card drag must keep the pressed QGraphicsItem alive until release,
+    # then submit one authoring command.  Selection used to rebuild the entire
+    # canvas during mouse press, leaving a visible but immovable graph.
+    shape = next(
+        node
+        for node in window.session.document.graph.nodes
+        if node.category == "shape"
+    )
+    original_position = shape.position
+    item = workspace.graph_canvas._node_items[shape.id]
+    start = workspace.graph_canvas.mapFromScene(item.scenePos())
+    end = start + QPoint(80, 40)
+    QTest.mousePress(workspace.graph_canvas.viewport(), Qt.LeftButton, pos=start)
+    app.processEvents()
+    if workspace.graph_canvas._node_items[shape.id] is not item:
+        raise AssertionError("graph selection rebuilt the card during mouse press")
+    QApplication.sendEvent(
+        workspace.graph_canvas.viewport(),
+        QMouseEvent(
+            QMouseEvent.MouseMove,
+            end,
+            workspace.graph_canvas.viewport().mapToGlobal(end),
+            Qt.NoButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+    )
+    app.processEvents()
+    during_drag = next(
+        node
+        for node in window.session.document.graph.nodes
+        if node.id == shape.id
+    )
+    if during_drag.position != original_position:
+        raise AssertionError("graph drag mutated the document before mouse release")
+    QTest.mouseRelease(workspace.graph_canvas.viewport(), Qt.LeftButton, pos=end)
+    app.processEvents()
+    moved = next(
+        node
+        for node in window.session.document.graph.nodes
+        if node.id == shape.id
+    )
+    if moved.position == original_position:
+        raise AssertionError("graph card did not move through the native gesture")
+    if not window.session.undo():
+        raise AssertionError("graph card move was not undoable")
+    restored = next(
+        node
+        for node in window.session.document.graph.nodes
+        if node.id == shape.id
+    )
+    if restored.position != original_position:
+        raise AssertionError("undo did not restore the graph card position")
+
     window.pattern_service.pattern_level_requested("l2")
     app.processEvents()
     if workspace.authoring_level() != "l2" or workspace.stack.currentWidget() is not workspace.advanced_view:
@@ -147,7 +203,7 @@ def run(
     print(
         "native_editor_n6_ok "
         f"scene_candidates={len(window.action_catalog.search(ActionQuery(context='scene', parent_type='SceneRoot')))} "
-        f"graph_nodes={before_nodes} language={window.language} "
+        f"graph_nodes={before_nodes} graph_drag=undoable language={window.language} "
         "compact=960x640 "
         f"screenshot={screenshot or '(none)'} "
         f"compact_screenshot={compact_screenshot or '(none)'}",

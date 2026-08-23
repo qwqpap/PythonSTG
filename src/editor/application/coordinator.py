@@ -190,6 +190,10 @@ _PATTERN_VIEW_INVALIDATION = InvalidationSet(
     (InvalidationScope.PATTERN, InvalidationScope.INSPECTOR)
 )
 
+_PATTERN_SELECTION_INVALIDATION = InvalidationSet(
+    (InvalidationScope.INSPECTOR,)
+)
+
 _UI_MUTATION_INVALIDATION = InvalidationSet(
     (
         InvalidationScope.UI_CANVAS,
@@ -849,7 +853,11 @@ class EditorCoordinator:
                     f"Graph node does not exist: {intent.target_id}",
                 )
             state.selection.graph_node_id = intent.target_id
-            return _PATTERN_VIEW_INVALIDATION
+            # The live QGraphicsItem already owns visual selection.  Rebinding
+            # the whole Pattern canvas here deletes that item during its mouse
+            # press, so a drag can never reach mouse release.  Only the
+            # Inspector depends on this view-state change.
+            return _PATTERN_SELECTION_INVALIDATION
 
         if action is PatternAction.SET_GRAPH_NODE_PROPERTIES:
             return self._submit(
