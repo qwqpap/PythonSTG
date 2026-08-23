@@ -552,6 +552,94 @@ def test_window_expand_fold_handlers_sync_context_and_preview(tmp_path, qapp_ses
     window.close()
 
 
+def test_real_mouse_drag_moves_one_graph_node_through_one_undoable_intent(
+    tmp_path,
+    qapp_session,
+    monkeypatch,
+):
+    """Press selection must not rebuild the item before its drag can finish."""
+
+    from src.editor.application import PatternAction, PatternIntent
+    from src.qt_compat.QtCore import QPoint
+    from src.qt_compat.QtGui import QMouseEvent
+    from src.qt_compat.QtTest import QTest
+    from src.qt_compat.QtWidgets import QApplication
+
+    _project_context, window, _fake = _window(tmp_path, document=_pattern())
+    record = window.resource_browser.index.find(
+        "res://game_content/patterns/graph_ui.pystg.json"
+    )
+    window.workbench_service.resource_activated(record)
+    session = window._active_pattern_session
+    window.pattern_service.graph_expand_requested()
+    workspace = window._document_widgets[session.document.id]
+    window.resize(960, 640)
+    window.show()
+    qapp_session.processEvents()
+
+    canvas = workspace.graph_canvas
+    shape = next(
+        node for node in session.document.graph.nodes if node.category == "shape"
+    )
+    original_position = shape.position
+    item = canvas._node_items[shape.id]
+    original_item_position = item.pos()
+    start = canvas.mapFromScene(item.scenePos())
+    end = start + QPoint(80, 40)
+    dispatched = []
+    original_dispatch = window.editor_coordinator.dispatch
+
+    def record_dispatch(intent):
+        dispatched.append(intent)
+        return original_dispatch(intent)
+
+    monkeypatch.setattr(window.editor_coordinator, "dispatch", record_dispatch)
+
+    QTest.mousePress(canvas.viewport(), Qt.LeftButton, pos=start)
+    qapp_session.processEvents()
+    assert canvas._node_items[shape.id] is item
+    QApplication.sendEvent(
+        canvas.viewport(),
+        QMouseEvent(
+            QMouseEvent.MouseMove,
+            end,
+            canvas.viewport().mapToGlobal(end),
+            Qt.NoButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+    )
+    qapp_session.processEvents()
+    assert item.pos() != original_item_position
+    current_shape = next(
+        node for node in session.document.graph.nodes if node.id == shape.id
+    )
+    assert current_shape.position == original_position
+
+    QTest.mouseRelease(canvas.viewport(), Qt.LeftButton, pos=end)
+    qapp_session.processEvents()
+    move_intents = [
+        intent
+        for intent in dispatched
+        if isinstance(intent, PatternIntent)
+        and intent.action is PatternAction.MOVE_GRAPH_NODE
+    ]
+    assert len(move_intents) == 1
+    moved_shape = next(
+        node for node in session.document.graph.nodes if node.id == shape.id
+    )
+    assert moved_shape.position != original_position
+
+    assert session.undo()
+    restored_shape = next(
+        node for node in session.document.graph.nodes if node.id == shape.id
+    )
+    assert restored_shape.position == original_position
+    session.revert()
+    window.close()
+    qapp_session.processEvents()
+
+
 def test_window_graph_edits_are_undoable_and_survive_reopen(tmp_path, qapp_session):
     project, window, fake = _window(tmp_path, document=_pattern())
     record = window.resource_browser.index.find(
