@@ -51,10 +51,11 @@ export default defineConfig({
         items: [
           { text: '弹幕脚本开发指南', link: '/STAGE_SCRIPTING_GUIDE' },
           { text: '敌人预设系统', link: '/ENEMY_PRESET_SYSTEM' },
-          { text: '统一场景编辑器', link: '/SCENE_EDITOR_MVP' },
+          { text: '代码驱动编辑器', link: '/EDITOR_PRODUCT_VISION' },
           { text: '编辑器工具', link: '/EDITOR_TOOLS_GUIDE' },
           { text: '开发工具链', link: '/DEVTOOLS_PHASE1' },
-          { text: '编辑器架构边界', link: '/EDITOR_ARCHITECTURE' }
+          { text: '编辑器架构边界', link: '/EDITOR_ARCHITECTURE' },
+          { text: '编辑器实施 TODO', link: '/EDITOR_IMPLEMENTATION_TODO' }
         ]
       },
       {

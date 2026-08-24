@@ -2,107 +2,86 @@
 
 This file applies to the whole repository.
 
-## Editor roadmap
+## Code-driven editor roadmap
 
-Before making substantial changes to the Godot-style authoring editor, read
-[`docs/EDITOR_IMPLEMENTATION_TODO.md`](docs/EDITOR_IMPLEMENTATION_TODO.md)
-completely.
+Before changing the level authoring editor, read
+[`docs/EDITOR_IMPLEMENTATION_TODO.md`](docs/EDITOR_IMPLEMENTATION_TODO.md) and
+[`docs/EDITOR_ARCHITECTURE.md`](docs/EDITOR_ARCHITECTURE.md) completely. The
+roadmap is the only implementation order and status record for the editor.
 
-The roadmap is the durable source of truth for:
-
-- implementation order and dependencies;
-- editor/runtime architecture boundaries;
-- the current milestone and deferred scope;
-- completion gates and verification evidence.
-
-Do not begin a later roadmap phase merely because its UI is easier to demo.
-Foundation, runtime parity, and preview gates must be completed in dependency
-order.
-
-## Architecture remediation hold
-
-N7 is paused.  The mandatory order is now:
+The mandatory order is:
 
 ```text
-N6.3 -> ER0..ER8 -> N6.4 -> N7 -> N8 -> N9
+CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 ```
 
-The ER tasks are defined in `docs/EDITOR_IMPLEMENTATION_TODO.md`.  Their target
-dependency direction, directory layout, and module responsibilities are
-defined in `docs/EDITOR_ARCHITECTURE.md`.  No N7 contract or implementation
-work may start until every ER task and the independent N6.4 usability gate are
-complete.
+Do not start a later phase while an earlier phase gate is red. The previous
+Scene/Pattern/Graph editor is archived at tag `archive/editor-v1-f9e0798`; it is
+not a compatibility target and must not be restored through shims, feature
+flags, hidden menus, or retained tests.
 
-The ER work is a behavior-preserving architecture remediation.  It must not be
-used to redesign the timeline, behavior graph, authoring schemas, renderer, or
-runtime, and it must not introduce a second preview or document model.
+## Fixed product contract
 
-## Working rules
+1. The only authoring source of truth is the restricted declarative Python
+   project under `game_content/authoring/<project_id>/`.
+2. Generated Python and metadata live under
+   `game_content/generated/<project_id>/`; they are disposable build output and
+   must not be committed.
+3. Existing handwritten Stage1-Stage3 remain supported runtime content, but the
+   editor does not reverse-engineer them.
+4. The DSL, parser, model, compiler, timeline analysis, and preview protocol are
+   headless and must not import Qt, editor widgets, or the renderer.
+5. Generated stages use the existing `StageScript`, `Wave`, `EnemyScript`,
+   `SpellCard`, `StageManager`, renderer, pools, lasers, audio, and game loop.
+   Do not introduce a second runtime or per-bullet Python callbacks.
+6. The timeline is a projection of source nodes and runtime Trace. It is never
+   a separately saved authoring document.
+7. Unsupported Python opens read-only and is never overwritten or
+   best-effort-rewritten.
+8. Every editor mutation uses one `QUndoStack`. External reload discards the
+   entire stack only after an explicit user decision.
+9. Preview starts only on an explicit Run. Edits mark the running preview
+   stale; they do not hot-reload it.
+10. Resource references remain project-relative `res://` values resolved via
+    `ProjectContext`; generated packages never copy assets.
 
-1. Check `git status --short` before editing. Preserve unrelated user changes.
-2. For substantial work, propose the intended roadmap task IDs, boundaries, and
-   tradeoffs before implementation.
-3. Keep authoring documents as the source of truth. Generated Python is an
-   optional export and must not become the only runnable representation.
-4. Never expand high-density bullets into scene-tree nodes or attach a Python
-   per-frame callback to every bullet.
-5. Preview results must use the formal runtime path. Label structural tests,
-   simulated previews, and visually accepted results separately.
-6. All document mutations initiated by editor UI must participate in Undo/Redo.
-7. New document schema versions require migration and round-trip tests.
-8. Use project-relative resource references and `ProjectContext`; do not add new
-   current-working-directory assumptions.
-9. Do not mark a roadmap phase complete until its explicit gate passes.
-10. After completing roadmap work, update its checkboxes and single Evidence
-    block with concise, reproducible results; do not append handoff diaries or
-    self-hashing test gates.
+## Scope discipline
 
-## Agent ownership during ER work
+The new editor is only for level gameplay authoring. Do not add a plugin
+marketplace, behavior/state/render graph, security sandbox, dependency
+installer, legacy importer, arbitrary two-way Python editor, or another asset
+editor. Keep the first UI Simplified Chinese while Python APIs and generated
+code stay English.
 
-Every implementation task must name one owner, an explicit path allowlist, and
-an explicit denylist before editing.  Use the task-specific boundaries in the
-roadmap; the default ownership is:
+For each CD task, state one owner, an explicit path allowlist, and a denylist
+before editing. Preserve unrelated changes and always run `git status --short`
+first. The coordinating agent alone updates roadmap status. A verifier who did
+not implement the task performs the final read-only gate.
 
-| Agent role | May own | Must not change |
-| --- | --- | --- |
-| Architecture/specification | `AGENTS.md`, `docs/EDITOR_ARCHITECTURE.md`, `docs/EDITOR_IMPLEMENTATION_TODO.md`, architecture contracts | Product implementation or completion status without verification |
-| Editor shell/application | `src/editor/app.py`, `src/editor/shell/`, `src/editor/application/`, `src/editor/state/` | Authoring schema, runtime, renderer, or concrete panel behavior |
-| Authoring/compiler | `src/authoring/`, `src/compiler/`, compatibility exports named by the active ER task | Qt widgets, preview host, or runtime implementation |
-| Panel | One named module under `src/editor/panels/` and its focused tests | Other panels, coordinator internals, direct document mutation |
-| Preview | `src/editor/preview/`, `src/preview/`, focused preview tests | Authoring schema, timeline/graph implementation, or renderer semantics |
-| Plugin | `src/editor/plugins/`, plugin SDK adapters, focused plugin tests | Window private state, runtime internals, or unrelated registries |
-| Verification | Read-only product inspection, gate commands, and the current task Evidence block | Product fixes, weakened assertions, skips, xfails, or completion claims for a failing gate |
+If work must cross the declared boundary, stop and revise the boundary before
+editing. Never modify, stage, revert, or commit `.claude/settings.local.json`.
 
-The main coordinating agent owns integration order and is the only agent that
-may mark roadmap tasks complete.  The final verifier for an ER task must be
-different from its implementation agent.  Two agents must not concurrently
-edit the same module or compatibility export.
+## Editing and verification rules
 
-If work must cross an ownership boundary, stop, report the required files and
-reason, and have the coordinating agent revise the task boundary before any
-cross-boundary edit.
+- Use the narrowest relevant tests while iterating and invoke them with
+  `python -m pytest`, never bare `pytest`.
+- Do not weaken assertions or add `skip`, `xfail`, silent fallback, fake
+  preview, synthetic native evidence, or synthetic usability evidence.
+- Validate generated code through an independent Python subprocess using
+  compile/import/runtime checks before atomically publishing it.
+- A failed build must preserve the last successful generated package and the
+  old running preview.
+- Run native gates with a real PySide6 window and real GLFW/ModernGL child
+  window. Offscreen Qt and screenshots are not substitutes for native
+  embedding or interaction.
+- Report Structural, Runtime, Native, Performance, and Usability evidence as
+  separate classes. Unobserved classes must say `not run`.
+- After a phase passes, update only its checkbox and single Evidence block in
+  `docs/EDITOR_IMPLEMENTATION_TODO.md` with reproducible commands and results.
+- Use project-relative paths and deterministic UTF-8/LF/four-space output.
 
-## Completion integrity
+## Repository baseline checks
 
-- A file existing, an import succeeding, a checkbox, an offscreen screenshot,
-  or one green aggregate number is not completion evidence.
-- Contract tests are agreed before implementation.  An implementation agent
-  may not weaken them; a contract correction requires an explicit specification
-  revision reviewed separately.
-- Do not add `skip`, `xfail`, silent fallback, mocked formal preview, direct
-  downstream-slot calls presented as UI interaction, or generated reports that
-  claim native or human evidence.
-- Structural, runtime, native visual, performance, and usability evidence are
-  separate classes.  Record only the classes actually observed.
-- Run native gates through real PySide6 windows and formal compiler/runtime
-  paths.  N6.4 requires the repository usability protocol and five independent
-  target users; no agent may synthesize that report.
-- A red focused gate blocks the next task.  Near-complete work remains `[ ]`
-  with an explicit blocker.
-
-## Verification baseline
-
-Use the narrowest relevant tests while iterating. Before declaring a roadmap
-gate complete, run the gate-specific checks plus the repository merge checks
-listed in `docs/EDITOR_ARCHITECTURE.md`. Qt tests should use an offscreen
-platform when no interactive display is available.
+Before declaring a phase complete, run its focused gate plus the merge checks
+defined in `docs/EDITOR_ARCHITECTURE.md`. Keep heavyweight full-engine tests
+separate from the fast editor gate when the roadmap says so.

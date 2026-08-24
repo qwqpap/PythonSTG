@@ -1,6 +1,7 @@
 # pystg 编辑器工具指南
 
-> 本文档介绍 pystg 附带的可视化编辑器工具及统一启动方式。
+> 本文档只介绍关卡编辑器之外的独立资产工具。代码驱动关卡编辑器见
+> [产品愿景](EDITOR_PRODUCT_VISION.md)。
 
 ---
 
@@ -8,7 +9,7 @@
 
 1. [概览](#_1-概览)
 2. [依赖安装](#_2-依赖安装)
-3. [插件工作台与旧启动器](#_3-插件工作台与旧启动器)
+3. [独立工具启动器](#_3-独立工具启动器)
 4. [弹幕别名管理器](#_4-弹幕别名管理器)
 5. [纹理资产编辑器](#_5-纹理资产编辑器)
 6. [自机编辑器](#_6-自机编辑器)
@@ -27,8 +28,8 @@ pystg 提供多套可视化工具，用于管理游戏资产配置：
 | **纹理资产编辑器** | `tools/asset/asset_manager_qt.py` | 编辑精灵图集裁切区域、动画帧、激光配置 |
 | **自机编辑器** | `tools/player/player_editor.py` | 编辑自机动画、射击类型、子机配置 |
 
-统一入口现在是场景编辑器中的**插件工作台**（`tools/scene_editor.py`）。旧的
-`tools/editor_launcher.py` 和每个工具的独立脚本仍然保留。
+这些工具不作为关卡编辑器插件。可以使用 `tools/editor_launcher.py`，也可以直接运行
+每个工具的独立脚本。
 
 所有编辑器共享统一暗色主题（Catppuccin Mocha），公共代码位于 `tools/editor_common.py`。
 
@@ -36,8 +37,7 @@ pystg 提供多套可视化工具，用于管理游戏资产配置：
 
 | 文件 | 作用 |
 |------|------|
-| `tools/scene_editor.py` | 场景编辑、资源浏览与插件工作台 |
-| `tools/editor_launcher.py` | 保留的独立工具启动器 |
+| `tools/editor_launcher.py` | 独立资产工具启动器 |
 | `tools/editor_common.py` | 共享模块：主题、缓存、数据加载 |
 | `tools/bullet/bullet_alias_manager.py` | 弹幕别名管理器 |
 | `tools/asset/asset_manager_qt.py` | 纹理资产编辑器 |
@@ -57,24 +57,7 @@ pip install PyQt5
 
 ---
 
-## 3. 插件工作台与旧启动器
-
-### 推荐启动方式
-
-```bash
-python tools/scene_editor.py
-```
-
-工作台保留 Scene Tree、2D Viewport、Inspector、Timeline、Undo/Redo，并新增：
-
-- **Assets**：扫描 `assets/` 与 `game_content/`，按目录、类型和文本过滤。
-- **JSON 子资源**：将图集里的 `sprites`、`animations` 展开为可搜索的资源；引用格式为 `path.json#name`。
-- **Scene 连接**：双击或拖放图片/sprite 创建 Sprite；选中 Sprite 后双击会设置 `texture`；选中 SpellCard 后可设置 Python `script`。
-- **Tools 菜单**：弹幕别名管理器以内嵌中央页签打开；其余现有工具先以受工作台管理的独立进程打开。
-
-关闭工作台时，由工作台启动的外部工具会被终止；工具自己的独立启动方式不受影响。
-
-### 保留的旧启动器
+## 3. 独立工具启动器
 
 ```bash
 python tools/editor_launcher.py
@@ -82,7 +65,7 @@ python tools/editor_launcher.py
 
 ### 功能
 
-旧启动器提供弹幕、纹理、自机、敌人、立绘和背景工具卡片：
+启动器提供弹幕、纹理、自机、敌人、立绘和背景工具卡片：
 
 - 🎯 **弹幕别名** — 打开弹幕别名管理器
 - 🖼️ **纹理编辑** — 打开纹理资产编辑器
