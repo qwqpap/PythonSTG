@@ -14,23 +14,15 @@ from src.core.project_context import ProjectContext
 
 
 RESOURCE_SCHEMA_VERSION = 1
-SCENE_RESOURCE_SCHEMA_VERSION = 4
 RESOURCE_FILE_SUFFIX = ".pystg.json"
 
-SCENE_RESOURCE_TYPE = "pystg.scene"
-PATTERN_RESOURCE_TYPE = "pystg.pattern"
 UI_RESOURCE_TYPE = "pystg.ui"
 BACKGROUND_RESOURCE_TYPE = "pystg.background"
-CURVE_RESOURCE_TYPE = "pystg.curve"
 AUTHORING_RESOURCE_TYPES = (
-    SCENE_RESOURCE_TYPE,
-    PATTERN_RESOURCE_TYPE,
     UI_RESOURCE_TYPE,
     BACKGROUND_RESOURCE_TYPE,
 )
 AUTHORING_RESOURCE_SCHEMA_VERSIONS = {
-    SCENE_RESOURCE_TYPE: SCENE_RESOURCE_SCHEMA_VERSION,
-    PATTERN_RESOURCE_TYPE: RESOURCE_SCHEMA_VERSION,
     UI_RESOURCE_TYPE: RESOURCE_SCHEMA_VERSION,
     BACKGROUND_RESOURCE_TYPE: RESOURCE_SCHEMA_VERSION,
 }
@@ -268,18 +260,13 @@ class ResourceReference:
         return value + (f"#{self.subresource}" if self.subresource else "")
 
     @classmethod
-    def parse(
-        cls,
-        value: str,
-        *,
-        allow_legacy_project_path: bool = False,
-    ) -> "ResourceReference":
+    def parse(cls, value: str) -> "ResourceReference":
         if not isinstance(value, str) or not value.strip():
             raise ResourceDocumentError("resource reference must be a non-empty string")
         normalized = value.strip().replace("\\", "/")
         if normalized.startswith("res://"):
             normalized = normalized[6:]
-        elif not allow_legacy_project_path:
+        else:
             raise ResourceDocumentError("resource reference must start with 'res://'")
         path_value, separator, fragment = normalized.partition("#")
         if "#" in fragment:

@@ -35,38 +35,6 @@ python main.py --debug --hot-reload
 
 监听器使用轮询方式，并在主游戏循环中运行。重载失败时会保留旧状态，并打印 `[HotReload:ERROR]`。
 
-## 原生 Pattern Lab
-
-```bash
-python tools/pattern_lab_native.py
-python tools/pattern_lab_native.py --spec my_pattern.json --export game_content/stages/stage1/spellcards/lab_spell.py
-```
-
-这个工具走真实引擎渲染路径：
-
-- `GameWindow`
-- `ModernGL`
-- `TextureAssetManager`
-- `SpriteRegistry`
-- `OptimizedBulletPool`
-- `StageContext` 弹幕别名解析
-- `OptimizedBulletRenderer`
-
-快捷键：
-
-- Up / Down：选择参数。
-- Left / Right：修改当前参数。
-- R：从第 0 帧重新开始，并清空弹幕。
-- Z：只清空弹幕，不改变当前帧。
-- X 或 Space：暂停 / 继续。
-- C：重置为默认值。
-- Enter：导出 `SpellCard` 代码到 stdout；如果传了 `--export`，则写入对应文件。
-- Esc：退出。
-
-UI 面板在 gameplay viewport 外侧，不会挡住弹幕。数值显示和导出代码都会做稳定格式化，避免浮点噪声。Pattern 模式包括 `ring`、`arc`、`spiral` 和 `flower`。
-
-旧的浏览器原型已经移除，避免 Pattern Lab 预览效果和真实游戏渲染发生偏差。
-
 ## 符卡预览
 
 ```bash
@@ -191,13 +159,12 @@ VSCode task：
 }
 ```
 
-预览器有意和代码编辑器解耦。以后 PyQt 编辑器、VSCode 插件或其他 UI 都可以复用同一套运行时接口；VSCode 继续负责写代码，PythonSTG 工具负责预览、调参和编排。
+这个独立预览器只服务现有手写符卡，不承担新关卡编辑器的 Project/Stage/Spell 预览。
 
 ## 推荐流程
 
-1. 用 `python tools/pattern_lab_native.py` 在真实渲染器里调一个可复用弹幕 pattern。
-2. 导出 `SpellCard` 片段，或者直接写完整符卡脚本。
-3. 添加 `<script>.preview.json` 或类内 preview 元数据。
-4. 在 VSCode 中编辑时运行 `python tools/preview.py <script.py>`。
-5. 符卡效果稳定后，运行 `python main.py --debug --hot-reload`，进入实际关卡测试。
-6. 提交前运行 `python tools/validate_assets.py` 和 `python -m pytest -q`。
+1. 直接编写现有手写 `SpellCard` 脚本。
+2. 添加 `<script>.preview.json` 或类内 preview 元数据。
+3. 编辑时运行 `python tools/preview.py <script.py>`。
+4. 符卡效果稳定后，运行 `python main.py --debug --hot-reload`，进入实际关卡测试。
+5. 提交前运行 `python tools/validate_assets.py` 和 `python -m pytest -q`。

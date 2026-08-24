@@ -1,14 +1,12 @@
 import json
-from pathlib import Path
-import uuid
 
 import pytest
 
 from src.authoring import (
     AUTHORING_RESOURCE_TYPES,
+    BACKGROUND_RESOURCE_TYPE,
+    UI_RESOURCE_TYPE,
     GenericResourceDocument,
-    MigrationError,
-    MigrationRegistry,
     ResourceDocumentError,
     ResourceHeader,
     ResourceReference,
@@ -17,13 +15,13 @@ from src.authoring import (
     ResourceTypeSpec,
     build_default_resource_type_registry,
 )
-from src.authoring.resources import SCENE_RESOURCE_SCHEMA_VERSION
 from src.core.project_context import ProjectContext
-from src.pattern import PatternDocument
 
 
-def test_all_initial_resource_types_round_trip_atomically(tmp_path):
+def test_retained_resource_types_round_trip_atomically(tmp_path):
+    assert AUTHORING_RESOURCE_TYPES == (UI_RESOURCE_TYPE, BACKGROUND_RESOURCE_TYPE)
     store = ResourceStore(ProjectContext(tmp_path))
+
     for index, resource_type in enumerate(AUTHORING_RESOURCE_TYPES):
         document = GenericResourceDocument(
             header=ResourceHeader(
@@ -32,63 +30,31 @@ def test_all_initial_resource_types_round_trip_atomically(tmp_path):
                 symbol_name=f"resource_{index}",
                 metadata={"author": "测试"},
             ),
-            body={"objects": [{"id": str(__import__("uuid").uuid4()), "value": index}]},
+            body={"note": f"retained-{index}"},
         )
-        if resource_type == "pystg.pattern":
-            document = PatternDocument.new(
-                name=document.name,
-                symbol_name=f"resource_{index}",
-            )
-            document.header.metadata = {"author": "typed-test"}
         path = store.save(document, f"assets/resources/{index}.pystg.json")
         loaded = store.load(path)
 
-        expected = document.to_dict()
-        if resource_type == "pystg.scene":
-            graph_id = str(uuid.uuid5(uuid.UUID(expected["id"]), "state-graph:root"))
-            state_id = str(uuid.uuid5(uuid.UUID(expected["id"]), "state:default"))
-            expected = {
-                **expected,
-                "schema_version": SCENE_RESOURCE_SCHEMA_VERSION,
-                "state_graph": {
-                    "id": graph_id,
-                    "name": "StageFlow",
-                    "initial_state_id": state_id,
-                    "states": [
-                        {
-                            "id": state_id,
-                            "name": "Default",
-                            "order": 0,
-                            "duration_frames": 0,
-                            "entry_actions": [],
-                            "exit_actions": [],
-                            "tracks": [],
-                            "transitions": [],
-                            "child_graph": None,
-                        }
-                    ],
-                },
-            }
-        assert loaded.to_dict() == expected
+        assert loaded.to_dict() == document.to_dict()
         assert loaded.name == f"中文资源 {index}"
         assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
 
 def test_resource_header_separates_unicode_name_and_portable_symbol():
-    header = ResourceHeader(type="pystg.pattern", name="星符「星轨回廊」")
+    header = ResourceHeader(type=UI_RESOURCE_TYPE, name="中文 HUD")
     header.validate()
     assert header.symbol_name is None
 
     with pytest.raises(ResourceDocumentError, match="symbol_name"):
         ResourceHeader(
-            type="pystg.pattern",
-            name="符卡",
+            type=UI_RESOURCE_TYPE,
+            name="HUD",
             symbol_name="中文不是符号",
         ).validate()
 
 
 def test_generic_resource_rejects_duplicate_ids_and_future_schema():
-    header = ResourceHeader(type="pystg.ui", name="HUD")
+    header = ResourceHeader(type=UI_RESOURCE_TYPE, name="HUD")
     document = GenericResourceDocument(
         header=header,
         body={"node": {"id": header.id}},
@@ -97,57 +63,19 @@ def test_generic_resource_rejects_duplicate_ids_and_future_schema():
         document.validate()
 
     registry = build_default_resource_type_registry()
-    with pytest.raises(MigrationError, match="newer"):
+    with pytest.raises(ResourceDocumentError, match="newer"):
         registry.load(
             {
                 "schema_version": 99,
-                "type": "pystg.ui",
+                "type": UI_RESOURCE_TYPE,
                 "id": header.id,
                 "name": "Future",
             }
         )
 
 
-def test_migration_registry_requires_an_explicit_step_by_step_path():
-    migrations = MigrationRegistry()
-    migrations.register_type("demo.resource", 2)
-    migrations.register(
-        "demo.resource",
-        0,
-        lambda data: {
-            **data,
-            "schema_version": 1,
-            "type": "demo.resource",
-            "first": True,
-        },
-    )
-    migrations.register(
-        "demo.resource",
-        1,
-        lambda data: {**data, "schema_version": 2, "second": True},
-    )
-
-    migrated = migrations.migrate({"name": "Legacy"}, expected_type="demo.resource")
-    assert migrated["schema_version"] == 2
-    assert migrated["first"] and migrated["second"]
-
-    incomplete = MigrationRegistry()
-    incomplete.register_type("demo.resource", 2)
-    incomplete.register(
-        "demo.resource",
-        0,
-        lambda data: {**data, "schema_version": 1, "type": "demo.resource"},
-    )
-    with pytest.raises(MigrationError, match="No migration path"):
-        incomplete.migrate({}, expected_type="demo.resource")
-
-
-def test_resource_type_registry_carries_editor_compiler_and_preview_contributions():
-    migrations = MigrationRegistry()
-    registry = ResourceTypeRegistry(migrations)
-    compiled = object()
-    preview = object()
-    editor = object()
+def test_resource_type_registry_is_loader_only():
+    registry = ResourceTypeRegistry()
     validated = []
     spec = ResourceTypeSpec(
         type_name="demo.resource",
@@ -155,9 +83,6 @@ def test_resource_type_registry_carries_editor_compiler_and_preview_contribution
         asset_kind="demo",
         loader=lambda data: dict(data),
         validator=lambda document: validated.append(document["name"]),
-        editor_factory=lambda: editor,
-        compiler=lambda document: compiled,
-        preview_handler=lambda document: preview,
     )
 
     assert registry.register(spec) is spec
@@ -165,15 +90,15 @@ def test_resource_type_registry_carries_editor_compiler_and_preview_contribution
         {
             "schema_version": 1,
             "type": "demo.resource",
-            "id": str(__import__("uuid").uuid4()),
+            "id": "not-used-by-loader",
             "name": "Example",
         }
     )
     assert loaded["name"] == "Example"
     assert validated == ["Example"]
-    assert registry["demo.resource"].editor_factory() is editor
-    assert registry["demo.resource"].compiler(loaded) is compiled
-    assert registry["demo.resource"].preview_handler(loaded) is preview
+    assert not hasattr(spec, "editor_factory")
+    assert not hasattr(spec, "compiler")
+    assert not hasattr(spec, "preview_handler")
     with pytest.raises(ValueError, match="Duplicate"):
         registry.register(spec)
     with pytest.raises(KeyError, match="Unknown"):
@@ -189,14 +114,9 @@ def test_resource_reference_is_canonical_and_project_constrained(tmp_path):
     reference = ResourceReference.parse("res://assets/atlas.json#orb")
     assert reference.uri == "res://assets/atlas.json#orb"
     assert reference.resolve(project, must_exist=True) == source.resolve()
-    assert ResourceReference.parse(
-        "assets/atlas.json#orb",
-        allow_legacy_project_path=True,
-    ) == reference
 
     with pytest.raises(ResourceDocumentError, match="project-relative"):
         ResourceReference.parse("res://")
-
     with pytest.raises(ResourceDocumentError, match="does not exist"):
         ResourceReference.parse("res://assets/missing.png").resolve(
             project,
@@ -208,10 +128,13 @@ def test_resource_reference_is_canonical_and_project_constrained(tmp_path):
         ResourceReference.parse(str(tmp_path.parent / "outside.json"))
 
 
-def test_resource_store_reports_invalid_typed_json(tmp_path):
+def test_resource_store_rejects_removed_resource_types(tmp_path):
     path = tmp_path / "assets" / "bad.pystg.json"
     path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({"type": "pystg.pattern"}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"schema_version": 1, "type": "pystg.pattern"}),
+        encoding="utf-8",
+    )
 
-    with pytest.raises((MigrationError, ResourceDocumentError)):
+    with pytest.raises(ResourceDocumentError, match="Unknown resource type"):
         ResourceStore(ProjectContext(tmp_path)).load(path)

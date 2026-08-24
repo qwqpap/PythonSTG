@@ -1,4 +1,4 @@
-"""Restricted whitelisted expression AST for data-authored bindings.
+"""Restricted whitelisted expression AST shared by runtime documents.
 
 This module implements the established expression contract:
 
@@ -11,8 +11,8 @@ This module implements the established expression contract:
 - ``random`` draws from the deterministic RNG provided in the evaluation
   context (``context["rng"]``); it never reads global state.
 
-Compiled expressions are plain data (nested tuples) with an interpreter, so
-``PatternProgram`` can carry them without installing any callable or calling
+Compiled expressions are plain data (nested tuples) with an interpreter. They
+can be stored by runtime documents without installing callables or invoking
 ``eval``/``exec``.
 """
 

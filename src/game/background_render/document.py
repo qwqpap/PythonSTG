@@ -29,7 +29,7 @@ from src.authoring.resources import (
     ResourceHeader,
     new_resource_id,
 )
-from src.pattern.expressions import ExpressionError, compile_expression
+from src.core.expressions import ExpressionError, compile_expression
 
 LEGACY_FIELDS = {
     "name",

@@ -5,6 +5,7 @@ import sys
 import os
 import json
 import time
+import importlib
 from pathlib import Path
 import moderngl
 
@@ -55,25 +56,8 @@ from src.ui.main_menu_layout import load_layout as load_main_menu_layout
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from src.devtools.hotreload import HotReloadManager
-from game_content.stages.stage1.stage_script import Stage1
 from game_content.stages.stage1.stage_asset_preview import Stage1AssetPreview
-from game_content.stages.stage2.stage_script import Stage2
-from game_content.stages.stage3.stage_script import Stage3
 from game_content.stages.stage_test.stage_script import StageTest
-
-# 所有正式关卡（按通关顺序），debug 菜单和关卡选择器用此列表
-ALL_STAGES = [Stage1, Stage2, Stage3]
-
-
-def _stage_class_by_id(stage_id: str):
-    """根据 stage.id（或类名）查找对应的关卡类，回退 Stage1。"""
-    sid = (stage_id or "").lower()
-    for cls in ALL_STAGES + [StageTest]:
-        if getattr(cls, "id", "").lower() == sid:
-            return cls
-        if cls.__name__.lower() == sid:
-            return cls
-    return Stage1
 
 # ===== Debug 模式 =====
 DEBUG_MODE = "--debug" in sys.argv
@@ -83,28 +67,56 @@ PROFILE_REPORT_FRAMES = 120
 
 
 def _get_cli_option(prefix: str):
-    """读取形如 --key=value 的命令行参数。"""
-    for arg in sys.argv[1:]:
+    """读取 ``--key=value`` 或 ``--key value`` 形式的命令行参数。"""
+    key = prefix[:-1] if prefix.endswith("=") else prefix
+    args = sys.argv[1:]
+    for index, arg in enumerate(args):
         if arg.startswith(prefix):
             return arg.split("=", 1)[1].strip()
+        if arg == key and index + 1 < len(args):
+            return args[index + 1].strip()
     return None
+
+
+CONTENT_ENTRY_MODULE = _get_cli_option("--content-entry=") or "game_content.entry"
+CONTENT_ENTRY = importlib.import_module(CONTENT_ENTRY_MODULE)
+ALL_STAGES = list(CONTENT_ENTRY.STAGES)
+START_STAGE = CONTENT_ENTRY.START_STAGE
+STAGE_BY_ID = dict(CONTENT_ENTRY.STAGE_BY_ID)
+
+
+def _stage_class_by_id(stage_id: str):
+    """根据 stage.id（或类名）查找关卡类，回退内容入口的开始关。"""
+    sid = (stage_id or "").lower()
+    for cls in ALL_STAGES + [StageTest]:
+        if getattr(cls, "id", "").lower() == sid:
+            return cls
+        if cls.__name__.lower() == sid:
+            return cls
+    return START_STAGE
 
 
 def resolve_stage_class():
     """根据 --stage 参数解析要加载的关卡类。"""
-    stage_arg = (_get_cli_option("--stage=") or "stage1").strip().lower()
+    requested = _get_cli_option("--stage=")
+    if requested is None:
+        return START_STAGE
+    stage_arg = requested.strip().lower()
     stage_map = {
-        "stage1": Stage1,
-        "stage2": Stage2,
-        "stage3": Stage3,
         "asset_preview": Stage1AssetPreview,
         "preview": Stage1AssetPreview,
         "assets": Stage1AssetPreview,
     }
+    for stage_id, stage_class in STAGE_BY_ID.items():
+        stage_map[str(stage_id).lower()] = stage_class
+        stage_map[stage_class.__name__.lower()] = stage_class
     stage_class = stage_map.get(stage_arg)
     if stage_class is None:
-        print(f"[main] 未识别的 --stage={stage_arg}，回退到 stage1")
-        return Stage1
+        print(
+            f"[main] 未识别的 --stage={stage_arg}，"
+            f"回退到 {getattr(START_STAGE, 'id', START_STAGE.__name__)}"
+        )
+        return START_STAGE
     print(f"[main] 当前关卡: {stage_class.__name__} (--stage={stage_arg})")
     return stage_class
 
@@ -760,6 +772,14 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> int:
 
 def main():
     """游戏主函数"""
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(
+            "usage: python main.py [--content-entry MODULE] [--stage ID] "
+            "[--project PATH] [--debug] [--profile] [--hot-reload]"
+        )
+        print(f"content entry: {CONTENT_ENTRY_MODULE}")
+        print("stages: " + ", ".join(STAGE_BY_ID))
+        return
     project_arg = _get_cli_option("--project=")
     if project_arg:
         project = get_project_context(project_arg)

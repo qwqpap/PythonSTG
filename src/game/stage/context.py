@@ -592,7 +592,7 @@ class StageContext(SpellCardContext):
     def clear_enemy_scripts(self):
         self._enemy_scripts.clear()
 
-    # ==================== Authored StageProgram API ====================
+    # ==================== 稀疏事件与生命周期 API ====================
 
     def set_node_position(self, node_id: str, x: float, y: float) -> None:
         if not str(node_id).strip():
@@ -734,10 +734,9 @@ class StageContext(SpellCardContext):
         self._event_bus = bus
         if bus is None:
             return
-        # Authored actions may originate from the in-editor timeline or from
-        # a typed external adapter.  Both paths deliberately converge on the
-        # same schema-validating handler at the EventBus main-thread boundary;
-        # adapters never mutate stage state from their receive threads.
+        # Typed external adapters converge on the same schema-validating
+        # handler at the EventBus main-thread boundary; adapters never mutate
+        # stage state from their receive threads.
         for event_type in (
             "scene.action",
             "adapter.local_ipc",
@@ -882,8 +881,8 @@ class StageContext(SpellCardContext):
     ) -> bool:
         """Apply a resource-backed transition at the stage boundary.
 
-        Reactions call this typed context operation; the renderer never
-        subscribes to the EventBus and never owns a Stage/Reaction object.
+        Sparse runtime events call this typed context operation; the renderer
+        never subscribes to the EventBus or owns authored transition state.
         The trace is runtime-only and is exposed to the debugger.
         """
 

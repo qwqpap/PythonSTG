@@ -14,7 +14,7 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 | ID | 任务 | 状态 | 依赖 |
 | --- | --- | --- | --- |
 | CD0 | 契约重置与安全点 | `[x]` | `f9e0798` |
-| CD1 | 拆除旧静态作者链 | `[ ]` | CD0 |
+| CD1 | 拆除旧静态作者链 | `[x]` | CD0 |
 | CD2 | 声明式 Python 核心 | `[ ]` | CD1 |
 | CD3 | 生成器与统一入口 | `[ ]` | CD2 |
 | CD4 | 最小 Qt 编辑器 | `[ ]` | CD3 |
@@ -131,7 +131,18 @@ git diff --check
 首条必须零命中；手写 Stage1-Stage3 通过新默认入口加载。删除测试时提交说明必须列出每类
 测试对应的已删除产品接口与保留替代覆盖。
 
-**Evidence / Blocker**：尚未开始。
+**Evidence（2026-08-24，独立只读验收 APPROVE）**：Structural PASS。旧八个禁用符号、
+旧模块导入、skip/xfail 均零命中，旧 tracked editor/pattern/compiler/preview、作者 JSON、
+StageProgram/Reaction、插件/变量/Timeline/StateGraph 产品链和对应验证工具已清零；
+`pystg-editor` 暂时移除。删除的旧 editor/pattern/preset/preview/graph/变量/兼容测试对应的
+产品接口已删除；保留的表达式、UI/Background 资源、events/lifecycle、批量渲染/池、资产、
+hot reload 和手写符卡工具由 146 项当前测试直接覆盖。Runtime PASS（CD1 范围）：
+`python -m pytest -q` 146 passed；`game_content.entry` 精确注册 Stage1-Stage3，`get_stage`
+和 `python main.py --content-entry game_content.entry --help` 通过。Performance PASS：独立
+复验 compileall 0.21s、资产校验 0.48s、pytest 3.35s、入口 0.97s；资产校验 71 JSON、
+16 sprite configs、745 sprites、142 images，0 error/0 warning。`git diff --check` 与 cached
+check 通过，`.claude/settings.local.json` 未暂存。Native：not run，本阶段不要求；
+Usability：not run，本阶段不要求。
 
 ## 5. CD2：声明式 Python 核心
 
