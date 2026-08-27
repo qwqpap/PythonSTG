@@ -15,7 +15,7 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 | --- | --- | --- | --- |
 | CD0 | 契约重置与安全点 | `[x]` | `f9e0798` |
 | CD1 | 拆除旧静态作者链 | `[x]` | CD0 |
-| CD2 | 声明式 Python 核心 | `[ ]` | CD1 |
+| CD2 | 声明式 Python 核心 | `[x]` | CD1 |
 | CD3 | 生成器与统一入口 | `[ ]` | CD2 |
 | CD4 | 最小 Qt 编辑器 | `[ ]` | CD3 |
 | CD5 | 固定布局、程序树与资源拖拽 | `[ ]` | CD4 |
@@ -176,7 +176,19 @@ Usability：not run，本阶段不要求。
 - `tests/test_authoring_python_source.py`
 - `tests/test_authoring_templates.py`
 
-**Evidence / Blocker**：尚未开始。
+**Evidence（2026-08-28，独立只读验收 APPROVE）**：Structural PASS。增量仅在 CD2
+allowlist：`src/authoring/{__init__,program,dsl,python_source,templates}.py` 与四个 focused
+tests；四个核心模块不导入 Qt、editor、renderer 或 Runtime，focused tests 无 skip/xfail。
+受限 AST、稳定 UID/注释/格式、原子保存、外部冲突/只读保真、纯模型操作、全部逻辑单元与
+节点、模板保留/展开/递归/异常及赋值时 import binding/shadowing 均有回归覆盖。Runtime PASS
+（CD2 范围）：`python -m pytest -q tests/test_authoring_program.py
+tests/test_authoring_dsl.py tests/test_authoring_python_source.py
+tests/test_authoring_templates.py` 为 155 passed，非平凡 Project/Stage/Wave/Enemy/Boss/
+NonSpell/Spell/参数 Task、Parallel、RawPython 工程可 load-modify-save-reopen 且语义等价；
+真实生成包/StageManager 属于 CD3，not run。Performance PASS：focused 2.77s，全仓
+`python -m pytest -q` 为 301 passed/3.93s，compileall 0.279s；资产校验 71 JSON、16 sprite
+configs、745 sprites、142 images，0 error/0 warning；diff/cached check 通过。Native：not run，
+本阶段不要求；Usability：not run，本阶段不要求。`.claude/settings.local.json` 未修改、未暂存。
 
 ## 6. CD3：生成器与统一入口
 
