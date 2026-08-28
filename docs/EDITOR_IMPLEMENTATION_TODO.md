@@ -18,7 +18,7 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 | CD2 | 声明式 Python 核心 | `[x]` | CD1 |
 | CD3 | 生成器与统一入口 | `[x]` | CD2 |
 | CD4 | 最小 Qt 编辑器 | `[x]` | CD3 |
-| CD5 | 固定布局、程序树与资源拖拽 | `[ ]` | CD4 |
+| CD5 | 固定布局、程序树与资源拖拽 | `[x]` | CD4 |
 | CD6 | 真实预览与 Trace | `[ ]` | CD5 |
 | CD7 | Timeline 与完整关卡证明 | `[ ]` | CD6 |
 
@@ -295,8 +295,9 @@ not run，无真人维护者实操。generated 未 tracked，`.claude/settings.l
 
 **Owner**：Editor interaction Agent。
 
-**允许路径**：`src/editor/window.py`、sidebars/program_tree/inspector/code_view/output/
-timeline UI、commands、focused Qt tests。
+**允许路径**：`src/editor/window.py`、`session.py` 中仅交互命令入口与派生资产查询、
+sidebars/program_tree/inspector/code_view/output/timeline UI、commands、focused Qt tests、
+`tools/verify_native_code_editor_layout.py`。
 
 **禁止路径**：Authoring/compiler/runtime/renderer 语义、preview process、资产编辑器、插件。
 
@@ -321,7 +322,24 @@ Inspector、Timeline、四种拖拽、参数和资源编辑、模板调用保留
 - `tests/test_editor_inspector.py`
 - `tests/test_editor_assets.py`
 
-**Evidence / Blocker**：尚未开始。
+**Evidence（2026-08-28，独立只读验收 APPROVE）**：Structural PASS。CD5 增量仅在
+`src/editor/{window,session,commands,sidebars,program_tree,inspector}.py`、既有窗口测试、
+四个 focused tests、native layout verifier 和本阶段 allowlist；Authoring/compiler/runtime/
+renderer 未改，Gemini 隔离目录未接入。四 Activity views、独立可关闭/恢复/调宽的 Editor/
+Game、右 Inspector、不可关闭且不被输出区替代的底部 Timeline、真实 Before/After/Child/
+Wrap drop、typed Inspector、全局/Stage 传递资产、RawPython/Expr 不猜资产、明确资源动作、
+模板聚合保留及单一 Undo/Redo 均有直接覆盖，禁用架构和 skip/xfail 零命中。Runtime PASS
+（CD5 交互路径）：`python -m pytest -q tests/test_editor_layout.py
+tests/test_editor_program_tree.py tests/test_editor_inspector.py tests/test_editor_assets.py` 为 12
+passed/2.296s；CD4+CD5 focused 为 23 passed，本仓 `python -m pytest -q` 为 365 passed/
+12.079s，真实 Qt drop、Inspector/资源修改、保存重开与 Undo/Redo 均执行。Native PASS（CD5
+范围）：清除 `QT_QPA_PLATFORM` 后 `python tools/verify_native_code_editor_layout.py` 为
+1.228s，Qt platform `windows`、真实 exposed native window；1480x920 的 Editor/Game 宽度
+468/467px，960x640 为 208/207px，四侧栏、中央组恢复、Inspector 和永久 Timeline 均通过；
+显式 offscreen 被 verifier exit 1 拒绝。本阶段不声称 CD6 GLFW 嵌入。Performance PASS：
+focused 2.296s、全仓 12.079s、compileall 0.254s、资产校验 0.567s 且 0 error/0 warning；
+authoring+compiler+editor 9270 行，低于最终 12000 当前预算。Usability：not run，无真人维护者
+实操。diff/cached check 通过，generated 未 tracked，`.claude/settings.local.json` 未暂存。
 
 ## 9. CD6：真实预览与 Trace
 

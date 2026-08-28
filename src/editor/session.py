@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
-from src.authoring.program import AuthoringProgram, LogicalUnit, Node, ProgramError, find_node
+from src.authoring.program import (
+    AuthoringProgram,
+    DropPlacement,
+    Expr,
+    LogicalUnit,
+    Node,
+    ProgramError,
+    Ref,
+    find_node,
+)
 from src.authoring.python_source import (
     AuthoringSourceProject,
     ExternalChange,
@@ -21,6 +31,47 @@ from src.authoring.python_source import (
 from src.core.project_context import ProjectContext
 from src.qt_compat.QtCore import QFileSystemWatcher, QObject, Signal
 from src.qt_compat.QtGui import QUndoStack
+
+
+_ASSET_SUFFIXES = frozenset(
+    {
+        ".bmp",
+        ".flac",
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".json",
+        ".mp3",
+        ".ogg",
+        ".otf",
+        ".png",
+        ".ttf",
+        ".wav",
+        ".webp",
+    }
+)
+_IGNORED_ASSET_DIRECTORIES = frozenset(
+    {
+        ".claude",
+        ".codex",
+        ".git",
+        ".github",
+        ".hg",
+        ".idea",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".svn",
+        ".venv",
+        ".vscode",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "trash",
+        "venv",
+    }
+)
 
 
 class EditorSession(QObject):
@@ -225,6 +276,92 @@ class EditorSession(QObject):
 
         self.undo_stack.push(SetUnitFieldCommand(self, unit_id, name, value))
 
+    def move_node(
+        self,
+        uid: str,
+        target_uid: str,
+        placement: DropPlacement | str,
+        *,
+        target_slot: str | None = None,
+    ) -> None:
+        unit, _node, _location = find_node(self.program, uid)
+        self._require_editable_unit(unit.id)
+        from .commands import MoveNodeCommand
+
+        self.undo_stack.push(
+            MoveNodeCommand(
+                self,
+                uid,
+                target_uid,
+                placement,
+                target_slot=target_slot,
+            )
+        )
+
+    def insert_node_relative(
+        self,
+        target_uid: str,
+        placement: DropPlacement | str,
+        node: Node,
+    ) -> None:
+        unit, _target, _location = find_node(self.program, target_uid)
+        self._require_editable_unit(unit.id)
+        from .commands import InsertNodeCommand
+
+        self.undo_stack.push(InsertNodeCommand(self, target_uid, placement, node))
+
+    @property
+    def global_assets(self) -> tuple[str, ...]:
+        if self.project_context is None:
+            return ()
+        return _scan_project_assets(self.project_context.root)
+
+    @property
+    def current_stage_id(self) -> str | None:
+        unit = self.current_unit
+        if unit is None:
+            return None
+        if unit.kind == "Stage":
+            return unit.id
+        project = next(
+            (
+                candidate
+                for candidate in self.program.logical_units()
+                if candidate.kind == "Project"
+            ),
+            None,
+        )
+        stage_ids = (
+            [reference.id for reference in project.metadata.get("stages", ())]
+            if project
+            else []
+        )
+        for stage_id in stage_ids:
+            if unit.id in self._unit_closure(stage_id):
+                return stage_id
+        return None
+
+    @property
+    def stage_assets(self) -> tuple[str, ...]:
+        stage_id = self.current_stage_id
+        if stage_id is None or self.project_context is None:
+            return ()
+        resources: set[str] = set()
+        for unit_id in self._unit_closure(stage_id):
+            unit = self.program.get_unit(unit_id)
+            for value in unit.metadata.values():
+                resources.update(_resource_values(value))
+            for parameter in unit.parameters:
+                if parameter.has_default:
+                    resources.update(_resource_values(parameter.default))
+            for node in unit.walk_nodes():
+                if node.kind == "RawPython":
+                    continue
+                resources.update(_resource_values(node.arguments))
+                resources.update(_resource_values(node.positional_arguments))
+        root = self.project_context.root
+        return tuple(sorted(uri for uri in resources if _resource_stays_in_root(uri, root)))
+
     def save_all(self) -> tuple[Path, ...]:
         if self.source_project is None:
             return ()
@@ -336,7 +473,30 @@ class EditorSession(QObject):
             if document.read_only or document.unit is None:
                 continue
             saved = self._saved_semantics.get(document.unit.id)
-            document.dirty = relative in self._external_keep or document.unit.semantic_data() != saved
+            document.dirty = (
+                relative in self._external_keep or document.unit.semantic_data() != saved
+            )
+
+    def _unit_closure(self, start_id: str) -> tuple[str, ...]:
+        visited: set[str] = set()
+
+        def visit(unit_id: str) -> None:
+            if unit_id in visited:
+                return
+            visited.add(unit_id)
+            unit = self.program.get_unit(unit_id)
+            values: list[Any] = [*unit.metadata.values(), *unit.body]
+            values.extend(
+                parameter.default for parameter in unit.parameters if parameter.has_default
+            )
+            for value in values:
+                for reference in _references(value):
+                    target = self.program.get_unit(reference.id)
+                    if target.kind not in {"Project", "Stage"}:
+                        visit(target.id)
+
+        visit(start_id)
+        return tuple(sorted(visited))
 
     def _remember_saved_semantics(self) -> None:
         self._saved_semantics = {
@@ -414,6 +574,86 @@ class EditorSession(QObject):
 
     def _emit_dirty(self, _clean: bool | None = None) -> None:
         self.dirty_changed.emit(self.dirty)
+
+
+def _references(value: Any):
+    if isinstance(value, Ref):
+        yield value
+    elif isinstance(value, Node):
+        if value.kind == "RawPython":
+            return
+        for item in value.arguments.values():
+            yield from _references(item)
+        for item in value.positional_arguments:
+            yield from _references(item)
+        for children in value.children.values():
+            for child in children:
+                yield from _references(child)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _references(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _references(item)
+
+
+def _resource_values(value: Any):
+    if isinstance(value, Expr):
+        return
+    if isinstance(value, str):
+        if value.startswith("res://"):
+            yield value
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _resource_values(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _resource_values(item)
+
+
+def _scan_project_assets(root: Path) -> tuple[str, ...]:
+    """Scan supported project assets without entering build, cache, or archive trees."""
+
+    root = root.resolve()
+    values: list[str] = []
+    for directory, directory_names, file_names in os.walk(root, topdown=True, followlinks=False):
+        current = Path(directory)
+        relative_directory = current.relative_to(root)
+        directory_names[:] = sorted(
+            name
+            for name in directory_names
+            if name not in _IGNORED_ASSET_DIRECTORIES
+            and not (
+                relative_directory.parts == ("game_content",)
+                and name == "generated"
+            )
+        )
+        for file_name in sorted(file_names):
+            path = current / file_name
+            if path.suffix.lower() not in _ASSET_SUFFIXES or not path.is_file():
+                continue
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
+                continue
+            if not _path_stays_in_root(path, root):
+                continue
+            values.append(f"res://{relative.as_posix()}")
+    return tuple(values)
+
+
+def _resource_stays_in_root(uri: str, root: Path) -> bool:
+    relative = uri.removeprefix("res://").split("#", 1)[0]
+    return _path_stays_in_root(root / Path(*relative.split("/")), root)
+
+
+def _path_stays_in_root(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 __all__ = ["EditorSession"]

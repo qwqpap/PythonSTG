@@ -1,104 +1,82 @@
-"""Simplified-Chinese Qt shell wired directly to :class:`EditorSession`."""
+"""Fixed code-driven editor layout wired directly to one EditorSession."""
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
-from typing import Any
 
-from src.authoring.program import Expr, Node, Ref
+from src.authoring.program import DropPlacement, Node
 from src.authoring.python_source import SourceConflictError, SourceSaveError
-from src.qt_compat.QtCore import Qt
-from src.qt_compat.QtGui import QAction
+from src.qt_compat.QtCore import Qt, Signal
+from src.qt_compat.QtGui import QAction, QCloseEvent, QCursor
 from src.qt_compat.QtWidgets import (
     QDockWidget,
     QFileDialog,
-    QFormLayout,
+    QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
+    QScrollArea,
     QSplitter,
     QTabWidget,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from .inspector import InspectorPanel
+from .program_tree import (
+    ProgramTree,
+    available_resource_actions,
+    node_for_resource_action,
+)
 from .session import EditorSession
+from .sidebars import ActivitySidebar, ResourceListWidget
 
 
 _ROLE_VALUE = int(Qt.ItemDataRole.UserRole)
 
 
-class InspectorPanel(QWidget):
-    """Minimal literal argument editor; richer typed widgets belong to CD5."""
+class ClosableGroup(QWidget):
+    """A splitter child that can be hidden and restored from the View menu."""
 
-    def __init__(self, session: EditorSession, parent: QWidget | None = None) -> None:
+    closed = Signal()
+
+    def __init__(self, title: str, content: QWidget, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("inspector_panel")
-        self.session = session
-        self.layout = QFormLayout(self)
-        self.layout.setContentsMargins(8, 8, 8, 8)
-        self.session.selection_changed.connect(self.refresh)
-        self.refresh()
+        self.title = title
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        header = QWidget(self)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(6, 2, 2, 2)
+        header_layout.addWidget(QLabel(title, header))
+        header_layout.addStretch(1)
+        close_button = QToolButton(header)
+        close_button.setObjectName(f"close_{title.lower()}_group")
+        close_button.setText("×")
+        close_button.setToolTip(f"关闭{title}组")
+        close_button.clicked.connect(self.close_group)
+        header_layout.addWidget(close_button)
+        layout.addWidget(header)
+        layout.addWidget(content, 1)
 
-    def refresh(self) -> None:
-        while self.layout.rowCount():
-            self.layout.removeRow(0)
-        node = self.session.current_node
-        unit = self.session.current_unit
-        if node is not None:
-            self.layout.addRow("节点类型", QLabel(node.kind))
-            self.layout.addRow("UID", QLabel(node.uid))
-            for name, value in node.arguments.items():
-                field = QLineEdit(_display_value(value), self)
-                field.setObjectName(f"argument_{name}")
-                editable = _is_literal_value(value) and self.session.can_edit
-                field.setReadOnly(not editable)
-                if editable:
-                    field.editingFinished.connect(
-                        lambda uid=node.uid, key=name, editor=field: self._commit(uid, key, editor)
-                    )
-                self.layout.addRow(name, field)
-            return
-        if unit is not None:
-            self.layout.addRow("逻辑单元", QLabel(unit.kind))
-            name_field = QLineEdit(unit.name, self)
-            name_field.setObjectName("unit_name")
-            name_field.setReadOnly(not self.session.can_edit)
-            if self.session.can_edit:
-                name_field.editingFinished.connect(
-                    lambda unit_id=unit.id, editor=name_field: self._commit_unit_name(
-                        unit_id, editor
-                    )
-                )
-            self.layout.addRow("名称", name_field)
-            return
-        self.layout.addRow(QLabel("当前文件不可视化编辑"))
+    def close_group(self) -> None:
+        self.hide()
+        self.closed.emit()
 
-    def _commit(self, uid: str, name: str, field: QLineEdit) -> None:
-        try:
-            value = ast.literal_eval(field.text())
-            self.session.set_node_argument(uid, name, value)
-        except Exception as exc:
-            self.window().statusBar().showMessage(f"参数未修改：{exc}", 5000)
-            self.refresh()
-
-    def _commit_unit_name(self, unit_id: str, field: QLineEdit) -> None:
-        try:
-            self.session.set_unit_field(unit_id, "name", field.text())
-        except Exception as exc:
-            self.window().statusBar().showMessage(f"名称未修改：{exc}", 5000)
-            self.refresh()
+    def restore(self) -> None:
+        self.show()
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
 
 class EditorWindow(QMainWindow):
-    """One window, one session, and no secondary document owner."""
+    """One window, one project, one session, and one undo history."""
 
     def __init__(
         self,
@@ -118,18 +96,24 @@ class EditorWindow(QMainWindow):
     def open_project(self, root: str | Path) -> None:
         self.session.open_project(root)
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Release the single project's file watcher with the window."""
+
+        if self.session.is_open:
+            self.session.close_project()
+        super().closeEvent(event)
+
     def _build_actions(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
         open_action = QAction("打开工程…", self)
         open_action.setObjectName("open_project_action")
         open_action.triggered.connect(self._choose_project)
         file_menu.addAction(open_action)
-        save_action = QAction("全部保存", self)
-        save_action.setObjectName("save_all_action")
-        save_action.setShortcut("Ctrl+S")
-        save_action.triggered.connect(self._save_all)
-        file_menu.addAction(save_action)
-        self.save_action = save_action
+        self.save_action = QAction("全部保存", self)
+        self.save_action.setObjectName("save_all_action")
+        self.save_action.setShortcut("Ctrl+S")
+        self.save_action.triggered.connect(self._save_all)
+        file_menu.addAction(self.save_action)
 
         edit_menu = self.menuBar().addMenu("编辑")
         self.undo_action = self.session.undo_stack.createUndoAction(self, "撤销")
@@ -140,83 +124,113 @@ class EditorWindow(QMainWindow):
         self.redo_action.setObjectName("redo_action")
         self.redo_action.setShortcut("Ctrl+Shift+Z")
         edit_menu.addAction(self.redo_action)
+        self.view_menu = self.menuBar().addMenu("视图")
 
     def _build_layout(self) -> None:
         self.unit_list = QTreeWidget(self)
         self.unit_list.setObjectName("program_structure")
         self.unit_list.setHeaderLabels(["程序结构"])
         self.unit_list.itemSelectionChanged.connect(self._unit_selected)
-
         self.file_list = QListWidget(self)
         self.file_list.setObjectName("file_sidebar")
         self.file_list.itemSelectionChanged.connect(self._file_selected)
-
-        sidebars = QTabWidget(self)
-        sidebars.setObjectName("activity_sidebars")
-        sidebars.addTab(self.unit_list, "程序")
-        sidebars.addTab(self.file_list, "文件")
-        sidebars.addTab(_placeholder("全局资产将在 CD5 接入"), "全局资产")
-        sidebars.addTab(_placeholder("当前关卡资产将在 CD5 接入"), "关卡资产")
+        self.global_asset_list = ResourceListWidget(self)
+        self.global_asset_list.setObjectName("global_asset_sidebar")
+        self.stage_asset_list = ResourceListWidget(self)
+        self.stage_asset_list.setObjectName("stage_asset_sidebar")
+        activity = ActivitySidebar(
+            self.unit_list,
+            self.file_list,
+            self.global_asset_list,
+            self.stage_asset_list,
+            self,
+        )
+        self.activity_sidebar = activity
         left_dock = QDockWidget("工程", self)
         left_dock.setObjectName("left_activity_dock")
-        left_dock.setWidget(sidebars)
+        left_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        left_dock.setWidget(activity)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, left_dock)
 
-        self.program_tree = QTreeWidget(self)
-        self.program_tree.setObjectName("program_tree")
-        self.program_tree.setHeaderLabels(["当前逻辑单元"])
-        self.program_tree.itemSelectionChanged.connect(self._node_selected)
-
+        self.program_tree = ProgramTree(self)
+        self.program_tree.node_selected.connect(self._node_selected)
+        self.program_tree.move_requested.connect(self._move_node)
+        self.program_tree.resource_action_requested.connect(self._resource_drop)
         self.code_view = QPlainTextEdit(self)
         self.code_view.setObjectName("source_code_view")
         self.code_view.setReadOnly(True)
         self.code_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-
-        editor_group = QTabWidget(self)
-        editor_group.setObjectName("editor_group")
-        editor_group.addTab(self.program_tree, "可视化程序")
-        editor_group.addTab(self.code_view, "作者 Python（只读）")
+        self.generated_code_view = QPlainTextEdit(self)
+        self.generated_code_view.setObjectName("generated_code_view")
+        self.generated_code_view.setReadOnly(True)
+        self.generated_code_view.setPlainText("构建成功后可在此查看生成 Runtime Python。")
+        editor_tabs = QTabWidget(self)
+        editor_tabs.setObjectName("editor_tabs")
+        editor_tabs.addTab(self.program_tree, "可视化程序")
+        editor_tabs.addTab(self.code_view, "作者 Python（只读）")
+        editor_tabs.addTab(self.generated_code_view, "生成 Python（只读）")
+        self.editor_group = ClosableGroup("编辑器", editor_tabs, self)
+        self.editor_group.setObjectName("editor_group")
 
         self.game_placeholder = _placeholder("游戏画面将在 CD6 接入真实运行窗口")
         self.game_placeholder.setObjectName("game_view_placeholder")
-        game_group = QTabWidget(self)
-        game_group.setObjectName("game_group")
-        game_group.addTab(self.game_placeholder, "游戏画面")
+        game_tabs = QTabWidget(self)
+        game_tabs.addTab(self.game_placeholder, "游戏画面")
+        self.game_group = ClosableGroup("游戏", game_tabs, self)
+        self.game_group.setObjectName("game_group")
 
-        center = QSplitter(Qt.Orientation.Horizontal, self)
-        center.setObjectName("central_groups")
-        center.addWidget(editor_group)
-        center.addWidget(game_group)
-        center.setStretchFactor(0, 3)
-        center.setStretchFactor(1, 2)
-        self.setCentralWidget(center)
+        self.central_groups = QSplitter(Qt.Orientation.Horizontal, self)
+        self.central_groups.setObjectName("central_groups")
+        self.central_groups.addWidget(self.editor_group)
+        self.central_groups.addWidget(self.game_group)
+        self.central_groups.setStretchFactor(0, 3)
+        self.central_groups.setStretchFactor(1, 2)
+        self.setCentralWidget(self.central_groups)
+
+        self.show_editor_action = QAction("显示编辑器组", self, checkable=True)
+        self.show_editor_action.setChecked(True)
+        self.show_editor_action.triggered.connect(
+            lambda visible: self._set_group_visible(self.editor_group, visible)
+        )
+        self.show_game_action = QAction("显示游戏组", self, checkable=True)
+        self.show_game_action.setChecked(True)
+        self.show_game_action.triggered.connect(
+            lambda visible: self._set_group_visible(self.game_group, visible)
+        )
+        self.editor_group.closed.connect(lambda: self.show_editor_action.setChecked(False))
+        self.game_group.closed.connect(lambda: self.show_game_action.setChecked(False))
+        self.view_menu.addAction(self.show_editor_action)
+        self.view_menu.addAction(self.show_game_action)
 
         self.inspector = InspectorPanel(self.session, self)
-        inspector_dock = QDockWidget("检查器", self)
-        inspector_dock.setObjectName("inspector_dock")
-        inspector_dock.setWidget(self.inspector)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, inspector_dock)
+        self.inspector_scroll = QScrollArea(self)
+        self.inspector_scroll.setObjectName("inspector_scroll")
+        self.inspector_scroll.setWidgetResizable(True)
+        self.inspector_scroll.setWidget(self.inspector)
+        self.inspector_dock = QDockWidget("检查器", self)
+        self.inspector_dock.setObjectName("inspector_dock")
+        self.inspector_dock.setWidget(self.inspector_scroll)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock)
+        self.view_menu.addAction(self.inspector_dock.toggleViewAction())
 
         self.timeline_placeholder = _placeholder("时间线将在 CD7 显示代码投影与运行 Trace")
         self.timeline_placeholder.setObjectName("timeline_placeholder")
-        timeline_dock = QDockWidget("时间线", self)
-        timeline_dock.setObjectName("timeline_dock")
-        timeline_dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetMovable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
-        )
-        timeline_dock.setWidget(self.timeline_placeholder)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline_dock)
+        self.timeline_dock = QDockWidget("时间线", self)
+        self.timeline_dock.setObjectName("timeline_dock")
+        self.timeline_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self.timeline_dock.setWidget(self.timeline_placeholder)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.timeline_dock)
 
         self.problems_view = QPlainTextEdit(self)
         self.problems_view.setObjectName("problems_log")
         self.problems_view.setReadOnly(True)
-        output_dock = QDockWidget("问题 / 日志", self)
-        output_dock.setObjectName("output_dock")
-        output_dock.setWidget(self.problems_view)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, output_dock)
-        self.tabifyDockWidget(timeline_dock, output_dock)
-        timeline_dock.raise_()
+        self.output_dock = QDockWidget("问题 / 日志", self)
+        self.output_dock.setObjectName("output_dock")
+        self.output_dock.setWidget(self.problems_view)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.output_dock)
+        self.splitDockWidget(self.timeline_dock, self.output_dock, Qt.Orientation.Vertical)
+        self.view_menu.addAction(self.output_dock.toggleViewAction())
+        self.output_dock.hide()
 
     def _connect_session(self) -> None:
         self.session.project_changed.connect(self.refresh_project)
@@ -245,25 +259,25 @@ class EditorWindow(QMainWindow):
                 item = QListWidgetItem(label)
                 item.setData(_ROLE_VALUE, relative.as_posix())
                 self.file_list.addItem(item)
+            root = self.session.project_context.root
+            self.global_asset_list.set_resources(self.session.global_assets, project_root=root)
+            self.stage_asset_list.set_resources(self.session.stage_assets, project_root=root)
+        else:
+            self.global_asset_list.clear()
+            self.stage_asset_list.clear()
         self.unit_list.blockSignals(False)
         self.file_list.blockSignals(False)
         self.refresh_selection()
         self.refresh_problems()
 
     def refresh_selection(self) -> None:
-        self.program_tree.blockSignals(True)
-        self.program_tree.clear()
-        unit = self.session.current_unit
-        if unit is not None:
-            root = QTreeWidgetItem([f"{unit.kind} · {unit.name}"])
-            root.setData(0, _ROLE_VALUE, None)
-            self.program_tree.addTopLevelItem(root)
-            for node in unit.body:
-                root.addChild(self._node_item(node))
-            root.setExpanded(True)
-            self._select_tree_value(self.unit_list, self.session.current_unit_id)
-            self._select_tree_value(self.program_tree, self.session.current_node_uid)
-        self.program_tree.blockSignals(False)
+        self.program_tree.set_unit(self.session.current_unit, self.session.current_node_uid)
+        self._select_unit(self.session.current_unit_id)
+        if self.session.source_project is not None:
+            self.stage_asset_list.set_resources(
+                self.session.stage_assets,
+                project_root=self.session.project_context.root,
+            )
         self.inspector.refresh()
         self.refresh_source()
 
@@ -276,20 +290,10 @@ class EditorWindow(QMainWindow):
             location = diagnostic.source_path or "工程"
             if diagnostic.span is not None:
                 location += f":{diagnostic.span.start_line}"
-            lines.append(f"[{diagnostic.severity}] {diagnostic.code} · {location} · {diagnostic.message}")
+            lines.append(
+                f"[{diagnostic.severity}] {diagnostic.code} · {location} · {diagnostic.message}"
+            )
         self.problems_view.setPlainText("\n".join(lines) if lines else "没有问题")
-
-    def _node_item(self, node: Node) -> QTreeWidgetItem:
-        item = QTreeWidgetItem([node.kind])
-        item.setData(0, _ROLE_VALUE, node.uid)
-        for slot, children in node.children.items():
-            if not children:
-                continue
-            slot_item = QTreeWidgetItem([slot])
-            for child in children:
-                slot_item.addChild(self._node_item(child))
-            item.addChild(slot_item)
-        return item
 
     def _unit_selected(self) -> None:
         items = self.unit_list.selectedItems()
@@ -301,25 +305,66 @@ class EditorWindow(QMainWindow):
         if items:
             self.session.select_source(items[0].data(_ROLE_VALUE))
 
-    def _node_selected(self) -> None:
-        items = self.program_tree.selectedItems()
-        if not items:
-            return
-        uid = items[0].data(0, _ROLE_VALUE)
-        if uid is not None:
-            self.session.select_node(uid)
+    def _node_selected(self, uid) -> None:
+        self.session.select_node(str(uid) if uid else None)
 
-    def _select_tree_value(self, tree: QTreeWidget, value: str | None) -> None:
-        if value is None:
+    def _move_node(self, uid: str, target_uid: str, placement: str) -> None:
+        try:
+            self.session.move_node(uid, target_uid, placement)
+        except Exception as exc:
+            self.statusBar().showMessage(f"节点未移动：{exc}", 5000)
+
+    def _resource_drop(self, uri: str, target_uid: str, placement: str) -> None:
+        actions = available_resource_actions(uri)
+        if not actions:
+            self.statusBar().showMessage("该资源只能拖到兼容的检查器字段", 5000)
             return
-        iterator = tree.invisibleRootItem()
-        stack = [iterator.child(index) for index in range(iterator.childCount())]
-        while stack:
-            item = stack.pop()
-            if item.data(0, _ROLE_VALUE) == value:
-                tree.setCurrentItem(item)
+        selected_action = self._choose_resource_action(actions)
+        if selected_action is None:
+            return
+        try:
+            self.insert_resource_action(
+                selected_action, uri, target_uid, DropPlacement(placement)
+            )
+        except Exception as exc:
+            self.statusBar().showMessage(f"资源未插入：{exc}", 5000)
+
+    def _choose_resource_action(self, actions) -> str | None:
+        menu = QMenu(self)
+        action_by_qaction = {}
+        for action in actions:
+            qaction = menu.addAction(action.label)
+            action_by_qaction[qaction] = action.key
+        selected = menu.exec(QCursor.pos())
+        return action_by_qaction.get(selected)
+
+    def insert_resource_action(
+        self,
+        action: str,
+        uri: str,
+        target_uid: str,
+        placement: DropPlacement | str,
+    ) -> Node:
+        node = node_for_resource_action(action, uri)
+        self.session.insert_node_relative(target_uid, placement, node)
+        return node
+
+    def _select_unit(self, unit_id: str | None) -> None:
+        if unit_id is None:
+            return
+        for index in range(self.unit_list.topLevelItemCount()):
+            item = self.unit_list.topLevelItem(index)
+            if item.data(0, _ROLE_VALUE) == unit_id:
+                self.unit_list.blockSignals(True)
+                self.unit_list.setCurrentItem(item)
+                self.unit_list.blockSignals(False)
                 return
-            stack.extend(item.child(index) for index in range(item.childCount()))
+
+    def _set_group_visible(self, group: ClosableGroup, visible: bool) -> None:
+        if visible:
+            group.restore()
+        else:
+            group.close_group()
 
     def _choose_project(self) -> None:
         root = QFileDialog.getExistingDirectory(self, "选择声明式 Python 工程")
@@ -375,20 +420,4 @@ def _placeholder(text: str) -> QWidget:
     return widget
 
 
-def _display_value(value: Any) -> str:
-    return repr(value)
-
-
-def _is_literal_value(value: Any) -> bool:
-    if isinstance(value, (Expr, Ref)):
-        return False
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return True
-    if isinstance(value, (list, tuple)):
-        return all(_is_literal_value(item) for item in value)
-    if isinstance(value, dict):
-        return all(isinstance(key, str) and _is_literal_value(item) for key, item in value.items())
-    return False
-
-
-__all__ = ["EditorWindow", "InspectorPanel"]
+__all__ = ["ClosableGroup", "EditorWindow"]

@@ -6,7 +6,7 @@ from src.core.project_context import ProjectContext
 from src.editor.session import EditorSession
 from src.editor.window import EditorWindow
 from src.authoring.python_source import ExternalChange
-from src.qt_compat.QtWidgets import QLineEdit
+from src.qt_compat.QtWidgets import QSpinBox
 
 
 def _project(root: Path) -> Path:
@@ -44,10 +44,10 @@ def test_minimal_window_navigates_and_edits_real_project(tmp_path, qapp_session)
     qapp_session.processEvents()
     assert session.current_node_uid == "wait"
 
-    field = window.inspector.findChild(QLineEdit, "argument_frames")
+    field = window.inspector.findChild(QSpinBox, "argument_frames")
     assert field is not None
     assert not field.isReadOnly()
-    field.setText("24")
+    field.setValue(24)
     field.editingFinished.emit()
     qapp_session.processEvents()
 
