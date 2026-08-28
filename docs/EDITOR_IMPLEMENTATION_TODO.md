@@ -19,7 +19,7 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 | CD3 | 生成器与统一入口 | `[x]` | CD2 |
 | CD4 | 最小 Qt 编辑器 | `[x]` | CD3 |
 | CD5 | 固定布局、程序树与资源拖拽 | `[x]` | CD4 |
-| CD6 | 真实预览与 Trace | `[ ]` | CD5 |
+| CD6 | 真实预览与 Trace | `[x]` | CD5 |
 | CD7 | Timeline 与完整关卡证明 | `[ ]` | CD6 |
 
 Agent 只能领取最早未完成任务。当前 gate 红时不得开始下一项。协调 Agent 是唯一可以更新
@@ -372,7 +372,24 @@ Trace 不阻塞帧。
 - `tests/test_preview_trace.py`
 - `tools/verify_native_code_editor_preview.py`
 
-**Evidence / Blocker**：尚未开始。
+**Evidence（2026-08-29，独立只读验收 APPROVE）**：Structural PASS。CD6 增量仅在
+preview/session/window 接线、`main.py` 控制入口、compiler 练习场与 Trace、StageContext/
+StageManager 有界批处理、focused tests 和真实 native verifier；单一 `QProcess` owner、固定
+五控制/七事件协议、run identity、stdout/stderr/Trace 硬上限、stale 不热重载、prepare 成功
+前保留旧预览、发布失败回滚、Win32 PID/style/`SetParent`/focus/release 均有直接覆盖。旧八
+符号、旧 preview formal/legacy 双模式、skip/xfail 和逐弹 Trace callback 零命中；Gemini 代码
+仅在被 `/trash/` 忽略的隔离目录，生产零导入、零 tracked 文件。Runtime PASS：focused
+`python -m pytest tests/test_preview_protocol.py tests/test_editor_preview.py
+tests/test_preview_practice.py tests/test_preview_trace.py tests/test_editor_window.py
+tests/test_editor_layout.py tests/test_compiler_package_builder.py` 为 42 passed/10.981s，全仓为
+395 passed/18.070s；Project/Stage/Wave/Enemy/Spell、固定 seed restart/seek、真实生成包、
+`StageManager` 稀疏 Trace 和批量弹幕路径通过。Native PASS：清除 `QT_QPA_PLATFORM` 后
+`python tools/verify_native_code_editor_preview.py` 为 PASS/19.660s，Qt platform `windows`，
+真实 GLFW/ModernGL 子窗口成功嵌入并取得键盘焦点；1480x920 时 host/child 均 447x696，
+960x640 时均 390x416；pause/resume/restart/seek/stop、Trace 和无孤儿进程通过。Performance
+PASS：compileall 0.232s；资产校验 0.475s，73 JSON、16 sprite configs、745 sprites、142
+images，0 error/0 warning；相关产品代码 10538 行，低于 12000 行预算；diff/cached check
+通过。Usability：not run，无真人维护者实操。generated 和 `.claude/settings.local.json` 未暂存。
 
 ## 10. CD7：Timeline 与完整关卡证明
 

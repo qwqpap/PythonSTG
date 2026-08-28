@@ -2,9 +2,12 @@ import sys
 import os
 import inspect
 import numpy as np
+from collections import deque
 
 
 class StageManager:
+    AUTHORING_TRACE_LIMIT = 4096
+
     def __init__(self):
         """
         初始化关卡管理器
@@ -26,6 +29,8 @@ class StageManager:
         # 引擎对象引用（由 bind_engine 设置）
         self._engine_refs = None
         self._audio_manager = None
+        self._authoring_trace = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
+        self._authoring_trace_dropped = 0
 
     # ==================== 引擎绑定 ====================
 
@@ -163,6 +168,7 @@ class StageManager:
         print(f"=== {stage_name} 结束 ===")
 
         # ===== 阶段 3：清理 =====
+        self._collect_authoring_trace(ctx)
         self.current_stage = None
         self.current_context = None
 
@@ -235,6 +241,9 @@ class StageManager:
         if self.is_paused:
             return
 
+        if self.current_context is not None:
+            self.current_context.set_runtime_frame(self.frame_count)
+
         # 更新Boss
         if self.boss_manager:
             self.boss_manager.update(dt, bullet_pool)
@@ -257,7 +266,30 @@ class StageManager:
                 print(f"Error in coroutine: {e}")
 
         self.coroutines = new_coroutines
+        if self.current_context is not None:
+            self._collect_authoring_trace(self.current_context)
         self.frame_count += 1
+
+    def _collect_authoring_trace(self, context) -> None:
+        while True:
+            batch = context.drain_authoring_trace(256)
+            if not batch:
+                break
+            for event in batch:
+                if len(self._authoring_trace) == self.AUTHORING_TRACE_LIMIT:
+                    self._authoring_trace_dropped += 1
+                self._authoring_trace.append(event)
+        self._authoring_trace_dropped += context.take_authoring_trace_dropped()
+
+    def drain_authoring_trace(self, limit=256):
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("authoring trace drain limit must be a positive integer")
+        values = []
+        for _ in range(min(limit, len(self._authoring_trace))):
+            values.append(self._authoring_trace.popleft())
+        dropped = self._authoring_trace_dropped
+        self._authoring_trace_dropped = 0
+        return tuple(values), dropped
 
     def get_frame_count(self):
         """

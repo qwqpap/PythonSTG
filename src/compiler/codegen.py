@@ -600,6 +600,7 @@ class CodeGenerator:
             "_pystg_set_background",
             "_pystg_set_position",
             "_pystg_spawn",
+            "_pystg_trace",
         ):
             writer.line(1, f"{name},")
         writer.line(text=")")
@@ -670,6 +671,7 @@ class CodeGenerator:
             "_pystg_set_background",
             "_pystg_set_position",
             "_pystg_spawn",
+            "_pystg_trace",
         ):
             writer.line(1, f"{name},")
         writer.line(text=")")
@@ -755,26 +757,65 @@ class CodeGenerator:
                         expanded = expand_nodes([node], self.template_registry)
                     except TemplateExpansionError as exc:
                         raise self._template_error(unit, exc) from exc
-                    self._render_nodes(
-                        writer,
-                        expanded,
-                        indent,
-                        unit,
-                        symbols,
-                        context,
-                        record=False,
-                    )
-                    if len(writer.lines) == before:
-                        writer.line(indent, "pass")
+                    if record:
+                        writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start')")
+                        writer.line(indent, "try:")
+                        self._render_nodes(
+                            writer,
+                            expanded,
+                            indent + 1,
+                            unit,
+                            symbols,
+                            context,
+                            record=False,
+                        )
+                        if len(writer.lines) == before + 2:
+                            writer.line(indent + 1, "pass")
+                        writer.line(indent, "finally:")
+                        writer.line(
+                            indent + 1,
+                            f"_pystg_trace({context}, {node.uid!r}, 'end')",
+                        )
+                    else:
+                        self._render_nodes(
+                            writer,
+                            expanded,
+                            indent,
+                            unit,
+                            symbols,
+                            context,
+                            record=False,
+                        )
+                        if len(writer.lines) == before:
+                            writer.line(indent, "pass")
                 if record:
                     writer.record(node, render_template)
                 else:
                     render_template()
                 continue
 
-            callback = lambda node=node: self._render_node(
-                writer, node, indent, unit, symbols, context, record=record
-            )
+            def callback(node=node) -> None:
+                if record:
+                    writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start')")
+                    writer.line(indent, "try:")
+                    self._render_node(
+                        writer,
+                        node,
+                        indent + 1,
+                        unit,
+                        symbols,
+                        context,
+                        record=record,
+                    )
+                    writer.line(indent, "finally:")
+                    writer.line(
+                        indent + 1,
+                        f"_pystg_trace({context}, {node.uid!r}, 'end')",
+                    )
+                else:
+                    self._render_node(
+                        writer, node, indent, unit, symbols, context, record=record
+                    )
             if record and node.kind != "Branch":
                 writer.record(node, callback)
             else:
@@ -1247,6 +1288,13 @@ def _pystg_context(owner):
     if context is None:
         raise RuntimeError("authoring action requires a bound Runtime context")
     return context
+
+
+def _pystg_trace(owner, uid, phase):
+    context = getattr(owner, "ctx", owner)
+    emitter = getattr(context, "emit_authoring_trace", None)
+    if emitter is not None:
+        emitter(uid, phase)
 
 
 def _pystg_bind_stage_resources(owner):

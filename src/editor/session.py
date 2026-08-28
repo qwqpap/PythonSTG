@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -80,8 +81,13 @@ class EditorSession(QObject):
     project_changed = Signal()
     selection_changed = Signal()
     source_changed = Signal()
+    program_changed = Signal()
     dirty_changed = Signal(bool)
     problems_changed = Signal()
+    build_changed = Signal(str)
+    preview_changed = Signal(str)
+    log_changed = Signal()
+    trace_changed = Signal()
     external_conflict = Signal(tuple)
 
     def __init__(
@@ -98,6 +104,10 @@ class EditorSession(QObject):
         self.current_source_path: Path | None = None
         self.build_state = "idle"
         self.preview_state = "stopped"
+        self.preview_frame = 0
+        self.last_build_identity: str | None = None
+        self.run_log = deque(maxlen=512)
+        self.trace_events = deque(maxlen=4096)
         self.undo_stack = QUndoStack(self)
         self.file_watcher = QFileSystemWatcher(self)
         self.file_watcher.fileChanged.connect(self._on_file_changed)
@@ -207,6 +217,7 @@ class EditorSession(QObject):
         self.current_source_path = self._path_for_unit(self.current_unit_id)
         self._watch_project_files()
         self.project_changed.emit()
+        self.program_changed.emit()
         self.selection_changed.emit()
         self.source_changed.emit()
         self.problems_changed.emit()
@@ -225,7 +236,13 @@ class EditorSession(QObject):
         self._saved_semantics.clear()
         self._pending_external.clear()
         self._external_keep.clear()
+        self.set_build_state("idle")
+        self.set_preview_state("stopped")
+        self.last_build_identity = None
+        self.run_log.clear()
+        self.trace_events.clear()
         self.project_changed.emit()
+        self.program_changed.emit()
         self.selection_changed.emit()
         self.source_changed.emit()
         self.problems_changed.emit()
@@ -396,6 +413,45 @@ class EditorSession(QObject):
         self._emit_dirty()
         return tuple(saved)
 
+    def set_build_state(self, state: str, identity: str | None = None) -> None:
+        if state not in {"idle", "building", "ready", "error"}:
+            raise ValueError(f"unsupported build state: {state}")
+        self.build_state = state
+        if identity is not None:
+            self.last_build_identity = identity
+        self.build_changed.emit(state)
+
+    def set_preview_state(self, state: str) -> None:
+        if state not in {
+            "stopped",
+            "starting",
+            "running",
+            "paused",
+            "stale",
+            "stopping",
+            "error",
+        }:
+            raise ValueError(f"unsupported preview state: {state}")
+        if self.preview_state != state:
+            self.preview_state = state
+            self.preview_changed.emit(state)
+
+    def append_run_log(self, text: str) -> None:
+        for line in str(text).replace("\r\n", "\n").replace("\r", "\n").splitlines():
+            self.run_log.append(line[:16_384])
+        self.log_changed.emit()
+
+    def reset_trace(self) -> None:
+        self.trace_events.clear()
+        self.preview_frame = 0
+        self.trace_changed.emit()
+
+    def append_trace(self, events) -> None:
+        for event in events:
+            if isinstance(event, dict):
+                self.trace_events.append(dict(event))
+        self.trace_changed.emit()
+
     def check_external_changes(self) -> ExternalChange:
         if self.source_project is None or self._saving:
             return ExternalChange.UNCHANGED
@@ -464,6 +520,7 @@ class EditorSession(QObject):
         self.selection_changed.emit()
         self.source_changed.emit()
         self.problems_changed.emit()
+        self.program_changed.emit()
         self._emit_dirty()
 
     def _sync_dirty_flags(self) -> None:
@@ -533,6 +590,7 @@ class EditorSession(QObject):
         self.selection_changed.emit()
         self.source_changed.emit()
         self.problems_changed.emit()
+        self.program_changed.emit()
         self._emit_dirty()
 
     def _path_for_unit(self, unit_id: str | None) -> Path | None:

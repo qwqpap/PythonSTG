@@ -6,6 +6,9 @@ import os
 import json
 import time
 import importlib
+import queue
+import threading
+import ctypes
 from pathlib import Path
 import moderngl
 
@@ -57,6 +60,13 @@ from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from src.devtools.hotreload import HotReloadManager
 from src.compiler.content_entry import load_content_entry
+from src.core.preview_protocol import (
+    MAX_PREVIEW_LINE_BYTES,
+    PreviewProtocolError,
+    decode_message,
+    encode_message,
+    event_message,
+)
 from game_content.stages.stage1.stage_asset_preview import Stage1AssetPreview
 from game_content.stages.stage_test.stage_script import StageTest
 
@@ -80,10 +90,114 @@ def _get_cli_option(prefix: str):
 
 
 CONTENT_ENTRY_MODULE = _get_cli_option("--content-entry=") or "game_content.entry"
+EDITOR_PREVIEW_RUN_ID = _get_cli_option("--editor-preview=")
+EDITOR_PREVIEW_MODE = EDITOR_PREVIEW_RUN_ID is not None
 CONTENT_ENTRY = load_content_entry(CONTENT_ENTRY_MODULE)
 ALL_STAGES = list(CONTENT_ENTRY.stages)
 START_STAGE = CONTENT_ENTRY.start_stage
 STAGE_BY_ID = dict(CONTENT_ENTRY.stage_by_id)
+
+
+class _EditorPreviewChannel:
+    """Non-blocking stdin controls and exclusive NDJSON stdout events."""
+
+    def __init__(self, run_id: str):
+        self.run_id = run_id
+        self._protocol_output = sys.stdout.buffer
+        self._controls = queue.SimpleQueue()
+        self._closed = False
+        # Existing game diagnostics remain useful, but stdout is reserved for
+        # the protocol so the Qt client never has to guess which lines are JSON.
+        sys.stdout = sys.stderr
+        self._stdin_fd = sys.stdin.fileno()
+        self._reader = threading.Thread(
+            target=self._read_controls,
+            name="pystg-preview-controls",
+            daemon=True,
+        )
+        self._reader.start()
+
+    def _read_controls(self):
+        buffered = bytearray()
+        while not self._closed:
+            try:
+                chunk = os.read(self._stdin_fd, 4096)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buffered.extend(chunk)
+            while b"\n" in buffered:
+                raw, _, remainder = buffered.partition(b"\n")
+                buffered = bytearray(remainder)
+                if len(raw) > MAX_PREVIEW_LINE_BYTES:
+                    self._controls.put(
+                        PreviewProtocolError(
+                            "line_too_long", "preview control line is too long"
+                        )
+                    )
+                    continue
+                try:
+                    message = decode_message(raw)
+                    if "command" not in message:
+                        raise PreviewProtocolError(
+                            "invalid_message", "game process accepts control messages only"
+                        )
+                    if message["run_id"] != self.run_id:
+                        continue
+                    self._controls.put(message)
+                except PreviewProtocolError as exc:
+                    self._controls.put(exc)
+            if len(buffered) > MAX_PREVIEW_LINE_BYTES:
+                buffered.clear()
+                self._controls.put(
+                    PreviewProtocolError("line_too_long", "preview control line is too long")
+                )
+
+    def poll(self):
+        values = []
+        while True:
+            try:
+                values.append(self._controls.get_nowait())
+            except queue.Empty:
+                return values
+
+    def emit(self, event: str, payload=None):
+        if self._closed:
+            return
+        try:
+            self._protocol_output.write(
+                encode_message(event_message(self.run_id, event, payload or {}))
+            )
+            self._protocol_output.flush()
+        except (BrokenPipeError, OSError):
+            self._closed = True
+
+    def close(self):
+        if not self._closed:
+            self.emit("stopped", {})
+        self._closed = True
+
+
+_PREVIEW_CHANNEL = None
+
+
+def _flush_preview_runtime(channel, stage_manager, *, force_frame=False):
+    if channel is None:
+        return
+    while True:
+        events, dropped = stage_manager.drain_authoring_trace(256)
+        if not events and not dropped:
+            break
+        channel.emit(
+            "trace",
+            {"events": list(events), **({"dropped": dropped} if dropped else {})},
+        )
+        if not events:
+            break
+    frame = stage_manager.get_frame_count()
+    if force_frame or frame % 6 == 0:
+        channel.emit("frame", {"frame": frame})
 
 
 def _stage_class_by_id(stage_id: str):
@@ -596,6 +710,10 @@ def run_debug_menu(window, ctx, screen_size, stage_class):
 
 def initialize_window_and_context():
     """初始化GLFW窗口和ModernGL上下文"""
+    if EDITOR_PREVIEW_MODE and sys.platform == "win32":
+        # Qt 6 uses Per-Monitor-V2.  GLFW must enter the same DPI mode before
+        # glfw.init(), otherwise modern Windows refuses cross-process SetParent.
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
     init_audio_backend()
 
     config = init_config()
@@ -606,11 +724,11 @@ def initialize_window_and_context():
 
     # 读取持久化的 fullscreen 偏好（设置菜单里的 "全屏 (重启生效)"）
     settings = get_settings()
-    fullscreen = bool(settings.fullscreen)
+    fullscreen = bool(settings.fullscreen) and not EDITOR_PREVIEW_MODE
 
     window = GameWindow(
         screen_size[0], screen_size[1],
-        "东方做题狙特别版",
+        "PySTG Editor Preview" if EDITOR_PREVIEW_MODE else "东方做题狙特别版",
         fullscreen=fullscreen,
     )
     if fullscreen:
@@ -773,10 +891,12 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> int:
 
 def main():
     """游戏主函数"""
+    global _PREVIEW_CHANNEL
     if "--help" in sys.argv or "-h" in sys.argv:
         print(
             "usage: python main.py [--content-entry MODULE] [--stage ID] "
-            "[--project PATH] [--debug] [--profile] [--hot-reload]"
+            "[--project PATH] [--debug] [--profile] [--hot-reload] "
+            "[--editor-preview RUN_ID] [--preview-seed INTEGER]"
         )
         print(f"content entry: {CONTENT_ENTRY_MODULE}")
         print("stages: " + ", ".join(STAGE_BY_ID))
@@ -790,8 +910,20 @@ def main():
         except ProjectContextError:
             project = get_project_context(PROJECT_ROOT)
     project.activate()
+    if EDITOR_PREVIEW_MODE:
+        _PREVIEW_CHANNEL = _EditorPreviewChannel(EDITOR_PREVIEW_RUN_ID)
+        _PREVIEW_CHANNEL.emit("state", {"state": "starting"})
     window, ctx, base_size, screen_size, game_viewport, game_viewport_fb = initialize_window_and_context()
     selected_stage_class = resolve_stage_class()
+    if _PREVIEW_CHANNEL is not None:
+        _PREVIEW_CHANNEL.emit(
+            "ready",
+            {
+                "pid": os.getpid(),
+                "title": "PySTG Editor Preview",
+                "stage": getattr(selected_stage_class, "id", selected_stage_class.__name__),
+            },
+        )
     game_audio = GameAudioBank()
     game_audio.load_defaults()
     audio_manager = AudioManager(game_audio)
@@ -812,12 +944,15 @@ def main():
             pending_replay_playback = ReplayPlayback(rep)
             print(f"[main] 准备回放: {rep}")
 
+    preview_pending_seek = None
     while True:
         # 选定模式：正常 / 回放
         replay_playback = pending_replay_playback
         pending_replay_playback = None  # 只触发一次
 
-        if replay_playback is None:
+        if EDITOR_PREVIEW_MODE:
+            active_stage_class = selected_stage_class
+        elif replay_playback is None:
             menu_choice = run_main_menu(window, ctx, screen_size, audio_manager)
             if menu_choice < 0:
                 # 退出
@@ -855,6 +990,8 @@ def main():
             active_stage_class = _stage_class_by_id(replay_playback.stage_id)
 
         while True:
+            preview_fast_forward_target = preview_pending_seek
+            preview_pending_seek = None
             # ===== 先创建加载画面渲染器（不依赖任何纹理资源） =====
             loading_renderer = LoadingScreenRenderer(ctx, screen_size[0], screen_size[1])
 
@@ -1017,7 +1154,14 @@ def main():
             _show_loading("Initializing stage...", 0.95)
 
             # ===== 决定本局自机与 RNG 种子 =====
-            if replay_playback is not None:
+            if EDITOR_PREVIEW_MODE:
+                run_character = settings.last_character
+                seed_text = _get_cli_option("--preview-seed=") or "1337"
+                try:
+                    run_seed = int(seed_text)
+                except ValueError as exc:
+                    raise ValueError("--preview-seed must be an integer") from exc
+            elif replay_playback is not None:
                 run_character = replay_playback.character or settings.last_character
                 run_seed = int(replay_playback.rng_seed)
             else:
@@ -1049,7 +1193,8 @@ def main():
                 panel_origin=(panel_origin_x, panel_origin_y),
                 bullet_pool=bullet_pool,
             )
-            emoji_sys.start()
+            if not EDITOR_PREVIEW_MODE:
+                emoji_sys.start()
 
             engine_session = EngineSession(
                 project=get_project_context(),
@@ -1070,7 +1215,7 @@ def main():
 
             # ===== 录制器 =====
             replay_recorder = None
-            if replay_playback is None:
+            if replay_playback is None and not EDITOR_PREVIEW_MODE:
                 replay_recorder = ReplayRecorder(
                     stage_id=getattr(active_stage_class, "id", active_stage_class.__name__),
                     character=run_character,
@@ -1109,10 +1254,20 @@ def main():
             
             clock = FrameClock()
             running = True
-            
+
             paused = False
             pause_menu_index = 0
             game_result_state = None
+            if _PREVIEW_CHANNEL is not None:
+                if preview_fast_forward_target is not None:
+                    audio_manager.set_se_volume(0.0)
+                    audio_manager.set_bgm_volume(0.0)
+                    _PREVIEW_CHANNEL.emit(
+                        "state",
+                        {"state": "seeking", "frame": preview_fast_forward_target},
+                    )
+                else:
+                    _PREVIEW_CHANNEL.emit("state", {"state": "running"})
 
             # ===== Continue / Game Over 状态机 =====
             # continue_state ∈ { "none", "asking", "game_over" }
@@ -1198,10 +1353,58 @@ def main():
                 profile_frames = 0
 
             while running:
-                dt = clock.tick(60)
+                dt = 1.0 / 60.0 if preview_fast_forward_target is not None else clock.tick(60)
                 frame_start = time.perf_counter() if PROFILE_MODE else 0.0
                 events_start = time.perf_counter() if PROFILE_MODE else 0.0
-                
+
+                if _PREVIEW_CHANNEL is not None:
+                    for control in _PREVIEW_CHANNEL.poll():
+                        if isinstance(control, PreviewProtocolError):
+                            _PREVIEW_CHANNEL.emit(
+                                "error", {"code": control.code, "message": control.message}
+                            )
+                            continue
+                        command = control["command"]
+                        if command == "pause":
+                            paused = True
+                            audio_manager.pause_bgm()
+                            _PREVIEW_CHANNEL.emit("state", {"state": "paused"})
+                        elif command == "resume":
+                            paused = False
+                            audio_manager.unpause_bgm()
+                            state = (
+                                "seeking"
+                                if preview_fast_forward_target is not None
+                                else "running"
+                            )
+                            _PREVIEW_CHANNEL.emit("state", {"state": state})
+                        elif command == "restart":
+                            audio_manager.set_se_volume(settings.se_volume)
+                            audio_manager.set_bgm_volume(settings.bgm_volume)
+                            preview_pending_seek = None
+                            game_result_state = "RESTART"
+                            running = False
+                        elif command == "seek":
+                            preview_pending_seek = control["payload"]["frame"]
+                            game_result_state = "RESTART"
+                            running = False
+                        elif command == "stop":
+                            game_result_state = "PREVIEW_STOP"
+                            running = False
+                    if not running:
+                        continue
+                    if (
+                        preview_fast_forward_target is not None
+                        and stage_manager.get_frame_count() >= preview_fast_forward_target
+                    ):
+                        preview_fast_forward_target = None
+                        audio_manager.set_se_volume(settings.se_volume)
+                        audio_manager.set_bgm_volume(settings.bgm_volume)
+                        _PREVIEW_CHANNEL.emit(
+                            "state",
+                            {"state": "running", "frame": stage_manager.get_frame_count()},
+                        )
+
                 for event in window.poll_events():
                     if event['type'] == EVENT_QUIT:
                         running = False
@@ -1353,12 +1556,17 @@ def main():
                 # StageManager.is_finished 在最后一个 stage 没有 _next_stage_class 时置 True，
                 # 这意味着包括 ending 对话 + staff roll 都跑完了。
                 if getattr(stage_manager, "is_finished", False) and not paused:
-                    print("[main] 检测到全通关 → 回主菜单")
-                    game_result_state = "MAIN_MENU"
+                    print("[main] 检测到全通关 → 结束预览" if EDITOR_PREVIEW_MODE else "[main] 检测到全通关 → 回主菜单")
+                    game_result_state = "PREVIEW_STOP" if EDITOR_PREVIEW_MODE else "MAIN_MENU"
                     running = False
 
                 # ===== 加载画面模式 =====
                 if stage_manager.loading_info:
+                    if preview_fast_forward_target is not None:
+                        if not paused:
+                            stage_manager.update(dt, bullet_pool, player)
+                        _flush_preview_runtime(_PREVIEW_CHANNEL, stage_manager)
+                        continue
                     loading_render_start = time.perf_counter() if PROFILE_MODE else 0.0
                     ctx.viewport = window.viewport
                     ctx.clear(0.0, 0.0, 0.0)
@@ -1415,6 +1623,9 @@ def main():
                     profile_acc["update"] += time.perf_counter() - update_start
 
                 if stage_manager.loading_info:
+                    if preview_fast_forward_target is not None:
+                        _flush_preview_runtime(_PREVIEW_CHANNEL, stage_manager)
+                        continue
                     loading_render_start = time.perf_counter() if PROFILE_MODE else 0.0
                     ctx.viewport = window.viewport
                     ctx.clear(0.0, 0.0, 0.0)
@@ -1579,7 +1790,11 @@ def main():
                 hud.state.point_value = item_pool.stats.point_rate
                 active_boss = _get_active_boss()
                 hud.update_from_boss(active_boss)
-                
+                _flush_preview_runtime(_PREVIEW_CHANNEL, stage_manager)
+
+                if preview_fast_forward_target is not None:
+                    continue
+
                 enemy_scripts = None
                 if hasattr(stage_manager, 'current_context') and stage_manager.current_context:
                     enemy_scripts = stage_manager.current_context.get_enemy_scripts()
@@ -1682,9 +1897,9 @@ def main():
                     _profile_maybe_report()
             
             # 保存高分记录（用过 Continue 的本局不计入高分榜）
-            if not run_continued:
+            if not run_continued and not EDITOR_PREVIEW_MODE:
                 item_pool.stats.save_hiscore()
-            else:
+            elif run_continued and not EDITOR_PREVIEW_MODE:
                 print("[main] 本局使用过 Continue → 不写入 hiscore")
 
             # ===== 保存重放（仅录制模式）=====
@@ -1728,7 +1943,8 @@ def main():
                         print(f"[main] 保存进度失败: {e}")
 
             # 始终保存设置（如音量/上次自机）
-            settings.save()
+            if not EDITOR_PREVIEW_MODE:
+                settings.save()
 
             cleanup_errors = engine_session.close()
             for cleanup_error in cleanup_errors:
@@ -1737,11 +1953,25 @@ def main():
             if game_result_state == "MAIN_MENU":
                 break  # Break inner loop, go back to top `while True:` where `run_main_menu` is
             elif game_result_state == "RESTART":
+                if _PREVIEW_CHANNEL is not None:
+                    _PREVIEW_CHANNEL.emit("state", {"state": "starting"})
                 pass   # Just continue inner loop, re-initializing everything except Main Menu
             else:
                 audio_manager.cleanup()
                 window.destroy()
+                if EDITOR_PREVIEW_MODE:
+                    return
                 sys.exit()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        if _PREVIEW_CHANNEL is not None:
+            _PREVIEW_CHANNEL.emit(
+                "error", {"code": "runtime_error", "message": f"{type(exc).__name__}: {exc}"}
+            )
+        raise
+    finally:
+        if _PREVIEW_CHANNEL is not None:
+            _PREVIEW_CHANNEL.close()

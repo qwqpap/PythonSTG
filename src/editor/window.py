@@ -12,6 +12,7 @@ from src.qt_compat.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -19,6 +20,7 @@ from src.qt_compat.QtWidgets import (
     QMenu,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QScrollArea,
     QSplitter,
     QTabWidget,
@@ -35,6 +37,7 @@ from .program_tree import (
     available_resource_actions,
     node_for_resource_action,
 )
+from .preview import PreviewHost, PreviewOwner, PreviewTarget
 from .session import EditorSession
 from .sidebars import ActivitySidebar, ResourceListWidget
 
@@ -92,6 +95,7 @@ class EditorWindow(QMainWindow):
         self._build_layout()
         self._connect_session()
         self.refresh_project()
+        self._preview_state_changed(self.session.preview_state)
 
     def open_project(self, root: str | Path) -> None:
         self.session.open_project(root)
@@ -99,6 +103,7 @@ class EditorWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         """Release the single project's file watcher with the window."""
 
+        self.preview_owner.stop()
         if self.session.is_open:
             self.session.close_project()
         super().closeEvent(event)
@@ -125,6 +130,44 @@ class EditorWindow(QMainWindow):
         self.redo_action.setShortcut("Ctrl+Shift+Z")
         edit_menu.addAction(self.redo_action)
         self.view_menu = self.menuBar().addMenu("视图")
+
+        run_menu = self.menuBar().addMenu("运行")
+        self.run_current_action = QAction("运行当前单元", self)
+        self.run_current_action.setObjectName("run_current_action")
+        self.run_current_action.setShortcut("F5")
+        self.run_current_action.triggered.connect(self._run_current)
+        run_menu.addAction(self.run_current_action)
+        self.run_project_action = QAction("运行整个工程", self)
+        self.run_project_action.setObjectName("run_project_action")
+        self.run_project_action.triggered.connect(
+            lambda: self._run_target(PreviewTarget("project"))
+        )
+        run_menu.addAction(self.run_project_action)
+        self.run_stage_action = QAction("运行当前 Stage", self)
+        self.run_stage_action.setObjectName("run_stage_action")
+        self.run_stage_action.triggered.connect(self._run_current_stage)
+        run_menu.addAction(self.run_stage_action)
+        run_menu.addSeparator()
+        self.pause_preview_action = QAction("暂停", self)
+        self.pause_preview_action.setObjectName("pause_preview_action")
+        self.pause_preview_action.triggered.connect(self._pause_preview)
+        run_menu.addAction(self.pause_preview_action)
+        self.resume_preview_action = QAction("继续", self)
+        self.resume_preview_action.setObjectName("resume_preview_action")
+        self.resume_preview_action.triggered.connect(self._resume_preview)
+        run_menu.addAction(self.resume_preview_action)
+        self.restart_preview_action = QAction("重新开始", self)
+        self.restart_preview_action.setObjectName("restart_preview_action")
+        self.restart_preview_action.triggered.connect(self._restart_preview)
+        run_menu.addAction(self.restart_preview_action)
+        self.seek_preview_action = QAction("跳转到帧…", self)
+        self.seek_preview_action.setObjectName("seek_preview_action")
+        self.seek_preview_action.triggered.connect(self._seek_preview)
+        run_menu.addAction(self.seek_preview_action)
+        self.stop_preview_action = QAction("停止", self)
+        self.stop_preview_action.setObjectName("stop_preview_action")
+        self.stop_preview_action.triggered.connect(self._stop_preview)
+        run_menu.addAction(self.stop_preview_action)
 
     def _build_layout(self) -> None:
         self.unit_list = QTreeWidget(self)
@@ -172,10 +215,33 @@ class EditorWindow(QMainWindow):
         self.editor_group = ClosableGroup("编辑器", editor_tabs, self)
         self.editor_group.setObjectName("editor_group")
 
-        self.game_placeholder = _placeholder("游戏画面将在 CD6 接入真实运行窗口")
-        self.game_placeholder.setObjectName("game_view_placeholder")
+        self.preview_host = PreviewHost(self)
+        self.preview_owner = PreviewOwner(self.session, self.preview_host, self)
+        game_panel = QWidget(self)
+        game_panel.setObjectName("game_preview_panel")
+        game_layout = QVBoxLayout(game_panel)
+        game_layout.setContentsMargins(0, 0, 0, 0)
+        controls = QWidget(game_panel)
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(4, 2, 4, 2)
+        self.preview_status = QLabel("已停止", controls)
+        self.preview_status.setObjectName("preview_status")
+        controls_layout.addWidget(self.preview_status)
+        controls_layout.addStretch(1)
+        for label, slot, object_name in (
+            ("运行", self._run_current, "preview_run_button"),
+            ("暂停", self._pause_preview, "preview_pause_button"),
+            ("继续", self._resume_preview, "preview_resume_button"),
+            ("停止", self._stop_preview, "preview_stop_button"),
+        ):
+            button = QPushButton(label, controls)
+            button.setObjectName(object_name)
+            button.clicked.connect(slot)
+            controls_layout.addWidget(button)
+        game_layout.addWidget(controls)
+        game_layout.addWidget(self.preview_host, 1)
         game_tabs = QTabWidget(self)
-        game_tabs.addTab(self.game_placeholder, "游戏画面")
+        game_tabs.addTab(game_panel, "游戏画面")
         self.game_group = ClosableGroup("游戏", game_tabs, self)
         self.game_group.setObjectName("game_group")
 
@@ -239,6 +305,10 @@ class EditorWindow(QMainWindow):
         self.session.problems_changed.connect(self.refresh_problems)
         self.session.dirty_changed.connect(self._dirty_changed)
         self.session.external_conflict.connect(self._ask_external_decision)
+        self.session.preview_changed.connect(self._preview_state_changed)
+        self.session.build_changed.connect(self._build_state_changed)
+        self.session.log_changed.connect(self.refresh_problems)
+        self.preview_owner.build_published.connect(self._show_generated_entry)
 
     def refresh_project(self) -> None:
         self.unit_list.blockSignals(True)
@@ -267,6 +337,12 @@ class EditorWindow(QMainWindow):
             self.stage_asset_list.clear()
         self.unit_list.blockSignals(False)
         self.file_list.blockSignals(False)
+        for action in (
+            self.run_current_action,
+            self.run_project_action,
+            self.run_stage_action,
+        ):
+            action.setEnabled(self.session.is_open)
         self.refresh_selection()
         self.refresh_problems()
 
@@ -293,6 +369,11 @@ class EditorWindow(QMainWindow):
             lines.append(
                 f"[{diagnostic.severity}] {diagnostic.code} · {location} · {diagnostic.message}"
             )
+        if self.session.run_log:
+            if lines:
+                lines.append("")
+            lines.append("—— 运行日志 ——")
+            lines.extend(self.session.run_log)
         self.problems_view.setPlainText("\n".join(lines) if lines else "没有问题")
 
     def _unit_selected(self) -> None:
@@ -387,6 +468,94 @@ class EditorWindow(QMainWindow):
             QMessageBox.warning(self, "无法保存", str(exc))
             return
         self.statusBar().showMessage(f"已保存 {len(saved)} 个文件", 3000)
+
+    def _run_current(self) -> None:
+        self._run_target(self.preview_owner.current_target())
+
+    def _run_current_stage(self) -> None:
+        stage_id = self.session.current_stage_id
+        if stage_id is None:
+            self.statusBar().showMessage("当前单元不属于可运行的 Stage", 4000)
+            return
+        self._run_target(PreviewTarget("stage", stage_id))
+
+    def _run_target(self, target: PreviewTarget) -> None:
+        self.show_game_action.setChecked(True)
+        self.game_group.restore()
+        if not self.preview_owner.run(target):
+            self.output_dock.show()
+            self.statusBar().showMessage("构建失败；旧预览未被替换", 5000)
+
+    def _pause_preview(self) -> None:
+        try:
+            self.preview_owner.pause()
+        except RuntimeError as exc:
+            self.statusBar().showMessage(str(exc), 3000)
+
+    def _resume_preview(self) -> None:
+        try:
+            self.preview_owner.resume()
+        except RuntimeError as exc:
+            self.statusBar().showMessage(str(exc), 3000)
+
+    def _restart_preview(self) -> None:
+        try:
+            self.preview_owner.restart()
+        except RuntimeError as exc:
+            self.statusBar().showMessage(str(exc), 3000)
+
+    def _seek_preview(self) -> None:
+        frame, accepted = QInputDialog.getInt(
+            self,
+            "跳转到帧",
+            "目标帧：",
+            value=self.session.preview_frame,
+            minValue=0,
+            maxValue=10_000_000,
+        )
+        if accepted:
+            try:
+                self.preview_owner.seek(frame)
+            except RuntimeError as exc:
+                self.statusBar().showMessage(str(exc), 3000)
+
+    def _stop_preview(self) -> None:
+        self.preview_owner.stop()
+
+    def _preview_state_changed(self, state: str) -> None:
+        labels = {
+            "stopped": "已停止",
+            "starting": "正在启动…",
+            "running": "运行中",
+            "paused": "已暂停",
+            "stale": "运行中 · 预览已过期",
+            "stopping": "正在停止…",
+            "error": "预览错误",
+        }
+        self.preview_status.setText(labels.get(state, state))
+        active = state not in {"stopped", "error"}
+        self.pause_preview_action.setEnabled(active and state != "paused")
+        self.resume_preview_action.setEnabled(active)
+        self.restart_preview_action.setEnabled(active)
+        self.seek_preview_action.setEnabled(active)
+        self.stop_preview_action.setEnabled(active)
+        if state == "error":
+            self.output_dock.show()
+
+    def _build_state_changed(self, state: str) -> None:
+        if state == "building":
+            self.statusBar().showMessage("正在保存并验证生成包…")
+        elif state == "ready":
+            self.statusBar().showMessage("构建成功，正在启动真实预览", 3000)
+        elif state == "error":
+            self.output_dock.show()
+
+    def _show_generated_entry(self, generated_root: str) -> None:
+        path = Path(generated_root) / "entry.py"
+        try:
+            self.generated_code_view.setPlainText(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            self.generated_code_view.setPlainText(f"无法读取生成入口：{exc}")
 
     def _ask_external_decision(self, paths: tuple[Path, ...]) -> None:
         box = QMessageBox(self)

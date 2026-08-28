@@ -13,6 +13,7 @@ import json
 import math
 import os
 import numpy as np
+from collections import deque
 from typing import Optional, Any, Dict, List, Mapping
 
 from .spellcard import SpellCardContext
@@ -44,6 +45,7 @@ class PlayerProxy:
 
 
 class StageContext(SpellCardContext):
+    AUTHORING_TRACE_LIMIT = 4096
     """
     关卡上下文 - 引擎提供的统一能力接口
 
@@ -126,6 +128,8 @@ class StageContext(SpellCardContext):
         self._background_transitions: List[Dict[str, Any]] = []
         self._lifecycle_trace: List[LifecycleEvent] = []
         self._runtime_frame = 0
+        self._authoring_trace = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
+        self._authoring_trace_dropped = 0
         self._script_event_handlers: Dict[str, Any] = {}
         self._reaction_actions: Dict[str, Any] = {}
         self._event_bus: EventBus | None = None
@@ -651,6 +655,34 @@ class StageContext(SpellCardContext):
             raise ValueError("runtime frame must be a non-negative integer")
         self._runtime_frame = frame
 
+    def emit_authoring_trace(self, uid: str, phase: str) -> None:
+        """Queue one sparse author-node boundary without performing I/O."""
+
+        if not isinstance(uid, str) or not uid.strip():
+            raise ValueError("authoring trace uid must be non-empty text")
+        if phase not in {"start", "end"}:
+            raise ValueError("authoring trace phase must be 'start' or 'end'")
+        if len(self._authoring_trace) == self.AUTHORING_TRACE_LIMIT:
+            self._authoring_trace_dropped += 1
+        self._authoring_trace.append(
+            {"uid": uid.strip(), "phase": phase, "frame": self._runtime_frame}
+        )
+
+    def drain_authoring_trace(self, limit: int = 256) -> tuple[dict[str, Any], ...]:
+        """Drain at most one bounded transport batch from the runtime queue."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("authoring trace drain limit must be a positive integer")
+        values = []
+        for _ in range(min(limit, len(self._authoring_trace))):
+            values.append(self._authoring_trace.popleft())
+        return tuple(values)
+
+    def take_authoring_trace_dropped(self) -> int:
+        dropped = self._authoring_trace_dropped
+        self._authoring_trace_dropped = 0
+        return dropped
+
     def publish_lifecycle(
         self,
         event_type: str,
@@ -830,6 +862,8 @@ class StageContext(SpellCardContext):
         self._timeline_events.clear()
         self._background_transitions.clear()
         self._lifecycle_trace.clear()
+        self._authoring_trace.clear()
+        self._authoring_trace_dropped = 0
 
     # ==================== 音频 API ====================
 

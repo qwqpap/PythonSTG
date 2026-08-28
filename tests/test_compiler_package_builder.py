@@ -209,6 +209,30 @@ def test_publish_interruption_rolls_back_previous_package(tmp_path, monkeypatch)
     assert not list(builder.output_root.glob("_pystg_backup_*"))
 
 
+def test_publish_retries_a_transient_windows_directory_lock(tmp_path, monkeypatch):
+    assert os.name == "nt", "CD6 targets the fixed Windows 11 platform"
+    builder = PackageBuilder(tmp_path / "generated", project_root=Path.cwd())
+    prepared = _manual_prepared(builder, "build_demo")
+    real_replace = os.replace
+    attempts = 0
+
+    def transient_then_replace(source, destination):
+        nonlocal attempts
+        if Path(source).resolve() == prepared.temp_dir.resolve() and attempts == 0:
+            attempts += 1
+            error = OSError("transient scanner lock")
+            error.winerror = 5
+            raise error
+        return real_replace(source, destination)
+
+    monkeypatch.setattr("src.compiler.package_builder.os.replace", transient_then_replace)
+    published = builder.publish(prepared)
+
+    assert attempts == 1
+    assert published.is_dir()
+    assert not prepared.temp_dir.exists()
+
+
 def test_backup_cleanup_failure_keeps_valid_new_package_and_reports_warning(tmp_path, monkeypatch):
     builder = PackageBuilder(tmp_path / "generated", project_root=Path.cwd())
     target = _write_old_target(builder, "build_demo")

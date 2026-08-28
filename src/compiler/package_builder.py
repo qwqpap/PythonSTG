@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 import warnings
 from dataclasses import dataclass
@@ -122,7 +123,7 @@ class PackageBuilder:
         had_target = target_dir.exists()
         if had_target:
             try:
-                os.replace(target_dir, backup_dir)
+                _replace_directory(target_dir, backup_dir)
             except OSError as exc:
                 raise CompilerError(
                     "publish_failed",
@@ -130,12 +131,12 @@ class PackageBuilder:
                 ) from exc
 
         try:
-            os.replace(temp_dir, target_dir)
+            _replace_directory(temp_dir, target_dir)
         except OSError as publish_error:
             rollback_error: OSError | None = None
             if had_target and backup_dir.exists():
                 try:
-                    os.replace(backup_dir, target_dir)
+                    _replace_directory(backup_dir, target_dir)
                 except OSError as exc:
                     rollback_error = exc
             message = f"cannot publish prepared package: {publish_error}"
@@ -213,6 +214,21 @@ class PackageBuilder:
 def _write_text(path: Path, text: str) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write(text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _replace_directory(source: Path, target: Path, *, timeout: float = 1.5) -> None:
+    """Retry only transient Windows sharing/access failures around atomic rename."""
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except OSError as exc:
+            transient = os.name == "nt" and getattr(exc, "winerror", None) in {5, 32, 33}
+            if not transient or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 def _write_json(path: Path, value: Any) -> None:
