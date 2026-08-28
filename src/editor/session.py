@@ -1,0 +1,419 @@
+"""Single owner for one open authoring project and its editor state."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from src.authoring.program import AuthoringProgram, LogicalUnit, Node, ProgramError, find_node
+from src.authoring.python_source import (
+    AuthoringSourceProject,
+    ExternalChange,
+    SourceConflictError,
+    SourceDocument,
+    SourceSaveError,
+    check_external_change,
+    load_authoring_project,
+    render_python_source,
+    resolve_external_conflict,
+    save_python_source,
+)
+from src.core.project_context import ProjectContext
+from src.qt_compat.QtCore import QFileSystemWatcher, QObject, Signal
+from src.qt_compat.QtGui import QUndoStack
+
+
+class EditorSession(QObject):
+    """Own every mutable state value for exactly one editor window."""
+
+    project_changed = Signal()
+    selection_changed = Signal()
+    source_changed = Signal()
+    dirty_changed = Signal(bool)
+    problems_changed = Signal()
+    external_conflict = Signal(tuple)
+
+    def __init__(
+        self,
+        parent: QObject | None = None,
+        *,
+        project_context: ProjectContext | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.project_context = project_context
+        self.source_project: AuthoringSourceProject | None = None
+        self.current_unit_id: str | None = None
+        self.current_node_uid: str | None = None
+        self.current_source_path: Path | None = None
+        self.build_state = "idle"
+        self.preview_state = "stopped"
+        self.undo_stack = QUndoStack(self)
+        self.file_watcher = QFileSystemWatcher(self)
+        self.file_watcher.fileChanged.connect(self._on_file_changed)
+        self._saved_semantics: dict[str, dict[str, Any]] = {}
+        self._pending_external: dict[Path, SourceDocument] = {}
+        self._external_keep: set[Path] = set()
+        self._saving = False
+        self.undo_stack.cleanChanged.connect(self._emit_dirty)
+
+    @property
+    def is_open(self) -> bool:
+        return self.source_project is not None
+
+    @property
+    def program(self) -> AuthoringProgram:
+        if self.source_project is None:
+            raise ProgramError("project_closed", "no authoring project is open")
+        return self.source_project.program
+
+    @property
+    def current_unit(self) -> LogicalUnit | None:
+        if self.source_project is None or self.current_unit_id is None:
+            return None
+        try:
+            return self.program.get_unit(self.current_unit_id)
+        except ProgramError:
+            return None
+
+    @property
+    def current_node(self) -> Node | None:
+        if self.source_project is None or self.current_node_uid is None:
+            return None
+        try:
+            return find_node(self.program, self.current_node_uid)[1]
+        except ProgramError:
+            return None
+
+    @property
+    def current_document(self) -> SourceDocument | None:
+        if self.source_project is None:
+            return None
+        if self.current_source_path is not None:
+            return self.source_project.files.get(self.current_source_path)
+        unit = self.current_unit
+        if unit is None:
+            return next(iter(self.source_project.files.values()), None)
+        return self.source_project.file_for_unit(unit.id)
+
+    @property
+    def dirty(self) -> bool:
+        return bool(
+            self.source_project
+            and any(document.dirty for document in self.source_project.files.values())
+        )
+
+    @property
+    def has_conflict(self) -> bool:
+        return bool(
+            self.source_project
+            and any(document.conflict for document in self.source_project.files.values())
+        )
+
+    @property
+    def pending_external_paths(self) -> tuple[Path, ...]:
+        return tuple(sorted(self._pending_external, key=lambda path: path.as_posix()))
+
+    @property
+    def can_edit(self) -> bool:
+        document = self.current_document
+        return bool(
+            document
+            and not document.read_only
+            and (not document.conflict or document.overwrite_confirmed)
+        )
+
+    @property
+    def diagnostics(self):
+        return self.source_project.diagnostics if self.source_project else ()
+
+    @property
+    def source_text(self) -> str:
+        document = self.current_document
+        if document is None:
+            return ""
+        if document.read_only or document.unit is None:
+            return document.text
+        try:
+            return render_python_source(document)
+        except SourceSaveError:
+            return document.text
+
+    def open_project(self, root: str | Path) -> AuthoringSourceProject:
+        source_project = load_authoring_project(root)
+        if self.project_context is None:
+            self.project_context = ProjectContext.discover(source_project.root)
+        self.source_project = source_project
+        self.undo_stack.clear()
+        self._pending_external.clear()
+        self._external_keep.clear()
+        self._remember_saved_semantics()
+        units = sorted(
+            source_project.program.logical_units(),
+            key=lambda unit: (unit.kind != "Project", unit.kind, unit.id),
+        )
+        self.current_unit_id = units[0].id if units else None
+        self.current_node_uid = None
+        self.current_source_path = self._path_for_unit(self.current_unit_id)
+        self._watch_project_files()
+        self.project_changed.emit()
+        self.selection_changed.emit()
+        self.source_changed.emit()
+        self.problems_changed.emit()
+        self._emit_dirty()
+        return source_project
+
+    def close_project(self) -> None:
+        watched = self.file_watcher.files()
+        if watched:
+            self.file_watcher.removePaths(watched)
+        self.source_project = None
+        self.current_unit_id = None
+        self.current_node_uid = None
+        self.current_source_path = None
+        self.undo_stack.clear()
+        self._saved_semantics.clear()
+        self._pending_external.clear()
+        self._external_keep.clear()
+        self.project_changed.emit()
+        self.selection_changed.emit()
+        self.source_changed.emit()
+        self.problems_changed.emit()
+        self._emit_dirty()
+
+    def select_unit(self, unit_id: str) -> None:
+        unit = self.program.get_unit(unit_id)
+        self.current_unit_id = unit.id
+        self.current_node_uid = None
+        self.current_source_path = self._path_for_unit(unit.id)
+        self.selection_changed.emit()
+        self.source_changed.emit()
+
+    def select_source(self, relative_path: str | Path) -> None:
+        if self.source_project is None:
+            raise ProgramError("project_closed", "no authoring project is open")
+        path = Path(relative_path)
+        if path not in self.source_project.files:
+            raise ProgramError("unknown_source", f"unknown source file {path.as_posix()!r}")
+        document = self.source_project.files[path]
+        self.current_source_path = path
+        self.current_unit_id = document.unit.id if document.unit is not None else None
+        self.current_node_uid = None
+        self.selection_changed.emit()
+        self.source_changed.emit()
+
+    def select_node(self, uid: str | None) -> None:
+        if uid is None:
+            self.current_node_uid = None
+        else:
+            unit, _node, _location = find_node(self.program, uid)
+            self.current_unit_id = unit.id
+            self.current_source_path = self._path_for_unit(unit.id)
+            self.current_node_uid = uid
+        self.selection_changed.emit()
+        self.source_changed.emit()
+
+    def set_node_argument(self, uid: str, name: str, value: Any) -> None:
+        unit, _node, _location = find_node(self.program, uid)
+        self._require_editable_unit(unit.id)
+        from .commands import SetNodeArgumentCommand
+
+        self.undo_stack.push(SetNodeArgumentCommand(self, uid, name, value))
+
+    def set_unit_field(self, unit_id: str, name: str, value: Any) -> None:
+        self._require_editable_unit(unit_id)
+        from .commands import SetUnitFieldCommand
+
+        self.undo_stack.push(SetUnitFieldCommand(self, unit_id, name, value))
+
+    def save_all(self) -> tuple[Path, ...]:
+        if self.source_project is None:
+            return ()
+        if self.has_conflict and any(
+            document.conflict and not document.overwrite_confirmed
+            for document in self.source_project.files.values()
+        ):
+            raise SourceConflictError()
+        saved: list[Path] = []
+        self._saving = True
+        watched = self.file_watcher.files()
+        if watched:
+            self.file_watcher.removePaths(watched)
+        try:
+            self.source_project.refresh_program()
+            for relative, document in sorted(
+                self.source_project.files.items(), key=lambda item: item[0].as_posix()
+            ):
+                if document.read_only or not document.dirty:
+                    continue
+                save_python_source(document, program=self.source_project.program)
+                saved.append(relative)
+            self.source_project.refresh_program()
+            self._external_keep.clear()
+            self._remember_saved_semantics()
+            self.undo_stack.setClean()
+        finally:
+            self._saving = False
+            self._watch_project_files()
+        self.source_changed.emit()
+        self.problems_changed.emit()
+        self._emit_dirty()
+        return tuple(saved)
+
+    def check_external_changes(self) -> ExternalChange:
+        if self.source_project is None or self._saving:
+            return ExternalChange.UNCHANGED
+        changed: dict[Path, SourceDocument] = {}
+        for relative, document in self.source_project.files.items():
+            state, candidate = check_external_change(document)
+            if state != ExternalChange.UNCHANGED:
+                if state == ExternalChange.CONFLICT:
+                    candidate = resolve_external_conflict(document, "reload")
+                changed[relative] = candidate
+        if not changed:
+            return ExternalChange.UNCHANGED
+
+        if self.dirty or self.undo_stack.count() > 0:
+            self._pending_external.update(changed)
+            for relative in changed:
+                document = self.source_project.files[relative]
+                document.conflict = True
+                document.overwrite_confirmed = False
+            self.external_conflict.emit(tuple(sorted(changed, key=lambda path: path.as_posix())))
+            self.source_changed.emit()
+            self._emit_dirty()
+            return ExternalChange.CONFLICT
+
+        self.source_project.files.update(changed)
+        self._reload_program_from_documents(clear_undo=True)
+        return ExternalChange.RELOADED
+
+    def resolve_external_changes(self, decision: str) -> ExternalChange:
+        if self.source_project is None or not self._pending_external:
+            raise SourceConflictError("there is no pending external change")
+        pending = tuple(sorted(self._pending_external, key=lambda path: path.as_posix()))
+        if decision == "reload":
+            for relative in pending:
+                self.source_project.files[relative] = self._pending_external[relative]
+            self._pending_external.clear()
+            self._external_keep.clear()
+            self._reload_program_from_documents(clear_undo=True)
+            return ExternalChange.RELOADED
+        if decision == "keep":
+            for relative in pending:
+                document = self.source_project.files[relative]
+                document.conflict = True
+                resolve_external_conflict(document, "keep")
+                document.dirty = True
+                self._external_keep.add(relative)
+            self._pending_external.clear()
+            self.source_changed.emit()
+            self._emit_dirty()
+            return ExternalChange.CONFLICT
+        raise ValueError("decision must be 'keep' or 'reload'")
+
+    def _apply_program(self, program: AuthoringProgram) -> None:
+        if self.source_project is None:
+            raise ProgramError("project_closed", "no authoring project is open")
+        self.source_project.program = program.clone()
+        for document in self.source_project.files.values():
+            if document.unit is None:
+                continue
+            try:
+                document.unit = self.source_project.program.get_unit(document.unit.id)
+            except ProgramError:
+                continue
+        self._sync_dirty_flags()
+        self.source_project.refresh_program()
+        self.selection_changed.emit()
+        self.source_changed.emit()
+        self.problems_changed.emit()
+        self._emit_dirty()
+
+    def _sync_dirty_flags(self) -> None:
+        if self.source_project is None:
+            return
+        for relative, document in self.source_project.files.items():
+            if document.read_only or document.unit is None:
+                continue
+            saved = self._saved_semantics.get(document.unit.id)
+            document.dirty = relative in self._external_keep or document.unit.semantic_data() != saved
+
+    def _remember_saved_semantics(self) -> None:
+        self._saved_semantics = {
+            unit.id: unit.semantic_data()
+            for unit in self.program.logical_units()
+        } if self.source_project is not None else {}
+        if self.source_project is not None:
+            for document in self.source_project.files.values():
+                document.dirty = False
+                document.conflict = False
+                document.overwrite_confirmed = False
+
+    def _reload_program_from_documents(self, *, clear_undo: bool) -> None:
+        if self.source_project is None:
+            return
+        previous_unit = self.current_unit_id
+        previous_source = self.current_source_path
+        self.source_project.refresh_program()
+        if clear_undo:
+            self.undo_stack.clear()
+        self._remember_saved_semantics()
+        unit_ids = {unit.id for unit in self.program.logical_units()}
+        self.current_unit_id = previous_unit if previous_unit in unit_ids else None
+        if self.current_unit_id is None and unit_ids:
+            self.current_unit_id = sorted(unit_ids)[0]
+        self.current_source_path = (
+            previous_source
+            if previous_source in self.source_project.files
+            else self._path_for_unit(self.current_unit_id)
+        )
+        self.current_node_uid = None
+        self._watch_project_files()
+        self.project_changed.emit()
+        self.selection_changed.emit()
+        self.source_changed.emit()
+        self.problems_changed.emit()
+        self._emit_dirty()
+
+    def _path_for_unit(self, unit_id: str | None) -> Path | None:
+        if self.source_project is None or unit_id is None:
+            return None
+        for relative, document in self.source_project.files.items():
+            if document.unit is not None and document.unit.id == unit_id:
+                return relative
+        return None
+
+    def _require_editable_unit(self, unit_id: str) -> None:
+        if self.source_project is None:
+            raise SourceSaveError("project_closed", "no authoring project is open")
+        document = self.source_project.file_for_unit(unit_id)
+        if document.read_only:
+            raise SourceSaveError("read_only", "unsupported Python is read-only")
+        if document.conflict and not document.overwrite_confirmed:
+            raise SourceConflictError()
+
+    def _watch_project_files(self) -> None:
+        watched = self.file_watcher.files()
+        if watched:
+            self.file_watcher.removePaths(watched)
+        if self.source_project is None:
+            return
+        paths = [
+            str(document.path)
+            for document in self.source_project.files.values()
+            if document.path.exists()
+        ]
+        if paths:
+            self.file_watcher.addPaths(paths)
+
+    def _on_file_changed(self, _path: str) -> None:
+        if self._saving:
+            return
+        self.check_external_changes()
+        self._watch_project_files()
+
+    def _emit_dirty(self, _clean: bool | None = None) -> None:
+        self.dirty_changed.emit(self.dirty)
+
+
+__all__ = ["EditorSession"]

@@ -17,7 +17,7 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 | CD1 | 拆除旧静态作者链 | `[x]` | CD0 |
 | CD2 | 声明式 Python 核心 | `[x]` | CD1 |
 | CD3 | 生成器与统一入口 | `[x]` | CD2 |
-| CD4 | 最小 Qt 编辑器 | `[ ]` | CD3 |
+| CD4 | 最小 Qt 编辑器 | `[x]` | CD3 |
 | CD5 | 固定布局、程序树与资源拖拽 | `[ ]` | CD4 |
 | CD6 | 真实预览与 Trace | `[ ]` | CD5 |
 | CD7 | Timeline 与完整关卡证明 | `[ ]` | CD6 |
@@ -274,7 +274,22 @@ sprites、142 images，0 error/0 warning。Native：not run，本阶段不要求
 - `tests/test_editor_window.py`
 - `tests/test_editor_external_changes.py`
 
-**Evidence / Blocker**：尚未开始。
+**Evidence（2026-08-28，独立只读验收 APPROVE）**：Structural PASS。增量仅
+`pyproject.toml`、`src/editor/{__init__,app,window,session,commands}.py` 和四个 focused
+tests；唯一 `pystg-editor = src.editor.app:main` 入口。一个 `EditorWindow` 只持有一个
+`EditorSession`，Session 唯一拥有工程、选择、dirty、build/preview 占位状态和单一
+`QUndoStack`；Coordinator/Service/Port/Intent/Plugin Registry/DocumentManager、QProcess、
+自动预览及 Runtime/renderer/compiler 依赖均为零，UI 为简体中文且源码只读。Runtime PASS
+（CD4 工作流）：真实 authoring 工程 open/navigate/edit/undo/redo/save/new-session reopen、
+窗口 Inspector 修改、clean reload、dirty conflict、显式 keep/reload、删除文件和 unsupported
+只读保真均通过；`python -m pytest -q tests/test_editor_session.py
+tests/test_editor_commands.py tests/test_editor_window.py tests/test_editor_external_changes.py` 为 11
+passed/1.814s，全仓为 353 passed/10.461s。外部冲突只有明确点击 keep/reload 才授权，取消
+保持 pending/conflict 且 Save 可再次决策；reload 清空整个 Undo 栈，keep 后可继续编辑并原子
+保存。Performance PASS：focused 1.814s、全仓 10.461s、compileall 0.242s；资产校验 71
+JSON、16 sprite configs、745 sprites、142 images，0 error/0 warning；diff/cached check 通过。
+Native：not run，本轮未做真实可见 Windows 人工交互，offscreen Qt 不冒充 Native；Usability：
+not run，无真人维护者实操。generated 未 tracked，`.claude/settings.local.json` 未修改、未暂存。
 
 ## 8. CD5：固定布局、程序树与资源拖拽
 
