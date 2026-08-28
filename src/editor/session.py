@@ -106,6 +106,7 @@ class EditorSession(QObject):
         self.preview_state = "stopped"
         self.preview_frame = 0
         self.last_build_identity: str | None = None
+        self.trace_run_id: str | None = None
         self.run_log = deque(maxlen=512)
         self.trace_events = deque(maxlen=4096)
         self.undo_stack = QUndoStack(self)
@@ -239,6 +240,7 @@ class EditorSession(QObject):
         self.set_build_state("idle")
         self.set_preview_state("stopped")
         self.last_build_identity = None
+        self.trace_run_id = None
         self.run_log.clear()
         self.trace_events.clear()
         self.project_changed.emit()
@@ -441,15 +443,24 @@ class EditorSession(QObject):
             self.run_log.append(line[:16_384])
         self.log_changed.emit()
 
-    def reset_trace(self) -> None:
+    def reset_trace(self, run_id: str | None = None) -> None:
         self.trace_events.clear()
+        self.trace_run_id = run_id
         self.preview_frame = 0
         self.trace_changed.emit()
 
-    def append_trace(self, events) -> None:
+    def append_trace(self, events, *, run_id: str | None = None) -> None:
+        if run_id is not None:
+            if self.trace_run_id is None:
+                self.trace_run_id = run_id
+            elif self.trace_run_id != run_id:
+                return
         for event in events:
             if isinstance(event, dict):
-                self.trace_events.append(dict(event))
+                value = dict(event)
+                if self.trace_run_id is not None:
+                    value["run_id"] = self.trace_run_id
+                self.trace_events.append(value)
         self.trace_changed.emit()
 
     def check_external_changes(self) -> ExternalChange:

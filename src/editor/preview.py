@@ -381,7 +381,7 @@ class PreviewOwner(QObject):
             target=target,
         )
         self.session.set_build_state("ready", prepared.build_hash)
-        self.session.reset_trace()
+        self.session.reset_trace(spec.run_id)
         self._stale = False
         self._building = False
         self.build_published.emit(str(published))
@@ -548,7 +548,10 @@ class PreviewOwner(QObject):
             if state in {"starting", "running", "paused"} and not self._stale:
                 self.session.set_preview_state(state)
         elif event == "trace":
-            self.session.append_trace(payload.get("events", ()))
+            self.session.append_trace(
+                payload.get("events", ()),
+                run_id=message["run_id"],
+            )
             dropped = payload.get("dropped", 0)
             if dropped:
                 self.session.append_run_log(f"[Preview] Trace 丢弃 {dropped} 条旧事件")

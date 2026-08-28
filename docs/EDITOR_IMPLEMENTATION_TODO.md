@@ -20,7 +20,7 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 | CD4 | 最小 Qt 编辑器 | `[x]` | CD3 |
 | CD5 | 固定布局、程序树与资源拖拽 | `[x]` | CD4 |
 | CD6 | 真实预览与 Trace | `[x]` | CD5 |
-| CD7 | Timeline 与完整关卡证明 | `[ ]` | CD6 |
+| CD7 | Timeline 与完整关卡证明 | `[x]` | CD6 |
 
 Agent 只能领取最早未完成任务。当前 gate 红时不得开始下一项。协调 Agent 是唯一可以更新
 本表的人；实现者之外的只读验证 Agent 执行最终 gate。
@@ -431,7 +431,27 @@ images，0 error/0 warning；相关产品代码 10538 行，低于 12000 行预�
 - CD2-CD6 全部 focused gates
 - `tools/verify_native_code_editor.py`
 
-**Evidence / Blocker**：尚未开始。
+**Evidence（2026-08-29，独立只读验收 APPROVE）**：Structural PASS。CD7 增量只包含
+headless Timeline、Qt Timeline 及必要的 session/preview/window 接线、完整声明式示例、
+focused tests 和最终 native verifier；顺序、Wait/At/duration、Repeat、Parallel、SpawnTask、
+If、动态未知、引用单元、项目/显式外部/缺失模板聚合和同 run identity Trace 均有直接覆盖。
+动态 Wait 不宣称可编辑，未解析 Call 保留 Problems 并投影 Unknown；三种反向编辑全部进入
+唯一 Undo 栈。旧八符号、旧模块/作者内容、skip/xfail、独立 Timeline 文档、生产 Gemini
+导入和 tracked trash/generated 均为零；`.claude/settings.local.json` 未暂存，diff checks 通过。
+Runtime PASS：CD7 focused 21 passed；CD2-CD7 focused 270 passed/19.94s；全仓
+`python -m pytest -q` 为 416 passed/21.50s。完整示例可解析、保存重开、确定性构建并由现有
+`StageManager` 使用真实 `OptimizedBulletPool` 跑到对话结束，保留批量弹幕且逐弹 callback
+为零；Project/Stage/Spell 三目标走真实生成/运行路径，手写 Stage1-Stage3 默认入口保持。
+Native PASS：清除 `QT_QPA_PLATFORM` 后 `python tools/verify_native_code_editor.py` 为
+PASS/39.657s，Qt platform `windows`；Project/Stage/Spell 的真实 GLFW/ModernGL 子窗口均
+成功 Win32 嵌入并取得键盘焦点，host/child 分别为 449x663、390x383、390x383；
+Wait/duration/At、pause/resume/restart/seek/stop、Trace run identity 和停止清理通过，无遗留
+进程。1480x920 与 960x640 的原生布局另行验证 Editor/Game、Inspector 和永久 Timeline
+均可操作。Performance PASS：DSL/compiler 197 passed/6.24s <15s，编辑器自动化
+63 passed/14.652s <60s，主门禁 <5min；compileall 0.232s，资产校验 0.441s，79 JSON、
+16 sprite configs、745 sprites、142 images，0 error/0 warning；保守按 authoring/compiler/
+editor 物理总行与 preview Runtime 支持净增计 11889 行 <=12000，归档基线产品代码净删除
+约 31266 行，显著大于新增。Usability：not run，没有真人维护者完成实际工作流。
 
 ## 11. 最终报告格式
 

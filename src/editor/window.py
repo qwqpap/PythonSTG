@@ -40,6 +40,7 @@ from .program_tree import (
 from .preview import PreviewHost, PreviewOwner, PreviewTarget
 from .session import EditorSession
 from .sidebars import ActivitySidebar, ResourceListWidget
+from .timeline import TimelinePanel
 
 
 _ROLE_VALUE = int(Qt.ItemDataRole.UserRole)
@@ -279,12 +280,11 @@ class EditorWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock)
         self.view_menu.addAction(self.inspector_dock.toggleViewAction())
 
-        self.timeline_placeholder = _placeholder("时间线将在 CD7 显示代码投影与运行 Trace")
-        self.timeline_placeholder.setObjectName("timeline_placeholder")
+        self.timeline_panel = TimelinePanel(self.session, self)
         self.timeline_dock = QDockWidget("时间线", self)
         self.timeline_dock.setObjectName("timeline_dock")
         self.timeline_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        self.timeline_dock.setWidget(self.timeline_placeholder)
+        self.timeline_dock.setWidget(self.timeline_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.timeline_dock)
 
         self.problems_view = QPlainTextEdit(self)
@@ -309,6 +309,7 @@ class EditorWindow(QMainWindow):
         self.session.build_changed.connect(self._build_state_changed)
         self.session.log_changed.connect(self.refresh_problems)
         self.preview_owner.build_published.connect(self._show_generated_entry)
+        self.preview_owner.event_received.connect(self.timeline_panel.handle_preview_event)
 
     def refresh_project(self) -> None:
         self.unit_list.blockSignals(True)

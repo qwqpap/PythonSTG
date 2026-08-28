@@ -73,6 +73,14 @@ from .resources import (
     ResourceReference,
 )
 from .storage import ResourceStore
+from .timeline import (
+    TimelineAnalyzer,
+    TimelineInterval,
+    TimelineProjection,
+    Unknown,
+    overlay_trace,
+    project_timeline,
+)
 
 __all__ = [
     "ACTION_NODE_KINDS",
@@ -116,8 +124,12 @@ __all__ = [
     "TemplateResolutionError",
     "TemplateSourceDefinition",
     "TemplateTarget",
+    "TimelineAnalyzer",
+    "TimelineInterval",
+    "TimelineProjection",
     "UNIT_KINDS",
     "UI_RESOURCE_TYPE",
+    "Unknown",
     "build_default_resource_type_registry",
     "delete_node",
     "expand_nodes",
@@ -128,6 +140,8 @@ __all__ = [
     "load_python_source",
     "load_source",
     "move_node",
+    "overlay_trace",
+    "project_timeline",
     "render_python_source",
     "resolve_external_conflict",
     "save_python_source",

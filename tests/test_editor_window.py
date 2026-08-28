@@ -33,7 +33,8 @@ def test_minimal_window_navigates_and_edits_real_project(tmp_path, qapp_session)
 
     assert window.findChild(type(window.unit_list), "program_structure") is window.unit_list
     assert window.code_view.isReadOnly()
-    assert window.timeline_placeholder.objectName() == "timeline_placeholder"
+    assert window.timeline_panel.objectName() == "timeline_panel"
+    assert window.timeline_panel.session is session
     assert window.preview_host.objectName() == "game_preview_host"
     assert window.preview_owner.session is session
     assert window.preview_owner.process is None

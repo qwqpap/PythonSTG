@@ -1,0 +1,16 @@
+[
+  {
+    "text": "这里的时间线来自代码，而不是另一份关卡数据。",
+    "character": "Hinanawi_Tenshi",
+    "portrait": "Happy",
+    "position": "left",
+    "duration": 30
+  },
+  {
+    "text": "修改 Wait 后，代码、预览和 Trace 会沿着同一条路径更新。",
+    "character": "Reiuji_Utsuho",
+    "portrait": "normal",
+    "position": "right",
+    "duration": 36
+  }
+]

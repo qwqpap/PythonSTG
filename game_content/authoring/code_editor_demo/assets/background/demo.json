@@ -1,0 +1,39 @@
+{
+  "name": "code_editor_demo",
+  "description": "代码驱动编辑器示例背景",
+  "textures": [
+    {
+      "name": "sky",
+      "path": "../../../../../assets/images/background/gensokyosora/aosora.png",
+      "blend_mode": "normal",
+      "alpha": 1.0
+    }
+  ],
+  "camera": {
+    "eye": [0.0, 0.0, -1.0],
+    "at": [0.0, 0.0, 0.0],
+    "up": [0.0, 1.0, 0.0],
+    "fovy": 0.6,
+    "z_near": 0.01,
+    "z_far": 10.0
+  },
+  "fog": {
+    "enabled": false,
+    "start": 3.0,
+    "end": 6.0,
+    "color": [0, 0, 0, 255]
+  },
+  "layers": [
+    {
+      "texture": "sky",
+      "z_order": 0,
+      "scroll_speed": [0.0, 0.0],
+      "parallax_factor": 1.0,
+      "alpha": 1.0,
+      "blend_mode": "normal",
+      "tile_repeat": [1, 1],
+      "use_3d": false
+    }
+  ],
+  "scroll_speed": 0.0
+}
