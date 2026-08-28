@@ -16,7 +16,7 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
 | CD0 | 契约重置与安全点 | `[x]` | `f9e0798` |
 | CD1 | 拆除旧静态作者链 | `[x]` | CD0 |
 | CD2 | 声明式 Python 核心 | `[x]` | CD1 |
-| CD3 | 生成器与统一入口 | `[ ]` | CD2 |
+| CD3 | 生成器与统一入口 | `[x]` | CD2 |
 | CD4 | 最小 Qt 编辑器 | `[ ]` | CD3 |
 | CD5 | 固定布局、程序树与资源拖拽 | `[ ]` | CD4 |
 | CD6 | 真实预览与 Trace | `[ ]` | CD5 |
@@ -195,8 +195,9 @@ configs、745 sprites、142 images，0 error/0 warning；diff/cached check 通�
 **Owner**：Compiler/Runtime integration Agent。
 
 **允许路径**：`src/compiler/diagnostics.py`、`codegen.py`、`package_builder.py`、
-`content_entry.py`、`main.py`、`game_content/entry.py`、`.gitignore`、focused compiler/
-runtime tests。
+`content_entry.py`、`main.py`、`game_content/entry.py`、`.gitignore`、
+`src/game/stage/context.py` 中仅 `create_bullets_batch(render_angle=...)` 的现有批量 API
+等价透传，以及 focused compiler/runtime tests。
 
 **禁止路径**：Qt editor、renderer 语义、现有 Stage1-Stage3 实现、作者源码自动迁移。
 
@@ -229,7 +230,19 @@ runtime tests。
 - `tests/test_content_entry.py`
 - `tests/test_generated_runtime.py`
 
-**Evidence / Blocker**：尚未开始。
+**Evidence（2026-08-28，独立只读验收 APPROVE）**：Structural PASS。CD3 增量仅在
+compiler/entry、`.gitignore`、`src/game/stage/context.py` 的批量 `render_angle` 等价透传和
+四个 focused tests；`src/compiler` 无 Qt/editor/renderer 导入，旧八符号、focused
+skip/xfail 和 tracked generated 文件均为零，diff/cached check 通过。Runtime PASS：
+`python -m pytest -q tests/test_compiler_codegen.py tests/test_compiler_package_builder.py
+tests/test_content_entry.py tests/test_generated_runtime.py` 为 41 passed/6.275s，全仓为 342
+passed/9.069s；生成包真实继承现有 Runtime 并由 `StageManager` 跑完，固定 seed 一致，真实
+`OptimizedBulletPool` 使用 batch 路径且 emitter callback 为零；独立 compile/import 子进程、
+确定性生成、事务回滚、资源不复制、source map、模板与 RawPython 双定位均通过，手写
+Stage1-Stage3 和 `main.py --content-entry` 两种参数形式实测加载。Performance PASS：focused
+6.275s <15s、全仓 9.069s、compileall 0.283s；资产校验 71 JSON、16 sprite configs、745
+sprites、142 images，0 error/0 warning。Native：not run，本阶段不要求；Usability：not run，
+本阶段不要求。`.claude/settings.local.json` 未修改、未暂存。
 
 ## 7. CD4：最小 Qt 编辑器
 

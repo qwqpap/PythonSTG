@@ -226,6 +226,7 @@ class StageContext(SpellCardContext):
         bounce_x: bool = False,
         bounce_y: bool = False,
         spin: float = 0.0,
+        render_angle: float = None,
         max_lifetime: float = 0.0,
         render_scale: float = 1.0,
         curve_type: int = 0,
@@ -255,10 +256,17 @@ class StageContext(SpellCardContext):
             flags |= FLAG_BOUNCE_X
         if bounce_y:
             flags |= FLAG_BOUNCE_Y
-        if spin != 0.0:
+        if spin != 0.0 or render_angle is not None:
             flags &= ~FLAG_RENDER_ANGLE_LOCKED
 
         angle_radians = np.deg2rad(angle_array).astype(np.float32, copy=False)
+        render_angles = None
+        if render_angle is not None:
+            render_angles = np.full(
+                len(angle_array),
+                math.radians(render_angle),
+                dtype=np.float32,
+            )
         speed_per_frame = speed_array / 60.0
         if hasattr(self.bullet_pool, "spawn_bullets_batch"):
             indices = self.bullet_pool.spawn_bullets_batch(
@@ -272,6 +280,7 @@ class StageContext(SpellCardContext):
                 time_scale=time_scale,
                 flags=flags,
                 angular_vel=math.radians(spin),
+                render_angles=render_angles,
                 max_lifetime=max_lifetime,
                 render_scale=render_scale,
                 curve_type=curve_type,
@@ -294,6 +303,7 @@ class StageContext(SpellCardContext):
                     time_scale=time_scale,
                     flags=flags,
                     angular_vel=math.radians(spin),
+                    render_angle=None if render_angles is None else float(render_angles[len(spawned)]),
                     max_lifetime=max_lifetime,
                     render_scale=render_scale,
                     curve_type=curve_type,

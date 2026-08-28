@@ -50,5 +50,8 @@ tests/test_window_key_sync.py
 /userdata/audio_cache/
 /userdata/hiscore.json
 
+# Disposable output of the code-driven level compiler
+/game_content/generated/
+
 # 本地 Claude Code 项目说明（不分发）
 /CLAUDE.md

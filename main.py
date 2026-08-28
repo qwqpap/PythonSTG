@@ -56,6 +56,7 @@ from src.ui.main_menu_layout import load_layout as load_main_menu_layout
 from src.ui.hud import load_hud_layout
 from src.ui.bitmap_font import get_font_manager
 from src.devtools.hotreload import HotReloadManager
+from src.compiler.content_entry import load_content_entry
 from game_content.stages.stage1.stage_asset_preview import Stage1AssetPreview
 from game_content.stages.stage_test.stage_script import StageTest
 
@@ -79,10 +80,10 @@ def _get_cli_option(prefix: str):
 
 
 CONTENT_ENTRY_MODULE = _get_cli_option("--content-entry=") or "game_content.entry"
-CONTENT_ENTRY = importlib.import_module(CONTENT_ENTRY_MODULE)
-ALL_STAGES = list(CONTENT_ENTRY.STAGES)
-START_STAGE = CONTENT_ENTRY.START_STAGE
-STAGE_BY_ID = dict(CONTENT_ENTRY.STAGE_BY_ID)
+CONTENT_ENTRY = load_content_entry(CONTENT_ENTRY_MODULE)
+ALL_STAGES = list(CONTENT_ENTRY.stages)
+START_STAGE = CONTENT_ENTRY.start_stage
+STAGE_BY_ID = dict(CONTENT_ENTRY.stage_by_id)
 
 
 def _stage_class_by_id(stage_id: str):
