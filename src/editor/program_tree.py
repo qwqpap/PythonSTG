@@ -5,8 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from src.authoring.dsl import PlayBGM, PlayDialogue, PlaySE, SetBackground
-from src.authoring.program import DropPlacement, LogicalUnit, Node
+from src.authoring import dsl
+from src.authoring.program import (
+    AuthoringProgram,
+    DropPlacement,
+    LogicalUnit,
+    Node,
+    ProgramError,
+    Ref,
+)
 from src.qt_compat.QtCore import QMimeData, QPoint, Qt, Signal
 from src.qt_compat.QtGui import QDragMoveEvent, QDropEvent
 from src.qt_compat.QtWidgets import QAbstractItemView, QTreeWidget, QTreeWidgetItem
@@ -17,6 +24,27 @@ from .sidebars import RESOURCE_MIME
 NODE_MIME = "application/x-pystg-node"
 _ROLE_UID = int(Qt.ItemDataRole.UserRole)
 _ROLE_ACCEPTS_CHILD = _ROLE_UID + 1
+
+NODE_PALETTE = (
+    ("时间与控制", (("Wait", "等待"), ("At", "定时执行"), ("Repeat", "重复"), ("If", "条件"),
+                  ("Parallel", "并行"), ("SpawnTask", "后台任务"), ("Set", "设置变量"), ("RawPython", "原始 Python"))),
+    ("关卡流程", (("RunWave", "运行 Wave"), ("RunBoss", "运行 Boss"), ("SetBackground", "切换背景"),
+                  ("PlayBGM", "播放 BGM"), ("PlayDialogue", "播放对话"), ("SpawnEnemy", "生成敌人"))),
+    ("移动与弹幕", (("MoveTo", "移动到"), ("MoveLinear", "线性移动"), ("Fire", "发射子弹"),
+                   ("FireCircle", "环形发射"), ("FireAtPlayer", "自机狙"), ("ClearBullets", "清除子弹"),
+                   ("PlaySE", "播放音效"), ("Kill", "结束对象"))),
+)
+
+_REFERENCE_NODES = {"RunWave": (dsl.RunWave, "Wave"), "RunBoss": (dsl.RunBoss, "Boss"),
+                    "SpawnEnemy": (dsl.SpawnEnemy, "Enemy")}
+_EMPTY_NODES = {"Fire", "FireCircle", "FireAtPlayer", "ClearBullets", "Kill"}
+_PALETTE_ARGUMENTS = {
+    "Wait": ((60,), {}), "At": ((0, []), {}), "Repeat": ((1, []), {}),
+    "If": ((dsl.Expr("True"), []), {}), "Parallel": (([[]],), {}),
+    "SpawnTask": ((), {"body": []}), "Set": (("value", 0), {}), "RawPython": (("# 在这里写受信任 Python",), {}),
+    "SetBackground": (("",), {}), "PlayBGM": (("",), {}), "PlayDialogue": (([],), {}),
+    "MoveTo": ((0.0, 0.5), {}), "MoveLinear": ((0.0, -0.2), {}), "PlaySE": (("",), {}),
+}
 
 
 @dataclass(frozen=True)
@@ -182,10 +210,10 @@ def available_resource_actions(uri: str) -> tuple[ResourceInsertAction, ...]:
 
 def node_for_resource_action(action: str, uri: str) -> Node:
     factories = {
-        "play_bgm": PlayBGM,
-        "play_se": PlaySE,
-        "set_background": SetBackground,
-        "play_dialogue": PlayDialogue,
+        "play_bgm": dsl.PlayBGM,
+        "play_se": dsl.PlaySE,
+        "set_background": dsl.SetBackground,
+        "play_dialogue": dsl.PlayDialogue,
     }
     try:
         return factories[action](uri)
@@ -193,10 +221,33 @@ def node_for_resource_action(action: str, uri: str) -> Node:
         raise ValueError(f"unknown resource action: {action}") from exc
 
 
+def node_from_palette(kind: str, program: AuthoringProgram) -> Node:
+    """Create one honest DSL node with small, editable starting values."""
+    try:
+        if kind in _REFERENCE_NODES:
+            factory, target_kind = _REFERENCE_NODES[kind]
+            return factory(_first_ref(program, target_kind))
+        if kind in _EMPTY_NODES:
+            return getattr(dsl, kind)()
+        arguments, keywords = _PALETTE_ARGUMENTS[kind]
+        return getattr(dsl, kind)(*arguments, **keywords)
+    except KeyError as exc:
+        raise ProgramError("unknown_node_kind", f"未知节点类型：{kind}") from exc
+
+
+def _first_ref(program: AuthoringProgram, kind: str) -> Ref:
+    ids = sorted(unit.id for unit in program.logical_units() if unit.kind == kind)
+    if not ids:
+        raise ProgramError("missing_reference", f"工程中还没有可引用的 {kind}")
+    return Ref(ids[0])
+
+
 __all__ = [
     "NODE_MIME",
+    "NODE_PALETTE",
     "ProgramTree",
     "ResourceInsertAction",
     "available_resource_actions",
     "node_for_resource_action",
+    "node_from_palette",
 ]

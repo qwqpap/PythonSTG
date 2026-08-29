@@ -329,6 +329,22 @@ class EditorSession(QObject):
 
         self.undo_stack.push(InsertNodeCommand(self, target_uid, placement, node))
 
+    def append_node(self, node: Node) -> None:
+        unit = self.current_unit
+        if unit is None:
+            raise ProgramError("no_unit", "请先选择一个逻辑单元")
+        self._require_editable_unit(unit.id)
+        from .commands import AppendNodeCommand
+
+        self.undo_stack.push(AppendNodeCommand(self, unit.id, node))
+
+    def delete_node(self, uid: str) -> None:
+        unit, _node, _location = find_node(self.program, uid)
+        self._require_editable_unit(unit.id)
+        from .commands import DeleteNodeCommand
+
+        self.undo_stack.push(DeleteNodeCommand(self, uid))
+
     @property
     def global_assets(self) -> tuple[str, ...]:
         if self.project_context is None:

@@ -4,11 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from src.authoring.program import DropPlacement, find_node
+from src.authoring.program import DropPlacement, ProgramError, find_node
 from src.core.project_context import ProjectContext
 from src.editor.program_tree import NODE_MIME, ProgramTree
 from src.editor.session import EditorSession
+from src.editor.window import EditorWindow
 from src.qt_compat.QtCore import QMimeData, QPoint
+from src.qt_compat.QtWidgets import QMenu
 
 
 class _DropPosition:
@@ -61,6 +63,19 @@ def _project(root: Path) -> Path:
         encoding="utf-8",
     )
     return root
+
+
+def _click_palette_action(window: EditorWindow, button, label: str) -> None:
+    button.click()
+    menu = window._node_menu
+    assert isinstance(menu, QMenu) and menu.isVisible()
+    for category in menu.actions():
+        submenu = category.menu()
+        for action in submenu.actions() if submenu is not None else ():
+            if action.text() == label:
+                action.trigger()
+                return
+    raise AssertionError(f"palette action {label!r} was not shown")
 
 
 def _session(tmp_path: Path) -> EditorSession:
@@ -194,3 +209,68 @@ def test_template_call_stays_aggregated_through_tree_edit_save_and_reopen(
         "Wait",
         "TemplateCall",
     ]
+
+
+def test_visible_toolbar_adds_root_and_child_nodes_and_deletes_with_undo(
+    tmp_path, qapp_session
+):
+    session = _session(tmp_path)
+    window = EditorWindow(session)
+    window.show()
+    qapp_session.processEvents()
+
+    assert window.add_after_button.isVisible()
+    assert window.add_after_button.isEnabled()
+    assert not window.add_child_button.isEnabled()
+    assert not window.delete_node_button.isEnabled()
+
+    _click_palette_action(window, window.add_after_button, "等待")
+    appended_uid = session.current_node_uid
+    assert appended_uid is not None
+    assert session.program.get_unit("stage").body[-1].uid == appended_uid
+
+    session.select_node("container")
+    qapp_session.processEvents()
+    assert window.add_child_button.isEnabled()
+    _click_palette_action(window, window.add_child_button, "等待")
+    child_uid = session.current_node_uid
+    assert child_uid is not None
+    container = find_node(session.program, "container")[1]
+    assert [node.uid for node in container.children["body"]] == ["inner", child_uid]
+
+    window.delete_node_button.click()
+    qapp_session.processEvents()
+    with pytest.raises(ProgramError, match="unknown node"):
+        find_node(session.program, child_uid)
+    session.undo_stack.undo()
+    assert find_node(session.program, child_uid)[1].kind == "Wait"
+    assert session.current_node_uid == child_uid
+    window.close()
+
+
+def test_empty_unit_can_add_its_first_node(tmp_path, qapp_session):
+    root = _project(tmp_path / "authoring")
+    (root / "stage.py").write_text(
+        "from src.authoring.dsl import Stage\n\n"
+        "stage = Stage('stage', 'Empty Stage', body=[])\n",
+        encoding="utf-8",
+    )
+    session = EditorSession(project_context=ProjectContext(tmp_path))
+    session.open_project(root)
+    session.select_unit("stage")
+    window = EditorWindow(session)
+
+    window.show()
+    _click_palette_action(window, window.add_after_button, "等待")
+
+    node_uid = session.current_node_uid
+    assert node_uid is not None
+    assert [item.uid for item in session.program.get_unit("stage").body] == [node_uid]
+    session.undo_stack.undo()
+    assert session.program.get_unit("stage").body == []
+    session.undo_stack.redo()
+    session.save_all()
+    reopened = EditorSession(project_context=ProjectContext(tmp_path))
+    reopened.open_project(root)
+    assert [item.uid for item in reopened.program.get_unit("stage").body] == [node_uid]
+    window.close()

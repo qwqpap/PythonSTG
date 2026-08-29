@@ -33,9 +33,11 @@ from src.qt_compat.QtWidgets import (
 
 from .inspector import InspectorPanel
 from .program_tree import (
+    NODE_PALETTE,
     ProgramTree,
     available_resource_actions,
     node_for_resource_action,
+    node_from_palette,
 )
 from .preview import PreviewHost, PreviewOwner, PreviewTarget
 from .session import EditorSession
@@ -90,6 +92,7 @@ class EditorWindow(QMainWindow):
         super().__init__(parent)
         self.setObjectName("code_editor_window")
         self.session = session or EditorSession(self)
+        self._node_menu: QMenu | None = None
         self.setWindowTitle("PySTG 关卡编辑器")
         self.resize(1280, 800)
         self._build_actions()
@@ -110,16 +113,18 @@ class EditorWindow(QMainWindow):
         super().closeEvent(event)
 
     def _build_actions(self) -> None:
+        def add_action(menu, attribute, text, object_name, callback, shortcut=None):
+            action = QAction(text, self)
+            action.setObjectName(object_name)
+            if shortcut is not None:
+                action.setShortcut(shortcut)
+            action.triggered.connect(callback)
+            menu.addAction(action)
+            setattr(self, attribute, action)
+
         file_menu = self.menuBar().addMenu("文件")
-        open_action = QAction("打开工程…", self)
-        open_action.setObjectName("open_project_action")
-        open_action.triggered.connect(self._choose_project)
-        file_menu.addAction(open_action)
-        self.save_action = QAction("全部保存", self)
-        self.save_action.setObjectName("save_all_action")
-        self.save_action.setShortcut("Ctrl+S")
-        self.save_action.triggered.connect(self._save_all)
-        file_menu.addAction(self.save_action)
+        add_action(file_menu, "open_action", "打开工程…", "open_project_action", self._choose_project)
+        add_action(file_menu, "save_action", "全部保存", "save_all_action", self._save_all, "Ctrl+S")
 
         edit_menu = self.menuBar().addMenu("编辑")
         self.undo_action = self.session.undo_stack.createUndoAction(self, "撤销")
@@ -133,42 +138,16 @@ class EditorWindow(QMainWindow):
         self.view_menu = self.menuBar().addMenu("视图")
 
         run_menu = self.menuBar().addMenu("运行")
-        self.run_current_action = QAction("运行当前单元", self)
-        self.run_current_action.setObjectName("run_current_action")
-        self.run_current_action.setShortcut("F5")
-        self.run_current_action.triggered.connect(self._run_current)
-        run_menu.addAction(self.run_current_action)
-        self.run_project_action = QAction("运行整个工程", self)
-        self.run_project_action.setObjectName("run_project_action")
-        self.run_project_action.triggered.connect(
-            lambda: self._run_target(PreviewTarget("project"))
-        )
-        run_menu.addAction(self.run_project_action)
-        self.run_stage_action = QAction("运行当前 Stage", self)
-        self.run_stage_action.setObjectName("run_stage_action")
-        self.run_stage_action.triggered.connect(self._run_current_stage)
-        run_menu.addAction(self.run_stage_action)
+        add_action(run_menu, "run_current_action", "运行当前单元", "run_current_action", self._run_current, "F5")
+        add_action(run_menu, "run_project_action", "运行整个工程", "run_project_action",
+                   lambda: self._run_target(PreviewTarget("project")))
+        add_action(run_menu, "run_stage_action", "运行当前 Stage", "run_stage_action", self._run_current_stage)
         run_menu.addSeparator()
-        self.pause_preview_action = QAction("暂停", self)
-        self.pause_preview_action.setObjectName("pause_preview_action")
-        self.pause_preview_action.triggered.connect(self._pause_preview)
-        run_menu.addAction(self.pause_preview_action)
-        self.resume_preview_action = QAction("继续", self)
-        self.resume_preview_action.setObjectName("resume_preview_action")
-        self.resume_preview_action.triggered.connect(self._resume_preview)
-        run_menu.addAction(self.resume_preview_action)
-        self.restart_preview_action = QAction("重新开始", self)
-        self.restart_preview_action.setObjectName("restart_preview_action")
-        self.restart_preview_action.triggered.connect(self._restart_preview)
-        run_menu.addAction(self.restart_preview_action)
-        self.seek_preview_action = QAction("跳转到帧…", self)
-        self.seek_preview_action.setObjectName("seek_preview_action")
-        self.seek_preview_action.triggered.connect(self._seek_preview)
-        run_menu.addAction(self.seek_preview_action)
-        self.stop_preview_action = QAction("停止", self)
-        self.stop_preview_action.setObjectName("stop_preview_action")
-        self.stop_preview_action.triggered.connect(self._stop_preview)
-        run_menu.addAction(self.stop_preview_action)
+        add_action(run_menu, "pause_preview_action", "暂停", "pause_preview_action", self._pause_preview)
+        add_action(run_menu, "resume_preview_action", "继续", "resume_preview_action", self._resume_preview)
+        add_action(run_menu, "restart_preview_action", "重新开始", "restart_preview_action", self._restart_preview)
+        add_action(run_menu, "seek_preview_action", "跳转到帧…", "seek_preview_action", self._seek_preview)
+        add_action(run_menu, "stop_preview_action", "停止", "stop_preview_action", self._stop_preview)
 
     def _build_layout(self) -> None:
         self.unit_list = QTreeWidget(self)
@@ -200,6 +179,30 @@ class EditorWindow(QMainWindow):
         self.program_tree.node_selected.connect(self._node_selected)
         self.program_tree.move_requested.connect(self._move_node)
         self.program_tree.resource_action_requested.connect(self._resource_drop)
+        program_panel = QWidget(self)
+        program_panel.setObjectName("program_editor_panel")
+        program_layout = QVBoxLayout(program_panel)
+        program_layout.setContentsMargins(0, 0, 0, 0)
+        program_toolbar = QWidget(program_panel)
+        program_toolbar.setObjectName("program_toolbar")
+        program_toolbar_layout = QHBoxLayout(program_toolbar)
+        program_toolbar_layout.setContentsMargins(4, 2, 4, 2)
+        buttons = (
+            ("add_after_button", "＋ 添加到后面", "add_node_after",
+             lambda: self._show_node_menu(DropPlacement.AFTER)),
+            ("add_child_button", "＋ 添加为子节点", "add_node_child",
+             lambda: self._show_node_menu(DropPlacement.CHILD)),
+            ("delete_node_button", "删除", "delete_node", self._delete_selected_node),
+        )
+        for attribute, text, object_name, callback in buttons:
+            button = QPushButton(text, program_toolbar)
+            button.setObjectName(object_name)
+            button.clicked.connect(callback)
+            program_toolbar_layout.addWidget(button)
+            setattr(self, attribute, button)
+        program_toolbar_layout.addStretch(1)
+        program_layout.addWidget(program_toolbar)
+        program_layout.addWidget(self.program_tree, 1)
         self.code_view = QPlainTextEdit(self)
         self.code_view.setObjectName("source_code_view")
         self.code_view.setReadOnly(True)
@@ -210,7 +213,7 @@ class EditorWindow(QMainWindow):
         self.generated_code_view.setPlainText("构建成功后可在此查看生成 Runtime Python。")
         editor_tabs = QTabWidget(self)
         editor_tabs.setObjectName("editor_tabs")
-        editor_tabs.addTab(self.program_tree, "可视化程序")
+        editor_tabs.addTab(program_panel, "可视化程序")
         editor_tabs.addTab(self.code_view, "作者 Python（只读）")
         editor_tabs.addTab(self.generated_code_view, "生成 Python（只读）")
         self.editor_group = ClosableGroup("编辑器", editor_tabs, self)
@@ -276,6 +279,7 @@ class EditorWindow(QMainWindow):
         self.inspector_scroll.setWidget(self.inspector)
         self.inspector_dock = QDockWidget("检查器", self)
         self.inspector_dock.setObjectName("inspector_dock")
+        self.inspector_dock.setMinimumWidth(120)
         self.inspector_dock.setWidget(self.inspector_scroll)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock)
         self.view_menu.addAction(self.inspector_dock.toggleViewAction())
@@ -283,6 +287,7 @@ class EditorWindow(QMainWindow):
         self.timeline_panel = TimelinePanel(self.session, self)
         self.timeline_dock = QDockWidget("时间线", self)
         self.timeline_dock.setObjectName("timeline_dock")
+        self.timeline_dock.setMinimumHeight(90)
         self.timeline_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.timeline_dock.setWidget(self.timeline_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.timeline_dock)
@@ -356,6 +361,12 @@ class EditorWindow(QMainWindow):
                 project_root=self.session.project_context.root,
             )
         self.inspector.refresh()
+        unit = self.session.current_unit
+        node = self.session.current_node
+        editable = bool(unit and unit.kind != "Project" and self.session.can_edit)
+        self.add_after_button.setEnabled(editable)
+        self.add_child_button.setEnabled(editable and bool(node and node.children))
+        self.delete_node_button.setEnabled(editable and node is not None)
         self.refresh_source()
 
     def refresh_source(self) -> None:
@@ -395,6 +406,43 @@ class EditorWindow(QMainWindow):
             self.session.move_node(uid, target_uid, placement)
         except Exception as exc:
             self.statusBar().showMessage(f"节点未移动：{exc}", 5000)
+
+    def _show_node_menu(self, placement: DropPlacement) -> None:
+        menu = QMenu(self)
+        self._node_menu = menu
+        for category, entries in NODE_PALETTE:
+            submenu = menu.addMenu(category)
+            for kind, label in entries:
+                action = submenu.addAction(label)
+                action.triggered.connect(lambda _checked=False, node_kind=kind:
+                                         self.insert_palette_node(node_kind, placement))
+        menu.popup(QCursor.pos())
+
+    def insert_palette_node(self, kind: str, placement: DropPlacement | str = DropPlacement.AFTER) -> Node | None:
+        placement = DropPlacement(placement)
+        try:
+            node = node_from_palette(kind, self.session.program)
+            target_uid = self.session.current_node_uid
+            if target_uid is None:
+                if placement != DropPlacement.AFTER:
+                    raise ValueError("添加子节点前，请先选择可包含内容的节点")
+                self.session.append_node(node)
+            else:
+                self.session.insert_node_relative(target_uid, placement, node)
+            return node
+        except Exception as exc:
+            self.statusBar().showMessage(f"节点未添加：{exc}", 6000)
+            return None
+
+    def _delete_selected_node(self) -> None:
+        uid = self.session.current_node_uid
+        if uid is None:
+            self.statusBar().showMessage("请先选择要删除的节点", 4000)
+            return
+        try:
+            self.session.delete_node(uid)
+        except Exception as exc:
+            self.statusBar().showMessage(f"节点未删除：{exc}", 6000)
 
     def _resource_drop(self, uri: str, target_uid: str, placement: str) -> None:
         actions = available_resource_actions(uri)

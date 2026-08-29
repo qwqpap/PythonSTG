@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.authoring.program import find_node
+from src.authoring.program import ProgramError, find_node
 from src.authoring.timeline import Unknown
 from src.compiler.practice import PRACTICE_STAGE_ID
 from src.core.project_context import ProjectContext
@@ -56,6 +56,22 @@ def _process_is_dead(pid: int) -> bool:
         return ctypes.windll.kernel32.WaitForSingleObject(handle, 0) == 0
     finally:
         ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def _choose_palette(window: EditorWindow, app: QApplication, button, label: str) -> None:
+    button.click()
+    app.processEvents()
+    menu = window._node_menu
+    if menu is None or not menu.isVisible():
+        raise RuntimeError("node palette did not open from its visible toolbar button")
+    for category in menu.actions():
+        submenu = category.menu()
+        for action in submenu.actions() if submenu is not None else ():
+            if action.text() == label:
+                action.trigger()
+                app.processEvents()
+                return
+    raise RuntimeError(f"node palette did not contain {label!r}")
 
 
 def main() -> int:
@@ -121,6 +137,37 @@ def main() -> int:
         if find_node(session.program, "aimed_enter")[1].arguments["duration"] != 45:
             raise RuntimeError("Timeline duration undo did not restore source")
 
+        session.select_unit("demo_stage")
+        session.select_node("stage_intro_wait")
+        _choose_palette(window, app, window.add_after_button, "等待")
+        appended_uid = session.current_node_uid
+        if appended_uid is None or find_node(session.program, appended_uid)[1].kind != "Wait":
+            raise RuntimeError("visible add-after interface did not create a Wait node")
+        session.select_node("stage_at_cue")
+        _choose_palette(window, app, window.add_child_button, "等待")
+        child_uid = session.current_node_uid
+        if child_uid is None or find_node(session.program, child_uid)[1].kind != "Wait":
+            raise RuntimeError("visible add-child interface did not create a Wait node")
+        window.delete_node_button.click()
+        app.processEvents()
+        try:
+            find_node(session.program, child_uid)
+        except ProgramError:
+            pass
+        else:
+            raise RuntimeError("visible delete interface did not remove the selected node")
+        session.undo_stack.undo()
+        if find_node(session.program, child_uid)[1].kind != "Wait":
+            raise RuntimeError("Undo did not restore the deleted node")
+        session.undo_stack.undo()
+        session.undo_stack.undo()
+        for uid in (appended_uid, child_uid):
+            try:
+                find_node(session.program, uid)
+            except ProgramError:
+                continue
+            raise RuntimeError("Undo did not restore the original example before preview")
+
         def run_target(
             name: str,
             target: PreviewTarget,
@@ -150,7 +197,10 @@ def main() -> int:
             if min(*host_size, *child_size) < 160:
                 raise RuntimeError(f"{name} preview is not operable: {host_size=} {child_size=}")
             if window.timeline_dock.height() < 90 or window.inspector_dock.width() < 100:
-                raise RuntimeError(f"{name} layout hid Timeline or Inspector")
+                raise RuntimeError(
+                    f"{name} layout hid Timeline or Inspector: "
+                    f"timeline={window.timeline_dock.height()} inspector={window.inspector_dock.width()}"
+                )
             window.raise_()
             window.activateWindow()
             app.processEvents()
@@ -243,6 +293,7 @@ def main() -> int:
                 "sizes": sizes,
                 "trace_counts": trace_counts,
                 "timeline_edits": ["wait", "duration", "at"],
+                "node_editing": ["add_after", "add_child", "delete", "undo"],
                 "controls": ["pause", "resume", "restart", "seek", "stop"],
                 "orphan_process": False,
             },

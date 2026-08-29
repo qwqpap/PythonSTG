@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from src.authoring.program import (
     AuthoringProgram,
     DropPlacement,
     Node,
     ProgramError,
+    delete_node,
     find_node,
     insert_node,
     move_node,
@@ -21,53 +22,45 @@ if TYPE_CHECKING:
     from .session import EditorSession
 
 
-class SetNodeArgumentCommand(QUndoCommand):
-    """Replace one node argument as a single reversible model mutation."""
+_KEEP_SELECTION = object()
 
+
+class _ProgramCommand(QUndoCommand):
     def __init__(
         self,
         session: "EditorSession",
-        uid: str,
-        name: str,
-        value: Any,
+        text: str,
+        transform: Callable[[AuthoringProgram], AuthoringProgram],
+        *,
+        redo_uid: str | None | object = _KEEP_SELECTION,
+        undo_uid: str | None | object = _KEEP_SELECTION,
     ) -> None:
-        super().__init__(f"修改 {name}")
+        super().__init__(text)
         self._session = session
         self._before = session.program.clone()
-        self._after = set_argument(self._before, uid, name, value)
+        self._after = transform(self._before)
+        self._redo_uid, self._undo_uid = redo_uid, undo_uid
+
+    def _apply(self, program: AuthoringProgram, uid: str | None | object) -> None:
+        self._session._apply_program(program)
+        if uid is not _KEEP_SELECTION:
+            self._session.select_node(uid)
 
     def redo(self) -> None:
-        self._session._apply_program(self._after)
+        self._apply(self._after, self._redo_uid)
 
     def undo(self) -> None:
-        self._session._apply_program(self._before)
+        self._apply(self._before, self._undo_uid)
 
+class SetNodeArgumentCommand(_ProgramCommand):
+    def __init__(self, session: "EditorSession", uid: str, name: str, value: Any) -> None:
+        super().__init__(session, f"修改 {name}", lambda program: set_argument(program, uid, name, value))
 
-class SetUnitFieldCommand(QUndoCommand):
-    """Replace one logical-unit field as a reversible model mutation."""
+class SetUnitFieldCommand(_ProgramCommand):
+    def __init__(self, session: "EditorSession", unit_id: str, name: str, value: Any) -> None:
+        super().__init__(session, f"修改 {name}", lambda program: set_unit_field(program, unit_id, name, value))
 
-    def __init__(
-        self,
-        session: "EditorSession",
-        unit_id: str,
-        name: str,
-        value: Any,
-    ) -> None:
-        super().__init__(f"修改 {name}")
-        self._session = session
-        self._before = session.program.clone()
-        self._after = set_unit_field(self._before, unit_id, name, value)
-
-    def redo(self) -> None:
-        self._session._apply_program(self._after)
-
-    def undo(self) -> None:
-        self._session._apply_program(self._before)
-
-
-class MoveNodeCommand(QUndoCommand):
-    """Apply exactly one Before/After/Child/Wrap move."""
-
+class MoveNodeCommand(_ProgramCommand):
     def __init__(
         self,
         session: "EditorSession",
@@ -78,27 +71,13 @@ class MoveNodeCommand(QUndoCommand):
         target_slot: str | None = None,
     ) -> None:
         placement = DropPlacement(placement)
-        super().__init__(f"移动节点：{placement.value}")
-        self._session = session
-        self._before = session.program.clone()
-        self._after = move_node(
-            self._before,
-            uid,
-            target_uid,
-            placement,
-            target_slot=target_slot,
+        super().__init__(
+            session,
+            f"移动节点：{placement.value}",
+            lambda program: move_node(program, uid, target_uid, placement, target_slot=target_slot),
         )
 
-    def redo(self) -> None:
-        self._session._apply_program(self._after)
-
-    def undo(self) -> None:
-        self._session._apply_program(self._before)
-
-
-class InsertNodeCommand(QUndoCommand):
-    """Insert one new node relative to an existing visible node."""
-
+class InsertNodeCommand(_ProgramCommand):
     def __init__(
         self,
         session: "EditorSession",
@@ -107,16 +86,31 @@ class InsertNodeCommand(QUndoCommand):
         node: Node,
     ) -> None:
         placement = DropPlacement(placement)
-        super().__init__(f"插入 {node.kind}")
-        self._session = session
-        self._before = session.program.clone()
-        self._after = _insert_relative(self._before, target_uid, placement, node)
+        super().__init__(
+            session, f"插入 {node.kind}",
+            lambda program: _insert_relative(program, target_uid, placement, node),
+            redo_uid=node.uid, undo_uid=session.current_node_uid,
+        )
 
-    def redo(self) -> None:
-        self._session._apply_program(self._after)
+class AppendNodeCommand(_ProgramCommand):
+    def __init__(self, session: "EditorSession", unit_id: str, node: Node) -> None:
+        def append(program: AuthoringProgram) -> AuthoringProgram:
+            unit = program.get_unit(unit_id)
+            return insert_node(program, unit_id, None, "body", len(unit.body), node)
 
-    def undo(self) -> None:
-        self._session._apply_program(self._before)
+        super().__init__(
+            session, f"添加 {node.kind}", append, redo_uid=node.uid,
+            undo_uid=session.current_node_uid,
+        )
+
+
+class DeleteNodeCommand(_ProgramCommand):
+    def __init__(self, session: "EditorSession", uid: str) -> None:
+        _unit, node, _location = find_node(session.program, uid)
+        super().__init__(
+            session, f"删除 {node.kind}", lambda program: delete_node(program, uid), redo_uid=None,
+            undo_uid=uid,
+        )
 
 
 def _insert_relative(
@@ -146,6 +140,8 @@ def _insert_relative(
 
 
 __all__ = [
+    "AppendNodeCommand",
+    "DeleteNodeCommand",
     "InsertNodeCommand",
     "MoveNodeCommand",
     "SetNodeArgumentCommand",
