@@ -17,6 +17,7 @@ from src.qt_compat.QtGui import QColor, QMouseEvent, QPainter, QPen
 from src.qt_compat.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -43,6 +44,7 @@ class TimelineCanvas(QWidget):
 
     interval_clicked = Signal(str)
     edit_requested = Signal(str, int)
+    seek_requested = Signal(int)
 
     def __init__(self, session: EditorSession, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -51,8 +53,10 @@ class TimelineCanvas(QWidget):
         self.pixels_per_frame = 0.5
         self.cursor_frame = 0
         self.selected_uid: str | None = None
+        self.scrub_frame: int | None = None
         self._painted: list[_PaintedInterval] = []
         self._drag: tuple[str, str, float, QRectF] | None = None
+        self._scrubbing = False
         self.setObjectName("timeline_canvas")
         self.setMouseTracking(True)
         self.setMinimumHeight(90)
@@ -153,13 +157,33 @@ class TimelineCanvas(QWidget):
         cursor_x = _ORIGIN_X + self.cursor_frame * self.pixels_per_frame
         painter.setPen(QPen(QColor("#ff4b4b"), 2))
         painter.drawLine(int(cursor_x), 0, int(cursor_x), self.height())
+        if self.scrub_frame is not None:
+            scrub_x = _ORIGIN_X + self.scrub_frame * self.pixels_per_frame
+            painter.setPen(QPen(QColor("#f4c95d"), 2, Qt.PenStyle.DashLine))
+            painter.drawLine(int(scrub_x), 0, int(scrub_x), self.height())
+            painter.setPen(QColor("#f4c95d"))
+            painter.drawText(
+                QRectF(scrub_x + 4, 2, 90, _RULER_HEIGHT - 4),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                f"→ {self.scrub_frame}f",
+            )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-        painted = self._at(event.position().x(), event.position().y())
+        position = event.position()
+        if position.y() <= _RULER_HEIGHT and position.x() >= _ORIGIN_X:
+            frame = max(0, round((position.x() - _ORIGIN_X) / self.pixels_per_frame))
+            self.scrub_frame = frame
+            self._scrubbing = True
+            self.update()
+            return
+        painted = self._at(position.x(), position.y())
         if painted is None:
+            if position.x() >= _ORIGIN_X:
+                frame = max(0, round((position.x() - _ORIGIN_X) / self.pixels_per_frame))
+                self.seek_requested.emit(frame)
             return
         uid = painted.interval.uid
         try:
@@ -177,7 +201,26 @@ class TimelineCanvas(QWidget):
             )
         self.update()
 
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._scrubbing:
+            frame = max(
+                0, round((event.position().x() - _ORIGIN_X) / self.pixels_per_frame)
+            )
+            if frame != self.scrub_frame:
+                self.scrub_frame = frame
+                self.update()
+            return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._scrubbing and event.button() == Qt.MouseButton.LeftButton:
+            frame = self.scrub_frame
+            self._scrubbing = False
+            self.scrub_frame = None
+            self.update()
+            if frame is not None:
+                self.seek_requested.emit(frame)
+            return
         drag = self._drag
         self._drag = None
         if drag is None or event.button() != Qt.MouseButton.LeftButton:
@@ -202,11 +245,16 @@ class TimelineCanvas(QWidget):
 class TimelinePanel(QWidget):
     """Permanent bottom panel owned by the window's one EditorSession."""
 
+    seek_requested = Signal(int)
+    pause_requested = Signal()
+    resume_requested = Signal()
+
     def __init__(self, session: EditorSession, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("timeline_panel")
         self.session = session
         self.projection: TimelineProjection | None = None
+        self._seek_target: int | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -216,7 +264,23 @@ class TimelinePanel(QWidget):
         self.status_label = QLabel("时间线 · 代码投影", toolbar)
         self.status_label.setObjectName("timeline_status")
         toolbar_layout.addWidget(self.status_label)
+        self.seek_progress = QProgressBar(toolbar)
+        self.seek_progress.setObjectName("timeline_seek_progress")
+        self.seek_progress.setRange(0, 100)
+        self.seek_progress.setValue(0)
+        self.seek_progress.setFormat("快进到目标帧 %p%")
+        self.seek_progress.setVisible(False)
+        self.seek_progress.setMaximumWidth(220)
+        toolbar_layout.addWidget(self.seek_progress)
         toolbar_layout.addStretch(1)
+        self.pause_button = QPushButton("暂停", toolbar)
+        self.pause_button.setObjectName("timeline_pause")
+        self.pause_button.clicked.connect(self.pause_requested)
+        toolbar_layout.addWidget(self.pause_button)
+        self.resume_button = QPushButton("继续", toolbar)
+        self.resume_button.setObjectName("timeline_resume")
+        self.resume_button.clicked.connect(self.resume_requested)
+        toolbar_layout.addWidget(self.resume_button)
         zoom_out = QPushButton("−", toolbar)
         zoom_out.setObjectName("timeline_zoom_out")
         zoom_out.clicked.connect(lambda: self.canvas.zoom(1 / 1.5))
@@ -231,6 +295,7 @@ class TimelinePanel(QWidget):
         self.scroll.setWidgetResizable(True)
         self.canvas = TimelineCanvas(session, self.scroll)
         self.canvas.edit_requested.connect(self.edit_interval)
+        self.canvas.seek_requested.connect(self.seek_requested)
         self.scroll.setWidget(self.canvas)
         layout.addWidget(self.scroll)
 
@@ -238,6 +303,7 @@ class TimelinePanel(QWidget):
         session.program_changed.connect(self.refresh)
         session.selection_changed.connect(self.refresh)
         session.trace_changed.connect(self.refresh)
+        session.preview_changed.connect(self._preview_state_changed)
         self.refresh()
 
     def refresh(self) -> None:
@@ -265,10 +331,29 @@ class TimelinePanel(QWidget):
         self._update_status()
 
     def handle_preview_event(self, message: dict) -> None:
-        if message.get("event") == "frame":
+        event = message.get("event")
+        if event == "frame":
             frame = message.get("payload", {}).get("frame")
             if isinstance(frame, int) and not isinstance(frame, bool):
                 self.canvas.set_cursor_frame(frame)
+                self._update_seek_progress(frame)
+        elif event == "state":
+            state = message.get("payload", {}).get("state")
+            if state == "seeking":
+                target = message.get("payload", {}).get("frame")
+                if isinstance(target, int) and not isinstance(target, bool):
+                    self._seek_target = target
+                self.seek_progress.setVisible(True)
+                self._update_seek_progress(self.session.preview_frame)
+
+    def _update_seek_progress(self, frame: int) -> None:
+        if self._seek_target is None or self.session.preview_state != "seeking":
+            self.seek_progress.setVisible(False)
+            return
+        target = max(1, self._seek_target)
+        percent = int(max(0, min(100, frame * 100 / target)))
+        self.seek_progress.setValue(percent)
+        self.seek_progress.setVisible(True)
 
     def edit_interval(self, uid: str, value: int) -> None:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -286,6 +371,11 @@ class TimelinePanel(QWidget):
                 "Timeline 只允许修改字面量 Wait、duration 或 At.frame",
             )
         self.session.set_node_argument(uid, argument, value)
+
+    def _preview_state_changed(self, state: str) -> None:
+        if state != "seeking":
+            self._seek_target = None
+            self.seek_progress.setVisible(False)
 
     def _update_status(self) -> None:
         projection = self.projection

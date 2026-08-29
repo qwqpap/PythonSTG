@@ -89,17 +89,28 @@ def _drag_events(flow, mime, position):
     return enter, move, drop
 
 
-def _card_point(flow, uid: str, zone: str) -> QPoint:
+def _panel_point(panel, zone: str) -> QPoint:
+    strip = int(panel.height() * 0.34)
+    if zone == "before":
+        return QPoint(panel.center().x(), panel.top() + 2)
+    if zone == "after":
+        return QPoint(panel.center().x(), panel.bottom() - 2)
+    if zone == "child":
+        return QPoint(panel.left() + 4, panel.center().y())
+    return QPoint(panel.right() - 4, panel.center().y())
+
+
+def _hover_card(flow, mime, uid: str):
     rect = flow.canvas.rect_for_uid(uid)
     if rect is None:
         raise AssertionError(f"card {uid!r} is not visible")
-    if zone == "before":
-        return QPoint(rect.center().x(), rect.top() + 1)
-    if zone == "after":
-        return QPoint(rect.center().x(), rect.bottom() - 1)
-    if zone == "child":
-        return QPoint(rect.left() + 2, rect.center().y())
-    return QPoint(rect.right() - 2, rect.center().y())
+    enter, move, _drop = _drag_events(flow, mime, rect.center())
+    QApplication.sendEvent(flow.canvas, enter)
+    QApplication.sendEvent(flow.canvas, move)
+    panel = flow.canvas._panel_rect
+    if panel is None:
+        raise AssertionError(f"hovering {uid!r} did not anchor the four-zone panel")
+    return panel
 
 
 def verify_native_dragflow() -> dict[str, object]:
@@ -158,22 +169,18 @@ def verify_native_dragflow() -> dict[str, object]:
             window.node_palette.search.setText("")
             _process_events(app)
 
-            # 2. Four-zone switching with a real drag over a visible container card.
+            # 2. Four-zone switching on the magnified panel over a container card.
             zones = {}
+            mime = _palette_mime(window, "Repeat")
+            panel = _hover_card(flow, mime, "container")
             for zone in ("before", "after", "child", "wrap"):
-                position = _card_point(flow, "container", zone)
-                mime = _palette_mime(window, "Repeat")
-                enter, move, _drop = _drag_events(flow, mime, position)
-                QApplication.sendEvent(canvas, enter)
+                position = _panel_point(panel, zone)
+                _enter, move, _drop = _drag_events(flow, mime, position)
                 QApplication.sendEvent(canvas, move)
                 _process_events(app)
                 if not move.isAccepted():
                     raise RuntimeError(f"drag move refused at zone {zone}")
                 zones[zone] = flow.canvas._drop_candidate[1].value
-                QApplication.sendEvent(canvas, QDragMoveEvent(
-                    position, Qt.DropAction.MoveAction, mime,
-                    Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
-                ))
             expected = {"before": "before", "after": "after", "child": "child", "wrap": "wrap"}
             if zones != expected:
                 raise RuntimeError(f"four-zone mapping wrong: {zones}")
@@ -182,7 +189,8 @@ def verify_native_dragflow() -> dict[str, object]:
             # 3. A real drop appends one undoable command and flashes the card.
             body_before = [node.uid for node in session.program.get_unit("stage").body]
             mime = _palette_mime(window, "Wait")
-            position = _card_point(flow, "wait", "after")
+            panel = _hover_card(flow, mime, "wait")
+            position = _panel_point(panel, "after")
             enter, move, drop = _drag_events(flow, mime, position)
             QApplication.sendEvent(canvas, enter)
             QApplication.sendEvent(canvas, move)

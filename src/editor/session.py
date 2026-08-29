@@ -559,6 +559,7 @@ class EditorSession(QObject):
             "starting",
             "running",
             "paused",
+            "seeking",
             "stale",
             "stopping",
             "error",

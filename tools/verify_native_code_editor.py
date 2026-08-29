@@ -18,13 +18,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.authoring.program import ProgramError, find_node
+from src.authoring.program import DropPlacement, ProgramError, find_node
 from src.authoring.timeline import Unknown
 from src.compiler.practice import PRACTICE_STAGE_ID
 from src.core.project_context import ProjectContext
 from src.editor.preview import PreviewTarget
 from src.editor.session import EditorSession
 from src.editor.window import EditorWindow
+from src.qt_compat.QtCore import Qt
 from src.qt_compat.QtWidgets import QApplication
 
 
@@ -58,20 +59,28 @@ def _process_is_dead(pid: int) -> bool:
         ctypes.windll.kernel32.CloseHandle(handle)
 
 
-def _choose_palette(window: EditorWindow, app: QApplication, button, label: str) -> None:
-    button.click()
+def _choose_palette(window: EditorWindow, app: QApplication, placement, kind: str) -> None:
+    """Insert through the visible palette: pick a mode, select, then add."""
+
+    window.insert_mode_buttons[placement].click()
     app.processEvents()
-    menu = window._node_menu
-    if menu is None or not menu.isVisible():
-        raise RuntimeError("node palette did not open from its visible toolbar button")
-    for category in menu.actions():
-        submenu = category.menu()
-        for action in submenu.actions() if submenu is not None else ():
-            if action.text() == label:
-                action.trigger()
+    palette = window.node_palette
+    role = int(Qt.ItemDataRole.UserRole)
+
+    def walk(item):
+        yield item
+        for index in range(item.childCount()):
+            yield from walk(item.child(index))
+
+    for top in range(palette.tree.topLevelItemCount()):
+        for item in walk(palette.tree.topLevelItem(top)):
+            if item.data(0, role) == kind and not item.isDisabled():
+                palette.tree.setCurrentItem(item)
+                app.processEvents()
+                window.add_node_button.click()
                 app.processEvents()
                 return
-    raise RuntimeError(f"node palette did not contain {label!r}")
+    raise RuntimeError(f"node palette did not contain an enabled {kind!r} entry")
 
 
 def main() -> int:
@@ -139,12 +148,12 @@ def main() -> int:
 
         session.select_unit("demo_stage")
         session.select_node("stage_intro_wait")
-        _choose_palette(window, app, window.add_after_button, "等待")
+        _choose_palette(window, app, DropPlacement.AFTER, "Wait")
         appended_uid = session.current_node_uid
         if appended_uid is None or find_node(session.program, appended_uid)[1].kind != "Wait":
             raise RuntimeError("visible add-after interface did not create a Wait node")
         session.select_node("stage_at_cue")
-        _choose_palette(window, app, window.add_child_button, "等待")
+        _choose_palette(window, app, DropPlacement.CHILD, "Wait")
         child_uid = session.current_node_uid
         if child_uid is None or find_node(session.program, child_uid)[1].kind != "Wait":
             raise RuntimeError("visible add-child interface did not create a Wait node")
@@ -192,8 +201,24 @@ def main() -> int:
             pids.append(pid)
             host_size = (window.preview_host.width(), window.preview_host.height())
             child_size = _child_size(hwnd)
-            if abs(host_size[0] - child_size[0]) > 2 or abs(host_size[1] - child_size[1]) > 2:
-                raise RuntimeError(f"{name} child does not fill host: {host_size=} {child_size=}")
+            ratio = window.preview_host.devicePixelRatioF()
+            host_physical = (
+                max(1, round(host_size[0] * ratio)),
+                max(1, round(host_size[1] * ratio)),
+            )
+            game = window.preview_host.game_size()
+            scale = min(host_physical[0] / game[0], host_physical[1] / game[1])
+            expected = (
+                max(1, round(game[0] * scale)),
+                max(1, round(game[1] * scale)),
+            )
+            if abs(child_size[0] - expected[0]) > 2 or abs(child_size[1] - expected[1]) > 2:
+                raise RuntimeError(
+                    f"{name} child does not letterbox-fit host: "
+                    f"{host_size=} {game=} {child_size=} expected={expected}"
+                )
+            if child_size[0] > host_physical[0] + 2 or child_size[1] > host_physical[1] + 2:
+                raise RuntimeError(f"{name} child overflows host: {host_size=} {child_size=}")
             if min(*host_size, *child_size) < 160:
                 raise RuntimeError(f"{name} preview is not operable: {host_size=} {child_size=}")
             if window.timeline_dock.height() < 90 or window.inspector_dock.width() < 100:

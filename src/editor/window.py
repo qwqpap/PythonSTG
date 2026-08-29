@@ -160,6 +160,9 @@ _WINDOW_STYLESHEET = """
     QPlainTextEdit:disabled, QComboBox:disabled { color: #6e7681; }
     QComboBox QAbstractItemView { background: #1f242c; color: #c9d1d9;
         selection-background-color: #294d70; }
+    QScrollArea { background: #171a20; border: none; }
+    QScrollArea > QWidget > QWidget { background: transparent; }
+    QScrollArea > QWidget > QScrollBar { background: #171a20; }
     QTreeWidget, QListWidget { background: #171a20; color: #c9d1d9;
         border: 1px solid #3a414e; }
     QTreeWidget::item, QListWidget::item { padding: 2px; }
@@ -502,6 +505,9 @@ class EditorWindow(QMainWindow):
         self.session.log_changed.connect(self.refresh_problems)
         self.preview_owner.build_published.connect(self._show_generated_entry)
         self.preview_owner.event_received.connect(self.timeline_panel.handle_preview_event)
+        self.timeline_panel.seek_requested.connect(self._seek_timeline)
+        self.timeline_panel.pause_requested.connect(self._pause_preview)
+        self.timeline_panel.resume_requested.connect(self._resume_preview)
 
     def refresh_project(self) -> None:
         self.unit_list.blockSignals(True)
@@ -1037,6 +1043,13 @@ class EditorWindow(QMainWindow):
         except RuntimeError as exc:
             self.statusBar().showMessage(str(exc), 3000)
 
+    def _seek_timeline(self, frame: int) -> None:
+        try:
+            self.preview_owner.seek(int(frame))
+            self.statusBar().showMessage(f"预览快进到第 {frame} 帧", 2500)
+        except RuntimeError as exc:
+            self.statusBar().showMessage(f"无法跳转：{exc}", 4000)
+
     def _seek_preview(self) -> None:
         frame, accepted = QInputDialog.getInt(
             self,
@@ -1061,6 +1074,7 @@ class EditorWindow(QMainWindow):
             "starting": "正在启动…",
             "running": "运行中",
             "paused": "已暂停",
+            "seeking": "正在快进到目标帧…",
             "stale": "运行中 · 预览已过期",
             "stopping": "正在停止…",
             "error": "预览错误",

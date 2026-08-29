@@ -116,6 +116,12 @@ class PreviewHost(QWidget):
     def native_handle(self) -> int | None:
         return self._hwnd
 
+    def game_size(self) -> tuple[int, int]:
+        """The game window's own size when it was first embedded."""
+
+        left, top, right, bottom = self._original_rect
+        return max(1, right - left), max(1, bottom - top)
+
     def attach_process(self, process: QProcess) -> None:
         self.detach()
         self._process = process
@@ -216,14 +222,31 @@ class PreviewHost(QWidget):
         return True
 
     def _sync_size(self) -> None:
+        """Fit the game into the host with its aspect ratio preserved.
+
+        MoveWindow works in physical pixels relative to the parent client area,
+        so the host's logical size must be scaled by the device pixel ratio;
+        otherwise the game overflows or underfills the visible panel on scaled
+        displays.
+        """
+
         if self._hwnd is None or sys.platform != "win32":
             return
+        ratio = self.devicePixelRatioF()
+        host_w = max(1, round(self.width() * ratio))
+        host_h = max(1, round(self.height() * ratio))
+        left, top, right, bottom = self._original_rect
+        game_w = max(1, right - left)
+        game_h = max(1, bottom - top)
+        scale = min(host_w / game_w, host_h / game_h)
+        child_w = max(1, round(game_w * scale))
+        child_h = max(1, round(game_h * scale))
         _user32().MoveWindow(
             self._hwnd,
-            0,
-            0,
-            max(1, self.width()),
-            max(1, self.height()),
+            (host_w - child_w) // 2,
+            (host_h - child_h) // 2,
+            child_w,
+            child_h,
             True,
         )
 
@@ -545,7 +568,7 @@ class PreviewOwner(QObject):
         payload = message["payload"]
         if event == "state":
             state = payload.get("state")
-            if state in {"starting", "running", "paused"} and not self._stale:
+            if state in {"starting", "running", "paused", "seeking"} and not self._stale:
                 self.session.set_preview_state(state)
         elif event == "trace":
             self.session.append_trace(

@@ -243,6 +243,31 @@ python tools/verify_native_code_editor_dragflow.py --json
   960×640 是规格中的"小窗口"，必须纵向堆叠。
 - 全量门禁复验：439 passed / 40.2s；原生验证器 PASS。
 
+### 预览与拖拽可用性修复（2026-08-30 追加）
+
+维护者反馈四项问题，全部修复：
+
+1. **检查器白色背景**：全局深色样式未覆盖 `QScrollArea` 及其内容部件。已补充
+   `QScrollArea` 深色背景与透明内容规则，检查器与全窗一致。
+2. **预览超出宿主看不全**：`PreviewHost._sync_size` 之前用 Qt 逻辑像素直接
+   `MoveWindow`（物理像素坐标），且无视宽高比。现在按设备像素比换算并以信箱式
+   保持宽高比居中适配，游戏窗口任何宿主尺寸下完整可见。原生验证器契约同步更新：
+   三个预览目标（Project/Stage/Spell）实测 294×227 信箱适配 294×667 / 294×387
+   宿主，`tools/verify_native_code_editor_preview.py` 与
+   `tools/verify_native_code_editor.py` PASS。
+3. **时间线定位预览**：时间线标尺与泳道空白处支持点击/拖拽选择目标帧（黄色虚线
+   幽灵播放头 + 帧号），松开一次提交 seek（从 0 重算快进）；工具栏新增暂停/继续
+   按钮与"快进到目标帧 %"进度条（seeking 状态按 frame 事件实时推进，红色播放头
+   跟随当前帧）。`main.py` 的 seeking 状态事件接入 `EditorSession` 状态机。
+4. **四区命中区太小**：卡片拖拽不再依赖 34px 高卡片内的四分区，改为悬浮
+   280×180 放大面板（锚定目标卡片中心、视口内钳制），四区大标签、命中区约
+   60-140px；目标卡片同步显示插入指示（前/后=粗线，子项=实线框，包裹=虚线框）。
+   光标在面板内时面板优先，避免被下层卡片抢占锚定。
+
+复验：全仓 439 passed / 26.1s；`verify_native_code_editor_dragflow.py`、
+`verify_native_code_editor_preview.py`、`verify_native_code_editor.py`、
+`verify_native_code_editor_layout.py` 四个真实 Windows 门禁全部 PASS。
+
 ### Usability：not run
 
 维护者尚未实际完成完整工作流（新建 Wave/Enemy、拖出 Repeat/Wait/Fire、包裹、

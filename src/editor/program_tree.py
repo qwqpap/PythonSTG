@@ -60,6 +60,9 @@ _AUTOSCROLL_INTERVAL_MS = 16
 _AUTOSCROLL_EDGE_PX = 28
 _AUTOSCROLL_STEP_PX = 10
 _MIN_COLUMN_WIDTH = 230
+_ZONE_PANEL_WIDTH = 280
+_ZONE_PANEL_HEIGHT = 180
+_ZONE_STRIP = 0.34
 
 _MARGIN = 12
 _CARD_HEIGHT = 34
@@ -206,6 +209,8 @@ class _FlowCanvas(QWidget):
         self._drop_active = False
         self._drop_candidate: tuple[str | None, DropPlacement, str | None] | None = None
         self._drop_check = DropCheck(False, "")
+        self._panel_uid: str | None = None
+        self._panel_rect: QRect | None = None
         self._flash_uid: str | None = None
         self._press_card: str | None = None
         self._press_pos = QPoint()
@@ -617,17 +622,69 @@ class _FlowCanvas(QWidget):
             return
         allowed = self._drop_check.allowed
         if element.kind == "card":
-            for zone_placement, rect in self._zones(element.rect).items():
-                active = zone_placement == placement
-                if active:
-                    color = QColor("#238636" if allowed else "#8b1a1a")
-                    painter.fillRect(rect, color)
-                painter.setPen(QPen(QColor("#8b949e"), 1))
-                painter.setFont(self._base_font(bold=False))
-                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, _ZONE_LABELS[zone_placement])
+            self._paint_card_indicator(painter, element, placement, allowed)
+            self._paint_zone_panel(painter)
         elif not allowed:
             painter.setPen(QPen(QColor("#8b1a1a"), 2))
             painter.drawRoundedRect(element.rect.adjusted(-2, -2, 2, 2), 6, 6)
+
+    def _paint_card_indicator(
+        self, painter: QPainter, element: _Element, placement: DropPlacement, allowed: bool
+    ) -> None:
+        color = QColor("#238636" if allowed else "#8b1a1a")
+        rect = element.rect
+        if placement == DropPlacement.BEFORE:
+            painter.fillRect(QRect(rect.left(), rect.top() - 2, rect.width(), 4), color)
+        elif placement == DropPlacement.AFTER:
+            painter.fillRect(QRect(rect.left(), rect.bottom() - 2, rect.width(), 4), color)
+        elif placement == DropPlacement.CHILD:
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect.adjusted(1, 1, -1, -1))
+        else:
+            painter.setPen(QPen(color, 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect.adjusted(-3, -3, 3, 3))
+
+    def _paint_zone_panel(self, painter: QPainter) -> None:
+        if self._panel_rect is None:
+            return
+        rect = self._panel_rect
+        painter.setPen(QPen(QColor("#3a414e"), 1))
+        painter.setBrush(QColor("#11151a"))
+        painter.drawRoundedRect(rect, 8, 8)
+        strip = int(rect.height() * _ZONE_STRIP)
+        zones = {
+            DropPlacement.BEFORE: QRect(rect.left(), rect.top(), rect.width(), strip),
+            DropPlacement.AFTER: QRect(
+                rect.left(), rect.bottom() - strip + 1, rect.width(), strip
+            ),
+            DropPlacement.CHILD: QRect(
+                rect.left(), rect.top() + strip, rect.width() // 2,
+                rect.height() - 2 * strip,
+            ),
+            DropPlacement.WRAP: QRect(
+                rect.center().x(), rect.top() + strip,
+                rect.width() - rect.width() // 2, rect.height() - 2 * strip,
+            ),
+        }
+        painter.setFont(self._base_font(bold=True))
+        for placement, zone in zones.items():
+            active = (
+                self._drop_candidate is not None
+                and self._drop_candidate[0] == self._panel_uid
+                and self._drop_candidate[1] == placement
+            )
+            if active:
+                allowed = self._drop_check.allowed
+                painter.setPen(QPen(QColor("#238636" if allowed else "#8b1a1a"), 1))
+                painter.setBrush(QColor(35, 134, 54, 110 if allowed else 90))
+            else:
+                painter.setPen(QPen(QColor("#30363d"), 1))
+                painter.setBrush(QColor(48, 54, 61, 130))
+            painter.drawRect(zone)
+            painter.setPen(QColor("#f0f6fc" if active else "#8b949e"))
+            painter.drawText(zone, Qt.AlignmentFlag.AlignCenter, _ZONE_LABELS[placement])
 
     def _paint_flash(self, painter: QPainter) -> None:
         if self._flash_uid is None:
@@ -661,45 +718,62 @@ class _FlowCanvas(QWidget):
                 return element
         return None
 
-    def _zones(self, rect: QRect) -> dict[DropPlacement, QRect]:
-        quarter = max(1, rect.height() // 4)
-        middle = QRect(
-            rect.left(), rect.top() + quarter, rect.width(), rect.height() - 2 * quarter
-        )
-        half = middle.width() // 2
-        return {
-            DropPlacement.BEFORE: QRect(rect.left(), rect.top(), rect.width(), quarter),
-            DropPlacement.AFTER: QRect(
-                rect.left(), rect.bottom() - quarter + 1, rect.width(), quarter
-            ),
-            DropPlacement.CHILD: QRect(middle.left(), middle.top(), half, middle.height()),
-            DropPlacement.WRAP: QRect(
-                middle.left() + half, middle.top(), middle.width() - half, middle.height()
-            ),
-        }
-
     def _drop_target(self, position: QPoint) -> tuple[str | None, DropPlacement, str | None]:
+        # Aiming inside the anchored panel always wins, even when another card
+        # happens to sit underneath it: the panel is what the author sees.
+        panel_zone = self._zone_from_panel(position)
+        if panel_zone is not None:
+            return panel_zone
+        card = self._card_at(position)
+        if card is not None:
+            self._anchor_zone_panel(card, position)
+            return self._zone_from_panel(position) or (card.uid, DropPlacement.AFTER, None)
         landing = self._landing_at(position)
         if landing is not None:
+            self._panel_uid = None
+            self._panel_rect = None
             if landing.kind == "new_branch":
                 return landing.uid, DropPlacement.CHILD, "new_branch"
             if landing.uid is None and landing.slot is None:
                 return None, DropPlacement.AFTER, None
             return landing.uid, DropPlacement.CHILD, landing.slot
-        card = self._card_at(position)
-        if card is None:
-            if self._layout.root_landing is not None and self._layout.root_landing.rect.contains(position):
-                return None, DropPlacement.AFTER, None
+        if self._layout.root_landing is not None and self._layout.root_landing.rect.contains(position):
             return None, DropPlacement.AFTER, None
-        rect = card.rect
-        ratio = (position.y() - rect.top()) / max(1, rect.height())
-        if ratio < 0.25:
-            return card.uid, DropPlacement.BEFORE, None
-        if ratio > 0.75:
-            return card.uid, DropPlacement.AFTER, None
-        if position.x() < rect.center().x():
-            return card.uid, DropPlacement.CHILD, None
-        return card.uid, DropPlacement.WRAP, None
+        return None, DropPlacement.AFTER, None
+
+    def _anchor_zone_panel(self, card: _Element, position: QPoint) -> None:
+        """Anchor the magnified four-zone panel on the hovered card."""
+
+        if self._panel_uid != card.uid or self._panel_rect is None:
+            visible = self.visible_rect()
+            x = card.rect.center().x() - _ZONE_PANEL_WIDTH // 2
+            y = card.rect.center().y() - _ZONE_PANEL_HEIGHT // 2
+            x = max(4, min(x, self.width() - _ZONE_PANEL_WIDTH - 4))
+            y = max(
+                visible.top() + 4,
+                min(y, visible.bottom() - _ZONE_PANEL_HEIGHT - 4),
+            )
+            self._panel_uid = card.uid
+            self._panel_rect = QRect(x, y, _ZONE_PANEL_WIDTH, _ZONE_PANEL_HEIGHT)
+
+    def _zone_from_panel(self, position: QPoint) -> tuple[str, DropPlacement, str | None] | None:
+        if self._panel_uid is None or self._panel_rect is None:
+            return None
+        if not self._panel_rect.contains(position):
+            return None
+        rect = self._panel_rect
+        rel_y = position.y() - rect.top()
+        strip = int(rect.height() * _ZONE_STRIP)
+        if rel_y < strip:
+            return self._panel_uid, DropPlacement.BEFORE, None
+        if rel_y > rect.height() - strip:
+            return self._panel_uid, DropPlacement.AFTER, None
+        placement = (
+            DropPlacement.CHILD
+            if position.x() < rect.center().x()
+            else DropPlacement.WRAP
+        )
+        return self._panel_uid, placement, None
 
     # -- mouse and keyboard ---------------------------------------------------
 
@@ -887,6 +961,8 @@ class _FlowCanvas(QWidget):
         self._drop_active = False
         self._drop_candidate = None
         self._drop_check = DropCheck(False, "")
+        self._panel_uid = None
+        self._panel_rect = None
         self._hover_uid = None
         self._autoscroll_direction = 0
         self._autoscroll_timer.stop()

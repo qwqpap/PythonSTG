@@ -59,6 +59,38 @@ def _wait(app: QApplication, predicate, timeout: float, label: str) -> None:
     raise RuntimeError(f"timeout waiting for {label}")
 
 
+def _expected_child_size(host: tuple[int, int], game: tuple[int, int]) -> tuple[int, int]:
+    scale = min(host[0] / game[0], host[1] / game[1])
+    return max(1, round(game[0] * scale)), max(1, round(game[1] * scale))
+
+
+def _child_fits(window, hwnd: int) -> bool:
+    ratio = window.preview_host.devicePixelRatioF()
+    host = (
+        max(1, round(window.preview_host.width() * ratio)),
+        max(1, round(window.preview_host.height() * ratio)),
+    )
+    child = _child_size(hwnd)
+    expected = _expected_child_size(host, window.preview_host.game_size())
+    return abs(child[0] - expected[0]) <= 2 and abs(child[1] - expected[1]) <= 2
+
+
+def _assert_letterboxed(window, host_logical, child) -> None:
+    ratio = window.preview_host.devicePixelRatioF()
+    host = (
+        max(1, round(host_logical[0] * ratio)),
+        max(1, round(host_logical[1] * ratio)),
+    )
+    game = window.preview_host.game_size()
+    expected = _expected_child_size(host, game)
+    if abs(child[0] - expected[0]) > 2 or abs(child[1] - expected[1]) > 2:
+        raise RuntimeError(
+            f"embedded game must letterbox-fit the host: {host=} {game=} {child=}"
+        )
+    if child[0] > host[0] + 2 or child[1] > host[1] + 2:
+        raise RuntimeError(f"embedded game overflows the host: {host=} {child=}")
+
+
 def _child_size(hwnd: int) -> tuple[int, int]:
     rect = wintypes.RECT()
     if not ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect)):
@@ -140,11 +172,12 @@ def main() -> int:
         large_child = _child_size(hwnd)
         if min(*large_host, *large_child) < 200:
             raise RuntimeError(f"1480x920 preview is not operable: {large_host=} {large_child=}")
+        _assert_letterboxed(window, large_host, large_child)
 
         window.resize(960, 640)
         _wait(
             app,
-            lambda: abs(_child_size(hwnd)[0] - window.preview_host.width()) <= 2,
+            lambda: _child_fits(window, hwnd),
             5.0,
             "embedded resize",
         )
@@ -152,6 +185,7 @@ def main() -> int:
         small_child = _child_size(hwnd)
         if min(*small_host, *small_child) < 160:
             raise RuntimeError(f"960x640 preview is not operable: {small_host=} {small_child=}")
+        _assert_letterboxed(window, small_host, small_child)
 
         window.raise_()
         window.activateWindow()

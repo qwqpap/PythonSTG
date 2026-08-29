@@ -85,37 +85,72 @@ def _node_mime(uid: str) -> QMimeData:
     return mime
 
 
-def _send_drag(
-    flow: ProgramFlow, mime: QMimeData, position: QPoint, *, expect_accepted: bool = True
-) -> QDropEvent:
-    canvas = flow.canvas
+def _drag_events(flow, mime: QMimeData, position: QPoint):
     actions = Qt.DropAction.MoveAction
     buttons = Qt.MouseButton.LeftButton
     modifiers = Qt.KeyboardModifier.NoModifier
-    QApplication.sendEvent(
-        canvas, QDragEnterEvent(position, actions, mime, buttons, modifiers)
+    return (
+        QDragEnterEvent(position, actions, mime, buttons, modifiers),
+        QDragMoveEvent(position, actions, mime, buttons, modifiers),
+        QDropEvent(position, actions, mime, buttons, modifiers),
     )
-    move = QDragMoveEvent(position, actions, mime, buttons, modifiers)
+
+
+def _hover_card(flow: ProgramFlow, mime: QMimeData, uid: str) -> QRect:
+    """Enter a card drag; the magnified four-zone panel must appear."""
+
+    rect = flow.canvas.rect_for_uid(uid)
+    assert rect is not None, f"card {uid} is not visible in the flow"
+    enter, move, _drop = _drag_events(flow, mime, rect.center())
+    QApplication.sendEvent(flow.canvas, enter)
+    QApplication.sendEvent(flow.canvas, move)
+    panel = flow.canvas._panel_rect
+    assert panel is not None, "hovering a card must anchor the four-zone panel"
+    return panel
+
+
+def _panel_point(panel: QRect, placement: DropPlacement) -> QPoint:
+    strip = int(panel.height() * 0.34)
+    if placement == DropPlacement.BEFORE:
+        return QPoint(panel.center().x(), panel.top() + 2)
+    if placement == DropPlacement.AFTER:
+        return QPoint(panel.center().x(), panel.bottom() - 2)
+    if placement == DropPlacement.CHILD:
+        return QPoint(panel.left() + 4, panel.center().y())
+    return QPoint(panel.right() - 4, panel.center().y())
+
+
+def _send_drag(
+    flow: ProgramFlow,
+    mime: QMimeData,
+    target_uid: str,
+    placement: DropPlacement,
+    *,
+    expect_accepted: bool = True,
+) -> QDropEvent:
+    panel = _hover_card(flow, mime, target_uid)
+    position = _panel_point(panel, placement)
+    canvas = flow.canvas
+    _enter, move, _ = _drag_events(flow, mime, position)
     QApplication.sendEvent(canvas, move)
     if expect_accepted:
         assert move.isAccepted(), "drag move must be accepted over a visible drop target"
     else:
         assert not move.isAccepted(), "an illegal drop zone must refuse the drag"
-    drop = QDropEvent(position, actions, mime, buttons, modifiers)
+    _e, _m, drop = _drag_events(flow, mime, position)
     QApplication.sendEvent(canvas, drop)
     return drop
 
 
-def _card_point(flow: ProgramFlow, uid: str, placement: DropPlacement) -> QPoint:
-    rect = flow.canvas.rect_for_uid(uid)
-    assert rect is not None, f"card {uid} is not visible in the flow"
-    if placement == DropPlacement.BEFORE:
-        return QPoint(rect.center().x(), rect.top() + 1)
-    if placement == DropPlacement.AFTER:
-        return QPoint(rect.center().x(), rect.bottom() - 1)
-    if placement == DropPlacement.CHILD:
-        return QPoint(rect.left() + 2, rect.center().y())
-    return QPoint(rect.right() - 2, rect.center().y())
+def _send_drag_at(flow: ProgramFlow, mime: QMimeData, position: QPoint) -> QDropEvent:
+    """Drop onto a large direct landing (empty slot, new branch, root)."""
+
+    canvas = flow.canvas
+    enter, move, drop = _drag_events(flow, mime, position)
+    QApplication.sendEvent(canvas, enter)
+    QApplication.sendEvent(canvas, move)
+    QApplication.sendEvent(canvas, drop)
+    return drop
 
 
 @pytest.mark.parametrize(
@@ -134,7 +169,7 @@ def test_real_drag_events_move_nodes_with_one_undoable_command(
     flow = window.program_tree
     before = session.program.semantic_data()
 
-    drop = _send_drag(flow, _node_mime(source), _card_point(flow, target, placement))
+    drop = _send_drag(flow, _node_mime(source), target, placement)
 
     assert drop.isAccepted()
     assert session.undo_stack.count() == 1
@@ -153,7 +188,7 @@ def test_real_palette_drag_inserts_node_and_flashes_it(tmp_path, qapp_session):
     flow = window.program_tree
     mime = _drag_mime(window, "Wait")
 
-    drop = _send_drag(flow, mime, _card_point(flow, "a", DropPlacement.BEFORE))
+    drop = _send_drag(flow, mime, "a", DropPlacement.BEFORE)
 
     assert drop.isAccepted()
     body = session.program.get_unit("stage").body
@@ -177,7 +212,8 @@ def test_invalid_drag_zone_is_rejected_without_model_changes(tmp_path, qapp_sess
     drop = _send_drag(
         flow,
         _node_mime("container"),
-        _card_point(flow, "a", DropPlacement.WRAP),
+        "a",
+        DropPlacement.WRAP,
         expect_accepted=False,
     )
 
@@ -206,9 +242,7 @@ def test_empty_unit_root_landing_takes_the_first_node(tmp_path, qapp_session):
     landing = canvas._layout.root_landing
     assert landing is not None and landing.rect.height() >= 120
 
-    drop = _send_drag(
-        flow, _drag_mime(window, "Wait"), landing.rect.center()
-    )
+    drop = _send_drag_at(flow, _drag_mime(window, "Wait"), landing.rect.center())
 
     assert drop.isAccepted()
     body = session.program.get_unit("stage").body
@@ -245,7 +279,7 @@ def test_if_dual_slots_and_parallel_new_branch_accept_drops(tmp_path, qapp_sessi
     branch_landing = next(
         element.rect for element in new_branch if element.uid == parallel_uid
     )
-    drop = _send_drag(flow, _drag_mime(window, "Wait"), branch_landing.center())
+    drop = _send_drag_at(flow, _drag_mime(window, "Wait"), branch_landing.center())
     assert drop.isAccepted()
     parallel_after = find_node(session.program, parallel_uid)[1]
     assert len(parallel_after.children["branches"]) == 2
@@ -261,31 +295,15 @@ def test_drop_preview_describes_the_full_result(tmp_path, qapp_session):
     flow.drop_feedback.connect(feedback.append)
     mime = _drag_mime(window, "Repeat")
 
-    position = _card_point(flow, "a", DropPlacement.WRAP)
-    QApplication.sendEvent(
-        flow.canvas,
-        QDragEnterEvent(
-            position,
-            Qt.DropAction.MoveAction,
-            mime,
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
-        ),
-    )
-    QApplication.sendEvent(
-        flow.canvas,
-        QDragMoveEvent(
-            position,
-            Qt.DropAction.MoveAction,
-            mime,
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
-        ),
-    )
+    panel = _hover_card(flow, mime, "a")
+    position = _panel_point(panel, DropPlacement.WRAP)
+    _enter, move, _drop = _drag_events(flow, mime, position)
+    QApplication.sendEvent(flow.canvas, move)
 
     assert feedback, "drag move must emit a result preview"
     assert "包裹" in feedback[-1] and "等待" in feedback[-1]
     assert flow.canvas._drop_check.allowed
+    flow.canvas._end_drop()
     window.close()
 
 
@@ -297,7 +315,9 @@ def test_hover_over_collapsed_container_expands_after_450ms(tmp_path, qapp_sessi
     QApplication.processEvents()
     assert "container" in canvas._collapsed
 
-    position = _card_point(flow, "container", DropPlacement.CHILD)
+    rect = flow.canvas.rect_for_uid("container")
+    assert rect is not None
+    position = rect.center()
     mime = _node_mime("a")
     QApplication.sendEvent(
         canvas,
