@@ -45,6 +45,23 @@ def _window(tmp_path: Path) -> EditorWindow:
     return window
 
 
+def _select_palette_entry(window: EditorWindow, kind: str) -> None:
+    palette = window.node_palette
+    role = int(Qt.ItemDataRole.UserRole)
+
+    def walk(item):
+        yield item
+        for index in range(item.childCount()):
+            yield from walk(item.child(index))
+
+    for top in range(palette.tree.topLevelItemCount()):
+        for item in walk(palette.tree.topLevelItem(top)):
+            if item.data(0, role) == kind and not item.isDisabled():
+                palette.tree.setCurrentItem(item)
+                return
+    raise AssertionError(f"palette entry {kind!r} not selectable")
+
+
 def _items(palette: NodePalette):
     def walk(item):
         yield item
@@ -170,4 +187,60 @@ def test_templates_stay_aggregated_template_calls(tmp_path, qapp_session):
     assert node is not None and node.kind == "TemplateCall"
     stage_after = session.program.get_unit("stage")
     assert stage_after.body[1].kind == "TemplateCall"
+    window.close()
+
+
+def test_palette_selection_change_neither_reenters_nor_clones_the_program(
+    tmp_path, qapp_session
+):
+    """Regression: selecting a palette entry must stay instant and safe.
+
+    The old implementation validated every palette entry by cloning and fully
+    revalidating the program, and rebuilds re-entered the window's refresh path
+    through itemSelectionChanged during clear() -- freezing for seconds and
+    crashing Qt's selection model under repeated interaction.
+    """
+
+    window = _window(tmp_path)
+    session = window.session
+
+    calls = {"refresh": 0}
+    original_refresh = window.refresh_selection
+
+    def counting_refresh():
+        calls["refresh"] += 1
+        original_refresh()
+
+    window.refresh_selection = counting_refresh
+    window.node_palette.current_changed.connect(counting_refresh)
+
+    clones = {"n": 0}
+    original_clone = type(session.program).clone
+
+    def counting_clone(self):
+        clones["n"] += 1
+        return original_clone(self)
+
+    type(session.program).clone = counting_clone
+    try:
+        _select_palette_entry(window, "Repeat")
+        qapp_session.processEvents()
+        calls["refresh"] = 0
+        clones["n"] = 0
+
+        # A palette selection change: the tree may emit once, the window must
+        # not loop, and no program clone may happen anywhere in the path.
+        _select_palette_entry(window, "At")
+        qapp_session.processEvents()
+    finally:
+        type(session.program).clone = original_clone
+
+    assert calls["refresh"] <= 2, "selection change must not cascade refreshes"
+    assert clones["n"] == 0, "compatibility checks must not clone the program"
+
+    # Mode switches land in the same budget: one bounded refresh, no cascade.
+    calls["refresh"] = 0
+    window.insert_mode_buttons[DropPlacement.CHILD].click()
+    qapp_session.processEvents()
+    assert calls["refresh"] <= 2
     window.close()

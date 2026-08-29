@@ -13,11 +13,14 @@ from src.authoring.program import (
     node_from_palette,
     validate_insert,
 )
-from src.qt_compat.QtCore import QMimeData, Qt, Signal
+from src.qt_compat.QtCore import QMimeData, QRect, Qt, Signal
+from src.qt_compat.QtGui import QColor, QPainter
 from src.qt_compat.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QLineEdit,
+    QStyle,
+    QStyledItemDelegate,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -27,6 +30,16 @@ from src.qt_compat.QtWidgets import (
 
 PROTOTYPE_MIME = "application/x-pystg-node-prototype"
 _ROLE_KIND = int(Qt.ItemDataRole.UserRole)
+_ROLE_COLOR = _ROLE_KIND + 1
+_CATEGORY_COLORS = {
+    "时间与控制": "#58a6e7",
+    "关卡流程": "#a371f7",
+    "移动": "#3fb950",
+    "弹幕": "#f85149",
+    "激光": "#d29922",
+    "模板": "#bc8cff",
+}
+_DEFAULT_COLOR = "#8b949e"
 
 
 @dataclass(frozen=True)
@@ -94,6 +107,56 @@ class _PaletteTree(QTreeWidget):
         return data
 
 
+class _PaletteDelegate(QStyledItemDelegate):
+    """Draws one accent bar per category plus label and dim kind suffix."""
+
+    _ACCENT_WIDTH = 3
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        painter.save()
+        rect = QRect(option.rect)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        if selected:
+            painter.fillRect(rect, QColor("#294d70"))
+        elif index.data(Qt.ItemDataRole.DisplayRole) and not index.parent().isValid():
+            painter.fillRect(rect, QColor("#16191f"))
+        color = index.data(_ROLE_COLOR) or _DEFAULT_COLOR
+        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        if text and not index.parent().isValid():
+            # Category headers keep their plain look, slightly dimmed.
+            painter.setPen(QColor("#8b949e"))
+            painter.setFont(option.font)
+            painter.drawText(
+                rect.adjusted(8, 0, -4, 0), Qt.AlignmentFlag.AlignVCenter, text
+            )
+            painter.restore()
+            return
+        painter.fillRect(
+            QRect(rect.left(), rect.top(), self._ACCENT_WIDTH, rect.height()),
+            QColor(color),
+        )
+        font = option.font
+        if selected:
+            painter.setPen(QColor("#f0f6fc"))
+        elif index.flags() & Qt.ItemFlag.ItemIsEnabled:
+            painter.setPen(QColor("#c9d1d9"))
+        else:
+            painter.setPen(QColor("#6e7681"))
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        painter.drawText(
+            rect.adjusted(12, 0, -4, 0),
+            Qt.AlignmentFlag.AlignVCenter,
+            metrics.elidedText(text, Qt.TextElideMode.ElideRight, rect.width() - 16),
+        )
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(24)
+        return size
+
+
 class NodePalette(QWidget):
     """One visible palette; compatibility is derived from the headless model."""
 
@@ -113,6 +176,8 @@ class NodePalette(QWidget):
         self.tree = _PaletteTree(self)
         self.tree.setObjectName("node_palette_tree")
         self.tree.setHeaderHidden(True)
+        self.tree.setItemDelegate(_PaletteDelegate(self.tree))
+        self.tree.setStyleSheet("QTreeWidget { background: #171a20; border: 1px solid #3a414e; }")
         self.tree.setDragEnabled(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.itemDoubleClicked.connect(self._activate)
@@ -128,6 +193,7 @@ class NodePalette(QWidget):
         self._placement = DropPlacement.AFTER
         self._recent: list[str] = []
         self._templates: tuple[TemplateTarget, ...] = ()
+        self._context: tuple | None = None
 
     def set_context(
         self,
@@ -137,6 +203,10 @@ class NodePalette(QWidget):
         placement: DropPlacement | str,
         templates: tuple[TemplateTarget, ...] = (),
     ) -> None:
+        context = (program, unit_id, target_uid, DropPlacement(placement), templates)
+        if context == self._context:
+            return
+        self._context = context
         self._program, self._unit_id, self._target_uid = program, unit_id, target_uid
         self._placement = DropPlacement(placement)
         self._templates = templates
@@ -144,6 +214,16 @@ class NodePalette(QWidget):
 
     def refresh(self) -> None:
         query = self.search.text().strip().casefold()
+        # clear() emits itemSelectionChanged while items with a selection are
+        # removed; blocking signals keeps the rebuild from re-entering the
+        # window's refresh path (and crashing Qt's selection model).
+        self.tree.blockSignals(True)
+        try:
+            self._rebuild(query)
+        finally:
+            self.tree.blockSignals(False)
+
+    def _rebuild(self, query: str) -> None:
         self.tree.clear()
         categories: dict[str, QTreeWidgetItem] = {}
         entries = [
@@ -176,6 +256,7 @@ class NodePalette(QWidget):
                 categories[category_name] = category
             item = QTreeWidgetItem([f"{entry.label}  {entry.kind}"])
             item.setData(0, _ROLE_KIND, entry.kind)
+            item.setData(0, _ROLE_COLOR, _CATEGORY_COLORS.get(entry.category, _DEFAULT_COLOR))
             item.setToolTip(0, reason or f"拖动以添加 {entry.label}")
             if not allowed:
                 item.setDisabled(True)

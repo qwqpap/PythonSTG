@@ -901,6 +901,117 @@ def insert_new_node(
     )
 
 
+def _ancestor_chain(program: AuthoringProgram, unit_id: str, uid: str) -> tuple[Node, ...]:
+    """Ancestors of `uid` inside its unit, outermost first."""
+
+    def walk(nodes: list[Node], trail: tuple[Node, ...]) -> tuple[Node, ...] | None:
+        for node in nodes:
+            if node.uid == uid:
+                return trail
+            for children in node.children.values():
+                found = walk(children, (*trail, node))
+                if found is not None:
+                    return found
+        return None
+
+    unit = program.get_unit(unit_id)
+    found = walk(unit.body, ())
+    if found is None:
+        raise ProgramError("unknown_uid", f"unknown node uid {uid!r}")
+    return found
+
+
+def _validate_node_in_context(
+    program: AuthoringProgram,
+    unit: LogicalUnit,
+    node: Node,
+    ancestors: tuple[Node, ...],
+) -> None:
+    """Reject the node when its own validation would gain a new error."""
+
+    unit_index = {
+        item.id: item for item in program.logical_units()
+    }
+    problems = [
+        item
+        for item in _validate_node(unit, node, unit_index, ancestors)
+        if item.severity == "error"
+    ]
+    if problems:
+        raise ProgramError("invalid_insert", problems[0].message)
+
+
+def _check_insert(
+    program: AuthoringProgram,
+    unit_id: str,
+    node: Node,
+    target_uid: str | None,
+    placement: DropPlacement | str,
+    *,
+    target_slot: str | None = None,
+) -> tuple[str, ...]:
+    """Structural dry run for one insertion; never clones or fully validates."""
+
+    placement = DropPlacement(placement)
+    unit = program.get_unit(unit_id)
+    if unit.kind == "Project":
+        raise ProgramError("invalid_insert", "Project does not contain statements")
+    if target_uid is None:
+        if placement not in {DropPlacement.BEFORE, DropPlacement.AFTER}:
+            raise ProgramError("invalid_insert", "empty logical units accept a root statement")
+        _validate_node_in_context(program, unit, node, ())
+        return ()
+    _unit, target, _location = find_node(program, target_uid)
+    if _unit.id != unit_id:
+        raise ProgramError("invalid_insert", "drop target belongs to another logical unit")
+    ancestors = _ancestor_chain(program, unit_id, target_uid)
+
+    if placement in {DropPlacement.BEFORE, DropPlacement.AFTER}:
+        _validate_node_in_context(program, unit, node, ancestors)
+        return ()
+    if placement == DropPlacement.WRAP:
+        if node.kind == "Parallel":
+            branches = node.children.get("branches", [])
+            if len(branches) != 1 or branches[0].children.get("body"):
+                raise ProgramError(
+                    "invalid_wrap", "new Parallel wrappers require one empty branch"
+                )
+            _validate_node_in_context(program, unit, node, ancestors)
+            _validate_node_in_context(
+                program, unit, target, ancestors + (node, branches[0])
+            )
+            return ()
+        slot = target_slot or _default_child_slot(node)
+        if slot not in _CHILD_SLOTS.get(node.kind, ()):
+            raise ProgramError("invalid_wrap", f"{node.kind} cannot wrap targets")
+        if node.children.get(slot):
+            raise ProgramError("invalid_wrap", "wrapper target slot must be empty")
+        _validate_node_in_context(program, unit, node, ancestors)
+        _validate_node_in_context(program, unit, target, ancestors + (node,))
+        return ()
+    if target.kind == "Parallel" and target_slot == "new_branch":
+        _validate_node_in_context(program, unit, node, ancestors + (target,))
+        return ()
+    if target.kind == "Parallel" and target_slot is None:
+        branches = target.children.get("branches", [])
+        if not branches:
+            raise ProgramError("invalid_insert", "Parallel has no branch")
+        first_branch = branches[0]
+        _validate_node_in_context(
+            program, unit, node, ancestors + (target, first_branch)
+        )
+        return ()
+    slot = target_slot or _default_child_slot(target)
+    if slot not in _CHILD_SLOTS.get(target.kind, ()):
+        raise ProgramError("invalid_insert", f"{target.kind} does not accept child slot {slot!r}")
+    if target.kind == "SpawnTask" and slot == "body" and "task" in target.arguments:
+        raise ProgramError(
+            "invalid_spawn_task", "SpawnTask requires exactly one of task or body"
+        )
+    _validate_node_in_context(program, unit, node, ancestors + (target,))
+    return ()
+
+
 def validate_insert(
     program: AuthoringProgram,
     unit_id: str,
@@ -910,7 +1021,12 @@ def validate_insert(
     *,
     target_slot: str | None = None,
 ) -> DropCheck:
-    """Return drop feasibility without mutating the supplied program."""
+    """Return drop feasibility without mutating, cloning, or fully validating.
+
+    The palette and the flow call this on every hover, so it must stay cheap:
+    only the placement resolution and the inserted node's own context rules are
+    checked.  The full model validation still guards the real insertion.
+    """
 
     slots: tuple[str, ...] = ()
     if target_uid is not None:
@@ -925,13 +1041,8 @@ def validate_insert(
         except ProgramError as exc:
             return DropCheck(False, exc.message)
     try:
-        insert_new_node(
-            program,
-            unit_id,
-            node,
-            target_uid,
-            placement,
-            target_slot=target_slot,
+        _check_insert(
+            program, unit_id, node, target_uid, placement, target_slot=target_slot
         )
     except (ProgramError, ProgramValidationError) as exc:
         return DropCheck(False, exc.message, slots)

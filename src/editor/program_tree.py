@@ -31,7 +31,7 @@ from src.qt_compat.QtCore import (
 from src.qt_compat.QtGui import QColor, QDrag, QDragMoveEvent, QDropEvent, QPainter, QPen
 from src.qt_compat.QtWidgets import QScrollArea, QWidget
 
-from .node_palette import PROTOTYPE_MIME, entry_for_kind
+from .node_palette import PROTOTYPE_MIME, _CATEGORY_COLORS, _DEFAULT_COLOR, entry_for_kind
 from .sidebars import RESOURCE_MIME
 
 
@@ -513,7 +513,14 @@ class _FlowCanvas(QWidget):
         painter.setPen(QPen(border, 1))
         painter.setBrush(background)
         painter.drawRoundedRect(element.rect, 6, 6)
-        x = element.rect.left()
+        accent = QColor(_CATEGORY_COLORS.get(entry_for_kind(node.kind).category, _DEFAULT_COLOR)) if node.kind not in {"Branch", "TemplateCall"} else QColor("#bc8cff")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(accent)
+        painter.drawRoundedRect(
+            QRect(element.rect.left() + 2, element.rect.top() + 6, 3, element.rect.height() - 12),
+            1, 1,
+        )
+        x = element.rect.left() + 8
         slots = self._child_slots(node)
         if slots:
             chevron_rect = self._chevron_rect(element)

@@ -125,6 +125,70 @@ class _UnitDialog(QDialog):
         )
 
 
+_WINDOW_STYLESHEET = """
+    QMainWindow, QDialog { background: #1c2128; color: #c9d1d9; }
+    QLabel { color: #c9d1d9; background: transparent; }
+    QMenuBar { background: #16191f; color: #c9d1d9; border-bottom: 1px solid #3a414e; }
+    QMenuBar::item { padding: 4px 10px; background: transparent; }
+    QMenuBar::item:selected { background: #294d70; }
+    QMenu { background: #1f242c; color: #c9d1d9; border: 1px solid #3a414e; }
+    QMenu::item { padding: 4px 24px 4px 12px; }
+    QMenu::item:selected { background: #294d70; }
+    QMenu::separator { height: 1px; background: #3a414e; margin: 4px 6px; }
+    QDockWidget { color: #c9d1d9; font-weight: 600; }
+    QDockWidget::title { background: #16191f; padding: 5px 10px;
+        border-bottom: 1px solid #3a414e; }
+    QTabWidget::pane { border: 1px solid #3a414e; background: #171a20; top: -1px; }
+    QTabBar::tab { background: #16191f; color: #8b949e; padding: 5px 14px;
+        border: 1px solid #3a414e; border-bottom: none; }
+    QTabBar::tab:selected { color: #f0f6fc; background: #171a20;
+        border-bottom: 2px solid #58a6e7; }
+    QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #3a414e;
+        border-radius: 4px; padding: 4px 12px; }
+    QPushButton:hover { background: #2d333b; border-color: #58a6e7; }
+    QPushButton:pressed { background: #294d70; }
+    QPushButton:checked { background: #1f4a73; border-color: #58a6e7;
+        color: #f0f6fc; font-weight: 600; }
+    QPushButton:disabled { background: #1a1e24; color: #484f58;
+        border-color: #262c34; }
+    QLineEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QComboBox {
+        background: #0f1216; color: #c9d1d9; border: 1px solid #3a414e;
+        border-radius: 4px; padding: 2px 6px; selection-background-color: #294d70; }
+    QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+    QPlainTextEdit:focus, QComboBox:focus { border: 1px solid #58a6e7; }
+    QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled,
+    QPlainTextEdit:disabled, QComboBox:disabled { color: #6e7681; }
+    QComboBox QAbstractItemView { background: #1f242c; color: #c9d1d9;
+        selection-background-color: #294d70; }
+    QTreeWidget, QListWidget { background: #171a20; color: #c9d1d9;
+        border: 1px solid #3a414e; }
+    QTreeWidget::item, QListWidget::item { padding: 2px; }
+    QTreeWidget::item:selected, QListWidget::item:selected { background: #294d70; }
+    QHeaderView::section { background: #16191f; color: #8b949e; border: none;
+        border-right: 1px solid #3a414e; padding: 4px 6px; }
+    QScrollBar:vertical { background: #171a20; width: 10px; margin: 0; }
+    QScrollBar::handle:vertical { background: #3a414e; border-radius: 4px;
+        min-height: 24px; }
+    QScrollBar:horizontal { background: #171a20; height: 10px; margin: 0; }
+    QScrollBar::handle:horizontal { background: #3a414e; border-radius: 4px;
+        min-width: 24px; }
+    QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+    QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+    QCheckBox { color: #c9d1d9; spacing: 6px; }
+    QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #3a414e;
+        border-radius: 3px; background: #0f1216; }
+    QCheckBox::indicator:checked { background: #58a6e7;
+        image: url(none); }
+    QSplitter::handle { background: #12161b; }
+    QSplitter::handle:horizontal { width: 3px; }
+    QSplitter::handle:vertical { height: 3px; }
+    QToolTip { background: #1f242c; color: #c9d1d9; border: 1px solid #3a414e;
+        padding: 2px; }
+    QStatusBar { background: #16191f; color: #8b949e; }
+    QStatusBar::item { border: none; }
+"""
+
+
 class ClosableGroup(QWidget):
     """A splitter child that can be hidden and restored from the View menu."""
 
@@ -170,8 +234,10 @@ class EditorWindow(QMainWindow):
         self.setObjectName("code_editor_window")
         self.session = session or EditorSession(self)
         self._insertion_mode = DropPlacement.AFTER
+        self._refreshing_selection = False
         self.setWindowTitle("PySTG 关卡编辑器")
         self.resize(1280, 800)
+        self.setStyleSheet(_WINDOW_STYLESHEET)
         self._build_actions()
         self._build_layout()
         self._connect_session()
@@ -474,6 +540,17 @@ class EditorWindow(QMainWindow):
         self.refresh_problems()
 
     def refresh_selection(self) -> None:
+        """Re-entrancy guard: palette and inspector updates can re-enter here."""
+
+        if self._refreshing_selection:
+            return
+        self._refreshing_selection = True
+        try:
+            self._refresh_selection()
+        finally:
+            self._refreshing_selection = False
+
+    def _refresh_selection(self) -> None:
         self.program_tree.set_unit(self.session.current_unit, self.session.current_node_uid)
         self._select_unit(self.session.current_unit_id)
         self.program_tree.set_diagnostics(self._node_error_messages())

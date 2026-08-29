@@ -261,17 +261,35 @@ def verify_native_dragflow() -> dict[str, object]:
             flow.canvas.relayout()
             _process_events(app)
             wide_rect_a, wide_rect_b = branch_heads()
-            if not (wide_rect_a.top() == wide_rect_b.top() and wide_rect_a.left() < wide_rect_b.left()):
-                raise RuntimeError("wide viewport must render Parallel branches side by side")
-            stacked_mode = _verify_stacked_mode(app, session)
+            side_by_side = (
+                wide_rect_a.top() == wide_rect_b.top()
+                and wide_rect_a.left() < wide_rect_b.left()
+            )
+            stacked = (
+                wide_rect_a.left() == wide_rect_b.left()
+                and wide_rect_a.top() < wide_rect_b.top()
+            )
+            # The interaction spec: wide screens render Parallel branches side
+            # by side, small windows stack them vertically.  1480x920 is the
+            # wide case; 960x640 is the small case.
+            if width == 1480 and not side_by_side:
+                raise RuntimeError(
+                    f"1480x920 must render Parallel branches side by side: "
+                    f"a={wide_rect_a} b={wide_rect_b} canvas={flow.canvas.width()}"
+                )
+            if width == 960 and not stacked:
+                raise RuntimeError(
+                    f"960x640 must stack Parallel branches vertically: "
+                    f"a={wide_rect_a} b={wide_rect_b} canvas={flow.canvas.width()}"
+                )
             _process_events(app)
             par = flow.canvas.rect_for_uid("par")
             observations.append(
                 {
                     "size": f"{width}x{height}",
                     "parallel_card_width": par.width(),
-                    "side_by_side": wide_rect_a.left() != wide_rect_b.left(),
-                    "stacked_mode_reachable": stacked_mode,
+                    "side_by_side": side_by_side,
+                    "stacked": stacked,
                 }
             )
 

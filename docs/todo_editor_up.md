@@ -216,12 +216,32 @@ python tools/verify_native_code_editor_dragflow.py --json
 
 ### Performance：PASS
 
-- 全仓 `python -m pytest`：38.74s < 5 分钟；编辑器自动化 19.52s < 60 秒；
+- 全仓 `python -m pytest`：36-43s < 5 分钟；编辑器自动化 19.52s < 60 秒；
   DSL/compiler 快速集 6.84s < 15 秒。
 - compileall 0.3s 左右；资产校验 0.5s 左右，79 JSON、0 error、0 warning。
 - 代码量：本次交互重构净增约 1,909 行 / 净删 567 行（src + tests + tools，
   相对检查点 `d758990^`）。删除的旧交互代码：弹出式节点菜单与子菜单表、
   隐形四区坐标判定、QTreeWidget 程序树实现、重复的 palette 参数表。
+
+### 卡死与崩溃修复（2026-08-29 追加）
+
+维护者实测发现"选择插入模式并点击添加后长时间冻结、随后崩溃"。定位与修复：
+
+- 根因一：`validate_insert` 每次克隆整个作者工程并做全量语义校验（实测
+  21.8ms/次），节点库每次刷新对全部约 40 个条目各执行一次（实测 878ms/次），
+  且每次选中/插入都会触发 2-3 层刷新级联，单次点击冻结 2.5 秒以上。
+  修复：新增只校验插入点上下文的结构化 dry run（`_check_insert` +
+  `_validate_node_in_context`），不克隆、不全量校验。实测 `validate_insert`
+  0.1ms（约 218 倍）、节点库刷新 10.6ms（约 83 倍）、`refresh_selection`
+  14.9ms（约 57 倍）。
+- 根因二：节点库 `clear()` 在 `itemSelectionChanged` 信号派发期间再次重建并
+  重入窗口刷新路径，属于 Qt 选择模型的未定义行为，会在反复交互时随机崩溃。
+  修复：重建期间阻塞树信号、窗口 `refresh_selection` 增加重入守卫、节点库
+  上下文未变化时跳过刷新；`tests/test_editor_palette.py` 新增回归测试断言
+  选中节点库条目不会级联刷新、兼容性检查不克隆工程。
+- 同步修正原生验证器对 Parallel 分支布局的断言：1480×920 必须并排，
+  960×640 是规格中的"小窗口"，必须纵向堆叠。
+- 全量门禁复验：439 passed / 40.2s；原生验证器 PASS。
 
 ### Usability：not run
 
