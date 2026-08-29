@@ -4,16 +4,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.authoring.program import DropPlacement, Node
+from src.authoring import dsl
+from src.authoring.program import (
+    DropCheck,
+    DropPlacement,
+    Node,
+    Ref,
+    ProgramError,
+    find_node,
+    move_node,
+    validate_insert,
+)
 from src.authoring.python_source import SourceConflictError, SourceSaveError
 from src.qt_compat.QtCore import Qt, Signal
 from src.qt_compat.QtGui import QAction, QCloseEvent, QCursor
 from src.qt_compat.QtWidgets import (
     QDockWidget,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QComboBox,
+    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -32,12 +48,12 @@ from src.qt_compat.QtWidgets import (
 )
 
 from .inspector import InspectorPanel
+from .node_palette import NodePalette, PROTOTYPE_MIME
 from .program_tree import (
-    NODE_PALETTE,
+    NODE_MIME,
     ProgramTree,
     available_resource_actions,
     node_for_resource_action,
-    node_from_palette,
 )
 from .preview import PreviewHost, PreviewOwner, PreviewTarget
 from .session import EditorSession
@@ -46,6 +62,56 @@ from .timeline import TimelinePanel
 
 
 _ROLE_VALUE = int(Qt.ItemDataRole.UserRole)
+
+
+class _UnitDialog(QDialog):
+    """Small creation/duplication form; paths remain derived from immutable IDs."""
+
+    def __init__(self, program, parent=None, *, source=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("复制逻辑单元" if source else "新建逻辑单元")
+        form = QFormLayout(self)
+        self.kind = QComboBox(self)
+        kinds = ("Stage", "Wave", "Enemy", "Boss", "Spell", "NonSpell", "Task", "Function")
+        self.kind.addItems([source.kind] if source else kinds)
+        self.unit_id = QLineEdit(self)
+        self.name = QLineEdit(self)
+        if source:
+            self.unit_id.setText(f"{source.id}_copy")
+            self.name.setText(f"{source.name} 副本")
+        self.register_stage = QCheckBox("加入 Project 关卡顺序", self)
+        self.register_stage.setChecked(False if source else True)
+        self.phase = QComboBox(self)
+        self.phase.addItems(
+            sorted(unit.id for unit in program.logical_units() if unit.kind in {"Spell", "NonSpell"})
+        )
+        form.addRow("类型", self.kind)
+        form.addRow("ID", self.unit_id)
+        form.addRow("显示名", self.name)
+        form.addRow("Boss 首个阶段", self.phase)
+        form.addRow("Stage", self.register_stage)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.kind.currentTextChanged.connect(self._sync)
+        self._sync(self.kind.currentText())
+
+    def _sync(self, kind: str) -> None:
+        self.phase.setEnabled(kind == "Boss")
+        self.register_stage.setEnabled(kind == "Stage")
+
+    def values(self) -> tuple[str, str, str, bool, str | None]:
+        return (
+            self.kind.currentText(),
+            self.unit_id.text().strip(),
+            self.name.text().strip(),
+            self.register_stage.isChecked(),
+            self.phase.currentText() or None,
+        )
 
 
 class ClosableGroup(QWidget):
@@ -92,7 +158,7 @@ class EditorWindow(QMainWindow):
         super().__init__(parent)
         self.setObjectName("code_editor_window")
         self.session = session or EditorSession(self)
-        self._node_menu: QMenu | None = None
+        self._insertion_mode = DropPlacement.AFTER
         self.setWindowTitle("PySTG 关卡编辑器")
         self.resize(1280, 800)
         self._build_actions()
@@ -154,6 +220,23 @@ class EditorWindow(QMainWindow):
         self.unit_list.setObjectName("program_structure")
         self.unit_list.setHeaderLabels(["程序结构"])
         self.unit_list.itemSelectionChanged.connect(self._unit_selected)
+        unit_panel = QWidget(self)
+        unit_panel_layout = QVBoxLayout(unit_panel)
+        unit_panel_layout.setContentsMargins(0, 0, 0, 0)
+        unit_toolbar = QWidget(unit_panel)
+        unit_toolbar_layout = QHBoxLayout(unit_toolbar)
+        unit_toolbar_layout.setContentsMargins(2, 2, 2, 2)
+        self.new_unit_button = QPushButton("新建", unit_toolbar)
+        self.duplicate_unit_button = QPushButton("复制", unit_toolbar)
+        self.delete_unit_button = QPushButton("删除", unit_toolbar)
+        self.new_unit_button.clicked.connect(self._create_unit)
+        self.duplicate_unit_button.clicked.connect(self._duplicate_unit)
+        self.delete_unit_button.clicked.connect(self._delete_unit)
+        unit_toolbar_layout.addWidget(self.new_unit_button)
+        unit_toolbar_layout.addWidget(self.duplicate_unit_button)
+        unit_toolbar_layout.addWidget(self.delete_unit_button)
+        unit_panel_layout.addWidget(unit_toolbar)
+        unit_panel_layout.addWidget(self.unit_list, 1)
         self.file_list = QListWidget(self)
         self.file_list.setObjectName("file_sidebar")
         self.file_list.itemSelectionChanged.connect(self._file_selected)
@@ -162,23 +245,36 @@ class EditorWindow(QMainWindow):
         self.stage_asset_list = ResourceListWidget(self)
         self.stage_asset_list.setObjectName("stage_asset_sidebar")
         activity = ActivitySidebar(
-            self.unit_list,
+            unit_panel,
             self.file_list,
             self.global_asset_list,
             self.stage_asset_list,
             self,
         )
         self.activity_sidebar = activity
+        self.node_palette = NodePalette(self)
+        self.node_palette.insert_requested.connect(self._insert_selected_prototype)
+        left_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        left_splitter.setObjectName("left_authoring_splitter")
+        left_splitter.addWidget(activity)
+        left_splitter.addWidget(self.node_palette)
+        left_splitter.setStretchFactor(0, 2)
+        left_splitter.setStretchFactor(1, 3)
         left_dock = QDockWidget("工程", self)
         left_dock.setObjectName("left_activity_dock")
         left_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        left_dock.setWidget(activity)
+        left_dock.setWidget(left_splitter)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, left_dock)
 
         self.program_tree = ProgramTree(self)
+        self.program_tree.set_drop_validator(self._validate_program_drop)
         self.program_tree.node_selected.connect(self._node_selected)
         self.program_tree.move_requested.connect(self._move_node)
+        self.program_tree.prototype_requested.connect(self._drop_prototype)
         self.program_tree.resource_action_requested.connect(self._resource_drop)
+        self.program_tree.drop_feedback.connect(
+            lambda message: self.statusBar().showMessage(message, 2500)
+        )
         program_panel = QWidget(self)
         program_panel.setObjectName("program_editor_panel")
         program_layout = QVBoxLayout(program_panel)
@@ -187,19 +283,27 @@ class EditorWindow(QMainWindow):
         program_toolbar.setObjectName("program_toolbar")
         program_toolbar_layout = QHBoxLayout(program_toolbar)
         program_toolbar_layout.setContentsMargins(4, 2, 4, 2)
-        buttons = (
-            ("add_after_button", "＋ 添加到后面", "add_node_after",
-             lambda: self._show_node_menu(DropPlacement.AFTER)),
-            ("add_child_button", "＋ 添加为子节点", "add_node_child",
-             lambda: self._show_node_menu(DropPlacement.CHILD)),
-            ("delete_node_button", "删除", "delete_node", self._delete_selected_node),
-        )
-        for attribute, text, object_name, callback in buttons:
-            button = QPushButton(text, program_toolbar)
-            button.setObjectName(object_name)
-            button.clicked.connect(callback)
+        self.insert_mode_buttons = {}
+        for placement, label in (
+            (DropPlacement.BEFORE, "之前"), (DropPlacement.AFTER, "之后"),
+            (DropPlacement.CHILD, "子项"), (DropPlacement.WRAP, "包裹"),
+        ):
+            button = QPushButton(label, program_toolbar)
+            button.setCheckable(True)
+            button.setChecked(placement == self._insertion_mode)
+            button.clicked.connect(
+                lambda _checked=False, value=placement: self._set_insertion_mode(value)
+            )
+            self.insert_mode_buttons[placement] = button
             program_toolbar_layout.addWidget(button)
-            setattr(self, attribute, button)
+        self.add_node_button = QPushButton("添加", program_toolbar)
+        self.add_node_button.setObjectName("add_selected_node")
+        self.add_node_button.clicked.connect(self._insert_selected_prototype)
+        program_toolbar_layout.addWidget(self.add_node_button)
+        self.delete_node_button = QPushButton("删除", program_toolbar)
+        self.delete_node_button.setObjectName("delete_node")
+        self.delete_node_button.clicked.connect(self._delete_selected_node)
+        program_toolbar_layout.addWidget(self.delete_node_button)
         program_toolbar_layout.addStretch(1)
         program_layout.addWidget(program_toolbar)
         program_layout.addWidget(self.program_tree, 1)
@@ -364,9 +468,18 @@ class EditorWindow(QMainWindow):
         unit = self.session.current_unit
         node = self.session.current_node
         editable = bool(unit and unit.kind != "Project" and self.session.can_edit)
-        self.add_after_button.setEnabled(editable)
-        self.add_child_button.setEnabled(editable and bool(node and node.children))
+        self.add_node_button.setEnabled(editable)
         self.delete_node_button.setEnabled(editable and node is not None)
+        self.new_unit_button.setEnabled(self.session.is_open)
+        self.duplicate_unit_button.setEnabled(editable)
+        self.delete_unit_button.setEnabled(editable)
+        self.node_palette.set_context(
+            self.session.program if self.session.is_open else None,
+            unit.id if unit is not None else None,
+            node.uid if node is not None else None,
+            self._insertion_mode,
+            self.session.palette_templates,
+        )
         self.refresh_source()
 
     def refresh_source(self) -> None:
@@ -393,6 +506,69 @@ class EditorWindow(QMainWindow):
         if items:
             self.session.select_unit(items[0].data(0, _ROLE_VALUE))
 
+    def _create_unit(self) -> None:
+        if not self.session.is_open:
+            return
+        dialog = _UnitDialog(self.session.program, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        kind, unit_id, name, register_stage, phase_id = dialog.values()
+        try:
+            if not unit_id or not name:
+                raise ProgramError("invalid_unit", "ID 和显示名不能为空")
+            if kind == "Boss" and phase_id is None:
+                raise ProgramError("missing_phase", "请先新建 Spell 或 NonSpell")
+            unit = _new_logical_unit(kind, unit_id, name, phase_id)
+            self.session.create_unit(unit, register_stage=register_stage)
+        except Exception as exc:
+            QMessageBox.warning(self, "无法新建", str(exc))
+
+    def _duplicate_unit(self) -> None:
+        source = self.session.current_unit
+        if source is None or source.kind == "Project":
+            return
+        dialog = _UnitDialog(self.session.program, self, source=source)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        _kind, unit_id, name, register_stage, _phase_id = dialog.values()
+        try:
+            self.session.duplicate_unit(
+                source.id, unit_id, name, register_stage=register_stage
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "无法复制", str(exc))
+
+    def _delete_unit(self) -> None:
+        unit = self.session.current_unit
+        if unit is None or unit.kind == "Project":
+            return
+        replacement = None
+        if unit.kind == "Stage":
+            project = next(
+                (item for item in self.session.program.logical_units() if item.kind == "Project"),
+                None,
+            )
+            if project and project.metadata.get("start_stage") == Ref(unit.id):
+                candidates = [
+                    ref.id for ref in project.metadata.get("stages", ()) if ref.id != unit.id
+                ]
+                if not candidates:
+                    QMessageBox.warning(self, "无法删除", "不能删除唯一的开始关卡")
+                    return
+                replacement, accepted = QInputDialog.getItem(
+                    self, "选择新的开始关卡", "开始关卡：", candidates, 0, False
+                )
+                if not accepted:
+                    return
+        if QMessageBox.question(
+            self, "删除逻辑单元", f"删除 {unit.kind} · {unit.name}？\n保存前可以撤销。"
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.session.delete_unit(unit.id, replacement_start_stage=replacement)
+        except Exception as exc:
+            QMessageBox.warning(self, "无法删除", str(exc))
+
     def _file_selected(self) -> None:
         items = self.file_list.selectedItems()
         if items:
@@ -401,38 +577,111 @@ class EditorWindow(QMainWindow):
     def _node_selected(self, uid) -> None:
         self.session.select_node(str(uid) if uid else None)
 
-    def _move_node(self, uid: str, target_uid: str, placement: str) -> None:
+    def _move_node(
+        self, uid: str, target_uid: str, placement: str, target_slot=None
+    ) -> None:
         try:
-            self.session.move_node(uid, target_uid, placement)
+            self.session.move_node(
+                uid, target_uid, placement, target_slot=target_slot
+            )
         except Exception as exc:
             self.statusBar().showMessage(f"节点未移动：{exc}", 5000)
 
-    def _show_node_menu(self, placement: DropPlacement) -> None:
-        menu = QMenu(self)
-        self._node_menu = menu
-        for category, entries in NODE_PALETTE:
-            submenu = menu.addMenu(category)
-            for kind, label in entries:
-                action = submenu.addAction(label)
-                action.triggered.connect(lambda _checked=False, node_kind=kind:
-                                         self.insert_palette_node(node_kind, placement))
-        menu.popup(QCursor.pos())
+    def _set_insertion_mode(self, placement: DropPlacement) -> None:
+        self._insertion_mode = placement
+        for value, button in self.insert_mode_buttons.items():
+            button.setChecked(value == placement)
+        self.refresh_selection()
 
-    def insert_palette_node(self, kind: str, placement: DropPlacement | str = DropPlacement.AFTER) -> Node | None:
+    def _insert_selected_prototype(self, *_args) -> None:
+        kind = self.node_palette.current_kind()
+        if kind is None:
+            self.statusBar().showMessage("请先在左侧节点库选择节点", 4000)
+            return
+        self.insert_palette_node(kind, self._insertion_mode)
+
+    def _drop_prototype(self, kind: str, target_uid, placement: str, target_slot) -> None:
+        self.insert_palette_node(
+            kind, placement, target_uid=target_uid, target_slot=target_slot,
+            use_current_target=False,
+        )
+
+    def insert_palette_node(
+        self,
+        kind: str,
+        placement: DropPlacement | str = DropPlacement.AFTER,
+        *,
+        target_uid: str | None = None,
+        target_slot: str | None = None,
+        use_current_target: bool = True,
+    ) -> Node | None:
         placement = DropPlacement(placement)
         try:
-            node = node_from_palette(kind, self.session.program)
-            target_uid = self.session.current_node_uid
+            unit = self.session.current_unit
+            if unit is None or unit.kind == "Project":
+                raise ProgramError("no_unit", "请先选择可编辑逻辑单元")
+            entry = self.node_palette.entry(kind)
+            candidates = self.node_palette.reference_candidates(kind)
+            reference_id = None
+            if entry.reference_kinds:
+                if not candidates:
+                    raise ProgramError(
+                        "missing_reference", f"请先新建 {'/'.join(entry.reference_kinds)}"
+                    )
+                reference_id, accepted = QInputDialog.getItem(
+                    self, f"选择 {entry.label} 目标", "引用：", list(candidates), 0, False
+                )
+                if not accepted:
+                    return None
+            node = self.node_palette.make_node(kind, reference_id)
+            if target_uid is None and use_current_target:
+                target_uid = self.session.current_node_uid
             if target_uid is None:
-                if placement != DropPlacement.AFTER:
-                    raise ValueError("添加子节点前，请先选择可包含内容的节点")
+                if placement not in {DropPlacement.BEFORE, DropPlacement.AFTER}:
+                    raise ProgramError("invalid_insert", "请先选择可包含内容的节点")
                 self.session.append_node(node)
             else:
-                self.session.insert_node_relative(target_uid, placement, node)
+                self.session.insert_node_relative(
+                    target_uid, placement, node, target_slot=target_slot
+                )
+            self.node_palette.remember(kind)
             return node
         except Exception as exc:
             self.statusBar().showMessage(f"节点未添加：{exc}", 6000)
             return None
+
+    def _validate_program_drop(self, mime, target_uid, placement, target_slot) -> DropCheck:
+        unit = self.session.current_unit
+        if unit is None or unit.kind == "Project" or not self.session.can_edit:
+            return DropCheck(False, "当前逻辑单元不可编辑")
+        try:
+            if mime.hasFormat(PROTOTYPE_MIME):
+                kind = bytes(mime.data(PROTOTYPE_MIME)).decode("utf-8")
+                candidates = self.node_palette.reference_candidates(kind)
+                entry = self.node_palette.entry(kind)
+                if entry.reference_kinds and not candidates:
+                    return DropCheck(False, f"请先新建 {'/'.join(entry.reference_kinds)}")
+                node = self.node_palette.make_node(
+                    kind, candidates[0] if candidates else None
+                )
+                return validate_insert(
+                    self.session.program, unit.id, node, target_uid, placement,
+                    target_slot=target_slot,
+                )
+            if mime.hasFormat(NODE_MIME):
+                source_uid = bytes(mime.data(NODE_MIME)).decode("utf-8")
+                if target_uid is None:
+                    return DropCheck(False, "已有节点不能放到逻辑单元标题")
+                move_node(
+                    self.session.program, source_uid, target_uid, placement,
+                    target_slot=target_slot,
+                )
+                return DropCheck(True)
+            if placement == DropPlacement.WRAP or target_uid is None:
+                return DropCheck(False, "资源不能包裹节点")
+            return DropCheck(True)
+        except Exception as exc:
+            return DropCheck(False, str(exc))
 
     def _delete_selected_node(self) -> None:
         uid = self.session.current_node_uid

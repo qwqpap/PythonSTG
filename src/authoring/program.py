@@ -561,6 +561,13 @@ class DropPlacement(str, Enum):
 
 
 @dataclass(frozen=True)
+class DropCheck:
+    allowed: bool
+    reason: str = ""
+    slots: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class NodeLocation:
     unit_id: str
     parent_uid: str | None
@@ -822,6 +829,341 @@ def insert_node(
     values.insert(index, copy.deepcopy(node))
     _assert_no_new_errors(program, result)
     return result
+
+
+def insert_new_node(
+    program: AuthoringProgram,
+    unit_id: str,
+    node: Node,
+    target_uid: str | None = None,
+    placement: DropPlacement | str = DropPlacement.AFTER,
+    *,
+    target_slot: str | None = None,
+) -> AuthoringProgram:
+    """Insert one new node at a root or explicit visual drop placement."""
+
+    placement = DropPlacement(placement)
+    if target_uid is None:
+        if placement not in {DropPlacement.BEFORE, DropPlacement.AFTER}:
+            raise ProgramError("invalid_insert", "empty logical units accept a root statement")
+        unit = program.get_unit(unit_id)
+        return insert_node(program, unit_id, None, "body", len(unit.body), node)
+    unit, target, location = find_node(program, target_uid)
+    if unit.id != unit_id:
+        raise ProgramError("invalid_insert", "drop target belongs to another logical unit")
+    if placement in {DropPlacement.BEFORE, DropPlacement.AFTER}:
+        offset = 0 if placement == DropPlacement.BEFORE else 1
+        return insert_node(
+            program, unit_id, location.parent_uid, location.slot, location.index + offset, node
+        )
+    if placement == DropPlacement.WRAP:
+        if node.kind == "Parallel":
+            wrapper = copy.deepcopy(node)
+            branches = wrapper.children.get("branches", [])
+            if len(branches) != 1 or branches[0].children.get("body"):
+                raise ProgramError("invalid_wrap", "new Parallel wrappers require one empty branch")
+            branches[0].children["body"] = [copy.deepcopy(target)]
+            result = program.clone()
+            result_unit, _target, result_location = find_node(result, target_uid)
+            values = _child_list(
+                result_unit, result_location.parent_uid, result_location.slot
+            )
+            values[result_location.index] = wrapper
+            _assert_no_new_errors(program, result)
+            return result
+        return wrap_node(program, target_uid, node, target_slot)
+    if target.kind == "Parallel" and target_slot == "new_branch":
+        result = program.clone()
+        _unit, parallel, _location = find_node(result, target_uid)
+        index = len(parallel.children.get("branches", []))
+        branch = Node(
+            kind="Branch",
+            children={"body": [copy.deepcopy(node)]},
+            uid=f"{parallel.uid}__branch_{index}",
+        )
+        parallel.children.setdefault("branches", []).append(branch)
+        _assert_no_new_errors(program, result)
+        return result
+    if target.kind == "Parallel" and target_slot is None:
+        branches = target.children.get("branches", [])
+        if not branches:
+            raise ProgramError("invalid_insert", "Parallel has no branch")
+        target_uid, target_slot = branches[0].uid, "body"
+    slot = target_slot or _default_child_slot(target)
+    target_unit, child_target, _child_location = find_node(program, target_uid)
+    return insert_node(
+        program,
+        target_unit.id,
+        child_target.uid,
+        slot,
+        len(child_target.children.get(slot, [])),
+        node,
+    )
+
+
+def validate_insert(
+    program: AuthoringProgram,
+    unit_id: str,
+    node: Node,
+    target_uid: str | None = None,
+    placement: DropPlacement | str = DropPlacement.AFTER,
+    *,
+    target_slot: str | None = None,
+) -> DropCheck:
+    """Return drop feasibility without mutating the supplied program."""
+
+    slots: tuple[str, ...] = ()
+    if target_uid is not None:
+        try:
+            _unit, target, _location = find_node(program, target_uid)
+            if target.kind == "Parallel":
+                slots = tuple(branch.uid for branch in target.children.get("branches", ())) + (
+                    "new_branch",
+                )
+            else:
+                slots = _CHILD_SLOTS.get(target.kind, ())
+        except ProgramError as exc:
+            return DropCheck(False, exc.message)
+    try:
+        insert_new_node(
+            program,
+            unit_id,
+            node,
+            target_uid,
+            placement,
+            target_slot=target_slot,
+        )
+    except (ProgramError, ProgramValidationError) as exc:
+        return DropCheck(False, exc.message, slots)
+    return DropCheck(True, slots=slots)
+
+
+def node_from_palette(
+    kind: str,
+    program: AuthoringProgram,
+    unit_kind: str,
+    reference_id: str | None = None,
+    *,
+    template_target: TemplateTarget | None = None,
+) -> Node:
+    """Create the one canonical starter value used by every authoring UI.
+
+    Defaults stay next to the DSL rather than in Qt labels.  Context validity is
+    still decided by :func:`validate_insert`; this factory only guarantees a
+    structurally valid prototype and never guesses a reference.
+    """
+
+    del program  # reserved for future signature-derived project defaults
+    if unit_kind not in UNIT_KINDS or unit_kind == "Project":
+        raise ProgramError("invalid_context", f"{unit_kind} cannot contain statements")
+    if template_target is not None:
+        return make_template_call(template_target)
+
+    from . import dsl  # local import avoids program <-> public DSL import cycle
+
+    reference_kinds = {
+        "RunWave": ("Wave",),
+        "RunBoss": ("Boss",),
+        "SpawnEnemy": ("Enemy",),
+        "Call": ("Function", "Task"),
+        "SpawnTask": ("Task",),
+    }
+    ref = Ref(reference_id) if reference_id else None
+    if kind in reference_kinds and ref is None:
+        raise ProgramError("missing_reference", f"{kind} requires an explicit reference")
+    factories = {
+        "Wait": lambda: dsl.Wait(60),
+        "At": lambda: dsl.At(0, []),
+        "Repeat": lambda: dsl.Repeat(1, []),
+        "While": lambda: dsl.While(Expr("True"), []),
+        "If": lambda: dsl.If(Expr("True"), []),
+        "Else": lambda: dsl.Else([]),
+        "ForEach": lambda: dsl.ForEach("item", [], []),
+        "Parallel": lambda: dsl.Parallel([[]]),
+        "SpawnTask": lambda: dsl.SpawnTask(ref),
+        "Break": dsl.Break,
+        "Continue": dsl.Continue,
+        "Return": dsl.Return,
+        "Set": lambda: dsl.Set("value", 0),
+        "Call": lambda: dsl.Call(ref),
+        "RawPython": lambda: dsl.RawPython("# 受信任 Python"),
+        "RunWave": lambda: dsl.RunWave(ref),
+        "RunBoss": lambda: dsl.RunBoss(ref),
+        "SetBackground": lambda: dsl.SetBackground(""),
+        "PlayBGM": lambda: dsl.PlayBGM(""),
+        "PlayDialogue": lambda: dsl.PlayDialogue([]),
+        "SpawnEnemy": lambda: dsl.SpawnEnemy(ref),
+        "MoveTo": lambda: dsl.MoveTo(0.0, 0.5),
+        "MoveLinear": lambda: dsl.MoveLinear(0.0, -0.2),
+        "SetPosition": lambda: dsl.SetPosition(0.0, 0.5),
+        "Fire": lambda: dsl.Fire(x=0.0, y=0.0),
+        "FireCircle": lambda: dsl.FireCircle(x=0.0, y=0.0, count=12),
+        "FireArc": lambda: dsl.FireArc(x=0.0, y=0.0),
+        "FireAtPlayer": lambda: dsl.FireAtPlayer(x=0.0, y=0.0),
+        "FirePolar": lambda: dsl.FirePolar(0.1, 0.0, center=[0.0, 0.0]),
+        "FireOrbit": lambda: dsl.FireOrbit(0.1, 0.0, center=[0.0, 0.0]),
+        "ClearBullets": dsl.ClearBullets,
+        "Kill": dsl.Kill,
+        "PlaySE": lambda: dsl.PlaySE(""),
+        "CreateLaser": lambda: dsl.CreateLaser(0.0, 0.0, -90.0, 0.2, 0.6, 0.2, 0.02),
+        "CreateBentLaser": lambda: dsl.CreateBentLaser(0.0, 0.0, 180, 0.02),
+        "RemoveLaser": lambda: dsl.RemoveLaser(Expr("laser")),
+        "ClearLasers": dsl.ClearLasers,
+    }
+    try:
+        return factories[kind]()
+    except KeyError as exc:
+        raise ProgramError("unknown_node_kind", f"unknown palette node {kind!r}") from exc
+
+
+def create_unit(
+    program: AuthoringProgram,
+    unit: LogicalUnit,
+    *,
+    register_stage: bool = True,
+) -> AuthoringProgram:
+    if unit.kind == "Project":
+        raise ProgramError("invalid_unit", "an authoring project already owns its Project unit")
+    if any(candidate.id == unit.id for candidate in program.logical_units()):
+        raise ProgramError("duplicate_unit_id", f"logical unit {unit.id!r} already exists")
+    result = program.clone()
+    result.units[unit.id] = unit.clone()
+    if unit.kind == "Stage" and register_stage:
+        projects = [item for item in result.logical_units() if item.kind == "Project"]
+        if len(projects) != 1:
+            raise ProgramError("missing_project", "stage registration requires exactly one Project")
+        project = projects[0]
+        stages = list(project.metadata.get("stages", []))
+        stages.append(Ref(unit.id))
+        project.metadata["stages"] = stages
+        if not isinstance(project.metadata.get("start_stage"), Ref):
+            project.metadata["start_stage"] = Ref(unit.id)
+    _assert_no_new_errors(program, result)
+    return result
+
+
+def duplicate_unit(
+    program: AuthoringProgram,
+    source_id: str,
+    new_id: str,
+    new_name: str,
+    *,
+    register_stage: bool = False,
+) -> AuthoringProgram:
+    source = program.get_unit(source_id)
+    if source.kind == "Project":
+        raise ProgramError("invalid_unit", "Project cannot be duplicated")
+    duplicate = source.clone()
+    duplicate.id = new_id
+    duplicate.name = new_name
+    duplicate.source_path = None
+    duplicate.source_span = None
+    duplicate.metadata = _rewrite_ref_value(duplicate.metadata, source_id, new_id)
+    duplicate.parameters = tuple(
+        Parameter(
+            item.name,
+            item.annotation,
+            _rewrite_ref_value(item.default, source_id, new_id) if item.has_default else _NO_DEFAULT,
+        )
+        for item in duplicate.parameters
+    )
+    for node in duplicate.body:
+        _regenerate_node_uids(node)
+    for node in duplicate.walk_nodes():
+        node.source_span = None
+        node.arguments = _rewrite_ref_value(node.arguments, source_id, new_id)
+        node.positional_arguments = tuple(
+            _rewrite_ref_value(value, source_id, new_id)
+            for value in node.positional_arguments
+        )
+    return create_unit(program, duplicate, register_stage=register_stage)
+
+
+def delete_unit(
+    program: AuthoringProgram,
+    unit_id: str,
+    *,
+    replacement_start_stage: str | None = None,
+) -> AuthoringProgram:
+    removed = program.get_unit(unit_id)
+    if removed.kind == "Project":
+        raise ProgramError("invalid_unit", "Project cannot be deleted")
+    references = _unit_reference_locations(program, unit_id)
+    non_project = [location for location in references if not location.startswith("Project.")]
+    if non_project:
+        raise ProgramError(
+            "unit_in_use", f"{unit_id!r} is referenced by {', '.join(non_project)}"
+        )
+    result = program.clone()
+    del result.units[unit_id]
+    if removed.kind == "Stage":
+        project = next((item for item in result.logical_units() if item.kind == "Project"), None)
+        if project is not None:
+            stages = [ref for ref in project.metadata.get("stages", []) if ref != Ref(unit_id)]
+            if not stages:
+                raise ProgramError("invalid_project_stages", "the last registered Stage cannot be deleted")
+            project.metadata["stages"] = stages
+            if project.metadata.get("start_stage") == Ref(unit_id):
+                replacement = replacement_start_stage or stages[0].id
+                if Ref(replacement) not in stages:
+                    raise ProgramError("invalid_start_stage", "replacement start Stage is not registered")
+                project.metadata["start_stage"] = Ref(replacement)
+    _assert_no_new_errors(program, result)
+    return result
+
+
+def _regenerate_node_uids(node: Node) -> None:
+    node.uid = new_uid(node.kind)
+    for slot, children in node.children.items():
+        for index, child in enumerate(children):
+            if node.kind == "Parallel" and slot == "branches":
+                child.uid = f"{node.uid}__branch_{index}"
+                for branch_child in child.children.get("body", []):
+                    _regenerate_node_uids(branch_child)
+            else:
+                _regenerate_node_uids(child)
+
+
+def _rewrite_ref_value(value: Any, old_id: str, new_id: str) -> Any:
+    if isinstance(value, Ref):
+        return Ref(new_id if value.id == old_id else value.id)
+    if isinstance(value, list):
+        return [_rewrite_ref_value(item, old_id, new_id) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_rewrite_ref_value(item, old_id, new_id) for item in value)
+    if isinstance(value, Mapping):
+        return {
+            key: _rewrite_ref_value(item, old_id, new_id)
+            for key, item in value.items()
+        }
+    return copy.deepcopy(value)
+
+
+def _unit_reference_locations(program: AuthoringProgram, target_id: str) -> tuple[str, ...]:
+    locations: list[str] = []
+
+    def collect(value: Any, location: str) -> None:
+        if isinstance(value, Ref) and value.id == target_id:
+            locations.append(location)
+        elif isinstance(value, Mapping):
+            for key, item in value.items():
+                collect(item, f"{location}.{key}")
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                collect(item, f"{location}[{index}]")
+
+    for unit in program.logical_units():
+        if unit.id == target_id:
+            continue
+        prefix = "Project" if unit.kind == "Project" else unit.id
+        collect(unit.metadata, prefix)
+        for parameter in unit.parameters:
+            if parameter.has_default:
+                collect(parameter.default, f"{prefix}.parameters.{parameter.name}")
+        for node in unit.walk_nodes():
+            collect(node.arguments, f"{prefix}.{node.uid}")
+            collect(node.positional_arguments, f"{prefix}.{node.uid}")
+    return tuple(locations)
 
 
 def delete_node(program: AuthoringProgram, uid: str) -> AuthoringProgram:
@@ -1731,6 +2073,7 @@ __all__ = [
     "AuthoringProgram",
     "CONTROL_NODE_KINDS",
     "Diagnostic",
+    "DropCheck",
     "DropPlacement",
     "Expr",
     "LogicalUnit",
@@ -1746,15 +2089,21 @@ __all__ = [
     "SourceSpan",
     "TemplateTarget",
     "UNIT_KINDS",
+    "create_unit",
     "delete_node",
+    "delete_unit",
+    "duplicate_unit",
     "find_node",
+    "insert_new_node",
     "insert_node",
     "make_template_call",
     "move_node",
+    "node_from_palette",
     "new_uid",
     "set_argument",
     "set_template_positional_argument",
     "set_unit_field",
     "validate_author_value",
+    "validate_insert",
     "wrap_node",
 ]

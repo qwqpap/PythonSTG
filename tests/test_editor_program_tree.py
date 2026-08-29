@@ -6,11 +6,11 @@ import pytest
 
 from src.authoring.program import DropPlacement, ProgramError, find_node
 from src.core.project_context import ProjectContext
+from src.editor.node_palette import PROTOTYPE_MIME, PaletteEntry
 from src.editor.program_tree import NODE_MIME, ProgramTree
 from src.editor.session import EditorSession
 from src.editor.window import EditorWindow
-from src.qt_compat.QtCore import QMimeData, QPoint
-from src.qt_compat.QtWidgets import QMenu
+from src.qt_compat.QtCore import QMimeData, QPoint, Qt
 
 
 class _DropPosition:
@@ -65,17 +65,22 @@ def _project(root: Path) -> Path:
     return root
 
 
-def _click_palette_action(window: EditorWindow, button, label: str) -> None:
-    button.click()
-    menu = window._node_menu
-    assert isinstance(menu, QMenu) and menu.isVisible()
-    for category in menu.actions():
-        submenu = category.menu()
-        for action in submenu.actions() if submenu is not None else ():
-            if action.text() == label:
-                action.trigger()
+def _select_palette_entry(window: EditorWindow, kind: str) -> None:
+    """Act like a user: pick one visible palette row, then use the add action."""
+
+    palette = window.node_palette
+
+    def walk(item):
+        yield item
+        for index in range(item.childCount()):
+            yield from walk(item.child(index))
+
+    for top_index in range(palette.tree.topLevelItemCount()):
+        for item in walk(palette.tree.topLevelItem(top_index)):
+            if item.data(0, int(Qt.ItemDataRole.UserRole)) == kind and not item.isDisabled():
+                palette.tree.setCurrentItem(item)
                 return
-    raise AssertionError(f"palette action {label!r} was not shown")
+    raise AssertionError(f"palette entry {kind!r} was not selectable")
 
 
 def _session(tmp_path: Path) -> EditorSession:
@@ -219,20 +224,23 @@ def test_visible_toolbar_adds_root_and_child_nodes_and_deletes_with_undo(
     window.show()
     qapp_session.processEvents()
 
-    assert window.add_after_button.isVisible()
-    assert window.add_after_button.isEnabled()
-    assert not window.add_child_button.isEnabled()
+    assert window.add_node_button.isVisible()
+    assert window.add_node_button.isEnabled()
     assert not window.delete_node_button.isEnabled()
+    assert window.insert_mode_buttons[DropPlacement.AFTER].isChecked()
 
-    _click_palette_action(window, window.add_after_button, "等待")
+    _select_palette_entry(window, "Wait")
+    window.add_node_button.click()
     appended_uid = session.current_node_uid
     assert appended_uid is not None
     assert session.program.get_unit("stage").body[-1].uid == appended_uid
 
     session.select_node("container")
     qapp_session.processEvents()
-    assert window.add_child_button.isEnabled()
-    _click_palette_action(window, window.add_child_button, "等待")
+    window.insert_mode_buttons[DropPlacement.CHILD].click()
+    qapp_session.processEvents()
+    _select_palette_entry(window, "Wait")
+    window.add_node_button.click()
     child_uid = session.current_node_uid
     assert child_uid is not None
     container = find_node(session.program, "container")[1]
@@ -261,7 +269,8 @@ def test_empty_unit_can_add_its_first_node(tmp_path, qapp_session):
     window = EditorWindow(session)
 
     window.show()
-    _click_palette_action(window, window.add_after_button, "等待")
+    _select_palette_entry(window, "Wait")
+    window.add_node_button.click()
 
     node_uid = session.current_node_uid
     assert node_uid is not None

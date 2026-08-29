@@ -9,9 +9,13 @@ from src.authoring.program import (
     DropPlacement,
     Node,
     ProgramError,
+    LogicalUnit,
+    create_unit,
     delete_node,
+    delete_unit,
+    duplicate_unit,
     find_node,
-    insert_node,
+    insert_new_node,
     move_node,
     set_argument,
     set_unit_field,
@@ -34,23 +38,33 @@ class _ProgramCommand(QUndoCommand):
         *,
         redo_uid: str | None | object = _KEEP_SELECTION,
         undo_uid: str | None | object = _KEEP_SELECTION,
+        redo_unit_id: str | None | object = _KEEP_SELECTION,
+        undo_unit_id: str | None | object = _KEEP_SELECTION,
     ) -> None:
         super().__init__(text)
         self._session = session
         self._before = session.program.clone()
         self._after = transform(self._before)
         self._redo_uid, self._undo_uid = redo_uid, undo_uid
+        self._redo_unit_id, self._undo_unit_id = redo_unit_id, undo_unit_id
 
-    def _apply(self, program: AuthoringProgram, uid: str | None | object) -> None:
+    def _apply(
+        self,
+        program: AuthoringProgram,
+        uid: str | None | object,
+        unit_id: str | None | object,
+    ) -> None:
         self._session._apply_program(program)
-        if uid is not _KEEP_SELECTION:
+        if unit_id is not _KEEP_SELECTION and unit_id is not None:
+            self._session.select_unit(unit_id)
+        elif uid is not _KEEP_SELECTION:
             self._session.select_node(uid)
 
     def redo(self) -> None:
-        self._apply(self._after, self._redo_uid)
+        self._apply(self._after, self._redo_uid, self._redo_unit_id)
 
     def undo(self) -> None:
-        self._apply(self._before, self._undo_uid)
+        self._apply(self._before, self._undo_uid, self._undo_unit_id)
 
 class SetNodeArgumentCommand(_ProgramCommand):
     def __init__(self, session: "EditorSession", uid: str, name: str, value: Any) -> None:
@@ -84,22 +98,23 @@ class InsertNodeCommand(_ProgramCommand):
         target_uid: str,
         placement: DropPlacement | str,
         node: Node,
+        target_slot: str | None = None,
     ) -> None:
         placement = DropPlacement(placement)
+        unit = find_node(session.program, target_uid)[0]
         super().__init__(
             session, f"插入 {node.kind}",
-            lambda program: _insert_relative(program, target_uid, placement, node),
+            lambda program: insert_new_node(
+                program, unit.id, node, target_uid, placement, target_slot=target_slot
+            ),
             redo_uid=node.uid, undo_uid=session.current_node_uid,
         )
 
 class AppendNodeCommand(_ProgramCommand):
     def __init__(self, session: "EditorSession", unit_id: str, node: Node) -> None:
-        def append(program: AuthoringProgram) -> AuthoringProgram:
-            unit = program.get_unit(unit_id)
-            return insert_node(program, unit_id, None, "body", len(unit.body), node)
-
         super().__init__(
-            session, f"添加 {node.kind}", append, redo_uid=node.uid,
+            session, f"添加 {node.kind}",
+            lambda program: insert_new_node(program, unit_id, node), redo_uid=node.uid,
             undo_uid=session.current_node_uid,
         )
 
@@ -113,35 +128,76 @@ class DeleteNodeCommand(_ProgramCommand):
         )
 
 
-def _insert_relative(
-    program: AuthoringProgram,
-    target_uid: str,
-    placement: DropPlacement,
-    node: Node,
-) -> AuthoringProgram:
-    unit, target, location = find_node(program, target_uid)
-    if placement in {DropPlacement.BEFORE, DropPlacement.AFTER}:
-        offset = 0 if placement == DropPlacement.BEFORE else 1
-        return insert_node(
-            program,
-            unit.id,
-            location.parent_uid,
-            location.slot,
-            location.index + offset,
-            node,
+class CreateUnitCommand(_ProgramCommand):
+    def __init__(
+        self,
+        session: "EditorSession",
+        unit: LogicalUnit,
+        *,
+        register_stage: bool = True,
+    ) -> None:
+        super().__init__(
+            session,
+            f"新建 {unit.kind} {unit.id}",
+            lambda program: create_unit(program, unit, register_stage=register_stage),
+            redo_unit_id=unit.id,
+            undo_unit_id=session.current_unit_id,
         )
-    if placement == DropPlacement.CHILD:
-        slots = tuple(target.children)
-        if not slots:
-            raise ProgramError("invalid_insert", f"{target.kind} does not accept child nodes")
-        slot = "body" if "body" in slots else slots[0]
-        return insert_node(program, unit.id, target.uid, slot, len(target.children[slot]), node)
-    raise ProgramError("invalid_insert", "new resource actions cannot implicitly wrap code")
+
+
+class DuplicateUnitCommand(_ProgramCommand):
+    def __init__(
+        self,
+        session: "EditorSession",
+        source_id: str,
+        new_id: str,
+        new_name: str,
+        *,
+        register_stage: bool = False,
+    ) -> None:
+        super().__init__(
+            session,
+            f"复制 {source_id} 为 {new_id}",
+            lambda program: duplicate_unit(
+                program, source_id, new_id, new_name, register_stage=register_stage
+            ),
+            redo_unit_id=new_id,
+            undo_unit_id=source_id,
+        )
+
+
+class DeleteUnitCommand(_ProgramCommand):
+    def __init__(
+        self,
+        session: "EditorSession",
+        unit_id: str,
+        *,
+        replacement_start_stage: str | None = None,
+    ) -> None:
+        fallback = next(
+            (unit.id for unit in session.program.logical_units() if unit.id != unit_id),
+            None,
+        )
+        super().__init__(
+            session,
+            f"删除 {unit_id}",
+            lambda program: delete_unit(
+                program,
+                unit_id,
+                replacement_start_stage=replacement_start_stage,
+            ),
+            redo_uid=None,
+            redo_unit_id=fallback,
+            undo_unit_id=unit_id,
+        )
 
 
 __all__ = [
     "AppendNodeCommand",
     "DeleteNodeCommand",
+    "CreateUnitCommand",
+    "DuplicateUnitCommand",
+    "DeleteUnitCommand",
     "InsertNodeCommand",
     "MoveNodeCommand",
     "SetNodeArgumentCommand",

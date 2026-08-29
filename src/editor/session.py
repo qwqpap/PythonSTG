@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import tempfile
+import hashlib
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from src.authoring.program import (
     Node,
     ProgramError,
     Ref,
+    TemplateTarget,
     find_node,
 )
 from src.authoring.python_source import (
@@ -22,6 +25,7 @@ from src.authoring.python_source import (
     ExternalChange,
     SourceConflictError,
     SourceDocument,
+    SourceMode,
     SourceSaveError,
     check_external_change,
     load_authoring_project,
@@ -161,7 +165,10 @@ class EditorSession(QObject):
     def dirty(self) -> bool:
         return bool(
             self.source_project
-            and any(document.dirty for document in self.source_project.files.values())
+            and (
+                self.source_project.deleted_files
+                or any(document.dirty for document in self.source_project.files.values())
+            )
         )
 
     @property
@@ -187,6 +194,33 @@ class EditorSession(QObject):
     @property
     def diagnostics(self):
         return self.source_project.diagnostics if self.source_project else ()
+
+    @property
+    def palette_templates(self) -> tuple[TemplateTarget, ...]:
+        if self.source_project is None:
+            return ()
+        targets: dict[str, TemplateTarget] = {}
+        for document in self.source_project.files.values():
+            for definition in document.templates:
+                targets[definition.identity] = TemplateTarget(
+                    identity=definition.identity,
+                    symbol=definition.symbol,
+                    display_name=definition.symbol,
+                    module=document.module_name,
+                    resolved=True,
+                    definition_path=definition.source_path,
+                    definition_span=definition.span,
+                )
+            for local, module, symbol in document.active_external_bindings:
+                identity = f"{module}.{symbol}"
+                targets[identity] = TemplateTarget(
+                    identity=identity,
+                    symbol=symbol,
+                    display_name=local,
+                    module=module,
+                    resolved=True,
+                )
+        return tuple(targets[key] for key in sorted(targets))
 
     @property
     def source_text(self) -> str:
@@ -322,12 +356,18 @@ class EditorSession(QObject):
         target_uid: str,
         placement: DropPlacement | str,
         node: Node,
+        *,
+        target_slot: str | None = None,
     ) -> None:
         unit, _target, _location = find_node(self.program, target_uid)
         self._require_editable_unit(unit.id)
         from .commands import InsertNodeCommand
 
-        self.undo_stack.push(InsertNodeCommand(self, target_uid, placement, node))
+        self.undo_stack.push(
+            InsertNodeCommand(
+                self, target_uid, placement, node, target_slot=target_slot
+            )
+        )
 
     def append_node(self, node: Node) -> None:
         unit = self.current_unit
@@ -344,6 +384,48 @@ class EditorSession(QObject):
         from .commands import DeleteNodeCommand
 
         self.undo_stack.push(DeleteNodeCommand(self, uid))
+
+    def create_unit(
+        self,
+        unit: LogicalUnit,
+        *,
+        register_stage: bool = True,
+    ) -> None:
+        from .commands import CreateUnitCommand
+
+        self.undo_stack.push(CreateUnitCommand(self, unit, register_stage=register_stage))
+
+    def duplicate_unit(
+        self,
+        source_id: str,
+        new_id: str,
+        new_name: str,
+        *,
+        register_stage: bool = False,
+    ) -> None:
+        self._require_editable_unit(source_id)
+        from .commands import DuplicateUnitCommand
+
+        self.undo_stack.push(
+            DuplicateUnitCommand(
+                self, source_id, new_id, new_name, register_stage=register_stage
+            )
+        )
+
+    def delete_unit(
+        self,
+        unit_id: str,
+        *,
+        replacement_start_stage: str | None = None,
+    ) -> None:
+        self._require_editable_unit(unit_id)
+        from .commands import DeleteUnitCommand
+
+        self.undo_stack.push(
+            DeleteUnitCommand(
+                self, unit_id, replacement_start_stage=replacement_start_stage
+            )
+        )
 
     @property
     def global_assets(self) -> tuple[str, ...]:
@@ -406,6 +488,19 @@ class EditorSession(QObject):
         ):
             raise SourceConflictError()
         saved: list[Path] = []
+        touched = {
+            relative: document.path
+            for relative, document in self.source_project.files.items()
+            if document.dirty and not document.read_only
+        }
+        touched.update(
+            (relative, document.path)
+            for relative, document in self.source_project.deleted_files.items()
+        )
+        disk_snapshot = {
+            path: (path.read_bytes() if path.exists() else None)
+            for path in touched.values()
+        }
         self._saving = True
         watched = self.file_watcher.files()
         if watched:
@@ -418,11 +513,23 @@ class EditorSession(QObject):
                 if document.read_only or not document.dirty:
                     continue
                 save_python_source(document, program=self.source_project.program)
+                document.is_new = False
                 saved.append(relative)
+            for relative, document in sorted(
+                self.source_project.deleted_files.items(), key=lambda item: item[0].as_posix()
+            ):
+                if document.path.exists():
+                    document.path.unlink()
+                saved.append(relative)
+            self.source_project.deleted_files.clear()
             self.source_project.refresh_program()
             self._external_keep.clear()
             self._remember_saved_semantics()
             self.undo_stack.setClean()
+        except Exception:
+            for path, payload in disk_snapshot.items():
+                _restore_disk_file(path, payload)
+            raise
         finally:
             self._saving = False
             self._watch_project_files()
@@ -535,13 +642,44 @@ class EditorSession(QObject):
         if self.source_project is None:
             raise ProgramError("project_closed", "no authoring project is open")
         self.source_project.program = program.clone()
-        for document in self.source_project.files.values():
+        desired_ids = {unit.id for unit in self.source_project.program.logical_units()}
+        for relative, document in tuple(self.source_project.files.items()):
             if document.unit is None:
                 continue
             try:
                 document.unit = self.source_project.program.get_unit(document.unit.id)
             except ProgramError:
+                del self.source_project.files[relative]
+                if not document.is_new or document.path.exists():
+                    self.source_project.deleted_files[relative] = document
+        documented_ids = {
+            document.unit.id
+            for document in self.source_project.files.values()
+            if document.unit is not None
+        }
+        for relative, document in tuple(self.source_project.deleted_files.items()):
+            if document.unit is not None and document.unit.id in desired_ids:
+                del self.source_project.deleted_files[relative]
+                document.unit = self.source_project.program.get_unit(document.unit.id)
+                self.source_project.files[relative] = document
+                documented_ids.add(document.unit.id)
+        for unit in self.source_project.program.logical_units():
+            if unit.id in documented_ids:
                 continue
+            relative = _unit_source_path(unit)
+            path = (self.source_project.root / relative).resolve()
+            document = SourceDocument(
+                path=path,
+                raw_bytes=b"",
+                text="",
+                mode=SourceMode.SUPPORTED,
+                unit=unit,
+                module_name=".".join((*self.source_project.root.parts[-1:], *relative.with_suffix("").parts)),
+                disk_digest=_empty_digest(),
+                dirty=True,
+                is_new=True,
+            )
+            self.source_project.files[relative] = document
         self._sync_dirty_flags()
         self.source_project.refresh_program()
         self.selection_changed.emit()
@@ -739,6 +877,58 @@ def _path_stays_in_root(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+_UNIT_DIRECTORIES = {
+    "Stage": "stages",
+    "Wave": "waves",
+    "Enemy": "enemies",
+    "Boss": "bosses",
+    "Spell": "spells",
+    "NonSpell": "spells",
+    "Task": "tasks",
+    "Function": "functions",
+}
+
+
+def _unit_source_path(unit: LogicalUnit) -> Path:
+    if unit.kind == "Project":
+        return Path("project.py")
+    try:
+        directory = _UNIT_DIRECTORIES[unit.kind]
+    except KeyError as exc:
+        raise ProgramError("invalid_unit", f"unsupported source unit kind {unit.kind!r}") from exc
+    return Path(directory) / f"{unit.id}.py"
+
+
+def _empty_digest() -> str:
+    return hashlib.sha256(b"").hexdigest()
+
+
+def _restore_disk_file(path: Path, payload: bytes | None) -> None:
+    """Best-effort atomic rollback used only after a multi-file save failure."""
+
+    if payload is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=f".{path.name}.", suffix=".rollback", dir=path.parent,
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink(missing_ok=True)
 
 
 __all__ = ["EditorSession"]

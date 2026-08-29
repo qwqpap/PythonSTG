@@ -88,6 +88,7 @@ class SourceDocument:
     dirty: bool = False
     conflict: bool = False
     overwrite_confirmed: bool = False
+    is_new: bool = False
 
     @property
     def read_only(self) -> bool:
@@ -107,6 +108,7 @@ class AuthoringSourceProject:
     files: dict[Path, SourceDocument]
     program: AuthoringProgram
     diagnostics: tuple[Diagnostic, ...] = ()
+    deleted_files: dict[Path, SourceDocument] = field(default_factory=dict)
 
     def file_for_unit(self, unit_id: str) -> SourceDocument:
         for document in self.files.values():
@@ -128,6 +130,58 @@ class AuthoringSourceProject:
         )
         self.diagnostics = (*source, *semantic)
         return self.program
+
+    def add_unsaved_unit(self, unit: LogicalUnit, relative_path: str | Path) -> SourceDocument:
+        """Add a supported in-memory document without touching the filesystem."""
+
+        relative = Path(relative_path)
+        if relative.is_absolute() or ".." in relative.parts or relative.suffix != ".py":
+            raise SourceError("invalid_source_path", f"invalid authoring path {relative.as_posix()!r}")
+        if relative in self.files:
+            raise SourceError("source_exists", f"source path already exists: {relative.as_posix()}")
+        path = (self.root / relative).resolve()
+        try:
+            path.relative_to(self.root)
+        except ValueError as exc:
+            raise SourceError("invalid_source_path", "source path escapes the authoring root") from exc
+        module = ".".join([_project_module_prefix(self.root), *relative.with_suffix("").parts])
+        document = SourceDocument(
+            path=path,
+            raw_bytes=b"",
+            text="",
+            mode=SourceMode.SUPPORTED,
+            unit=unit,
+            module_name=module,
+            disk_digest=_digest(b""),
+            dirty=True,
+            is_new=True,
+        )
+        unit.source_path = path
+        self.files[relative] = document
+        self.deleted_files.pop(relative, None)
+        self.refresh_program()
+        return document
+
+    def tombstone_unit(self, unit_id: str) -> SourceDocument:
+        """Hide a source document until save; callers may restore it for Undo."""
+
+        for relative, document in tuple(self.files.items()):
+            if document.unit is not None and document.unit.id == unit_id:
+                del self.files[relative]
+                self.deleted_files[relative] = document
+                self.refresh_program()
+                return document
+        raise SourceError("unknown_unit", f"no source file for logical unit {unit_id!r}")
+
+    def restore_tombstone(self, relative_path: str | Path) -> SourceDocument:
+        relative = Path(relative_path)
+        try:
+            document = self.deleted_files.pop(relative)
+        except KeyError as exc:
+            raise SourceError("unknown_tombstone", relative.as_posix()) from exc
+        self.files[relative] = document
+        self.refresh_program()
+        return document
 
     def save_unit(self, unit_id: str, *, confirm_overwrite: bool = False) -> str:
         document = self.file_for_unit(unit_id)
@@ -364,6 +418,7 @@ def _copy_document_state(target: SourceDocument, source: SourceDocument) -> None
     target.dirty = False
     target.conflict = False
     target.overwrite_confirmed = False
+    target.is_new = False
 
 
 def save_source(

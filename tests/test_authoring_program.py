@@ -46,16 +46,22 @@ from src.authoring.dsl import (
 )
 from src.authoring.program import (
     AuthoringProgram,
+    DropCheck,
     DropPlacement,
     Node,
     ProgramError,
+    create_unit,
     delete_node,
+    delete_unit,
+    duplicate_unit,
     find_node,
     insert_node,
+    insert_new_node,
     move_node,
     set_argument,
     set_template_positional_argument,
     set_unit_field,
+    validate_insert,
     wrap_node,
 )
 
@@ -883,3 +889,64 @@ def test_move_wrap_rejects_an_occupied_wrapper_without_mutating_the_program():
         move_node(program, "wrapper", "target", DropPlacement.WRAP)
 
     assert program.semantic_data() == before
+
+
+def test_new_node_insert_supports_root_slots_wrap_parallel_and_dry_run():
+    program = AuthoringProgram.from_units(
+        [Function("flow", "Flow", body=[If(True, [], [], uid="condition"), Wait(1, uid="tail")])]
+    )
+
+    root = insert_new_node(program, "flow", Wait(2, uid="root_wait"))
+    child = insert_new_node(
+        root, "flow", Wait(3, uid="else_wait"), "condition", DropPlacement.CHILD,
+        target_slot="else_body",
+    )
+    wrapped = insert_new_node(
+        child, "flow", Parallel([[]], uid="parallel"), "tail", DropPlacement.WRAP
+    )
+    branched = insert_new_node(
+        wrapped, "flow", Wait(4, uid="branch_wait"), "parallel", DropPlacement.CHILD,
+        target_slot="new_branch",
+    )
+
+    parallel = find_node(branched, "parallel")[1]
+    assert [node.uid for node in find_node(branched, "condition")[1].children["else_body"]] == [
+        "else_wait"
+    ]
+    assert [[node.uid for node in branch.children["body"]] for branch in parallel.children["branches"]] == [
+        ["tail"], ["branch_wait"]
+    ]
+    assert validate_insert(branched, "flow", Fire(), "tail", DropPlacement.AFTER) == DropCheck(
+        True
+    )
+    rejected = validate_insert(branched, "flow", RunWave(Ref("missing")), "tail")
+    assert not rejected.allowed and "missing" in rejected.reason
+
+
+def test_logical_unit_create_duplicate_and_delete_update_refs_and_uids():
+    program = AuthoringProgram.from_units(
+        [
+            Project("demo", "Demo", Ref("stage_a"), [Ref("stage_a")]),
+            Stage("stage_a", "A", [Wait(1, uid="source_wait")]),
+            Task("task_a", "Task", body=[Call(Ref("task_a"), uid="self_ref")]),
+        ]
+    )
+
+    created = create_unit(program, Stage("stage_b", "B"), register_stage=True)
+    project = created.get_unit("demo")
+    assert project.metadata["stages"] == [Ref("stage_a"), Ref("stage_b")]
+
+    duplicated = duplicate_unit(created, "task_a", "task_b", "Task B")
+    duplicate = duplicated.get_unit("task_b")
+    assert duplicate.body[0].uid != "self_ref"
+    assert duplicate.body[0].arguments["function"] == Ref("task_b")
+    linked = create_unit(
+        duplicated, Function("caller", "Caller", body=[Call(Ref("task_b"))])
+    )
+
+    deleted = delete_unit(linked, "stage_a", replacement_start_stage="stage_b")
+    assert deleted.get_unit("demo").metadata == {
+        "start_stage": Ref("stage_b"), "stages": [Ref("stage_b")]
+    }
+    with pytest.raises(ProgramError, match="referenced"):
+        delete_unit(deleted, "task_b")
