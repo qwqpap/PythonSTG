@@ -385,6 +385,13 @@ class EditorSession(QObject):
 
         self.undo_stack.push(DeleteNodeCommand(self, uid))
 
+    def duplicate_node(self, uid: str) -> None:
+        unit, _node, _location = find_node(self.program, uid)
+        self._require_editable_unit(unit.id)
+        from .commands import DuplicateNodeCommand
+
+        self.undo_stack.push(DuplicateNodeCommand(self, uid))
+
     def create_unit(
         self,
         unit: LogicalUnit,

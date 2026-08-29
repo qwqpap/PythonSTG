@@ -98,6 +98,7 @@ class NodePalette(QWidget):
     """One visible palette; compatibility is derived from the headless model."""
 
     insert_requested = Signal(str)
+    current_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -115,6 +116,7 @@ class NodePalette(QWidget):
         self.tree.setDragEnabled(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.itemDoubleClicked.connect(self._activate)
+        self.tree.itemSelectionChanged.connect(self.current_changed)
         self.search.textChanged.connect(self.refresh)
         self.show_all.toggled.connect(self.refresh)
         layout.addWidget(self.search)

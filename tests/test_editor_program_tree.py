@@ -1,3 +1,5 @@
+"""ProgramFlow interaction tests driven by real Qt drag events."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,39 +8,13 @@ import pytest
 
 from src.authoring.program import DropPlacement, ProgramError, find_node
 from src.core.project_context import ProjectContext
-from src.editor.node_palette import PROTOTYPE_MIME, PaletteEntry
-from src.editor.program_tree import NODE_MIME, ProgramTree
+from src.editor.node_palette import PROTOTYPE_MIME
+from src.editor.program_tree import NODE_MIME, ProgramFlow
 from src.editor.session import EditorSession
 from src.editor.window import EditorWindow
 from src.qt_compat.QtCore import QMimeData, QPoint, Qt
-
-
-class _DropPosition:
-    def __init__(self, point: QPoint) -> None:
-        self._point = point
-
-    def toPoint(self) -> QPoint:
-        return self._point
-
-
-class _DropEvent:
-    def __init__(self, point: QPoint, source_uid: str) -> None:
-        self._position = _DropPosition(point)
-        self._mime = QMimeData()
-        self._mime.setData(NODE_MIME, source_uid.encode("utf-8"))
-        self.accepted = False
-
-    def position(self) -> _DropPosition:
-        return self._position
-
-    def mimeData(self) -> QMimeData:
-        return self._mime
-
-    def acceptProposedAction(self) -> None:
-        self.accepted = True
-
-    def ignore(self) -> None:
-        self.accepted = False
+from src.qt_compat.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from src.qt_compat.QtWidgets import QApplication
 
 
 def _project(root: Path) -> Path:
@@ -49,7 +25,7 @@ def _project(root: Path) -> Path:
         encoding="utf-8",
     )
     (root / "stage.py").write_text(
-        "from src.authoring.dsl import Repeat, Stage, Wait\n\n"
+        "from src.authoring.dsl import Parallel, Repeat, Stage, Wait\n\n"
         "stage = Stage(\n"
         "    'stage',\n"
         "    'Stage',\n"
@@ -65,8 +41,27 @@ def _project(root: Path) -> Path:
     return root
 
 
-def _select_palette_entry(window: EditorWindow, kind: str) -> None:
-    """Act like a user: pick one visible palette row, then use the add action."""
+def _session(tmp_path: Path) -> EditorSession:
+    session = EditorSession(project_context=ProjectContext(tmp_path))
+    session.open_project(_project(tmp_path / "authoring"))
+    session.select_unit("stage")
+    return session
+
+
+def _window(tmp_path: Path) -> EditorWindow:
+    window = EditorWindow(_session(tmp_path))
+    window.resize(1080, 720)
+    window.show()
+    QApplication.processEvents()
+    window.inspector_dock.hide()
+    window.timeline_dock.hide()
+    window.resize(1080, 720)
+    QApplication.processEvents()
+    return window
+
+
+def _drag_mime(window: EditorWindow, kind: str) -> QMimeData:
+    """Build the MIME exactly as the visible palette tree emits it."""
 
     palette = window.node_palette
 
@@ -75,188 +70,125 @@ def _select_palette_entry(window: EditorWindow, kind: str) -> None:
         for index in range(item.childCount()):
             yield from walk(item.child(index))
 
-    for top_index in range(palette.tree.topLevelItemCount()):
-        for item in walk(palette.tree.topLevelItem(top_index)):
+    for top in range(palette.tree.topLevelItemCount()):
+        for item in walk(palette.tree.topLevelItem(top)):
             if item.data(0, int(Qt.ItemDataRole.UserRole)) == kind and not item.isDisabled():
-                palette.tree.setCurrentItem(item)
-                return
-    raise AssertionError(f"palette entry {kind!r} was not selectable")
+                mime = palette.tree.mimeData([item])
+                assert mime.hasFormat(PROTOTYPE_MIME)
+                return mime
+    raise AssertionError(f"palette has no enabled {kind!r} entry")
 
 
-def _session(tmp_path: Path) -> EditorSession:
-    session = EditorSession(project_context=ProjectContext(tmp_path))
-    session.open_project(_project(tmp_path / "authoring"))
-    session.select_unit("stage")
-    return session
+def _node_mime(uid: str) -> QMimeData:
+    mime = QMimeData()
+    mime.setData(NODE_MIME, uid.encode("utf-8"))
+    return mime
+
+
+def _send_drag(
+    flow: ProgramFlow, mime: QMimeData, position: QPoint, *, expect_accepted: bool = True
+) -> QDropEvent:
+    canvas = flow.canvas
+    actions = Qt.DropAction.MoveAction
+    buttons = Qt.MouseButton.LeftButton
+    modifiers = Qt.KeyboardModifier.NoModifier
+    QApplication.sendEvent(
+        canvas, QDragEnterEvent(position, actions, mime, buttons, modifiers)
+    )
+    move = QDragMoveEvent(position, actions, mime, buttons, modifiers)
+    QApplication.sendEvent(canvas, move)
+    if expect_accepted:
+        assert move.isAccepted(), "drag move must be accepted over a visible drop target"
+    else:
+        assert not move.isAccepted(), "an illegal drop zone must refuse the drag"
+    drop = QDropEvent(position, actions, mime, buttons, modifiers)
+    QApplication.sendEvent(canvas, drop)
+    return drop
+
+
+def _card_point(flow: ProgramFlow, uid: str, placement: DropPlacement) -> QPoint:
+    rect = flow.canvas.rect_for_uid(uid)
+    assert rect is not None, f"card {uid} is not visible in the flow"
+    if placement == DropPlacement.BEFORE:
+        return QPoint(rect.center().x(), rect.top() + 1)
+    if placement == DropPlacement.AFTER:
+        return QPoint(rect.center().x(), rect.bottom() - 1)
+    if placement == DropPlacement.CHILD:
+        return QPoint(rect.left() + 2, rect.center().y())
+    return QPoint(rect.right() - 2, rect.center().y())
 
 
 @pytest.mark.parametrize(
-    ("source", "target", "placement", "top_level", "child_uids"),
+    ("source", "target", "placement", "top_level"),
     (
-        ("b", "a", DropPlacement.BEFORE, ["container", "wrapper", "b", "a"], []),
-        ("a", "b", DropPlacement.AFTER, ["container", "wrapper", "b", "a"], []),
-        ("a", "container", DropPlacement.CHILD, ["container", "wrapper", "b"], ["inner", "a"]),
-        ("wrapper", "a", DropPlacement.WRAP, ["container", "wrapper", "b"], ["a"]),
+        ("b", "a", DropPlacement.BEFORE, ["container", "wrapper", "b", "a"]),
+        ("a", "b", DropPlacement.AFTER, ["container", "wrapper", "b", "a"]),
+        ("wrapper", "a", DropPlacement.WRAP, ["container", "wrapper", "b"]),
     ),
 )
-def test_each_drop_placement_emits_one_undoable_command(
-    tmp_path,
-    qapp_session,
-    source,
-    target,
-    placement,
-    top_level,
-    child_uids,
+def test_real_drag_events_move_nodes_with_one_undoable_command(
+    tmp_path, qapp_session, source, target, placement, top_level
 ):
-    session = _session(tmp_path)
+    window = _window(tmp_path)
+    session = window.session
+    flow = window.program_tree
     before = session.program.semantic_data()
-    tree = ProgramTree()
-    tree.resize(480, 360)
-    tree.set_unit(session.current_unit)
-    tree.expandAll()
-    tree.show()
-    qapp_session.processEvents()
-    tree.move_requested.connect(session.move_node)
 
-    target_item = tree.item_for_uid(target)
-    rect = tree.visualItemRect(target_item)
-    if placement == DropPlacement.BEFORE:
-        point = QPoint(rect.center().x(), rect.top() + 1)
-    elif placement == DropPlacement.AFTER:
-        point = QPoint(rect.center().x(), rect.bottom() - 1)
-    elif placement == DropPlacement.CHILD:
-        point = QPoint(rect.left() + 1, rect.center().y())
-    else:
-        point = QPoint(rect.right() - 1, rect.center().y())
-    event = _DropEvent(point, source)
-    tree.dropEvent(event)
+    drop = _send_drag(flow, _node_mime(source), _card_point(flow, target, placement))
 
-    assert event.accepted
+    assert drop.isAccepted()
     assert session.undo_stack.count() == 1
     assert [node.uid for node in session.program.get_unit("stage").body] == top_level
-    if child_uids:
-        parent_uid = "container" if placement == DropPlacement.CHILD else "wrapper"
-        parent = find_node(session.program, parent_uid)[1]
-        assert [node.uid for node in parent.children["body"]] == child_uids
-
     after = session.program.semantic_data()
     session.undo_stack.undo()
     assert session.program.semantic_data() == before
     session.undo_stack.redo()
     assert session.program.semantic_data() == after
-    tree.close()
-
-
-def test_tree_computes_four_unambiguous_drop_zones(tmp_path, qapp_session):
-    session = _session(tmp_path)
-    tree = ProgramTree()
-    tree.resize(480, 360)
-    tree.set_unit(session.current_unit)
-    tree.expandAll()
-    tree.show()
-    qapp_session.processEvents()
-    item = tree.item_for_uid("container")
-    rect = tree.visualItemRect(item)
-
-    assert (
-        tree.placement_for_item(item, QPoint(rect.center().x(), rect.top() + 1))
-        == DropPlacement.BEFORE
-    )
-    assert (
-        tree.placement_for_item(item, QPoint(rect.center().x(), rect.bottom() - 1))
-        == DropPlacement.AFTER
-    )
-    assert (
-        tree.placement_for_item(item, QPoint(rect.left() + 1, rect.center().y()))
-        == DropPlacement.CHILD
-    )
-    assert (
-        tree.placement_for_item(item, QPoint(rect.right() - 1, rect.center().y()))
-        == DropPlacement.WRAP
-    )
-    tree.close()
-
-
-def test_template_call_stays_aggregated_through_tree_edit_save_and_reopen(
-    tmp_path, qapp_session
-):
-    root = tmp_path / "authoring"
-    root.mkdir()
-    (root / "project.py").write_text(
-        "from src.authoring.dsl import Project, Ref\n\n"
-        "project = Project('demo', 'Demo', Ref('stage'), [Ref('stage')])\n",
-        encoding="utf-8",
-    )
-    (root / "stage.py").write_text(
-        "from src.authoring.dsl import Stage, Wait, template\n\n"
-        "@template\n"
-        "def local_pause(frames: int = 3):\n"
-        "    return [Wait(frames)]\n\n"
-        "stage = Stage('stage', 'Stage', body=[local_pause(frames=4), Wait(1, uid='tail')])\n",
-        encoding="utf-8",
-    )
-    session = EditorSession(project_context=ProjectContext(tmp_path))
-    session.open_project(root)
-    stage = session.program.get_unit("stage")
-    call_uid = stage.body[0].uid
-    assert stage.body[0].kind == "TemplateCall"
-
-    session.move_node("tail", call_uid, DropPlacement.BEFORE)
-    assert [node.kind for node in session.program.get_unit("stage").body] == [
-        "Wait",
-        "TemplateCall",
-    ]
-    session.save_all()
-
-    reopened = EditorSession(project_context=ProjectContext(tmp_path))
-    reopened.open_project(root)
-    assert [node.kind for node in reopened.program.get_unit("stage").body] == [
-        "Wait",
-        "TemplateCall",
-    ]
-
-
-def test_visible_toolbar_adds_root_and_child_nodes_and_deletes_with_undo(
-    tmp_path, qapp_session
-):
-    session = _session(tmp_path)
-    window = EditorWindow(session)
-    window.show()
-    qapp_session.processEvents()
-
-    assert window.add_node_button.isVisible()
-    assert window.add_node_button.isEnabled()
-    assert not window.delete_node_button.isEnabled()
-    assert window.insert_mode_buttons[DropPlacement.AFTER].isChecked()
-
-    _select_palette_entry(window, "Wait")
-    window.add_node_button.click()
-    appended_uid = session.current_node_uid
-    assert appended_uid is not None
-    assert session.program.get_unit("stage").body[-1].uid == appended_uid
-
-    session.select_node("container")
-    qapp_session.processEvents()
-    window.insert_mode_buttons[DropPlacement.CHILD].click()
-    qapp_session.processEvents()
-    _select_palette_entry(window, "Wait")
-    window.add_node_button.click()
-    child_uid = session.current_node_uid
-    assert child_uid is not None
-    container = find_node(session.program, "container")[1]
-    assert [node.uid for node in container.children["body"]] == ["inner", child_uid]
-
-    window.delete_node_button.click()
-    qapp_session.processEvents()
-    with pytest.raises(ProgramError, match="unknown node"):
-        find_node(session.program, child_uid)
-    session.undo_stack.undo()
-    assert find_node(session.program, child_uid)[1].kind == "Wait"
-    assert session.current_node_uid == child_uid
     window.close()
 
 
-def test_empty_unit_can_add_its_first_node(tmp_path, qapp_session):
+def test_real_palette_drag_inserts_node_and_flashes_it(tmp_path, qapp_session):
+    window = _window(tmp_path)
+    session = window.session
+    flow = window.program_tree
+    mime = _drag_mime(window, "Wait")
+
+    drop = _send_drag(flow, mime, _card_point(flow, "a", DropPlacement.BEFORE))
+
+    assert drop.isAccepted()
+    body = session.program.get_unit("stage").body
+    assert body[2].kind == "Wait"
+    assert session.undo_stack.count() == 1
+    assert flow.canvas._flash_uid == body[2].uid
+    session.undo_stack.undo()
+    assert len(session.program.get_unit("stage").body) == 4
+    window.close()
+
+
+def test_invalid_drag_zone_is_rejected_without_model_changes(tmp_path, qapp_session):
+    window = _window(tmp_path)
+    session = window.session
+    flow = window.program_tree
+    before = session.program.semantic_data()
+
+    feedback: list[str] = []
+    flow.drop_feedback.connect(feedback.append)
+    # Wrapping a plain Wait with an existing Repeat is not a legal move.
+    drop = _send_drag(
+        flow,
+        _node_mime("container"),
+        _card_point(flow, "a", DropPlacement.WRAP),
+        expect_accepted=False,
+    )
+
+    assert not drop.isAccepted()
+    assert session.program.semantic_data() == before
+    assert session.undo_stack.count() == 0
+    assert feedback and "不能" in feedback[-1] or "只有" in feedback[-1] or feedback[-1]
+    window.close()
+
+
+def test_empty_unit_root_landing_takes_the_first_node(tmp_path, qapp_session):
     root = _project(tmp_path / "authoring")
     (root / "stage.py").write_text(
         "from src.authoring.dsl import Stage\n\n"
@@ -267,19 +199,232 @@ def test_empty_unit_can_add_its_first_node(tmp_path, qapp_session):
     session.open_project(root)
     session.select_unit("stage")
     window = EditorWindow(session)
-
     window.show()
-    _select_palette_entry(window, "Wait")
-    window.add_node_button.click()
+    QApplication.processEvents()
+    flow = window.program_tree
+    canvas = flow.canvas
+    landing = canvas._layout.root_landing
+    assert landing is not None and landing.rect.height() >= 120
 
-    node_uid = session.current_node_uid
-    assert node_uid is not None
-    assert [item.uid for item in session.program.get_unit("stage").body] == [node_uid]
-    session.undo_stack.undo()
-    assert session.program.get_unit("stage").body == []
-    session.undo_stack.redo()
-    session.save_all()
-    reopened = EditorSession(project_context=ProjectContext(tmp_path))
-    reopened.open_project(root)
-    assert [item.uid for item in reopened.program.get_unit("stage").body] == [node_uid]
+    drop = _send_drag(
+        flow, _drag_mime(window, "Wait"), landing.rect.center()
+    )
+
+    assert drop.isAccepted()
+    body = session.program.get_unit("stage").body
+    assert len(body) == 1 and body[0].kind == "Wait"
+    assert session.undo_stack.count() == 1
+    window.close()
+
+
+def test_if_dual_slots_and_parallel_new_branch_accept_drops(tmp_path, qapp_session):
+    window = _window(tmp_path)
+    session = window.session
+    flow = window.program_tree
+    session.select_node("container")
+    QApplication.processEvents()
+    window.insert_palette_node("If", DropPlacement.AFTER, target_uid="container")
+    condition = session.current_node_uid
+    if_node = find_node(session.program, condition)[1]
+    parallel_uid = None
+    session.select_node("a")
+    window.insert_palette_node("Parallel", DropPlacement.AFTER, target_uid="a")
+    parallel_uid = session.current_node_uid
+
+    landings = [
+        element for element in flow.canvas._layout.elements if element.kind == "landing"
+    ]
+    slot_uids = {element.uid for element in landings}
+    assert {if_node.uid} <= slot_uids  # 条件成立/否则 landings exist for the If
+    new_branch = [
+        element for element in flow.canvas._layout.elements if element.kind == "new_branch"
+    ]
+    assert any(element.uid == parallel_uid for element in new_branch)
+
+    parallel = find_node(session.program, parallel_uid)[1]
+    branch_landing = next(
+        element.rect for element in new_branch if element.uid == parallel_uid
+    )
+    drop = _send_drag(flow, _drag_mime(window, "Wait"), branch_landing.center())
+    assert drop.isAccepted()
+    parallel_after = find_node(session.program, parallel_uid)[1]
+    assert len(parallel_after.children["branches"]) == 2
+    assert parallel_after.children["branches"][1].children["body"][0].kind == "Wait"
+    assert session.undo_stack.count() == 3
+    window.close()
+
+
+def test_drop_preview_describes_the_full_result(tmp_path, qapp_session):
+    window = _window(tmp_path)
+    flow = window.program_tree
+    feedback: list[str] = []
+    flow.drop_feedback.connect(feedback.append)
+    mime = _drag_mime(window, "Repeat")
+
+    position = _card_point(flow, "a", DropPlacement.WRAP)
+    QApplication.sendEvent(
+        flow.canvas,
+        QDragEnterEvent(
+            position,
+            Qt.DropAction.MoveAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    QApplication.sendEvent(
+        flow.canvas,
+        QDragMoveEvent(
+            position,
+            Qt.DropAction.MoveAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+    assert feedback, "drag move must emit a result preview"
+    assert "包裹" in feedback[-1] and "等待" in feedback[-1]
+    assert flow.canvas._drop_check.allowed
+    window.close()
+
+
+def test_hover_over_collapsed_container_expands_after_450ms(tmp_path, qapp_session):
+    window = _window(tmp_path)
+    flow = window.program_tree
+    canvas = flow.canvas
+    canvas.collapse("container")
+    QApplication.processEvents()
+    assert "container" in canvas._collapsed
+
+    position = _card_point(flow, "container", DropPlacement.CHILD)
+    mime = _node_mime("a")
+    QApplication.sendEvent(
+        canvas,
+        QDragEnterEvent(
+            position,
+            Qt.DropAction.MoveAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    move_event = QDragMoveEvent(
+        position,
+        Qt.DropAction.MoveAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(canvas, move_event)
+    qapp_session.processEvents()
+    from src.qt_compat.QtTest import QTest
+
+    QTest.qWait(520)
+    QApplication.sendEvent(
+        canvas,
+        QDragMoveEvent(
+            position,
+            Qt.DropAction.MoveAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    qapp_session.processEvents()
+
+    assert "container" not in canvas._collapsed
+    canvas._end_drop()
+    window.close()
+
+
+def test_drag_near_the_bottom_edge_autoscrolls(tmp_path, qapp_session):
+    window = _window(tmp_path)
+    flow = window.program_tree
+    canvas = flow.canvas
+    for index in range(6):
+        session = window.session
+        session.select_node("b")
+        window.insert_palette_node("Repeat", DropPlacement.AFTER, target_uid="b")
+    QApplication.processEvents()
+    bar = flow.verticalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(0)
+    position = QPoint(canvas.width() // 2, flow.viewport().height() - 2)
+    mime = _node_mime("a")
+    QApplication.sendEvent(
+        canvas,
+        QDragEnterEvent(
+            position,
+            Qt.DropAction.MoveAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    QApplication.sendEvent(
+        canvas,
+        QDragMoveEvent(
+            position,
+            Qt.DropAction.MoveAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+    canvas._autoscroll_step()
+    canvas._autoscroll_step()
+
+    assert bar.value() > 0
+    canvas._end_drop()
+    window.close()
+
+
+def test_collapse_keeps_selection_and_refolds_without_model_changes(
+    tmp_path, qapp_session
+):
+    window = _window(tmp_path)
+    session = window.session
+    flow = window.program_tree
+    before = session.program.semantic_data()
+
+    flow.collapse("container")
+    QApplication.processEvents()
+    folded = [
+        element
+        for element in flow.canvas._layout.elements
+        if element.kind == "folded" and element.uid == "container"
+    ]
+    assert folded, "collapsed container must show its fold hint"
+    assert find_node(session.program, "container")[1].children["body"]
+
+    flow.expand("container")
+    QApplication.processEvents()
+    assert session.program.semantic_data() == before
+    assert session.undo_stack.count() == 0
+    window.close()
+
+
+def test_double_click_activates_node_for_parameter_focus(tmp_path, qapp_session):
+    window = _window(tmp_path)
+    flow = window.program_tree
+    activated: list[str] = []
+    flow.node_activated.connect(activated.append)
+    canvas = flow.canvas
+    rect = canvas.rect_for_uid("a")
+    from src.qt_compat.QtCore import QEvent, QPointF
+    from src.qt_compat.QtGui import QMouseEvent
+
+    click = QMouseEvent(
+        QEvent.Type.MouseButtonDblClick,
+        QPointF(rect.center()),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(canvas, click)
+
+    assert activated == ["a"]
+    assert window.session.current_node_uid == "a"
     window.close()

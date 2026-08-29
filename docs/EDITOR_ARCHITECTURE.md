@@ -59,7 +59,8 @@ src/
 │  ├─ session.py          # 一个工程的唯一状态所有者
 │  ├─ commands.py         # QUndoCommand 模型操作
 │  ├─ sidebars.py         # 程序/文件/全局资产/Stage 资产
-│  ├─ program_tree.py     # 当前逻辑单元节点树与四种拖拽结果
+│  ├─ node_palette.py     # 常驻节点库：搜索、兼容过滤、引用候选、模板
+│  ├─ program_tree.py     # 自定义绘制纵向程序流与四区拖拽覆盖层
 │  ├─ inspector.py        # 由 DSL 类型注解生成字段编辑器
 │  ├─ code_view.py        # 作者/生成 Python 只读查看
 │  ├─ output.py           # Problems 和有界运行日志
@@ -339,8 +340,19 @@ Panel 读取 Session 并调用公开命令工厂；不得自己保存第二份�
 Editor/Game 是两个独立可关闭组，关闭后有固定菜单动作恢复。Inspector 是右侧辅助栏。
 Timeline 永久挂在底部，可调高度但无关闭动作。
 
+左侧为上下分栏：上方保留四视图，下方常驻节点库（`node_palette.py`）。节点库只
+保存中文标签、类别和引用候选类型，不复制构造函数参数或父子规则；兼容性由
+headless `validate_insert` 推导。新节点拖拽使用瞬态 MIME
+`application/x-pystg-node-prototype`，只携带节点或模板 identity。
+
+中央程序流（`program_tree.py` 的 `ProgramFlow`）是自定义绘制的纵向块式投影：
+每个节点一张缩进卡片；`Repeat`/`If`/`At`/`SpawnTask` 直接展示嵌套区域；空容器
+显示"拖到这里添加内容"；`If` 显示"条件成立/否则"；`Parallel` 分支在宽视口并排、
+窄视口纵向堆叠；支持折叠、边缘自动滚动、悬停 450ms 自动展开、Esc 取消拖动。
+
 程序节点拖拽先计算唯一 `DropPlacement`：`BEFORE`、`AFTER`、`CHILD`、`WRAP`。
 拖动期间只显示候选，释放时生成恰一个 `QUndoCommand`。Inspector 和资源拖拽同理。
+放置成功后选中新节点、闪烁高亮，并把 Inspector 滚动到建议首先修改的字段。
 
 作者源码和生成源码视图使用只读文本控件。受支持文件也不提供任意文本编辑器；外部编辑
 由文件监视器加载。首版所有作者可见 UI 字符串为简体中文。

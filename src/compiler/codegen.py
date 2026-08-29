@@ -874,7 +874,11 @@ class CodeGenerator:
                 self._render_nodes(writer, else_body, indent + 1, unit, symbols, context, record=record)
             return
         if kind == "Else":
-            self._render_nodes(writer, node.children["body"], indent, unit, symbols, context, record=record)
+            body = node.children["body"]
+            if body:
+                self._render_nodes(writer, body, indent, unit, symbols, context, record=record)
+            else:
+                writer.line(indent, "pass")
             return
         if kind == "Parallel":
             helpers: list[str] = []

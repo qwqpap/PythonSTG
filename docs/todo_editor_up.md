@@ -136,3 +136,95 @@ Python source project增加未保存文档和删除墓碑状态：
 - Project、Stage、Spell 真实 GLFW/ModernGL 预览继续成功嵌入、获得焦点并正常停止，无残留进程。
 - 维护者必须实际完成一次完整工作流：新建 Wave 和 Enemy、拖出 Repeat/Wait/Fire、把节点包裹进容器、加入 Stage、修改参数、保存重开并运行预览。
 - Structural、Runtime、Native、Performance、Usability 分别报告；维护者未实际完成前，Usability 必须写 `not run`，不能用自动化或截图代替。
+
+## 6. 实施与验收证据（2026-08-29）
+
+### 实施顺序执行情况
+
+1. **检查点提交**：`d758990`（feat(editor): headless palette inserts, unit
+   lifecycle, and in-memory documents）已提交并推送到
+   `codex/code-driven-editor-v2`；`.claude/settings.local.json` 从未暂存。
+2. **Headless 层先行**：`validate_insert`/`DropCheck`、`insert_new_node`、
+   `node_from_palette`、`create_unit`/`duplicate_unit`/`delete_unit`、
+   `duplicate_node`、`unit_reference_locations` 全部先于 Qt 改动完成并有直接
+   测试；Python source 工程新增未保存文档与删除墓碑状态
+   （`add_unsaved_unit`/`tombstone_unit`/`restore_tombstone`）。
+3. **节点库与程序流替换**：旧的弹出式 `NODE_PALETTE`、隐形四区判定、
+   `_PALETTE_ARGUMENTS`、QTreeWidget 版程序树已整体删除，未保留新旧双轨。
+4. **逻辑单元管理与结构化 Inspector** 已接入窗口与命令层。
+5. **保存/构建/预览串联**：新建与删除在保存前只改内存；保存失败回滚磁盘
+   快照；外部冲突沿用 keep/reload 流程。
+6. **独立只读验证**：见下方各类证据；Usability 等待维护者实操。
+
+### Structural：PASS
+
+- `src/editor/program_tree.py` 重写为自定义绘制的 `ProgramFlow`
+  （`QAbstractScrollArea` + 画布），投影 `EditorSession`，不持有第二份模型；
+  `Parallel` 分支按视口宽度自动并排/纵向堆叠；空容器显示"拖到这里添加内容"；
+  折叠、边缘自动滚动、悬停 450ms 自动展开、落点闪烁高亮。
+- `src/editor/node_palette.py` 常驻节点库：搜索、兼容过滤、灰显原因、最近使用
+  （仅会话内存）、模板与显式导入模板按调用保留。
+- `src/editor/inspector.py`：Literal 下拉框、可搜索 Ref 选择框、常量/表达式
+  切换、`res://` 拖入与文件浏览、列表/字典字面量结构化编辑、字段级错误提示、
+  "建议调整"标记与聚焦。
+- `src/editor/commands.py`：`SetNodeArgumentCommand` 支持 `id()`/`mergeWith`，
+  连续数值编辑合并为一个可理解 Undo；新增 `DuplicateNodeCommand`。
+- 全部 37 个公开 DSL 节点种类由 `node_from_palette` 工厂覆盖（测试断言与
+  `dsl.NODE_CONSTRUCTORS` 一一对应）。
+
+### Runtime：PASS
+
+```text
+python -m pytest tests/ -q --tb=no -p no:warnings
+=> 438 passed, 0 failed, 38.74s（< 5 分钟 PR 门禁）
+
+DSL/compiler 快速集（7 个文件）：192 passed / 6.84s（< 15 秒预算）
+编辑器自动化（15 个文件）：75 passed / 19.52s（< 60 秒预算）
+python -m compileall -q main.py src game_content tools tests => 通过
+python tools/validate_assets.py --format json => ok=true, 0 errors, 0 warnings
+git diff --check / git diff --cached --check => 通过
+```
+
+- `tests/test_editor_program_tree.py` 使用真实 `QDragEnterEvent` /
+  `QDragMoveEvent` / `QDropEvent` 事件投递到可见画布，从节点库真实 MIME 拖到
+  四区（Before/After/Child/Wrap）、空根落点、If 双插槽、Parallel 新建分支、
+  非法落点拒绝（无模型修改、无 Undo 记录）、折叠/悬停展开/自动滚动/闪烁。
+- `tests/test_editor_palette_nodes.py`：37 个节点种类各自在合法上下文中从
+  palette 工厂创建、经会话插入、保存、重开语义等价，并通过
+  `PackageBuilder.build` 真实构建（含子进程 compileall/import 验证）。
+- `tests/test_editor_unit_manager.py`：新建在保存前不落盘、复制重写全部 UID、
+  引用阻止删除并列出跳转位置、删除注册 Stage 处理 Project 顺序、保存失败
+  保留最近成功磁盘内容、连续数值编辑合并 Undo。
+
+### Native：PASS
+
+```text
+清除 QT_QPA_PLATFORM 后：
+python tools/verify_native_code_editor_dragflow.py --json
+=> {"platform": "windows",
+    "observations": [
+      {"size": "1480x920", "parallel_card_width": 754,
+       "side_by_side": true, "stacked_mode_reachable": true},
+      {"size": "960x640", "parallel_card_width": 535,
+       "side_by_side": true, "stacked_mode_reachable": true}]}
+```
+
+真实暴露的原生 PySide6 窗口内完成：节点库搜索、真实拖拽事件四区切换、
+自动滚动、Inspector 数值修改、Undo/Redo；Parallel 分支在宽视口并排、300px
+窄视口纵向堆叠。1480×920 与 960×640 两种尺寸均通过。GLFW/ModernGL 预览嵌入
+属于 CD6 既有 gate（`tools/verify_native_code_editor.py`），本次未改动预览链路。
+
+### Performance：PASS
+
+- 全仓 `python -m pytest`：38.74s < 5 分钟；编辑器自动化 19.52s < 60 秒；
+  DSL/compiler 快速集 6.84s < 15 秒。
+- compileall 0.3s 左右；资产校验 0.5s 左右，79 JSON、0 error、0 warning。
+- 代码量：本次交互重构净增约 1,909 行 / 净删 567 行（src + tests + tools，
+  相对检查点 `d758990^`）。删除的旧交互代码：弹出式节点菜单与子菜单表、
+  隐形四区坐标判定、QTreeWidget 程序树实现、重复的 palette 参数表。
+
+### Usability：not run
+
+维护者尚未实际完成完整工作流（新建 Wave/Enemy、拖出 Repeat/Wait/Fire、包裹、
+加入 Stage、修改参数、保存重开并运行预览）。所有自动化与原生验证均不可替代
+真人操作证据。

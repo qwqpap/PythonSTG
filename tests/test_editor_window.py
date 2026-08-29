@@ -6,7 +6,9 @@ from src.core.project_context import ProjectContext
 from src.editor.session import EditorSession
 from src.editor.window import EditorWindow
 from src.authoring.python_source import ExternalChange
-from src.qt_compat.QtWidgets import QSpinBox
+from src.qt_compat.QtCore import QEvent, QPointF, Qt
+from src.qt_compat.QtGui import QMouseEvent
+from src.qt_compat.QtWidgets import QApplication, QSpinBox
 
 
 def _project(root: Path) -> Path:
@@ -41,9 +43,17 @@ def test_minimal_window_navigates_and_edits_real_project(tmp_path, qapp_session)
     assert window.problems_view.toPlainText() == "没有问题"
 
     session.select_unit("stage")
-    root_item = window.program_tree.topLevelItem(0)
-    wait_item = root_item.child(0)
-    window.program_tree.setCurrentItem(wait_item)
+    canvas = window.program_tree.canvas
+    rect = canvas.rect_for_uid("wait")
+    assert rect is not None, "the Wait card must be visible in the program flow"
+    click = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(rect.center()),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(canvas, click)
     qapp_session.processEvents()
     assert session.current_node_uid == "wait"
 

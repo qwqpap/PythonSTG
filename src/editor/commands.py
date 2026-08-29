@@ -13,6 +13,7 @@ from src.authoring.program import (
     create_unit,
     delete_node,
     delete_unit,
+    duplicate_node,
     duplicate_unit,
     find_node,
     insert_new_node,
@@ -67,8 +68,28 @@ class _ProgramCommand(QUndoCommand):
         self._apply(self._before, self._undo_uid, self._undo_unit_id)
 
 class SetNodeArgumentCommand(_ProgramCommand):
+    """One argument edit; consecutive numeric edits merge into one user action."""
+
+    _MERGE_ID = 0x5341
+
     def __init__(self, session: "EditorSession", uid: str, name: str, value: Any) -> None:
         super().__init__(session, f"修改 {name}", lambda program: set_argument(program, uid, name, value))
+        self._target_uid, self._field = uid, name
+        self._mergeable = isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    def id(self) -> int:
+        return self._MERGE_ID if self._mergeable else -1
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if not isinstance(other, SetNodeArgumentCommand):
+            return False
+        if not (self._mergeable and other._mergeable):
+            return False
+        if other._target_uid != self._target_uid or other._field != self._field:
+            return False
+        self._after = other._after
+        self.setText(other.text())
+        return True
 
 class SetUnitFieldCommand(_ProgramCommand):
     def __init__(self, session: "EditorSession", unit_id: str, name: str, value: Any) -> None:
@@ -126,6 +147,29 @@ class DeleteNodeCommand(_ProgramCommand):
             session, f"删除 {node.kind}", lambda program: delete_node(program, uid), redo_uid=None,
             undo_uid=uid,
         )
+
+
+class DuplicateNodeCommand(_ProgramCommand):
+    """Copy a node subtree; the fresh clone is selected once it exists."""
+
+    def __init__(self, session: "EditorSession", uid: str) -> None:
+        unit, node, location = find_node(session.program, uid)
+        self._unit_id = unit.id
+        self._parent_uid, self._slot, self._index = location.parent_uid, location.slot, location.index
+        super().__init__(
+            session, f"复制 {node.kind}", lambda program: duplicate_node(program, uid),
+            undo_uid=uid,
+        )
+
+    def redo(self) -> None:
+        self._session._apply_program(self._after)
+        owner = self._session.program.get_unit(self._unit_id)
+        values = (
+            owner.body
+            if self._parent_uid is None
+            else find_node(self._session.program, self._parent_uid)[1].children[self._slot]
+        )
+        self._session.select_node(values[self._index + 1].uid)
 
 
 class CreateUnitCommand(_ProgramCommand):
@@ -195,6 +239,7 @@ class DeleteUnitCommand(_ProgramCommand):
 __all__ = [
     "AppendNodeCommand",
     "DeleteNodeCommand",
+    "DuplicateNodeCommand",
     "CreateUnitCommand",
     "DuplicateUnitCommand",
     "DeleteUnitCommand",

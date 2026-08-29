@@ -13,6 +13,7 @@ from src.authoring.program import (
     ProgramError,
     find_node,
     move_node,
+    unit_reference_locations,
     validate_insert,
 )
 from src.authoring.python_source import SourceConflictError, SourceSaveError
@@ -51,7 +52,7 @@ from .inspector import InspectorPanel
 from .node_palette import NodePalette, PROTOTYPE_MIME
 from .program_tree import (
     NODE_MIME,
-    ProgramTree,
+    ProgramFlow,
     available_resource_actions,
     node_for_resource_action,
 )
@@ -76,19 +77,27 @@ class _UnitDialog(QDialog):
         self.kind.addItems([source.kind] if source else kinds)
         self.unit_id = QLineEdit(self)
         self.name = QLineEdit(self)
+        self.texture = QLineEdit("boss1", self)
         if source:
             self.unit_id.setText(f"{source.id}_copy")
             self.name.setText(f"{source.name} 副本")
+            self.texture.setText(str(source.metadata.get("texture", "boss1")))
         self.register_stage = QCheckBox("加入 Project 关卡顺序", self)
         self.register_stage.setChecked(False if source else True)
         self.phase = QComboBox(self)
         self.phase.addItems(
             sorted(unit.id for unit in program.logical_units() if unit.kind in {"Spell", "NonSpell"})
         )
+        self.phase_hint = QLabel("Boss 至少需要一个符卡阶段，请先新建 Spell 或 NonSpell。", self)
+        self.phase_hint.setWordWrap(True)
+        self.phase_hint.setStyleSheet("color: #f0883e;")
+        self.phase_hint.setVisible(self.phase.count() == 0)
         form.addRow("类型", self.kind)
         form.addRow("ID", self.unit_id)
         form.addRow("显示名", self.name)
+        form.addRow("纹理", self.texture)
         form.addRow("Boss 首个阶段", self.phase)
+        form.addRow("", self.phase_hint)
         form.addRow("Stage", self.register_stage)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -102,15 +111,17 @@ class _UnitDialog(QDialog):
 
     def _sync(self, kind: str) -> None:
         self.phase.setEnabled(kind == "Boss")
+        self.texture.setEnabled(kind == "Boss")
         self.register_stage.setEnabled(kind == "Stage")
 
-    def values(self) -> tuple[str, str, str, bool, str | None]:
+    def values(self) -> tuple[str, str, str, bool, str | None, str]:
         return (
             self.kind.currentText(),
             self.unit_id.text().strip(),
             self.name.text().strip(),
             self.register_stage.isChecked(),
             self.phase.currentText() or None,
+            self.texture.text().strip(),
         )
 
 
@@ -254,6 +265,7 @@ class EditorWindow(QMainWindow):
         self.activity_sidebar = activity
         self.node_palette = NodePalette(self)
         self.node_palette.insert_requested.connect(self._insert_selected_prototype)
+        self.node_palette.current_changed.connect(self.refresh_selection)
         left_splitter = QSplitter(Qt.Orientation.Vertical, self)
         left_splitter.setObjectName("left_authoring_splitter")
         left_splitter.addWidget(activity)
@@ -266,9 +278,10 @@ class EditorWindow(QMainWindow):
         left_dock.setWidget(left_splitter)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, left_dock)
 
-        self.program_tree = ProgramTree(self)
+        self.program_tree = ProgramFlow(self)
         self.program_tree.set_drop_validator(self._validate_program_drop)
         self.program_tree.node_selected.connect(self._node_selected)
+        self.program_tree.node_activated.connect(self._focus_suggested_field)
         self.program_tree.move_requested.connect(self._move_node)
         self.program_tree.prototype_requested.connect(self._drop_prototype)
         self.program_tree.resource_action_requested.connect(self._resource_drop)
@@ -300,6 +313,10 @@ class EditorWindow(QMainWindow):
         self.add_node_button.setObjectName("add_selected_node")
         self.add_node_button.clicked.connect(self._insert_selected_prototype)
         program_toolbar_layout.addWidget(self.add_node_button)
+        self.duplicate_node_button = QPushButton("复制", program_toolbar)
+        self.duplicate_node_button.setObjectName("duplicate_node")
+        self.duplicate_node_button.clicked.connect(self._duplicate_selected_node)
+        program_toolbar_layout.addWidget(self.duplicate_node_button)
         self.delete_node_button = QPushButton("删除", program_toolbar)
         self.delete_node_button.setObjectName("delete_node")
         self.delete_node_button.clicked.connect(self._delete_selected_node)
@@ -459,6 +476,7 @@ class EditorWindow(QMainWindow):
     def refresh_selection(self) -> None:
         self.program_tree.set_unit(self.session.current_unit, self.session.current_node_uid)
         self._select_unit(self.session.current_unit_id)
+        self.program_tree.set_diagnostics(self._node_error_messages())
         if self.session.source_project is not None:
             self.stage_asset_list.set_resources(
                 self.session.stage_assets,
@@ -468,7 +486,8 @@ class EditorWindow(QMainWindow):
         unit = self.session.current_unit
         node = self.session.current_node
         editable = bool(unit and unit.kind != "Project" and self.session.can_edit)
-        self.add_node_button.setEnabled(editable)
+        self.add_node_button.setEnabled(editable and self._palette_kind_is_addable())
+        self.duplicate_node_button.setEnabled(editable and node is not None)
         self.delete_node_button.setEnabled(editable and node is not None)
         self.new_unit_button.setEnabled(self.session.is_open)
         self.duplicate_unit_button.setEnabled(editable)
@@ -512,13 +531,15 @@ class EditorWindow(QMainWindow):
         dialog = _UnitDialog(self.session.program, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        kind, unit_id, name, register_stage, phase_id = dialog.values()
+        kind, unit_id, name, register_stage, phase_id, texture = dialog.values()
         try:
             if not unit_id or not name:
                 raise ProgramError("invalid_unit", "ID 和显示名不能为空")
+            if not unit_id.isidentifier():
+                raise ProgramError("invalid_unit", "ID 必须是 Python 标识符（字母、数字、下划线）")
             if kind == "Boss" and phase_id is None:
                 raise ProgramError("missing_phase", "请先新建 Spell 或 NonSpell")
-            unit = _new_logical_unit(kind, unit_id, name, phase_id)
+            unit = _new_logical_unit(kind, unit_id, name, phase_id, texture)
             self.session.create_unit(unit, register_stage=register_stage)
         except Exception as exc:
             QMessageBox.warning(self, "无法新建", str(exc))
@@ -530,8 +551,10 @@ class EditorWindow(QMainWindow):
         dialog = _UnitDialog(self.session.program, self, source=source)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        _kind, unit_id, name, register_stage, _phase_id = dialog.values()
+        _kind, unit_id, name, register_stage, _phase_id, _texture = dialog.values()
         try:
+            if not unit_id.isidentifier():
+                raise ProgramError("invalid_unit", "ID 必须是 Python 标识符（字母、数字、下划线）")
             self.session.duplicate_unit(
                 source.id, unit_id, name, register_stage=register_stage
             )
@@ -566,8 +589,48 @@ class EditorWindow(QMainWindow):
             return
         try:
             self.session.delete_unit(unit.id, replacement_start_stage=replacement)
+        except ProgramError as exc:
+            if exc.code == "unit_in_use":
+                self._show_reference_block(unit.id)
+            else:
+                QMessageBox.warning(self, "无法删除", str(exc))
         except Exception as exc:
             QMessageBox.warning(self, "无法删除", str(exc))
+
+    def _show_reference_block(self, unit_id: str) -> None:
+        """List the blocking reference locations and let the author jump to them."""
+
+        locations = unit_reference_locations(self.session.program, unit_id)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("无法删除：仍被引用")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(
+            f"{unit_id} 还被以下位置引用；删除会破坏它们，请先修改这些引用。"
+        ))
+        listing = QListWidget(dialog)
+        for location in locations:
+            listing.addItem(location)
+        listing.itemDoubleClicked.connect(
+            lambda item: self._jump_to_reference(item.text()) or dialog.close()
+        )
+        layout.addWidget(listing)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
+        buttons.rejected.connect(dialog.reject)
+        buttons.clicked.connect(dialog.close)
+        layout.addWidget(buttons)
+        dialog.resize(420, 260)
+        dialog.exec()
+
+    def _jump_to_reference(self, location: str) -> None:
+        parts = location.split(".")
+        unit_id = parts[0]
+        node_uid = parts[1] if len(parts) > 1 else None
+        try:
+            self.session.select_unit(unit_id)
+            if node_uid:
+                self.session.select_node(node_uid)
+        except Exception:
+            pass
 
     def _file_selected(self) -> None:
         items = self.file_list.selectedItems()
@@ -593,8 +656,11 @@ class EditorWindow(QMainWindow):
             button.setChecked(value == placement)
         self.refresh_selection()
 
-    def _insert_selected_prototype(self, *_args) -> None:
-        kind = self.node_palette.current_kind()
+    def _insert_selected_prototype(self, *args) -> None:
+        kind = next(
+            (value for value in args if isinstance(value, str) and value),
+            self.node_palette.current_kind(),
+        )
         if kind is None:
             self.statusBar().showMessage("请先在左侧节点库选择节点", 4000)
             return
@@ -623,11 +689,13 @@ class EditorWindow(QMainWindow):
             entry = self.node_palette.entry(kind)
             candidates = self.node_palette.reference_candidates(kind)
             reference_id = None
-            if entry.reference_kinds:
+            if entry.reference_kinds and not candidates:
+                if not self._offer_unit_creation(entry.reference_kinds):
+                    return None
+                candidates = self.node_palette.reference_candidates(kind)
                 if not candidates:
-                    raise ProgramError(
-                        "missing_reference", f"请先新建 {'/'.join(entry.reference_kinds)}"
-                    )
+                    return None
+            if entry.reference_kinds:
                 reference_id, accepted = QInputDialog.getItem(
                     self, f"选择 {entry.label} 目标", "引用：", list(candidates), 0, False
                 )
@@ -645,10 +713,93 @@ class EditorWindow(QMainWindow):
                     target_uid, placement, node, target_slot=target_slot
                 )
             self.node_palette.remember(kind)
+            self.program_tree.flash(node.uid)
+            self.inspector.focus_suggested_field()
             return node
         except Exception as exc:
             self.statusBar().showMessage(f"节点未添加：{exc}", 6000)
             return None
+
+    def _offer_unit_creation(self, expected_kinds: tuple[str, ...]) -> bool:
+        """Guide the author to create a missing referenced unit first."""
+
+        box = QMessageBox(self)
+        box.setWindowTitle("缺少可引用对象")
+        box.setText(f"还没有可引用的 {'/'.join(expected_kinds)}。可以现在新建一个。")
+        create_button = box.addButton(
+            f"新建 {expected_kinds[0]}", QMessageBox.ButtonRole.AcceptRole
+        )
+        box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is not create_button:
+            return False
+        dialog = _UnitDialog(self.session.program, self)
+        dialog.kind.setCurrentText(expected_kinds[0])
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        kind, unit_id, name, register_stage, phase_id, texture = dialog.values()
+        try:
+            if not unit_id or not name:
+                raise ProgramError("invalid_unit", "ID 和显示名不能为空")
+            if not unit_id.isidentifier():
+                raise ProgramError(
+                    "invalid_unit", "ID 必须是 Python 标识符（字母、数字、下划线）"
+                )
+            if kind == "Boss" and phase_id is None:
+                raise ProgramError("missing_phase", "请先新建 Spell 或 NonSpell")
+            self.session.create_unit(
+                _new_logical_unit(kind, unit_id, name, phase_id, texture),
+                register_stage=register_stage,
+            )
+            return True
+        except Exception as exc:
+            QMessageBox.warning(self, "无法新建", str(exc))
+            return False
+
+    def _duplicate_selected_node(self) -> None:
+        uid = self.session.current_node_uid
+        if uid is None:
+            self.statusBar().showMessage("请先选择要复制的节点", 4000)
+            return
+        try:
+            self.session.duplicate_node(uid)
+        except Exception as exc:
+            self.statusBar().showMessage(f"节点未复制：{exc}", 5000)
+
+    def _focus_suggested_field(self, uid: str) -> None:
+        try:
+            self.session.select_node(uid)
+        except Exception:
+            return
+        self.inspector.focus_suggested_field()
+
+    def _node_error_messages(self) -> dict[str, tuple[str, ...]]:
+        messages: dict[str, list[str]] = {}
+        for diagnostic in self.session.diagnostics:
+            if diagnostic.severity == "error" and diagnostic.uid:
+                messages.setdefault(diagnostic.uid, []).append(diagnostic.message)
+        return {uid: tuple(items) for uid, items in messages.items()}
+
+    def _palette_kind_is_addable(self) -> bool:
+        """Enable the generic add action only for a compatible palette selection."""
+
+        unit = self.session.current_unit
+        kind = self.node_palette.current_kind()
+        if unit is None or unit.kind == "Project" or not self.session.can_edit or not kind:
+            return False
+        try:
+            entry = self.node_palette.entry(kind)
+            candidates = self.node_palette.reference_candidates(kind)
+            if entry.reference_kinds and not candidates:
+                return False
+            node = self.node_palette.make_node(kind, candidates[0] if candidates else None)
+            target = self.session.current_node_uid
+            check = validate_insert(
+                self.session.program, unit.id, node, target, self._insertion_mode
+            )
+            return check.allowed
+        except Exception:
+            return False
 
     def _validate_program_drop(self, mime, target_uid, placement, target_slot) -> DropCheck:
         unit = self.session.current_unit
@@ -693,7 +844,7 @@ class EditorWindow(QMainWindow):
         except Exception as exc:
             self.statusBar().showMessage(f"节点未删除：{exc}", 6000)
 
-    def _resource_drop(self, uri: str, target_uid: str, placement: str) -> None:
+    def _resource_drop(self, uri: str, target_uid: str, placement: str, target_slot=None) -> None:
         actions = available_resource_actions(uri)
         if not actions:
             self.statusBar().showMessage("该资源只能拖到兼容的检查器字段", 5000)
@@ -703,7 +854,8 @@ class EditorWindow(QMainWindow):
             return
         try:
             self.insert_resource_action(
-                selected_action, uri, target_uid, DropPlacement(placement)
+                selected_action, uri, target_uid, DropPlacement(placement),
+                target_slot=target_slot,
             )
         except Exception as exc:
             self.statusBar().showMessage(f"资源未插入：{exc}", 5000)
@@ -723,9 +875,15 @@ class EditorWindow(QMainWindow):
         uri: str,
         target_uid: str,
         placement: DropPlacement | str,
+        *,
+        target_slot: str | None = None,
     ) -> Node:
         node = node_for_resource_action(action, uri)
-        self.session.insert_node_relative(target_uid, placement, node)
+        self.session.insert_node_relative(
+            target_uid, placement, node, target_slot=target_slot
+        )
+        self.program_tree.flash(node.uid)
+        self.inspector.focus_suggested_field()
         return node
 
     def _select_unit(self, unit_id: str | None) -> None:
@@ -875,6 +1033,34 @@ class EditorWindow(QMainWindow):
         self.save_action.setEnabled(
             self.session.is_open and (dirty or self.session.has_conflict)
         )
+
+
+def _new_logical_unit(
+    kind: str, unit_id: str, name: str, phase_id: str | None, texture: str | None
+) -> Node:
+    """Build one fresh logical unit; required parameters come from the dialog."""
+
+    if kind == "Stage":
+        return dsl.Stage(unit_id, name)
+    if kind == "Wave":
+        return dsl.Wave(unit_id, name)
+    if kind == "Enemy":
+        return dsl.Enemy(unit_id, name)
+    if kind == "Boss":
+        if not texture:
+            raise ProgramError("invalid_unit", "Boss 需要一个纹理名称")
+        if phase_id is None:
+            raise ProgramError("missing_phase", "请先新建 Spell 或 NonSpell")
+        return dsl.Boss(unit_id, name, texture, [Ref(phase_id)])
+    if kind == "Spell":
+        return dsl.Spell(unit_id, name)
+    if kind == "NonSpell":
+        return dsl.NonSpell(unit_id, name)
+    if kind == "Task":
+        return dsl.Task(unit_id, name)
+    if kind == "Function":
+        return dsl.Function(unit_id, name)
+    raise ProgramError("invalid_unit", f"unsupported unit kind {kind!r}")
 
 
 def _placeholder(text: str) -> QWidget:

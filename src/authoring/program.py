@@ -986,7 +986,7 @@ def node_from_palette(
         "Return": dsl.Return,
         "Set": lambda: dsl.Set("value", 0),
         "Call": lambda: dsl.Call(ref),
-        "RawPython": lambda: dsl.RawPython("# 受信任 Python"),
+        "RawPython": lambda: dsl.RawPython("pass"),
         "RunWave": lambda: dsl.RunWave(ref),
         "RunBoss": lambda: dsl.RunBoss(ref),
         "SetBackground": lambda: dsl.SetBackground(""),
@@ -1088,7 +1088,7 @@ def delete_unit(
     removed = program.get_unit(unit_id)
     if removed.kind == "Project":
         raise ProgramError("invalid_unit", "Project cannot be deleted")
-    references = _unit_reference_locations(program, unit_id)
+    references = unit_reference_locations(program, unit_id)
     non_project = [location for location in references if not location.startswith("Project.")]
     if non_project:
         raise ProgramError(
@@ -1139,7 +1139,7 @@ def _rewrite_ref_value(value: Any, old_id: str, new_id: str) -> Any:
     return copy.deepcopy(value)
 
 
-def _unit_reference_locations(program: AuthoringProgram, target_id: str) -> tuple[str, ...]:
+def unit_reference_locations(program: AuthoringProgram, target_id: str) -> tuple[str, ...]:
     locations: list[str] = []
 
     def collect(value: Any, location: str) -> None:
@@ -1164,6 +1164,17 @@ def _unit_reference_locations(program: AuthoringProgram, target_id: str) -> tupl
             collect(node.arguments, f"{prefix}.{node.uid}")
             collect(node.positional_arguments, f"{prefix}.{node.uid}")
     return tuple(locations)
+
+
+def duplicate_node(program: AuthoringProgram, uid: str) -> AuthoringProgram:
+    """Copy one node subtree with fresh UIDs right after the source node."""
+
+    unit, node, location = find_node(program, uid)
+    clone = copy.deepcopy(node)
+    _regenerate_node_uids(clone)
+    return insert_node(
+        program, unit.id, location.parent_uid, location.slot, location.index + 1, clone
+    )
 
 
 def delete_node(program: AuthoringProgram, uid: str) -> AuthoringProgram:
@@ -2091,6 +2102,7 @@ __all__ = [
     "UNIT_KINDS",
     "create_unit",
     "delete_node",
+    "duplicate_node",
     "delete_unit",
     "duplicate_unit",
     "find_node",
@@ -2103,6 +2115,7 @@ __all__ = [
     "set_argument",
     "set_template_positional_argument",
     "set_unit_field",
+    "unit_reference_locations",
     "validate_author_value",
     "validate_insert",
     "wrap_node",
