@@ -204,6 +204,7 @@ def test_templates_stay_aggregated_template_calls(tmp_path, qapp_session):
     assert frames is not None
     frames.setValue(7)
     frames.editingFinished.emit()
+    QApplication.processEvents()
     assert session.current_node.arguments["frames"] == 7
     session.save_all()
     reopened = EditorSession(project_context=ProjectContext(tmp_path))

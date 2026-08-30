@@ -17,7 +17,7 @@ from src.authoring.program import (
     parse_author_value,
     reference_kinds_for_field,
 )
-from src.qt_compat.QtCore import Qt, Signal
+from src.qt_compat.QtCore import Qt, QTimer, Signal
 from src.qt_compat.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -387,7 +387,9 @@ class InspectorPanel(QWidget):
             widget.setReadOnly(not self.session.can_edit)
             if self.session.can_edit:
                 widget.editingFinished.connect(
-                    lambda editor=widget: self._commit(commit, editor.value(), name)
+                    lambda editor=widget: self._commit_after_event(
+                        commit, editor.value(), name
+                    )
                 )
             return widget
         if field_type is float:
@@ -398,7 +400,9 @@ class InspectorPanel(QWidget):
             widget.setReadOnly(not self.session.can_edit)
             if self.session.can_edit:
                 widget.editingFinished.connect(
-                    lambda editor=widget: self._commit(commit, editor.value(), name)
+                    lambda editor=widget: self._commit_after_event(
+                        commit, editor.value(), name
+                    )
                 )
             return widget
         if isinstance(value, (list, tuple, dict)):
@@ -561,6 +565,17 @@ class InspectorPanel(QWidget):
         return widget
 
     # -- commit with field-level errors ---------------------------------------
+
+    def _commit_after_event(self, callback, value: Any, name: str) -> None:
+        """Commit after a native editor finishes dispatching its input event.
+
+        A successful commit replaces the immutable model and synchronously
+        rebuilds this panel.  Destroying a spin box from inside its own
+        ``editingFinished`` handler can crash Qt, so capture the value now and
+        mutate only after control returns to the event loop.
+        """
+
+        QTimer.singleShot(0, lambda: self._commit(callback, value, name))
 
     def _commit(self, callback, value: Any, name: str) -> None:
         try:

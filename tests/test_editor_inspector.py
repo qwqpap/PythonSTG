@@ -11,6 +11,8 @@ from src.editor.inspector import (
     ResourceLineEdit,
 )
 from src.editor.session import EditorSession
+from src.qt_compat.QtCore import Qt
+from src.qt_compat.QtTest import QTest
 from src.qt_compat.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -82,6 +84,7 @@ def test_inspector_uses_dsl_annotations_for_scalar_controls_and_undo(
     assert "int" in frames.property("pystg_annotation")
     frames.setValue(24)
     frames.editingFinished.emit()
+    qapp_session.processEvents()
     assert session.current_node.arguments["frames"] == 24
     assert session.undo_stack.count() == 1
 
@@ -107,6 +110,31 @@ def test_inspector_uses_dsl_annotations_for_scalar_controls_and_undo(
     session.undo_stack.undo()
     session.select_node("wait")
     assert session.current_node.arguments["frames"] == 12
+    panel.close()
+
+
+def test_numeric_zero_keyboard_commit_does_not_destroy_active_editor(
+    tmp_path, qapp_session
+):
+    """A real key event must finish before Inspector replaces its controls."""
+
+    session = _session(tmp_path)
+    panel = InspectorPanel(session)
+    panel.show()
+    session.select_node("wait")
+    qapp_session.processEvents()
+
+    frames = panel.findChild(QSpinBox, "argument_frames")
+    assert frames is not None
+    frames.setFocus()
+    frames.lineEdit().selectAll()
+    QTest.keyClick(frames, Qt.Key.Key_0)
+    frames.editingFinished.emit()
+    assert session.current_node.arguments["frames"] == 12
+    qapp_session.processEvents()
+
+    assert session.current_node.arguments["frames"] == 0
+    assert session.undo_stack.count() == 1
     panel.close()
 
 
