@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.authoring.program import Expr, Ref
 from src.core.project_context import ProjectContext
 from src.editor.inspector import (
@@ -102,6 +104,7 @@ def test_inspector_uses_dsl_annotations_for_scalar_controls_and_undo(
     assert midboss is not None
     assert not midboss.isChecked()
     midboss.setChecked(True)
+    qapp_session.processEvents()
     assert session.current_node.arguments["is_midboss"] is True
     assert session.undo_stack.count() == 2
 
@@ -157,6 +160,7 @@ def test_ref_selector_is_typed_and_task_parameter_table_is_undoable(
     assert parameters is not None
     parameters.table.item(0, 2).setText("5")
     parameters.commit_requested.emit(parameters.parameters())
+    qapp_session.processEvents()
     assert session.program.get_unit("task").parameters[0].default == 5
     assert session.undo_stack.count() == 1
     session.undo_stack.undo()
@@ -200,6 +204,8 @@ def test_expr_toggle_is_bidirectional_and_rejects_nonliteral_numeric_source(
     to_expr = panel.findChild(QToolButton, "expression_toggle_frames")
     assert to_expr is not None and to_expr.text() == "ƒ"
     to_expr.click()
+    qapp_session.processEvents()
+    qapp_session.processEvents()
     assert session.current_node.arguments["frames"] == Expr("12")
 
     expression = panel.findChild(QLineEdit, "argument_frames")
@@ -208,12 +214,15 @@ def test_expr_toggle_is_bidirectional_and_rejects_nonliteral_numeric_source(
     assert to_constant.text() == "常"
     expression.setText("player_x")
     to_constant.click()
+    qapp_session.processEvents()
     assert session.current_node.arguments["frames"] == Expr("12")
     error = panel.findChild(QLabel, "error_frames")
     assert error is not None and "字面量" in error.text()
 
     expression.setText("24")
     to_constant.click()
+    qapp_session.processEvents()
+    qapp_session.processEvents()
     assert session.current_node.arguments["frames"] == 24
     panel.close()
 
@@ -258,6 +267,7 @@ def test_compatible_resource_drop_assigns_one_unit_field_command(
     assert not bgm.drop_resource("res://assets/background.json")
     assert session.undo_stack.count() == 0
     assert bgm.drop_resource("res://assets/theme.ogg")
+    qapp_session.processEvents()
     assert session.undo_stack.count() == 1
     assert session.program.get_unit("stage").metadata["bgm"] == "res://assets/theme.ogg"
 
@@ -265,4 +275,105 @@ def test_compatible_resource_drop_assigns_one_unit_field_command(
     assert "bgm" not in session.program.get_unit("stage").metadata
     session.undo_stack.redo()
     assert session.program.get_unit("stage").metadata["bgm"] == "res://assets/theme.ogg"
+    panel.close()
+
+
+def test_marker_point_maps_authoring_coordinates_faithfully():
+    """x=±1 are the side edges, y is upward, and the shader aspect applies."""
+
+    from src.editor.inspector import marker_point
+
+    # Center of the play field.
+    assert marker_point(0.0, 0.0, 200, 200) == (100.0, 100.0)
+    # x=+1 is the right edge; y=+1 sits above centre by the 384/448 correction.
+    u, v = marker_point(1.0, 1.0, 200, 200)
+    assert u == 200.0
+    assert v == pytest.approx((1 - 384.0 / 448.0) / 2 * 200)
+    # y=-1 sits below centre by the same correction.
+    _u, v_low = marker_point(0.0, -1.0, 200, 200)
+    assert v_low == pytest.approx((1 + 384.0 / 448.0) / 2 * 200)
+
+
+def test_coordinate_preview_tracks_live_editor_values(tmp_path, qapp_session):
+    session = _session(tmp_path)
+    panel = InspectorPanel(session)
+    panel.show()
+    session.select_unit("enemy")
+    session.select_node("move")
+    qapp_session.processEvents()
+    qapp_session.processEvents()
+
+    from src.editor.inspector import CoordinatePreview
+
+    preview = panel.findChild(CoordinatePreview, "coordinate_preview_widget")
+    assert preview is not None, "a node with x/y must show the play-field preview"
+    node = session.current_node
+    assert panel._coordinate_spec(node) == ("point", 0.5, 0.25)
+
+    x_field = panel.findChild(QDoubleSpinBox, "argument_x")
+    assert x_field is not None
+    x_field.setValue(-0.75)
+    assert panel._coordinate_spec(node) == ("point", -0.75, 0.25)
+
+    # Off-screen flag drives the same spec; the preview paints it red.
+    x_field.setValue(1.9)
+    spec = panel._coordinate_spec(node)
+    assert spec == ("point", 1.9, 0.25)
+    panel.close()
+
+
+def test_coordinate_preview_hints_for_actor_default_and_deltas(tmp_path, qapp_session):
+    from src.authoring.dsl import Fire, MoveLinear, Wait
+    from src.editor.inspector import _coordinate_spec_kind
+
+    assert _coordinate_spec_kind(Wait(1)) is None
+    assert _coordinate_spec_kind(MoveLinear(0.1, -0.2)) == "delta"
+    fire = Fire()
+    assert _coordinate_spec_kind(fire) == "hint"
+
+    session = _session(tmp_path)
+    panel = InspectorPanel(session)
+    panel.show()
+    session.select_unit("spell")
+    qapp_session.processEvents()
+    session.insert_node_relative("spell_wait", "after", fire)
+    qapp_session.processEvents()
+    qapp_session.processEvents()
+    assert panel._coordinate_spec(session.current_node) == (
+        "hint", "未填 x/y = 使用发射者位置",
+    )
+    panel.close()
+
+
+def test_rapid_numeric_edits_do_not_crash_and_merge_into_one_undo(
+    tmp_path, qapp_session
+):
+    """Typing must never delete the editor mid-signal, even when rushed."""
+
+    session = _session(tmp_path)
+    panel = InspectorPanel(session)
+    panel.show()
+    session.select_node("wait")
+    qapp_session.processEvents()
+
+    frames = panel.findChild(QSpinBox, "argument_frames")
+    assert frames is not None
+    frames.setValue(30)
+    frames.editingFinished.emit()
+    frames.setValue(48)
+    frames.editingFinished.emit()
+    qapp_session.processEvents()
+    qapp_session.processEvents()
+
+    assert session.current_node.arguments["frames"] == 48
+    assert session.undo_stack.count() == 1
+
+    # Rebuilt field: committing the unchanged value must push nothing.
+    frames = panel.findChild(QSpinBox, "argument_frames")
+    assert frames is not None and frames.value() == 48
+    frames.setValue(48)
+    frames.editingFinished.emit()
+    qapp_session.processEvents()
+    qapp_session.processEvents()
+    assert session.undo_stack.count() == 1
     panel.close()

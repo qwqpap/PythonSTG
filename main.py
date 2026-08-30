@@ -635,7 +635,7 @@ def run_debug_menu(window, ctx, screen_size, stage_class):
 
     stage_name = getattr(stage_class, 'name', stage_class.__name__)
     entries = build_debug_menu(stage_class)
-    
+
     # 构建适合 Debug 菜单的布局
     # 为了容纳更多选项，缩小字体，减小间距，并将整体上移
     layout = {
@@ -740,30 +740,44 @@ def initialize_window_and_context():
     ctx.enable(moderngl.BLEND)
     ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
-    # game_viewport 是 logical 坐标 (UI/对话/emoji 的着色器需要)。
-    # 但 renderer.render_frame 通过 ctx.viewport 设置 GL viewport，
-    # 必须用 framebuffer 像素坐标，否则全屏时游戏只渲染到左下角小块。
-    fb_w, fb_h = window.framebuffer_size
+    game_viewport_fb = compute_game_viewport_fb(
+        game_viewport, screen_size, window.framebuffer_size
+    )
+
+    return window, ctx, base_size, screen_size, game_viewport, game_viewport_fb
+
+
+def compute_game_viewport_fb(
+    game_viewport: tuple[int, int, int, int],
+    screen_size: tuple[int, int],
+    framebuffer_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    """Scale the logical game viewport into framebuffer pixels.
+
+    Recomputed whenever the framebuffer changes: the editor embeds the game
+    window and resizes it externally, so the init-time ratio goes stale and
+    the play field would render clipped into the smaller backbuffer.
+    """
+
+    fb_w, fb_h = framebuffer_size
     scale_x = fb_w / screen_size[0]
     scale_y = fb_h / screen_size[1]
-    game_viewport_fb = (
+    return (
         int(round(game_viewport[0] * scale_x)),
         int(round(game_viewport[1] * scale_y)),
         int(round(game_viewport[2] * scale_x)),
         int(round(game_viewport[3] * scale_y)),
     )
 
-    return window, ctx, base_size, screen_size, game_viewport, game_viewport_fb
-
 
 def load_resources(ctx, texture_asset_manager: TextureAssetManager):
     """
     加载游戏资源（使用新的统一纹理资产管理系统）
-    
+
     Args:
         ctx: ModernGL上下文
         texture_asset_manager: 纹理资产管理器
-    
+
     Returns:
         tuple: (textures, sprite_uv_map)
     """
@@ -771,18 +785,18 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
     if not texture_asset_manager.load_sprite_config_folder(sprite_config_folder):
         print("Failed to load sprite configurations!")
         sys.exit()
-    
+
     all_sprite_ids = texture_asset_manager.get_all_sprite_ids()
     default_sprite_id = 'star_small1' if 'star_small1' in all_sprite_ids else next(iter(all_sprite_ids), None)
-    
+
     textures = texture_asset_manager.create_all_gl_textures(ctx, flip_y=True)
-    
+
     sprite_uv_map = texture_asset_manager.compute_all_sprite_uvs(flip_y=True)
-    
+
     stats = texture_asset_manager.get_stats()
     print(f"资源加载完成: {stats['atlases']} 图集, {stats['sprites']} 精灵, {stats['animations']} 动画")
     print(f"Loaded {len(textures)} texture(s) successfully")
-    
+
     return textures, sprite_uv_map
 
 
@@ -817,7 +831,7 @@ def initialize_game_objects(stage_class, audio_manager=None, background_renderer
     item_pool = ItemPool(max_items=1000)
     boss_manager = BossManager()
     stage_manager = StageManager()
-    
+
     stage_manager.set_boss_manager(boss_manager)
 
     stage_manager.bind_engine(
@@ -1033,7 +1047,7 @@ def main():
             _show_loading("Loading fonts...", 0.60)
             font_manager = get_font_manager()
             font_manager.load_font('score', 'assets/images/ui/font/score.fnt')
-            
+
             hud_layout_cfg = load_hud_layout('assets/ui/hud_layout.json')
             panel_cfg = hud_layout_cfg.get('panel', {}) if hud_layout_cfg else {}
             gap_to_game = panel_cfg.get('gap_to_game', 16)
@@ -1230,7 +1244,7 @@ def main():
             # 加载高分记录
             item_pool.stats.load_hiscore()
             player.bombs = item_pool.stats.bombs
-            
+
             # 连接 bomb 回调：统一清弹、转点、收点和 Boss 积分事件
             def _on_player_bomb():
                 item_pool.stats.bombs = max(0, item_pool.stats.bombs - 1)
@@ -1251,7 +1265,7 @@ def main():
                     if boss is not None and getattr(boss, '_active', False):
                         return boss
                 return stage_manager.get_active_boss()
-            
+
             clock = FrameClock()
             running = True
 
@@ -1498,7 +1512,7 @@ def main():
                                 if stage_manager.current_stage:
                                     dialog_state = stage_manager.current_stage.get_dialog_renderer()
                                     dialog_active = dialog_state and hasattr(dialog_state, 'is_active') and dialog_state.is_active()
-                                
+
                                 if not dialog_active and not stage_manager.loading_info:
                                     _player_cycle = {"tao": "orin", "orin": "tenshi", "tenshi": "tao"}
                                     new_name = _player_cycle.get(player.name, "tao")
@@ -1508,7 +1522,7 @@ def main():
                                     old_lives = player.lives
                                     old_power = player.power
                                     old_invinc = player.invincible_timer
-                                    
+
                                     player = load_player(new_name)
                                     player.pos = old_pos
                                     player.lives = old_lives
@@ -1516,7 +1530,7 @@ def main():
                                     player.bombs = item_pool.stats.bombs
                                     player.invincible_timer = max(old_invinc, 0.5)  # 给个短暂无敌防判定死
                                     player.on_bomb_callback = _on_player_bomb
-                                    
+
                                     # 强制清空渲染器的纹理缓存，以便下一次渲染加载新自机的图片
                                     if hasattr(renderer, 'player_texture') and renderer.player_texture:
                                         renderer.player_texture.release()
@@ -1524,7 +1538,7 @@ def main():
                                     if hasattr(renderer, 'player_bullet_texture') and renderer.player_bullet_texture:
                                         renderer.player_bullet_texture.release()
                                         renderer.player_bullet_texture = None
-                                        
+
                                     stage_manager._engine_refs['player'] = player
                                     if stage_manager.current_context:
                                         stage_manager.current_context.player = player
@@ -1641,7 +1655,7 @@ def main():
                         profile_frames += 1
                         _profile_maybe_report()
                     continue
-                
+
                 player.score = item_pool.stats.score
                 player.power = item_pool.stats.get_power_float()
                 player.lives = item_pool.stats.lives
@@ -1716,7 +1730,7 @@ def main():
                                 _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
                                 if _ab and _ab._active:
                                     _ab.on_player_miss()
-                    
+
                     collision_targets = []
                     if stage_manager.current_context:
                         collision_targets.extend(stage_manager.current_context.get_enemy_scripts())
@@ -1724,7 +1738,7 @@ def main():
                         boss = stage_manager.current_stage._current_boss
                         if boss._active:
                             collision_targets.append(boss)
-                    
+
                     if collision_targets:
                         hits, active_targets = collision_mgr.check_player_bullets_vs_targets(
                             player.bullet_pool,
@@ -1783,7 +1797,7 @@ def main():
                         player.add_graze(graze_count)
                 if PROFILE_MODE:
                     profile_acc["collision"] += time.perf_counter() - collision_start
-                
+
                 hud.update_from_player(player)
                 hud.state.graze = item_pool.stats.graze
                 hud.state.bombs = item_pool.stats.bombs
@@ -1801,6 +1815,9 @@ def main():
 
                 render_start = time.perf_counter() if PROFILE_MODE else 0.0
                 render_segments = {} if PROFILE_MODE else None
+                game_viewport_fb = compute_game_viewport_fb(
+                    game_viewport, screen_size, window.framebuffer_size
+                )
                 renderer.render_frame(
                     bullet_pool, player, stage_manager, laser_pool,
                     viewport_rect=game_viewport_fb,
@@ -1810,7 +1827,7 @@ def main():
                     enemy_scripts=enemy_scripts,
                     profile_segments=render_segments,
                 )
-                
+
                 ctx.viewport = window.viewport
                 # 飘落 emoji 叠加在游戏画面上（在 HUD 之前，使其被 UI 覆盖）
                 emoji_game_start = time.perf_counter() if PROFILE_MODE else 0.0
@@ -1895,7 +1912,7 @@ def main():
                     profile_acc["frame"] += time.perf_counter() - frame_start
                     profile_frames += 1
                     _profile_maybe_report()
-            
+
             # 保存高分记录（用过 Continue 的本局不计入高分榜）
             if not run_continued and not EDITOR_PREVIEW_MODE:
                 item_pool.stats.save_hiscore()

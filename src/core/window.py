@@ -135,11 +135,32 @@ class GameWindow:
             })
 
     def poll_events(self) -> list:
-        """Poll window events, returns list of event dicts."""
+        """Poll window events, returns list of event dicts.
+
+        The framebuffer size is re-queried every poll: the editor embeds this
+        window with Win32 SetParent and resizes it externally, so the cached
+        init-time size would keep the GL viewport stale and clip the picture.
+        """
         self._events.clear()
         glfw.poll_events()
+        self._refresh_framebuffer_size()
         self._sync_key_states()
         return list(self._events)
+
+    def _refresh_framebuffer_size(self):
+        """Track external resizes (editor embedding) of the OS window."""
+        fb_w, fb_h = glfw.get_framebuffer_size(self._window)
+        if (fb_w, fb_h) == self._framebuffer_size:
+            return
+        self._framebuffer_size = (fb_w, fb_h)
+        # 窗口模式铺满新 framebuffer；全屏保持信箱逻辑（外部 resize 不发生在
+        # 全屏路径，但保持规则一致）。
+        if self._fullscreen:
+            self._viewport = self._compute_letterbox(
+                fb_w, fb_h, self._width, self._height
+            )
+        else:
+            self._viewport = (0, 0, fb_w, fb_h)
 
     def swap_buffers(self):
         glfw.swap_buffers(self._window)

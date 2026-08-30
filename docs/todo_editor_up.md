@@ -268,6 +268,37 @@ python tools/verify_native_code_editor_dragflow.py --json
 `verify_native_code_editor_preview.py`、`verify_native_code_editor.py`、
 `verify_native_code_editor_layout.py` 四个真实 Windows 门禁全部 PASS。
 
+### 预览视口自适应与输入体验修复（2026-08-30 第二轮）
+
+维护者确认拖拽可用后，反馈预览仍只显示一部分、输入参数崩溃、参数无范围提示、
+坐标无位置预览。经确认保持 PySide6 框架，修三个根因：
+
+1. **预览视口自适应（游戏侧）**：`src/core/window.py::GameWindow` 初始化时只
+   查询一次 framebuffer 并永久缓存，外部 `MoveWindow`（编辑器嵌入）后游戏仍按
+   旧视口渲染导致裁剪。修复：`poll_events()` 每次复查 framebuffer 尺寸并更新
+   viewport；`main.py` 的 `game_viewport_fb` 抽成纯函数
+   `compute_game_viewport_fb` 并在每帧渲染前重算。编辑器侧信箱式缩放把子窗口
+   调整到游戏宽高比，游戏侧视口随之重渲染，画面完整可见。
+2. **输入参数崩溃根因**：任何编辑器部件在自身信号派发期间被重建删除都是
+   use-after-free。修复推广到全部控件路径（数值/文本/复选/引用下拉/表达式/
+   字面量文本/资源拖入/参数表应用）：先捕获值，经 `QTimer.singleShot(0)` 在
+   事件循环返回后提交；提交期间 `refresh()` 自动推迟重建。另加无变化跳过
+   （`_values_equal` 类型感知比较），重复提交同一值不再污染 Undo 栈。
+3. **参数范围提示**：内置 (节点, 字段) 范围表（帧数/次数/时长 0~100000、
+   时限 1~3600、HP 1~1e9、激光长度/宽度 0~2 等）与坐标类字段名回退
+   （±2、角度 ±360），Spinbox 直接按范围钳制并在 tooltip 显示
+   "类型 · 默认 · 范围"。
+4. **坐标小地图预览**：Inspector 新增 `CoordinatePreview`，编辑 x/y
+   （Fire*/SpawnEnemy/MoveTo/SetPosition/CreateLaser 等）时显示游戏场示意，
+   按忠实映射 `u=(x+1)/2·W，v=(1−y·384/448)/2·H` 画准星与坐标，实时跟随输入；
+   未填 x/y 提示"使用发射者位置"，Expr 提示无法预览，MoveLinear 画增量箭头，
+   |坐标|>1.5 标"屏外"。
+
+复验：全仓 455 passed / 26.5s（新增 GLFW resize 3 项、坐标映射/预览/崩溃回归
+4 项）；compileall、资产校验 0 错误、diff checks 通过；四个真实 Windows 门禁
+（dragflow / preview / CD7 综合 / layout）全部 PASS。main.py 一次性规范为
+LF 并清理历史遗留的 22 行行尾空格（仓库约定 UTF-8/LF）。
+
 ### Usability：not run
 
 维护者尚未实际完成完整工作流（新建 Wave/Enemy、拖出 Repeat/Wait/Fire、包裹、
