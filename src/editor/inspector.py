@@ -9,7 +9,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from src.authoring import dsl
-from src.authoring.program import Expr, Ref
+from src.authoring.program import (
+    Expr,
+    Parameter,
+    ProgramError,
+    Ref,
+    parse_author_value,
+    reference_kinds_for_field,
+)
 from src.qt_compat.QtCore import Qt, Signal
 from src.qt_compat.QtWidgets import (
     QCheckBox,
@@ -23,6 +30,8 @@ from src.qt_compat.QtWidgets import (
     QPlainTextEdit,
     QScrollArea,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -32,13 +41,6 @@ from .session import EditorSession
 from .sidebars import RESOURCE_MIME
 
 
-_REF_FIELD_KINDS = {
-    ("RunWave", "wave_class"): ("Wave",),
-    ("RunBoss", "boss_def"): ("Boss",),
-    ("SpawnEnemy", "enemy_class"): ("Enemy",),
-    ("Call", "function"): ("Function", "Task"),
-    ("SpawnTask", "task"): ("Task",),
-}
 _EXPR_TOGGLE_TIP = "把常量改为表达式"
 
 
@@ -80,6 +82,86 @@ class LiteralTextEdit(QPlainTextEdit):
         if self.isVisible():
             self.commit_requested.emit()
         super().focusOutEvent(event)
+
+
+class ParameterTable(QWidget):
+    """Small explicit table for Task/Function signature parameters."""
+
+    commit_requested = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, values: tuple[Parameter, ...], editable: bool, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.table = QTableWidget(0, 3, self)
+        self.table.setObjectName("parameter_table")
+        self.table.setHorizontalHeaderLabels(["名称", "类型", "默认值（留空=必填）"])
+        for parameter in values:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(parameter.name))
+            self.table.setItem(row, 1, QTableWidgetItem(parameter.annotation))
+            default = "" if not parameter.has_default else repr(parameter.default)
+            self.table.setItem(row, 2, QTableWidgetItem(default))
+        self.table.setEnabled(editable)
+        self.table.setMinimumHeight(110)
+        layout.addWidget(self.table)
+        controls = QHBoxLayout()
+        add = QToolButton(self)
+        add.setText("＋")
+        remove = QToolButton(self)
+        remove.setText("－")
+        apply = QToolButton(self)
+        apply.setText("应用")
+        for button in (add, remove, apply):
+            button.setEnabled(editable)
+            controls.addWidget(button)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+        add.clicked.connect(self._add_row)
+        remove.clicked.connect(self._remove_row)
+        apply.clicked.connect(self._apply)
+
+    def _add_row(self) -> None:
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(f"arg{row + 1}"))
+        self.table.setItem(row, 1, QTableWidgetItem("Any"))
+        self.table.setItem(row, 2, QTableWidgetItem(""))
+        self.table.setCurrentCell(row, 0)
+        self.table.editItem(self.table.item(row, 0))
+
+    def _remove_row(self) -> None:
+        row = self.table.currentRow()
+        if row >= 0:
+            self.table.removeRow(row)
+
+    def parameters(self) -> tuple[Parameter, ...]:
+        values: list[Parameter] = []
+        for row in range(self.table.rowCount()):
+            name = (self.table.item(row, 0).text() if self.table.item(row, 0) else "").strip()
+            annotation = (
+                self.table.item(row, 1).text() if self.table.item(row, 1) else "Any"
+            ).strip() or "Any"
+            default = (
+                self.table.item(row, 2).text() if self.table.item(row, 2) else ""
+            ).strip()
+            values.append(
+                Parameter(name, annotation)
+                if not default
+                else Parameter(name, annotation, _parse_literal(default))
+            )
+        return tuple(values)
+
+    def _apply(self) -> None:
+        try:
+            values = self.parameters()
+        except Exception as exc:
+            self.error.emit(str(exc))
+            return
+        self.error.emit("")
+        self.commit_requested.emit(values)
 
 
 class InspectorPanel(QWidget):
@@ -138,6 +220,8 @@ class InspectorPanel(QWidget):
                     unit_id, "name", value
                 ),
             )
+            if "parameters" in inspect.signature(constructor).parameters:
+                self._add_parameter_field(unit)
             for name, value in _unit_fields(unit.metadata, constructor):
                 self._add_field(
                     name,
@@ -220,8 +304,10 @@ class InspectorPanel(QWidget):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(editor, 1)
-        if self._supports_expr(value, annotation):
-            row.addWidget(self._expr_toggle(editor, value, name))
+        if self._supports_expr(value, annotation, field_name or name):
+            row.addWidget(
+                self._expr_toggle(editor, value, annotation, name, commit)
+            )
         if isinstance(editor, ResourceLineEdit):
             row.addWidget(self._browse_button(editor, name))
         layout.addLayout(row)
@@ -238,6 +324,28 @@ class InspectorPanel(QWidget):
             label.setStyleSheet("color: #f0883e;")
             self._suggested_widget = self._focus_proxy(editor)
         self.form.addRow(label, container)
+
+    def _add_parameter_field(self, unit) -> None:
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        table = ParameterTable(tuple(unit.parameters), self.session.can_edit, container)
+        table.setObjectName("argument_parameters")
+        table.commit_requested.connect(
+            lambda values, unit_id=unit.id: self._commit(
+                lambda parsed: self.session.set_unit_field(unit_id, "parameters", parsed),
+                values,
+                "parameters",
+            )
+        )
+        table.error.connect(lambda message: self._show_field_error("parameters", message))
+        layout.addWidget(table)
+        error = QLabel("", container)
+        error.setObjectName("error_parameters")
+        error.setStyleSheet("color: #f85149;")
+        error.setWordWrap(True)
+        layout.addWidget(error)
+        self.form.addRow(QLabel("参数表", container), container)
 
     def _focus_proxy(self, editor: QWidget) -> QWidget:
         inner = (
@@ -256,7 +364,7 @@ class InspectorPanel(QWidget):
         commit,
     ) -> QWidget:
         if isinstance(value, Ref):
-            return self._ref_editor(value, name, commit)
+            return self._ref_editor(value, owner_kind, name, commit)
         if isinstance(value, Expr):
             return self._expr_editor(value, name, commit)
         literal_options = _literal_options(annotation)
@@ -295,8 +403,9 @@ class InspectorPanel(QWidget):
             return widget
         if isinstance(value, (list, tuple, dict)):
             return self._literal_text_editor(value, name, commit)
+        is_resource = _is_resource_field(owner_kind, name)
         accepts = lambda uri: resource_field_accepts(owner_kind, name, uri)
-        widget = ResourceLineEdit(accepts, self)
+        widget = ResourceLineEdit(accepts, self) if is_resource else QLineEdit(self)
         widget.setText(value if isinstance(value, str) else repr(value))
         widget.setReadOnly(not self.session.can_edit)
         if self.session.can_edit:
@@ -305,7 +414,10 @@ class InspectorPanel(QWidget):
                     commit, _parse_text(editor.text(), original), name
                 )
             )
-            widget.resource_dropped.connect(lambda uri: self._commit(commit, uri, name))
+            if isinstance(widget, ResourceLineEdit):
+                widget.resource_dropped.connect(
+                    lambda uri: self._commit(commit, uri, name)
+                )
         return widget
 
     def _literal_combo(self, value, options: tuple, name: str, commit) -> QWidget:
@@ -322,11 +434,11 @@ class InspectorPanel(QWidget):
             )
         return widget
 
-    def _ref_editor(self, value: Ref, name: str, commit) -> QWidget:
+    def _ref_editor(self, value: Ref, owner_kind: str, name: str, commit) -> QWidget:
         """A searchable, explicit reference selector over existing logical units."""
 
         widget = QComboBox(self)
-        expected = _REF_FIELD_KINDS.get(name, ())
+        expected = reference_kinds_for_field(owner_kind, name)
         candidates = [
             unit.id
             for unit in sorted(
@@ -358,22 +470,40 @@ class InspectorPanel(QWidget):
             )
         return widget
 
-    def _expr_toggle(self, editor: QWidget, value: Any, name: str) -> QWidget:
+    def _expr_toggle(
+        self,
+        editor: QWidget,
+        value: Any,
+        annotation: Any,
+        name: str,
+        commit,
+    ) -> QWidget:
         button = QToolButton(self)
-        button.setText("ƒ")
-        button.setToolTip(_EXPR_TOGGLE_TIP)
+        button.setObjectName(f"expression_toggle_{name}")
+        button.setText("常" if isinstance(value, Expr) else "ƒ")
+        button.setToolTip(
+            "把表达式改回常量" if isinstance(value, Expr) else _EXPR_TOGGLE_TIP
+        )
         button.setEnabled(self.session.can_edit)
 
         def switch() -> None:
-            current = self._current_value(editor, value)
-            if isinstance(current, Expr):
+            if isinstance(value, Expr):
+                try:
+                    constant = _parse_expr_constant(editor.text(), annotation)
+                except ValueError as exc:
+                    self._show_field_error(name, str(exc))
+                    return
+                self._commit(commit, constant, name)
                 return
+            current = self._current_value(editor, value)
             self._commit(commit, Expr(_expr_source(current)), name)
 
         button.clicked.connect(switch)
         return button
 
-    def _supports_expr(self, value: Any, annotation: Any) -> bool:
+    def _supports_expr(self, value: Any, annotation: Any, field_name: str) -> bool:
+        if field_name == "unit_name":
+            return False
         if isinstance(value, (list, tuple, dict, Ref, bool)):
             return False
         if isinstance(value, Expr):
@@ -424,8 +554,8 @@ class InspectorPanel(QWidget):
         widget.setPlaceholderText("Python 字面量，例如 ['a', 1] 或 {'x': 2}")
         if self.session.can_edit:
             widget.commit_requested.connect(
-                lambda editor=widget: self._commit(
-                    commit, _parse_literal(editor.toPlainText()), name
+                lambda editor=widget: self._commit_literal_text(
+                    editor, commit, name
                 )
             )
         return widget
@@ -439,6 +569,14 @@ class InspectorPanel(QWidget):
             self._show_field_error(name, str(exc))
             return
         self._show_field_error(name, "")
+
+    def _commit_literal_text(self, editor: QPlainTextEdit, callback, name: str) -> None:
+        try:
+            value = _parse_literal(editor.toPlainText())
+        except ValueError as exc:
+            self._show_field_error(name, str(exc))
+            return
+        self._commit(callback, value, name)
 
     def _show_field_error(self, name: str, message: str) -> None:
         error_label = self.findChild(QLabel, f"error_{name}")
@@ -454,18 +592,26 @@ class InspectorPanel(QWidget):
 def resource_field_accepts(owner_kind: str, name: str, uri: str) -> bool:
     path = PurePosixPath(uri.removeprefix("res://").split("#", 1)[0])
     suffix = path.suffix.lower()
-    audio = {".flac", ".mp3", ".ogg", ".wav"}
-    images = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
-    key = (owner_kind, name)
-    if key in {("Stage", "bgm"), ("Stage", "boss_bgm"), ("PlayBGM", "name"), ("PlaySE", "name")}:
-        return suffix in audio
-    if key in {("Stage", "background"), ("SetBackground", "name")}:
-        return suffix == ".json"
-    if key in {("Enemy", "sprite"), ("Boss", "texture")}:
-        return suffix in images | {".json"}
-    if key == ("PlayDialogue", "dialogue_list"):
-        return suffix == ".json"
-    return False
+    return suffix in _RESOURCE_FIELD_SUFFIXES.get((owner_kind, name), frozenset())
+
+
+_AUDIO_SUFFIXES = frozenset({".flac", ".mp3", ".ogg", ".wav"})
+_IMAGE_SUFFIXES = frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"})
+_RESOURCE_FIELD_SUFFIXES = {
+    ("Stage", "bgm"): _AUDIO_SUFFIXES,
+    ("Stage", "boss_bgm"): _AUDIO_SUFFIXES,
+    ("PlayBGM", "name"): _AUDIO_SUFFIXES,
+    ("PlaySE", "name"): _AUDIO_SUFFIXES,
+    ("Stage", "background"): frozenset({".json"}),
+    ("SetBackground", "name"): frozenset({".json"}),
+    ("Enemy", "sprite"): _IMAGE_SUFFIXES | {".json"},
+    ("Boss", "texture"): _IMAGE_SUFFIXES | {".json"},
+    ("PlayDialogue", "dialogue_list"): frozenset({".json"}),
+}
+
+
+def _is_resource_field(owner_kind: str, name: str) -> bool:
+    return (owner_kind, name) in _RESOURCE_FIELD_SUFFIXES
 
 
 def _constructor_defaults(constructor) -> dict[str, Any]:
@@ -494,9 +640,11 @@ def _parse_text(text: str, original: Any) -> Any:
 
 def _parse_literal(text: str) -> Any:
     try:
-        return ast.literal_eval(text)
-    except (SyntaxError, ValueError) as exc:
-        raise ValueError("不是合法的 Python 字面量") from exc
+        return parse_author_value(text)
+    except ProgramError as exc:
+        raise ValueError(
+            f"不是合法的作者值（字面量/Ref/Expr）：{exc.message}"
+        ) from exc
 
 
 def _expr_source(value: Any) -> str:
@@ -507,6 +655,26 @@ def _expr_source(value: Any) -> str:
     if isinstance(value, float):
         return repr(value)
     return repr(value)
+
+
+def _parse_expr_constant(source: str, annotation: Any) -> Any:
+    """Convert an expression editor back to a literal without executing it."""
+
+    try:
+        return ast.literal_eval(source)
+    except (SyntaxError, ValueError):
+        if _annotation_contains(annotation, str):
+            return source
+        raise ValueError("只有字面量表达式才能切回常量") from None
+
+
+def _annotation_contains(annotation: Any, expected: type) -> bool:
+    if annotation is expected:
+        return True
+    origin = get_origin(annotation)
+    if origin in {types.UnionType, Union}:
+        return any(_annotation_contains(item, expected) for item in get_args(annotation))
+    return False
 
 
 def _resource_uri(mime_data) -> str | None:
@@ -582,4 +750,9 @@ def _field_type(annotation: Any, value: Any) -> type | None:
     return None
 
 
-__all__ = ["InspectorPanel", "ResourceLineEdit", "resource_field_accepts"]
+__all__ = [
+    "InspectorPanel",
+    "ParameterTable",
+    "ResourceLineEdit",
+    "resource_field_accepts",
+]

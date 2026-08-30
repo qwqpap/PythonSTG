@@ -283,6 +283,7 @@ class TemplateTarget:
     resolved: bool = True
     definition_path: str | None = None
     definition_span: SourceSpan | None = None
+    signature: inspect.Signature | None = field(default=None, compare=False, repr=False)
 
 
 def new_uid(kind: str = "node") -> str:
@@ -609,6 +610,77 @@ def validate_author_value(value: Any, path: str = "value") -> None:
         "invalid_value",
         f"{path} contains unsupported value type {type(value).__name__}",
     )
+
+
+def parse_author_value(source: str) -> Any:
+    """Parse one editable AuthorValue expression without executing Python.
+
+    Inspector container fields use the same closed value language as authoring
+    files.  Keeping this parser headless prevents Qt from inventing a looser
+    interpretation of ``Ref``/``Expr`` or Python literals.
+    """
+
+    try:
+        root = ast.parse(source, mode="eval").body
+    except SyntaxError as exc:
+        raise ProgramError(
+            "invalid_value", "not a valid author value expression"
+        ) from exc
+
+    def parse(node: ast.AST) -> Any:
+        if isinstance(node, ast.Constant):
+            if node.value is None or isinstance(node.value, (bool, int, float, str)):
+                return node.value
+        elif isinstance(node, ast.List):
+            return [parse(item) for item in node.elts]
+        elif isinstance(node, ast.Tuple):
+            return tuple(parse(item) for item in node.elts)
+        elif isinstance(node, ast.Dict):
+            result: dict[str, Any] = {}
+            for key_node, value_node in zip(node.keys, node.values):
+                if key_node is None:
+                    raise ProgramError(
+                        "invalid_value", "dictionary unpacking is not supported"
+                    )
+                key = parse(key_node)
+                if not isinstance(key, str):
+                    raise ProgramError("invalid_value", "dictionary keys must be strings")
+                result[key] = parse(value_node)
+            return result
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            operand = parse(node.operand)
+            if isinstance(operand, bool) or not isinstance(operand, (int, float)):
+                raise ProgramError("invalid_value", "unary +/- is only supported for numbers")
+            return -operand if isinstance(node.op, ast.USub) else +operand
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            constructor = {"Ref": Ref, "Expr": Expr}.get(node.func.id)
+            if constructor is not None:
+                if any(keyword.arg is None for keyword in node.keywords):
+                    raise ProgramError("invalid_value", "** expansion is not supported")
+                positional = [parse(item) for item in node.args]
+                keywords: dict[str, Any] = {}
+                for keyword_argument in node.keywords:
+                    assert keyword_argument.arg is not None
+                    if keyword_argument.arg in keywords:
+                        raise ProgramError(
+                            "invalid_value",
+                            f"duplicate keyword {keyword_argument.arg!r}",
+                        )
+                    keywords[keyword_argument.arg] = parse(keyword_argument.value)
+                try:
+                    inspect.signature(constructor).bind(*positional, **keywords)
+                    return constructor(*positional, **keywords)
+                except (TypeError, ValueError) as exc:
+                    raise ProgramError(
+                        "invalid_value", f"invalid {node.func.id} value: {exc}"
+                    ) from exc
+        raise ProgramError(
+            "invalid_value", f"unsupported author value expression {type(node).__name__}"
+        )
+
+    value = parse(root)
+    validate_author_value(value)
+    return value
 
 
 def _annotation_accepts(value: Any, annotation: Any) -> bool:
@@ -1068,19 +1140,17 @@ def node_from_palette(
     if unit_kind not in UNIT_KINDS or unit_kind == "Project":
         raise ProgramError("invalid_context", f"{unit_kind} cannot contain statements")
     if template_target is not None:
-        return make_template_call(template_target)
+        positional, keywords = _template_prototype_arguments(template_target.signature)
+        return make_template_call(
+            template_target,
+            positional=positional,
+            keywords=keywords,
+        )
 
     from . import dsl  # local import avoids program <-> public DSL import cycle
 
-    reference_kinds = {
-        "RunWave": ("Wave",),
-        "RunBoss": ("Boss",),
-        "SpawnEnemy": ("Enemy",),
-        "Call": ("Function", "Task"),
-        "SpawnTask": ("Task",),
-    }
     ref = Ref(reference_id) if reference_id else None
-    if kind in reference_kinds and ref is None:
+    if reference_kinds_for_node(kind) and ref is None:
         raise ProgramError("missing_reference", f"{kind} requires an explicit reference")
     factories = {
         "Wait": lambda: dsl.Wait(60),
@@ -1125,6 +1195,71 @@ def node_from_palette(
         return factories[kind]()
     except KeyError as exc:
         raise ProgramError("unknown_node_kind", f"unknown palette node {kind!r}") from exc
+
+
+def reference_kinds_for_node(kind: str) -> tuple[str, ...]:
+    """Return typed Ref targets without making Qt duplicate DSL semantics."""
+
+    values = {
+        target
+        for (node_kind, _field), targets in _REF_TARGETS.items()
+        if node_kind == kind
+        for target in targets
+    }
+    return tuple(sorted(values))
+
+
+def reference_kinds_for_field(kind: str, field: str) -> tuple[str, ...]:
+    """Expose the model's typed Ref rule to generated Inspector controls."""
+
+    return tuple(sorted(_REF_TARGETS.get((kind, field), ())))
+
+
+def _template_prototype_arguments(
+    signature: inspect.Signature | None,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    if signature is None:
+        return (), {}
+    positional: list[Any] = []
+    keywords: dict[str, Any] = {}
+    for name, parameter in signature.parameters.items():
+        if name == "uid" or parameter.kind in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }:
+            continue
+        if parameter.default is not inspect.Parameter.empty:
+            value = copy.deepcopy(parameter.default)
+        else:
+            annotation = parameter.annotation
+            normalized = (
+                annotation.strip()
+                if isinstance(annotation, str)
+                else getattr(annotation, "__name__", str(annotation))
+            )
+            if normalized == "bool":
+                value = False
+            elif normalized == "int":
+                value = 0
+            elif normalized == "float":
+                value = 0.0
+            elif normalized == "str":
+                value = ""
+            elif normalized.startswith(("list", "Sequence", "tuple")):
+                value = []
+            elif normalized.startswith(("dict", "Mapping")):
+                value = {}
+            else:
+                raise ProgramError(
+                    "template_argument_required",
+                    f"template parameter {name!r} has no safe default",
+                )
+        validate_author_value(value, f"TemplateCall.{name}")
+        if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+            positional.append(value)
+        else:
+            keywords[name] = value
+    return tuple(positional), keywords
 
 
 def create_unit(
@@ -2222,6 +2357,9 @@ __all__ = [
     "make_template_call",
     "move_node",
     "node_from_palette",
+    "parse_author_value",
+    "reference_kinds_for_node",
+    "reference_kinds_for_field",
     "new_uid",
     "set_argument",
     "set_template_positional_argument",

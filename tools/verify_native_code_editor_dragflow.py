@@ -9,10 +9,13 @@ Parallel side-by-side/stacked branch layout at both required sizes.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 
@@ -23,12 +26,22 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from src.core.project_context import ProjectContext
 from src.editor.session import EditorSession
 from src.editor.window import EditorWindow
-from src.qt_compat.QtCore import QPoint, QPointF, Qt
-from src.qt_compat.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent
+from src.qt_compat.QtCore import QPoint, QPointF, QRect, Qt
+from src.qt_compat.QtGui import (
+    QCursor,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QMouseEvent,
+)
 from src.qt_compat.QtWidgets import QApplication
+
+from src.editor.program_tree import _ZONE_PANEL_HEIGHT, _ZONE_PANEL_WIDTH
 
 
 REQUIRED_SIZES = ((1480, 920), (960, 640))
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP = 0x0004
 
 
 def _write_project(root: Path) -> Path:
@@ -113,6 +126,150 @@ def _hover_card(flow, mime, uid: str):
     return panel
 
 
+def _palette_item(window: EditorWindow, kind: str):
+    """Return the visible draggable palette row for an enabled prototype."""
+
+    role = int(Qt.ItemDataRole.UserRole)
+
+    def walk(item):
+        yield item
+        for index in range(item.childCount()):
+            yield from walk(item.child(index))
+
+    for top in range(window.node_palette.tree.topLevelItemCount()):
+        for item in walk(window.node_palette.tree.topLevelItem(top)):
+            if item.data(0, role) == kind and not item.isDisabled():
+                window.node_palette.tree.scrollToItem(item)
+                QApplication.processEvents()
+                return item
+    raise AssertionError(f"palette entry {kind!r} is not available")
+
+
+def _zone_panel_rect(canvas, uid: str) -> QRect:
+    card = canvas._layout.cards.get(uid)
+    if card is None:
+        raise AssertionError(f"card {uid!r} is not visible")
+    visible = canvas.visible_rect()
+    x = card.rect.center().x() - _ZONE_PANEL_WIDTH // 2
+    y = card.rect.center().y() - _ZONE_PANEL_HEIGHT // 2
+    x = max(4, min(x, canvas.width() - _ZONE_PANEL_WIDTH - 4))
+    y = max(
+        visible.top() + 4,
+        min(y, visible.bottom() - _ZONE_PANEL_HEIGHT - 4),
+    )
+    return QRect(x, y, _ZONE_PANEL_WIDTH, _ZONE_PANEL_HEIGHT)
+
+
+def _move_cursor(user32, start: QPoint, end: QPoint, steps: int = 12) -> None:
+    for index in range(1, steps + 1):
+        ratio = index / steps
+        x = round(start.x() + (end.x() - start.x()) * ratio)
+        y = round(start.y() + (end.y() - start.y()) * ratio)
+        if not user32.SetCursorPos(x, y):
+            raise OSError(ctypes.get_last_error(), "SetCursorPos failed")
+        time.sleep(0.018)
+
+
+def _physical_palette_drop(
+    app: QApplication,
+    window: EditorWindow,
+    kind: str,
+    target_uid: str,
+    zone: str,
+) -> None:
+    """Perform one actual Windows mouse drag from the palette into ProgramFlow.
+
+    Directly constructing ``QDropEvent`` is useful for exact widget contracts,
+    but it cannot prove that a human mouse gesture starts ``QDrag``.  This gate
+    uses Win32 cursor and button input while Qt runs its native nested drag loop.
+    The original cursor position is restored even when the gesture fails.
+    """
+
+    if sys.platform != "win32":
+        raise RuntimeError("physical mouse gate requires Windows")
+    tree = window.node_palette.tree
+    item = _palette_item(window, kind)
+    item_rect = tree.visualItemRect(item)
+    if item_rect.isEmpty():
+        raise RuntimeError(f"palette row {kind!r} is not visible")
+    source = tree.viewport().mapToGlobal(item_rect.center())
+    canvas = window.program_tree.canvas
+    card = canvas._layout.cards.get(target_uid)
+    if card is None:
+        raise RuntimeError(f"target card {target_uid!r} is not visible")
+    visible = canvas.visible_rect()
+    approach_top = canvas.mapToGlobal(QPoint(visible.right() - 3, visible.top() + 3))
+    approach_side = canvas.mapToGlobal(
+        QPoint(visible.right() - 3, card.rect.center().y())
+    )
+    hover = canvas.mapToGlobal(card.rect.center())
+    panel = _zone_panel_rect(canvas, target_uid)
+    zone_targets = [
+        canvas.mapToGlobal(_panel_point(panel, candidate))
+        for candidate in ("before", "child", "wrap", zone)
+    ]
+    original = QCursor.pos()
+    error: list[BaseException] = []
+    released = threading.Event()
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+    def gesture() -> None:
+        button_down = False
+        try:
+            time.sleep(0.12)
+            user32.SetForegroundWindow(int(window.winId()))
+            if not user32.SetCursorPos(source.x(), source.y()):
+                raise OSError(ctypes.get_last_error(), "SetCursorPos failed")
+            time.sleep(0.08)
+            user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            button_down = True
+            time.sleep(0.06)
+            # Cross QApplication.startDragDistance() before heading to the card.
+            threshold = QPoint(source.x() + 24, source.y())
+            _move_cursor(user32, source, threshold, 4)
+            # Enter the canvas above all cards first.  Approaching the first
+            # card from the palette's lower edge would legitimately anchor the
+            # magnifier on every card crossed along the way.
+            _move_cursor(user32, threshold, approach_top, 14)
+            _move_cursor(user32, approach_top, approach_side, 8)
+            _move_cursor(user32, approach_side, hover, 8)
+            time.sleep(0.24)
+            cursor = hover
+            for target in zone_targets:
+                _move_cursor(user32, cursor, target, 6)
+                cursor = target
+                time.sleep(0.10)
+            time.sleep(0.12)
+            user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            button_down = False
+        except BaseException as exc:  # surfaced on the Qt/main thread below
+            error.append(exc)
+        finally:
+            if button_down:
+                user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.05)
+            user32.SetCursorPos(original.x(), original.y())
+            released.set()
+
+    window.raise_()
+    window.activateWindow()
+    app.processEvents()
+    worker = threading.Thread(target=gesture, name="pystg-physical-drag", daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 5.0
+    while not released.is_set() and time.monotonic() < deadline:
+        # This call may enter QDrag.exec(); the worker continues issuing native
+        # input until the release lets that nested event loop return.
+        app.processEvents()
+        time.sleep(0.005)
+    worker.join(timeout=0.5)
+    app.processEvents()
+    if worker.is_alive() or not released.is_set():
+        raise RuntimeError("physical mouse drag timed out")
+    if error:
+        raise RuntimeError(f"physical mouse drag failed: {error[0]}") from error[0]
+
+
 def verify_native_dragflow() -> dict[str, object]:
     platform_override = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
     if platform_override in {"offscreen", "minimal"}:
@@ -186,23 +343,42 @@ def verify_native_dragflow() -> dict[str, object]:
                 raise RuntimeError(f"four-zone mapping wrong: {zones}")
             canvas._end_drop()
 
-            # 3. A real drop appends one undoable command and flashes the card.
+            # 3. A physical Win32 mouse drag starts QDrag, drops one prototype,
+            #    and produces exactly one undoable mutation.
             body_before = [node.uid for node in session.program.get_unit("stage").body]
-            mime = _palette_mime(window, "Wait")
-            panel = _hover_card(flow, mime, "wait")
-            position = _panel_point(panel, "after")
-            enter, move, drop = _drag_events(flow, mime, position)
-            QApplication.sendEvent(canvas, enter)
-            QApplication.sendEvent(canvas, move)
-            QApplication.sendEvent(canvas, drop)
+            physical_feedback: list[str] = []
+            feedback_sink = physical_feedback.append
+            flow.drop_feedback.connect(feedback_sink)
+            _physical_palette_drop(app, window, "Repeat", "container", "after")
+            flow.drop_feedback.disconnect(feedback_sink)
             _process_events(app)
             body_after = [node.uid for node in session.program.get_unit("stage").body]
             if len(body_after) != len(body_before) + 1:
-                raise RuntimeError("drop did not add exactly one node")
+                raise RuntimeError("physical mouse drop did not add exactly one node")
+            inserted = [uid for uid in body_after if uid not in body_before]
+            container_index = body_after.index("container")
+            inserted_index = body_after.index(inserted[0]) if len(inserted) == 1 else -99
+            if len(inserted) != 1 or abs(inserted_index - container_index) != 1:
+                raise RuntimeError(
+                    "physical mouse drop did not land adjacent to its target: "
+                    f"before={body_before!r} after={body_after!r} "
+                    f"feedback={physical_feedback!r}"
+                )
+            if not all(
+                any(marker in message for message in physical_feedback)
+                for marker in ("之前", "放入", "包裹", "之后")
+            ):
+                raise RuntimeError(
+                    "physical mouse did not traverse all four visible zones: "
+                    f"feedback={physical_feedback!r}"
+                )
             if session.undo_stack.count() != 1:
-                raise RuntimeError("drop did not produce exactly one undo command")
-            if flow.canvas._flash_uid != body_after[1]:
-                raise RuntimeError("inserted card was not flashed")
+                raise RuntimeError("physical mouse drop did not produce exactly one undo command")
+            if session.current_node_uid != inserted[0]:
+                raise RuntimeError(
+                    "physical mouse drop did not select the inserted card: "
+                    f"selected={session.current_node_uid!r} body={body_after!r}"
+                )
             session.undo_stack.undo()
             if [node.uid for node in session.program.get_unit("stage").body] != body_before:
                 raise RuntimeError("undo did not restore the previous body")
@@ -296,6 +472,7 @@ def verify_native_dragflow() -> dict[str, object]:
                 {
                     "size": f"{width}x{height}",
                     "parallel_card_width": par.width(),
+                    "physical_mouse_drop": True,
                     "side_by_side": side_by_side,
                     "stacked": stacked,
                 }

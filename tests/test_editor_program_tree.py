@@ -194,9 +194,32 @@ def test_real_palette_drag_inserts_node_and_flashes_it(tmp_path, qapp_session):
     body = session.program.get_unit("stage").body
     assert body[2].kind == "Wait"
     assert session.undo_stack.count() == 1
+    assert session.current_node_uid == body[2].uid
     assert flow.canvas._flash_uid == body[2].uid
     session.undo_stack.undo()
     assert len(session.program.get_unit("stage").body) == 4
+    window.close()
+
+
+def test_visible_duplicate_button_uses_one_undo_command_and_new_uid(
+    tmp_path, qapp_session
+):
+    window = _window(tmp_path)
+    session = window.session
+    session.select_node("a")
+    QApplication.processEvents()
+    before = session.program.semantic_data()
+
+    window.duplicate_node_button.click()
+    QApplication.processEvents()
+
+    body = session.program.get_unit("stage").body
+    copies = [node for node in body if node.kind == "Wait" and node.arguments["frames"] == 2]
+    assert len(copies) == 2
+    assert {node.uid for node in copies} != {"a"}
+    assert session.undo_stack.count() == 1
+    session.undo_stack.undo()
+    assert session.program.semantic_data() == before
     window.close()
 
 

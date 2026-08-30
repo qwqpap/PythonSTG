@@ -68,12 +68,22 @@ _ROLE_VALUE = int(Qt.ItemDataRole.UserRole)
 class _UnitDialog(QDialog):
     """Small creation/duplication form; paths remain derived from immutable IDs."""
 
-    def __init__(self, program, parent=None, *, source=None) -> None:
+    def __init__(
+        self,
+        program,
+        parent=None,
+        *,
+        source=None,
+        allowed_kinds: tuple[str, ...] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("复制逻辑单元" if source else "新建逻辑单元")
         form = QFormLayout(self)
         self.kind = QComboBox(self)
-        kinds = ("Stage", "Wave", "Enemy", "Boss", "Spell", "NonSpell", "Task", "Function")
+        all_kinds = (
+            "Stage", "Wave", "Enemy", "Boss", "Spell", "NonSpell", "Task", "Function"
+        )
+        kinds = tuple(dict.fromkeys(allowed_kinds or all_kinds))
         self.kind.addItems([source.kind] if source else kinds)
         self.unit_id = QLineEdit(self)
         self.name = QLineEdit(self)
@@ -334,6 +344,7 @@ class EditorWindow(QMainWindow):
         self.activity_sidebar = activity
         self.node_palette = NodePalette(self)
         self.node_palette.insert_requested.connect(self._insert_selected_prototype)
+        self.node_palette.create_reference_requested.connect(self._offer_unit_creation)
         self.node_palette.current_changed.connect(self.refresh_selection)
         left_splitter = QSplitter(Qt.Orientation.Vertical, self)
         left_splitter.setObjectName("left_authoring_splitter")
@@ -730,6 +741,8 @@ class EditorWindow(QMainWindow):
             self.session.move_node(
                 uid, target_uid, placement, target_slot=target_slot
             )
+            self.session.select_node(uid)
+            self.program_tree.flash(uid)
         except Exception as exc:
             self.statusBar().showMessage(f"节点未移动：{exc}", 5000)
 
@@ -796,6 +809,7 @@ class EditorWindow(QMainWindow):
                     target_uid, placement, node, target_slot=target_slot
                 )
             self.node_palette.remember(kind)
+            self.session.select_node(node.uid)
             self.program_tree.flash(node.uid)
             self.inspector.focus_suggested_field()
             return node
@@ -816,8 +830,11 @@ class EditorWindow(QMainWindow):
         box.exec()
         if box.clickedButton() is not create_button:
             return False
-        dialog = _UnitDialog(self.session.program, self)
-        dialog.kind.setCurrentText(expected_kinds[0])
+        dialog = _UnitDialog(
+            self.session.program,
+            self,
+            allowed_kinds=expected_kinds,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
         kind, unit_id, name, register_stage, phase_id, texture = dialog.values()
@@ -965,6 +982,7 @@ class EditorWindow(QMainWindow):
         self.session.insert_node_relative(
             target_uid, placement, node, target_slot=target_slot
         )
+        self.session.select_node(node.uid)
         self.program_tree.flash(node.uid)
         self.inspector.focus_suggested_field()
         return node

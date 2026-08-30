@@ -93,6 +93,8 @@ Intent、Plugin Registry、多层 DocumentManager 或第二预览模型。
 - `TemplateCall`，其参数仍必须属于本闭集。
 
 模型不执行 `Expr`。生成代码在对应 Runtime 函数上下文原样表达它，并把错误映射回节点。
+Inspector 的列表、字典和参数默认值文本必须调用 headless `parse_author_value`；该解析器只
+接受上述闭集及 `Ref(...)`/`Expr(...)`，不得由 Qt 使用 `eval` 或维护另一套值语法。
 
 ### 3.2 节点
 
@@ -206,7 +208,10 @@ conflict + reload disk             -> replace model, clear undo
 any + unsupported disk structure   -> readonly diagnostic, preserve bytes
 ```
 
-文件保存使用同目录临时文件、flush/fsync（平台支持时）和 `os.replace`，失败保留原文件。
+新建文件在首次保存前只存在于内存；删除文件先进入可撤销墓碑。墓碑仍参与文件监视，磁盘
+变化同样要求 keep/reload 决策。多文件保存保存前快照磁盘和文档元状态，任一写入失败时
+两者一起回滚；失败后的再次保存不能漏掉仍在内存中的修改。单文件写入使用同目录临时文件、
+flush/fsync（平台支持时）和 `os.replace`。
 
 ## 6. 模板解析与展开
 
@@ -341,8 +346,9 @@ Editor/Game 是两个独立可关闭组，关闭后有固定菜单动作恢复�
 Timeline 永久挂在底部，可调高度但无关闭动作。
 
 左侧为上下分栏：上方保留四视图，下方常驻节点库（`node_palette.py`）。节点库只
-保存中文标签、类别和引用候选类型，不复制构造函数参数或父子规则；兼容性由
-headless `validate_insert` 推导。新节点拖拽使用瞬态 MIME
+保存中文标签和类别；构造函数参数、父子规则与引用候选类型分别由 headless
+`node_from_palette`、`validate_insert` 和 `reference_kinds_for_node` 推导。缺少引用候选时
+节点库显示明确的新建对应逻辑单元入口。新节点拖拽使用瞬态 MIME
 `application/x-pystg-node-prototype`，只携带节点或模板 identity。
 
 中央程序流（`program_tree.py` 的 `ProgramFlow`）是自定义绘制的纵向块式投影：
@@ -353,6 +359,11 @@ headless `validate_insert` 推导。新节点拖拽使用瞬态 MIME
 程序节点拖拽先计算唯一 `DropPlacement`：`BEFORE`、`AFTER`、`CHILD`、`WRAP`。
 拖动期间只显示候选，释放时生成恰一个 `QUndoCommand`。Inspector 和资源拖拽同理。
 放置成功后选中新节点、闪烁高亮，并把 Inspector 滚动到建议首先修改的字段。
+Inspector 从 DSL 注解生成 Literal、Ref、常量/Expr、资源、列表/字典控件；Task/Function
+参数使用名称/类型/默认值三列表格，提交仍进入同一个 Undo 栈。模板原型从已解析签名取得
+默认参数，保存时保持模板调用而不展开。
+只有明确的 `res://` 语义字段显示资源拖入与文件选择；逻辑单元显示名等普通字符串使用
+普通文本框，不伪装为资源字段。
 
 作者源码和生成源码视图使用只读文本控件。受支持文件也不提供任意文本编辑器；外部编辑
 由文件监视器加载。首版所有作者可见 UI 字符串为简体中文。

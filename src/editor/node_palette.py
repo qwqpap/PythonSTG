@@ -11,6 +11,7 @@ from src.authoring.program import (
     ProgramError,
     TemplateTarget,
     node_from_palette,
+    reference_kinds_for_node,
     validate_insert,
 )
 from src.qt_compat.QtCore import QMimeData, QRect, Qt, Signal
@@ -19,6 +20,7 @@ from src.qt_compat.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QLineEdit,
+    QPushButton,
     QStyle,
     QStyledItemDelegate,
     QTreeWidget,
@@ -82,14 +84,8 @@ _CATEGORIES = {
         "CreateLaser", "CreateBentLaser", "RemoveLaser", "ClearLasers",
     )},
 }
-_REFERENCE_KINDS = {
-    "RunWave": ("Wave",), "RunBoss": ("Boss",), "SpawnEnemy": ("Enemy",),
-    "Call": ("Function", "Task"), "SpawnTask": ("Task",),
-}
-
-
 PALETTE_ENTRIES = tuple(
-    PaletteEntry(kind, _LABELS[kind], _CATEGORIES[kind], _REFERENCE_KINDS.get(kind, ()))
+    PaletteEntry(kind, _LABELS[kind], _CATEGORIES[kind], reference_kinds_for_node(kind))
     for kind in dsl.NODE_CONSTRUCTORS
 )
 
@@ -162,6 +158,7 @@ class NodePalette(QWidget):
 
     insert_requested = Signal(str)
     current_changed = Signal()
+    create_reference_requested = Signal(tuple)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -182,11 +179,18 @@ class NodePalette(QWidget):
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.itemDoubleClicked.connect(self._activate)
         self.tree.itemSelectionChanged.connect(self.current_changed)
+        self.create_reference_button = QPushButton("新建所需逻辑单元…", self)
+        self.create_reference_button.setObjectName("node_palette_create_reference")
+        self.create_reference_button.hide()
+        self.create_reference_button.clicked.connect(
+            lambda: self.create_reference_requested.emit(self._missing_reference_kinds)
+        )
         self.search.textChanged.connect(self.refresh)
         self.show_all.toggled.connect(self.refresh)
         layout.addWidget(self.search)
         layout.addWidget(self.show_all)
         layout.addWidget(self.tree, 1)
+        layout.addWidget(self.create_reference_button)
         self._program: AuthoringProgram | None = None
         self._unit_id: str | None = None
         self._target_uid: str | None = None
@@ -194,6 +198,7 @@ class NodePalette(QWidget):
         self._recent: list[str] = []
         self._templates: tuple[TemplateTarget, ...] = ()
         self._context: tuple | None = None
+        self._missing_reference_kinds: tuple[str, ...] = ()
 
     def set_context(
         self,
@@ -225,6 +230,7 @@ class NodePalette(QWidget):
 
     def _rebuild(self, query: str) -> None:
         self.tree.clear()
+        missing_reference_kinds: list[str] = []
         categories: dict[str, QTreeWidgetItem] = {}
         entries = [
             *PALETTE_ENTRIES,
@@ -245,6 +251,10 @@ class NodePalette(QWidget):
             if query and query not in entry.kind.casefold() and query not in entry.label.casefold():
                 continue
             allowed, reason = self.compatibility(entry)
+            if entry.reference_kinds and not self.reference_candidates(entry.kind):
+                for kind in entry.reference_kinds:
+                    if kind not in missing_reference_kinds:
+                        missing_reference_kinds.append(kind)
             if not allowed and not self.show_all.isChecked():
                 continue
             category_name = "最近使用" if entry.kind in self._recent[:8] and not query else entry.category
@@ -262,6 +272,13 @@ class NodePalette(QWidget):
                 item.setDisabled(True)
             category.addChild(item)
             category.setExpanded(True)
+        self._missing_reference_kinds = tuple(missing_reference_kinds)
+        if self._missing_reference_kinds:
+            names = "/".join(self._missing_reference_kinds)
+            self.create_reference_button.setText(f"＋ 新建 {names}…")
+            self.create_reference_button.show()
+        else:
+            self.create_reference_button.hide()
 
     def compatibility(self, entry: PaletteEntry) -> tuple[bool, str]:
         if self._program is None or self._unit_id is None:
@@ -295,7 +312,7 @@ class NodePalette(QWidget):
         return check.allowed, check.reason
 
     def reference_candidates(self, kind: str) -> tuple[str, ...]:
-        expected = _REFERENCE_KINDS.get(kind, ())
+        expected = reference_kinds_for_node(kind)
         if self._program is None:
             return ()
         return tuple(

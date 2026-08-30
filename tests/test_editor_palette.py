@@ -11,7 +11,7 @@ from src.editor.node_palette import PALETTE_ENTRIES, PROTOTYPE_MIME, NodePalette
 from src.editor.session import EditorSession
 from src.editor.window import EditorWindow
 from src.qt_compat.QtCore import Qt
-from src.qt_compat.QtWidgets import QApplication
+from src.qt_compat.QtWidgets import QApplication, QSpinBox
 
 
 def _project(root: Path) -> Path:
@@ -22,6 +22,7 @@ def _project(root: Path) -> Path:
         encoding="utf-8",
     )
     (root / "stage.py").write_text(
+        "from math import sin\n"
         "from src.authoring.dsl import Parallel, Stage, Wait, template\n\n"
         "@template\n"
         "def pause(frames: int = 5):\n"
@@ -168,6 +169,14 @@ def test_reference_nodes_require_explicit_existing_targets(tmp_path, qapp_sessio
     assert not compatibility[0]
     assert "Wave" in compatibility[1]
 
+    requested = []
+    palette.create_reference_requested.disconnect(window._offer_unit_creation)
+    palette.create_reference_requested.connect(requested.append)
+    assert palette.create_reference_button.isVisible()
+    assert "新建" in palette.create_reference_button.text()
+    palette.create_reference_button.click()
+    assert requested and "Wave" in requested[-1]
+
     window.close()
 
 
@@ -178,6 +187,7 @@ def test_templates_stay_aggregated_template_calls(tmp_path, qapp_session):
     assert templates, "the local @template must appear in the palette context"
     local = next(target for target in templates if target.symbol == "pause")
     assert local.identity.endswith(".pause")
+    assert all(target.identity != "math.sin" for target in templates)
 
     session.select_node("wait")
     QApplication.processEvents()
@@ -185,9 +195,57 @@ def test_templates_stay_aggregated_template_calls(tmp_path, qapp_session):
         f"template:{local.identity}", DropPlacement.AFTER, target_uid="wait"
     )
     assert node is not None and node.kind == "TemplateCall"
+    assert node.arguments["frames"] == 5
     stage_after = session.program.get_unit("stage")
     assert stage_after.body[1].kind == "TemplateCall"
+    QApplication.processEvents()
+    frames = window.inspector.findChild(QSpinBox, "argument_frames")
+    assert frames is not None
+    frames.setValue(7)
+    frames.editingFinished.emit()
+    assert session.current_node.arguments["frames"] == 7
+    session.save_all()
+    reopened = EditorSession(project_context=ProjectContext(tmp_path))
+    reopened.open_project(tmp_path / "authoring")
+    template_call = next(
+        item
+        for item in reopened.program.get_unit("stage").body
+        if item.kind == "TemplateCall"
+    )
+    assert template_call.arguments["frames"] == 7
     window.close()
+
+
+def test_explicitly_imported_decorated_template_appears_in_palette(
+    tmp_path, qapp_session, monkeypatch
+):
+    module = tmp_path / "palette_template_pack.py"
+    module.write_text(
+        "from src.authoring.dsl import Wait, template\n\n"
+        "@template\n"
+        "def burst(frames: int = 2, /):\n"
+        "    return [Wait(frames)]\n",
+        encoding="utf-8",
+    )
+    root = _project(tmp_path / "authoring")
+    stage_path = root / "stage.py"
+    stage_path.write_text(
+        "from palette_template_pack import burst\n" + stage_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    session = EditorSession(project_context=ProjectContext(tmp_path))
+    session.open_project(root)
+    targets = session.palette_templates
+    target = next(target for target in targets if target.symbol == "burst")
+    prototype = node_from_palette(
+        "TemplateCall",
+        session.program,
+        "Stage",
+        template_target=target,
+    )
+    assert prototype.positional_arguments == (2,)
+    assert prototype.arguments == {}
 
 
 def test_palette_selection_change_neither_reenters_nor_clones_the_program(

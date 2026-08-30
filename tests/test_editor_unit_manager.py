@@ -164,6 +164,16 @@ def test_save_failure_preserves_disk_and_memory(tmp_path, monkeypatch):
     assert find_node(session.program, "wait")[1].arguments["frames"] == 40
     assert session.dirty
 
+    # A retry after the failure must still persist every in-memory change;
+    # rolling back only disk bytes would silently mark the Stage document clean.
+    monkeypatch.setattr(
+        "src.editor.session.save_python_source", real_save_python_source, raising=True
+    )
+    session.save_all()
+    assert "frames=40" in stage_path.read_text(encoding="utf-8")
+    assert (root / "waves" / "wave_three.py").exists()
+    assert not session.dirty
+
 
 def test_consecutive_numeric_edits_merge_into_one_undoable_action(tmp_path):
     session = _session(tmp_path)

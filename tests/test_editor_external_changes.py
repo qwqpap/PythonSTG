@@ -17,6 +17,11 @@ def _project(root: Path, *, frames: int = 10) -> Path:
         encoding="utf-8",
     )
     _write_stage(root, frames)
+    (root / "wave.py").write_text(
+        "from src.authoring.dsl import Wave\n\n"
+        "wave = Wave('wave', 'Wave')\n",
+        encoding="utf-8",
+    )
     return root
 
 
@@ -117,3 +122,37 @@ def test_explicit_reload_of_deleted_source_becomes_read_only(tmp_path, qapp_sess
     assert session.current_document.read_only
     assert not session.can_edit
     assert session.undo_stack.count() == 0
+
+
+def test_external_change_to_tombstoned_unit_requires_keep_or_reload(
+    tmp_path, qapp_session
+):
+    root = _project(tmp_path / "authoring")
+    wave_path = root / "wave.py"
+    session = _session(root)
+    session.delete_unit("wave")
+    wave_path.write_text(
+        "from src.authoring.dsl import Wave\n\n"
+        "wave = Wave('wave', 'External Wave')\n",
+        encoding="utf-8",
+    )
+
+    assert session.check_external_changes() == ExternalChange.CONFLICT
+    with pytest.raises(SourceConflictError):
+        session.save_all()
+    assert session.resolve_external_changes("reload") == ExternalChange.RELOADED
+    assert session.program.get_unit("wave").name == "External Wave"
+    assert wave_path.exists()
+    assert session.undo_stack.count() == 0
+
+    session.delete_unit("wave")
+    wave_path.write_text(
+        "from src.authoring.dsl import Wave\n\n"
+        "wave = Wave('wave', 'External Again')\n",
+        encoding="utf-8",
+    )
+    assert session.check_external_changes() == ExternalChange.CONFLICT
+    assert session.resolve_external_changes("keep") == ExternalChange.CONFLICT
+    session.save_all()
+    assert not wave_path.exists()
+    assert all(unit.id != "wave" for unit in session.program.logical_units())

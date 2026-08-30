@@ -58,12 +58,21 @@ from src.authoring.program import (
     insert_node,
     insert_new_node,
     move_node,
+    parse_author_value,
     set_argument,
     set_template_positional_argument,
     set_unit_field,
     validate_insert,
     wrap_node,
 )
+
+
+def test_author_value_text_parser_supports_ref_expr_containers_without_execution():
+    assert parse_author_value(
+        "[Ref('wave'), {'x': Expr('player_x')}, -2]"
+    ) == [Ref("wave"), {"x": Expr("player_x")}, -2]
+    with pytest.raises(ProgramError, match="unsupported author value expression"):
+        parse_author_value("__import__('os').system('echo unsafe')")
 
 
 def _complete_program():

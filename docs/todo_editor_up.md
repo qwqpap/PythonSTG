@@ -273,3 +273,35 @@ python tools/verify_native_code_editor_dragflow.py --json
 维护者尚未实际完成完整工作流（新建 Wave/Enemy、拖出 Repeat/Wait/Fire、包裹、
 加入 Stage、修改参数、保存重开并运行预览）。所有自动化与原生验证均不可替代
 真人操作证据。
+
+### 最终完成审计补充（2026-08-30）
+
+- 节点库在 Ref 无候选时除灰显和原因外，新增可直接进入对应逻辑单元创建流程的
+  明确按钮；Ref 候选规则只来自 headless `reference_kinds_for_node/field`，Qt 不再
+  保存第二份类型规则。
+- 模板节点原型使用解析后的签名填入默认/安全起始参数，Inspector 可修改并保存重开为
+  原模板调用；普通显式 import 不再误显示为模板。
+- Inspector 新增 Task/Function 参数表（名称、类型、默认值），提交和 Undo 使用既有
+  `set_unit_field` 命令链。
+- 普通显示名不再错误显示资源选择器或 Expr 按钮；资源拖入只出现在明确的 `res://`
+  语义字段。列表/字典编辑改用 headless `parse_author_value`，可安全编辑嵌套
+  `Ref`/`Expr`，不执行任意 Python。拖放新建、已有节点移动和资源动作成功后均选择
+  结果节点并同步 Inspector。
+- 多文件保存失败现在同时回滚磁盘字节和 `SourceDocument` 元状态；失败后再次保存能把
+  全部内存修改完整写出。删除墓碑也进入外部修改 keep/reload 状态机，避免外部修改被
+  静默删除。
+- 新增直接回归覆盖：缺引用创建入口、显式模板过滤/参数保存、节点复制唯一 Undo、
+  参数表与类型 Ref、失败保存重试、墓碑外部冲突。
+- 当前自动化：`python -m pytest tests -q --tb=short -p no:warnings` 为 447 passed，
+  32.628 秒；8 文件 DSL/compiler 快速集 200 passed / 8.577 秒，13 文件
+  `test_editor_*` 集 61 passed / 12.569 秒，均低于预算。
+- 真实 Windows 门禁全部再次 PASS：layout 1.746 秒；dragflow 7.724 秒；真实预览
+  25.450 秒；Project/Stage/Spell 完整门禁 42.164 秒。dragflow 不再把直接构造 Qt
+  `QDropEvent` 当成人类拖拽证据：它在 1480×920 与 960×640 下使用 Win32 物理鼠标
+  输入，从节点库按住并跨越系统拖拽阈值，依次穿过之前/子项/包裹/之后四个可见区再
+  释放，验证一次 Drop、一次 Undo、新节点选择，并恢复原光标位置。
+- 相对 `d758990^`，本次重构的 `src + tests + tools` 为新增 5653 行、删除 577 行、
+  净增 5076 行；其中产品 `src` 新增 3738 行、删除 362 行、净增 3376 行。已删除的
+  旧交互仍是弹出式节点菜单、隐形四区判定、QTreeWidget 程序树和重复 palette 参数表；
+  新计划不设物理总行硬上限。
+- Usability 仍为 `not run`：上述证据不替代维护者完成计划指定的完整真人工作流。

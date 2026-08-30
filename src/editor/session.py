@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import tempfile
 import hashlib
+import copy
+import importlib
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,7 @@ from src.authoring.python_source import (
     resolve_external_conflict,
     save_python_source,
 )
+from src.authoring.templates import definition_from_callable, is_template
 from src.core.project_context import ProjectContext
 from src.qt_compat.QtCore import QFileSystemWatcher, QObject, Signal
 from src.qt_compat.QtGui import QUndoStack
@@ -118,6 +121,7 @@ class EditorSession(QObject):
         self.file_watcher.fileChanged.connect(self._on_file_changed)
         self._saved_semantics: dict[str, dict[str, Any]] = {}
         self._pending_external: dict[Path, SourceDocument] = {}
+        self._pending_tombstone_external: set[Path] = set()
         self._external_keep: set[Path] = set()
         self._saving = False
         self.undo_stack.cleanChanged.connect(self._emit_dirty)
@@ -175,7 +179,13 @@ class EditorSession(QObject):
     def has_conflict(self) -> bool:
         return bool(
             self.source_project
-            and any(document.conflict for document in self.source_project.files.values())
+            and any(
+                document.conflict
+                for document in (
+                    *self.source_project.files.values(),
+                    *self.source_project.deleted_files.values(),
+                )
+            )
         )
 
     @property
@@ -210,15 +220,29 @@ class EditorSession(QObject):
                     resolved=True,
                     definition_path=definition.source_path,
                     definition_span=definition.span,
+                    signature=definition.signature,
                 )
             for local, module, symbol in document.active_external_bindings:
-                identity = f"{module}.{symbol}"
-                targets[identity] = TemplateTarget(
-                    identity=identity,
-                    symbol=symbol,
+                try:
+                    value = importlib.import_module(module)
+                    for part in symbol.split("."):
+                        value = getattr(value, part)
+                    if not is_template(value):
+                        continue
+                    definition = definition_from_callable(value)
+                except Exception:
+                    # Missing packages remain preserved on existing calls, but
+                    # are not offered as constructible palette prototypes.
+                    continue
+                targets[definition.identity] = TemplateTarget(
+                    identity=definition.identity,
+                    symbol=definition.symbol,
                     display_name=local,
                     module=module,
                     resolved=True,
+                    definition_path=definition.source_path or None,
+                    definition_span=definition.span,
+                    signature=definition.signature,
                 )
         return tuple(targets[key] for key in sorted(targets))
 
@@ -241,6 +265,7 @@ class EditorSession(QObject):
         self.source_project = source_project
         self.undo_stack.clear()
         self._pending_external.clear()
+        self._pending_tombstone_external.clear()
         self._external_keep.clear()
         self._remember_saved_semantics()
         units = sorted(
@@ -270,6 +295,7 @@ class EditorSession(QObject):
         self.undo_stack.clear()
         self._saved_semantics.clear()
         self._pending_external.clear()
+        self._pending_tombstone_external.clear()
         self._external_keep.clear()
         self.set_build_state("idle")
         self.set_preview_state("stopped")
@@ -491,7 +517,10 @@ class EditorSession(QObject):
             return ()
         if self.has_conflict and any(
             document.conflict and not document.overwrite_confirmed
-            for document in self.source_project.files.values()
+            for document in (
+                *self.source_project.files.values(),
+                *self.source_project.deleted_files.values(),
+            )
         ):
             raise SourceConflictError()
         saved: list[Path] = []
@@ -508,6 +537,8 @@ class EditorSession(QObject):
             path: (path.read_bytes() if path.exists() else None)
             for path in touched.values()
         }
+        document_snapshot = copy.deepcopy(self.source_project.files)
+        tombstone_snapshot = copy.deepcopy(self.source_project.deleted_files)
         self._saving = True
         watched = self.file_watcher.files()
         if watched:
@@ -529,6 +560,7 @@ class EditorSession(QObject):
                     document.path.unlink()
                 saved.append(relative)
             self.source_project.deleted_files.clear()
+            self._pending_tombstone_external.clear()
             self.source_project.refresh_program()
             self._external_keep.clear()
             self._remember_saved_semantics()
@@ -536,6 +568,9 @@ class EditorSession(QObject):
         except Exception:
             for path, payload in disk_snapshot.items():
                 _restore_disk_file(path, payload)
+            self.source_project.files = document_snapshot
+            self.source_project.deleted_files = tombstone_snapshot
+            self.source_project.refresh_program()
             raise
         finally:
             self._saving = False
@@ -598,19 +633,33 @@ class EditorSession(QObject):
         if self.source_project is None or self._saving:
             return ExternalChange.UNCHANGED
         changed: dict[Path, SourceDocument] = {}
-        for relative, document in self.source_project.files.items():
+        documents = [
+            (False, relative, document)
+            for relative, document in self.source_project.files.items()
+        ]
+        documents.extend(
+            (True, relative, document)
+            for relative, document in self.source_project.deleted_files.items()
+        )
+        for tombstoned, relative, document in documents:
             state, candidate = check_external_change(document)
             if state != ExternalChange.UNCHANGED:
                 if state == ExternalChange.CONFLICT:
                     candidate = resolve_external_conflict(document, "reload")
                 changed[relative] = candidate
+                if tombstoned:
+                    self._pending_tombstone_external.add(relative)
         if not changed:
             return ExternalChange.UNCHANGED
 
         if self.dirty or self.undo_stack.count() > 0:
             self._pending_external.update(changed)
             for relative in changed:
-                document = self.source_project.files[relative]
+                document = (
+                    self.source_project.deleted_files[relative]
+                    if relative in self._pending_tombstone_external
+                    else self.source_project.files[relative]
+                )
                 document.conflict = True
                 document.overwrite_confirmed = False
             self.external_conflict.emit(tuple(sorted(changed, key=lambda path: path.as_posix())))
@@ -628,19 +677,27 @@ class EditorSession(QObject):
         pending = tuple(sorted(self._pending_external, key=lambda path: path.as_posix()))
         if decision == "reload":
             for relative in pending:
+                if relative in self._pending_tombstone_external:
+                    self.source_project.deleted_files.pop(relative, None)
                 self.source_project.files[relative] = self._pending_external[relative]
             self._pending_external.clear()
+            self._pending_tombstone_external.clear()
             self._external_keep.clear()
             self._reload_program_from_documents(clear_undo=True)
             return ExternalChange.RELOADED
         if decision == "keep":
             for relative in pending:
-                document = self.source_project.files[relative]
+                document = (
+                    self.source_project.deleted_files[relative]
+                    if relative in self._pending_tombstone_external
+                    else self.source_project.files[relative]
+                )
                 document.conflict = True
                 resolve_external_conflict(document, "keep")
                 document.dirty = True
                 self._external_keep.add(relative)
             self._pending_external.clear()
+            self._pending_tombstone_external.clear()
             self.source_changed.emit()
             self._emit_dirty()
             return ExternalChange.CONFLICT
@@ -791,7 +848,10 @@ class EditorSession(QObject):
             return
         paths = [
             str(document.path)
-            for document in self.source_project.files.values()
+            for document in (
+                *self.source_project.files.values(),
+                *self.source_project.deleted_files.values(),
+            )
             if document.path.exists()
         ]
         if paths:
