@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import importlib.machinery
 import importlib.util
 import inspect
 import io
 import os
+import sys
 import tempfile
 import tokenize
 import uuid
@@ -250,6 +252,65 @@ def load_source(path: str | Path, *, module_name: str | None = None) -> SourceDo
     """Short public alias used by editor/session callers."""
 
     return load_python_source(path, module_name=module_name)
+
+
+def find_python_module_source(module_name: str) -> Path | None:
+    """Resolve a module's ``.py`` origin without importing that module."""
+
+    search_path: Sequence[str] | None = sys.path
+    full_name = ""
+    spec = None
+    for part in module_name.split("."):
+        full_name = f"{full_name}.{part}" if full_name else part
+        spec = importlib.machinery.PathFinder.find_spec(full_name, search_path)
+        if spec is None:
+            return None
+        search_path = spec.submodule_search_locations
+    if spec is None or not spec.origin or spec.origin in {"built-in", "frozen"}:
+        return None
+    path = Path(spec.origin)
+    return path if path.is_file() and path.suffix.lower() == ".py" else None
+
+
+def load_template_source_definitions(
+    path: str | Path,
+    *,
+    module_name: str,
+) -> tuple[TemplateSourceDefinition, ...]:
+    """Read direct ``@template`` signatures without executing module code."""
+
+    source_path = Path(path)
+    try:
+        text = source_path.read_text(encoding="utf-8")
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        parser = _SourceParser(source_path, text, module_name)
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return ()
+    definitions: list[TemplateSourceDefinition] = []
+    for statement in parser.tree.body:
+        try:
+            if isinstance(statement, ast.Import):
+                parser._record_import(statement)
+            elif isinstance(statement, ast.ImportFrom):
+                parser._record_from_import(statement)
+            elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if isinstance(statement, ast.FunctionDef) and parser._is_template_definition(
+                    statement
+                ):
+                    definitions.append(parser._template_definition(statement))
+                parser._unbind_name(statement.name)
+            elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                targets = (
+                    statement.targets
+                    if isinstance(statement, ast.Assign)
+                    else [statement.target]
+                )
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        parser._unbind_name(target.id)
+        except (UnsupportedSourceError, ProgramError, ValueError, TypeError):
+            continue
+    return tuple(definitions)
 
 
 def load_authoring_project(root: str | Path) -> AuthoringSourceProject:
@@ -1422,10 +1483,12 @@ __all__ = [
     "SourceSaveError",
     "UnsupportedSourceError",
     "check_external_change",
+    "find_python_module_source",
     "load_authoring_project",
     "load_project",
     "load_python_source",
     "load_source",
+    "load_template_source_definitions",
     "render_python_source",
     "resolve_external_conflict",
     "save_python_source",

@@ -6,7 +6,6 @@ import os
 import tempfile
 import hashlib
 import copy
-import importlib
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -30,12 +29,13 @@ from src.authoring.python_source import (
     SourceMode,
     SourceSaveError,
     check_external_change,
+    find_python_module_source,
     load_authoring_project,
+    load_template_source_definitions,
     render_python_source,
     resolve_external_conflict,
     save_python_source,
 )
-from src.authoring.templates import definition_from_callable, is_template
 from src.core.project_context import ProjectContext
 from src.qt_compat.QtCore import QFileSystemWatcher, QObject, Signal
 from src.qt_compat.QtGui import QUndoStack
@@ -210,6 +210,7 @@ class EditorSession(QObject):
         if self.source_project is None:
             return ()
         targets: dict[str, TemplateTarget] = {}
+        external_definitions: dict[str, tuple] = {}
         for document in self.source_project.files.values():
             for definition in document.templates:
                 targets[definition.identity] = TemplateTarget(
@@ -223,16 +224,24 @@ class EditorSession(QObject):
                     signature=definition.signature,
                 )
             for local, module, symbol in document.active_external_bindings:
-                try:
-                    value = importlib.import_module(module)
-                    for part in symbol.split("."):
-                        value = getattr(value, part)
-                    if not is_template(value):
-                        continue
-                    definition = definition_from_callable(value)
-                except Exception:
-                    # Missing packages remain preserved on existing calls, but
-                    # are not offered as constructible palette prototypes.
+                if module not in external_definitions:
+                    source_path = find_python_module_source(module)
+                    external_definitions[module] = (
+                        load_template_source_definitions(
+                            source_path, module_name=module
+                        )
+                        if source_path is not None
+                        else ()
+                    )
+                definition = next(
+                    (
+                        item
+                        for item in external_definitions[module]
+                        if item.symbol == symbol
+                    ),
+                    None,
+                )
+                if definition is None:
                     continue
                 targets[definition.identity] = TemplateTarget(
                     identity=definition.identity,

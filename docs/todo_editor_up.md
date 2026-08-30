@@ -287,21 +287,24 @@ python tools/verify_native_code_editor_dragflow.py --json
   语义字段。列表/字典编辑改用 headless `parse_author_value`，可安全编辑嵌套
   `Ref`/`Expr`，不执行任意 Python。拖放新建、已有节点移动和资源动作成功后均选择
   结果节点并同步 Inspector。
+- 显式外部模板的 palette 签名改为用 `PathFinder` 定位 `.py` 后静态 AST 读取；节点库
+  刷新不再 import 外部模块。回归 fixture 在模块顶层主动抛错，仍可发现装饰模板，证明
+  模块 import-time 代码未执行；真实模板实现继续只在可信构建展开阶段运行。
 - 多文件保存失败现在同时回滚磁盘字节和 `SourceDocument` 元状态；失败后再次保存能把
   全部内存修改完整写出。删除墓碑也进入外部修改 keep/reload 状态机，避免外部修改被
   静默删除。
 - 新增直接回归覆盖：缺引用创建入口、显式模板过滤/参数保存、节点复制唯一 Undo、
   参数表与类型 Ref、失败保存重试、墓碑外部冲突。
 - 当前自动化：`python -m pytest tests -q --tb=short -p no:warnings` 为 447 passed，
-  32.628 秒；8 文件 DSL/compiler 快速集 200 passed / 8.577 秒，13 文件
+  最新复验 32.850 秒；8 文件 DSL/compiler 快速集 200 passed / 8.577 秒，13 文件
   `test_editor_*` 集 61 passed / 12.569 秒，均低于预算。
 - 真实 Windows 门禁全部再次 PASS：layout 1.746 秒；dragflow 7.724 秒；真实预览
   25.450 秒；Project/Stage/Spell 完整门禁 42.164 秒。dragflow 不再把直接构造 Qt
   `QDropEvent` 当成人类拖拽证据：它在 1480×920 与 960×640 下使用 Win32 物理鼠标
   输入，从节点库按住并跨越系统拖拽阈值，依次穿过之前/子项/包裹/之后四个可见区再
   释放，验证一次 Drop、一次 Undo、新节点选择，并恢复原光标位置。
-- 相对 `d758990^`，本次重构的 `src + tests + tools` 为新增 5653 行、删除 577 行、
-  净增 5076 行；其中产品 `src` 新增 3738 行、删除 362 行、净增 3376 行。已删除的
+- 相对 `d758990^`，本次重构的 `src + tests + tools` 为新增 5732 行、删除 577 行、
+  净增 5155 行；其中产品 `src` 新增 3814 行、删除 362 行、净增 3452 行。已删除的
   旧交互仍是弹出式节点菜单、隐形四区判定、QTreeWidget 程序树和重复 palette 参数表；
   新计划不设物理总行硬上限。
 - Usability 仍为 `not run`：上述证据不替代维护者完成计划指定的完整真人工作流。

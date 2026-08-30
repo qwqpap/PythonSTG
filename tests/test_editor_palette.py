@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from src.authoring import dsl
@@ -222,6 +223,7 @@ def test_explicitly_imported_decorated_template_appears_in_palette(
     module = tmp_path / "palette_template_pack.py"
     module.write_text(
         "from src.authoring.dsl import Wait, template\n\n"
+        "raise RuntimeError('palette discovery must not execute this module')\n\n"
         "@template\n"
         "def burst(frames: int = 2, /):\n"
         "    return [Wait(frames)]\n",
@@ -237,6 +239,7 @@ def test_explicitly_imported_decorated_template_appears_in_palette(
     session = EditorSession(project_context=ProjectContext(tmp_path))
     session.open_project(root)
     targets = session.palette_templates
+    assert "palette_template_pack" not in sys.modules
     target = next(target for target in targets if target.symbol == "burst")
     prototype = node_from_palette(
         "TemplateCall",
