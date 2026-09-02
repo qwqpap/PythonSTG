@@ -499,6 +499,79 @@ def _runtime_value(arguments: dict[str, Any], name: str, value: Any) -> None:
         arguments[name] = value
 
 
+_CurveParams = tuple[float | Expr, float | Expr, float | Expr, float | Expr] | Expr
+
+
+def _fire_runtime_arguments(
+    *,
+    bullet_type: str,
+    color: str,
+    accel: float | Expr,
+    angle_accel: float | Expr,
+    tag: int | Expr,
+    friction: float | Expr,
+    time_scale: float | Expr,
+    bounce_x: bool | Expr,
+    bounce_y: bool | Expr,
+    spin: float | Expr,
+    render_angle: float | Expr | None,
+    render_scale: float | Expr,
+    max_lifetime: float | Expr,
+    collision_radius: float | Expr,
+    curve_type: int | Expr,
+    curve_params: _CurveParams,
+    play_sound: bool,
+    play_sound_default: bool,
+) -> dict[str, Any]:
+    """Return the explicit straight-projectile options shared by Fire nodes.
+
+    These names deliberately mirror :class:`StageContext` instead of exposing
+    an untyped ``**kwargs`` escape hatch.  Omitted defaults stay omitted so a
+    generated call still uses the concrete Runtime's normal defaults.
+    """
+
+    return _without_defaults(
+        {
+            "bullet_type": bullet_type,
+            "color": color,
+            "accel": accel,
+            "angle_accel": angle_accel,
+            "tag": tag,
+            "friction": friction,
+            "time_scale": time_scale,
+            "bounce_x": bounce_x,
+            "bounce_y": bounce_y,
+            "spin": spin,
+            "render_angle": render_angle,
+            "render_scale": render_scale,
+            "max_lifetime": max_lifetime,
+            "collision_radius": collision_radius,
+            "curve_type": curve_type,
+            "curve_params": curve_params,
+            "play_sound": play_sound,
+        },
+        {
+            "bullet_type": "ball_m",
+            "color": "red",
+            "accel": 0.0,
+            "angle_accel": 0.0,
+            "tag": 0,
+            "friction": 0.0,
+            "time_scale": 1.0,
+            "bounce_x": False,
+            "bounce_y": False,
+            "spin": 0.0,
+            "render_angle": None,
+            "render_scale": 1.0,
+            "max_lifetime": 0.0,
+            "collision_radius": 0.0,
+            "curve_type": 0,
+            "curve_params": (0.0, 0.0, 0.0, 0.0),
+            "play_sound": play_sound_default,
+        },
+    )
+
+
 def Fire(
     x: float | Expr | None | _RuntimeDefault = RUNTIME_DEFAULT,
     y: float | Expr | None | _RuntimeDefault = RUNTIME_DEFAULT,
@@ -510,34 +583,47 @@ def Fire(
     angle_accel: float | Expr = 0.0,
     play_sound: bool = False,
     *,
+    tag: int | Expr = 0,
+    friction: float | Expr = 0.0,
+    time_scale: float | Expr = 1.0,
+    bounce_x: bool | Expr = False,
+    bounce_y: bool | Expr = False,
+    spin: float | Expr = 0.0,
+    render_angle: float | Expr | None = None,
+    render_scale: float | Expr = 1.0,
+    max_lifetime: float | Expr = 0.0,
+    collision_radius: float | Expr = 0.0,
+    curve_type: int | Expr = 0,
+    curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
     uid: str | None = None,
-    **runtime_options: AuthorValue,
 ) -> Node:
     arguments: dict[str, Any] = {}
     _runtime_value(arguments, "x", x)
     _runtime_value(arguments, "y", y)
     _runtime_value(arguments, "angle", angle)
+    arguments.update(_without_defaults({"speed": speed}, {"speed": 2.0}))
     arguments.update(
-        _without_defaults(
-            {
-                "speed": speed,
-                "bullet_type": bullet_type,
-                "color": color,
-                "accel": accel,
-                "angle_accel": angle_accel,
-                "play_sound": play_sound,
-            },
-            {
-                "speed": 2.0,
-                "bullet_type": "ball_m",
-                "color": "red",
-                "accel": 0.0,
-                "angle_accel": 0.0,
-                "play_sound": False,
-            },
+        _fire_runtime_arguments(
+            bullet_type=bullet_type,
+            color=color,
+            accel=accel,
+            angle_accel=angle_accel,
+            tag=tag,
+            friction=friction,
+            time_scale=time_scale,
+            bounce_x=bounce_x,
+            bounce_y=bounce_y,
+            spin=spin,
+            render_angle=render_angle,
+            render_scale=render_scale,
+            max_lifetime=max_lifetime,
+            collision_radius=collision_radius,
+            curve_type=curve_type,
+            curve_params=curve_params,
+            play_sound=play_sound,
+            play_sound_default=False,
         )
     )
-    arguments.update(runtime_options)
     return _node("Fire", arguments=arguments, uid=uid)
 
 
@@ -549,20 +635,51 @@ def FireCircle(
     start_angle: float | Expr = 0.0,
     play_sound: bool = True,
     *,
+    bullet_type: str = "ball_m",
+    color: str = "red",
+    accel: float | Expr = 0.0,
+    angle_accel: float | Expr = 0.0,
+    tag: int | Expr = 0,
+    friction: float | Expr = 0.0,
+    time_scale: float | Expr = 1.0,
+    bounce_x: bool | Expr = False,
+    bounce_y: bool | Expr = False,
+    spin: float | Expr = 0.0,
+    render_angle: float | Expr | None = None,
+    render_scale: float | Expr = 1.0,
+    max_lifetime: float | Expr = 0.0,
+    collision_radius: float | Expr = 0.0,
+    curve_type: int | Expr = 0,
+    curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
     uid: str | None = None,
-    **runtime_options: AuthorValue,
 ) -> Node:
     arguments: dict[str, Any] = {}
     _runtime_value(arguments, "count", count)
     _runtime_value(arguments, "x", x)
     _runtime_value(arguments, "y", y)
+    arguments.update(_without_defaults({"speed": speed, "start_angle": start_angle}, {"speed": 2.0, "start_angle": 0.0}))
     arguments.update(
-        _without_defaults(
-            {"speed": speed, "start_angle": start_angle, "play_sound": play_sound},
-            {"speed": 2.0, "start_angle": 0.0, "play_sound": True},
+        _fire_runtime_arguments(
+            bullet_type=bullet_type,
+            color=color,
+            accel=accel,
+            angle_accel=angle_accel,
+            tag=tag,
+            friction=friction,
+            time_scale=time_scale,
+            bounce_x=bounce_x,
+            bounce_y=bounce_y,
+            spin=spin,
+            render_angle=render_angle,
+            render_scale=render_scale,
+            max_lifetime=max_lifetime,
+            collision_radius=collision_radius,
+            curve_type=curve_type,
+            curve_params=curve_params,
+            play_sound=play_sound,
+            play_sound_default=True,
         )
     )
-    arguments.update(runtime_options)
     return _node("FireCircle", arguments=arguments, uid=uid)
 
 
@@ -575,8 +692,23 @@ def FireArc(
     arc_angle: float | Expr = 60.0,
     play_sound: bool = True,
     *,
+    bullet_type: str = "ball_m",
+    color: str = "red",
+    accel: float | Expr = 0.0,
+    angle_accel: float | Expr = 0.0,
+    tag: int | Expr = 0,
+    friction: float | Expr = 0.0,
+    time_scale: float | Expr = 1.0,
+    bounce_x: bool | Expr = False,
+    bounce_y: bool | Expr = False,
+    spin: float | Expr = 0.0,
+    render_angle: float | Expr | None = None,
+    render_scale: float | Expr = 1.0,
+    max_lifetime: float | Expr = 0.0,
+    collision_radius: float | Expr = 0.0,
+    curve_type: int | Expr = 0,
+    curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
     uid: str | None = None,
-    **runtime_options: AuthorValue,
 ) -> Node:
     arguments: dict[str, Any] = {}
     _runtime_value(arguments, "x", x)
@@ -588,18 +720,32 @@ def FireArc(
                 "speed": speed,
                 "center_angle": center_angle,
                 "arc_angle": arc_angle,
-                "play_sound": play_sound,
             },
-            {
-                "count": 5,
-                "speed": 2.0,
-                "center_angle": -90.0,
-                "arc_angle": 60.0,
-                "play_sound": True,
-            },
+            {"count": 5, "speed": 2.0, "center_angle": -90.0, "arc_angle": 60.0},
         )
     )
-    arguments.update(runtime_options)
+    arguments.update(
+        _fire_runtime_arguments(
+            bullet_type=bullet_type,
+            color=color,
+            accel=accel,
+            angle_accel=angle_accel,
+            tag=tag,
+            friction=friction,
+            time_scale=time_scale,
+            bounce_x=bounce_x,
+            bounce_y=bounce_y,
+            spin=spin,
+            render_angle=render_angle,
+            render_scale=render_scale,
+            max_lifetime=max_lifetime,
+            collision_radius=collision_radius,
+            curve_type=curve_type,
+            curve_params=curve_params,
+            play_sound=play_sound,
+            play_sound_default=True,
+        )
+    )
     return _node("FireArc", arguments=arguments, uid=uid)
 
 
@@ -610,19 +756,55 @@ def FireAtPlayer(
     offset_angle: float | Expr = 0.0,
     play_sound: bool = True,
     *,
+    bullet_type: str = "ball_m",
+    color: str = "red",
+    accel: float | Expr = 0.0,
+    angle_accel: float | Expr = 0.0,
+    tag: int | Expr = 0,
+    friction: float | Expr = 0.0,
+    time_scale: float | Expr = 1.0,
+    bounce_x: bool | Expr = False,
+    bounce_y: bool | Expr = False,
+    spin: float | Expr = 0.0,
+    render_angle: float | Expr | None = None,
+    render_scale: float | Expr = 1.0,
+    max_lifetime: float | Expr = 0.0,
+    collision_radius: float | Expr = 0.0,
+    curve_type: int | Expr = 0,
+    curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
     uid: str | None = None,
-    **runtime_options: AuthorValue,
 ) -> Node:
     arguments: dict[str, Any] = {}
     _runtime_value(arguments, "x", x)
     _runtime_value(arguments, "y", y)
     arguments.update(
         _without_defaults(
-            {"speed": speed, "offset_angle": offset_angle, "play_sound": play_sound},
-            {"speed": 2.0, "offset_angle": 0.0, "play_sound": True},
+            {"speed": speed, "offset_angle": offset_angle},
+            {"speed": 2.0, "offset_angle": 0.0},
         )
     )
-    arguments.update(runtime_options)
+    arguments.update(
+        _fire_runtime_arguments(
+            bullet_type=bullet_type,
+            color=color,
+            accel=accel,
+            angle_accel=angle_accel,
+            tag=tag,
+            friction=friction,
+            time_scale=time_scale,
+            bounce_x=bounce_x,
+            bounce_y=bounce_y,
+            spin=spin,
+            render_angle=render_angle,
+            render_scale=render_scale,
+            max_lifetime=max_lifetime,
+            collision_radius=collision_radius,
+            curve_type=curve_type,
+            curve_params=curve_params,
+            play_sound=play_sound,
+            play_sound_default=True,
+        )
+    )
     return _node("FireAtPlayer", arguments=arguments, uid=uid)
 
 
@@ -640,7 +822,6 @@ def FirePolar(
     play_sound: bool = False,
     *,
     uid: str | None = None,
-    **runtime_options: AuthorValue,
 ) -> Node:
     arguments: dict[str, Any] = {"orbit_radius": orbit_radius, "theta": theta}
     _runtime_value(arguments, "center", center)
@@ -668,7 +849,6 @@ def FirePolar(
             },
         )
     )
-    arguments.update(runtime_options)
     return _node("FirePolar", arguments=arguments, uid=uid)
 
 
@@ -686,7 +866,6 @@ def FireOrbit(
     play_sound: bool = False,
     *,
     uid: str | None = None,
-    **runtime_options: AuthorValue,
 ) -> Node:
     orbit_uid = _uid("FireOrbit", uid)
     node = FirePolar(
@@ -702,7 +881,6 @@ def FireOrbit(
         collision_radius,
         play_sound,
         uid=orbit_uid,
-        **runtime_options,
     )
     node.kind = "FireOrbit"
     return node

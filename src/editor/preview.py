@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import locale
+import re
 import sys
 import uuid
 from ctypes import wintypes
@@ -346,7 +347,10 @@ class PreviewOwner(QObject):
     def run(self, target: PreviewTarget) -> bool:
         if not self.session.is_open or self.session.project_context is None:
             self.session.append_run_log("[Preview] 请先打开声明式 Python 工程")
+            self.session.set_preview_error("请先打开声明式 Python 工程")
             return False
+        self.session.set_preview_target(target.kind, target.unit_id)
+        self.session.set_preview_error("")
         old_spec = self._launch_spec if self.is_running else None
         self._building = True
         self.session.set_build_state("building")
@@ -358,6 +362,15 @@ class PreviewOwner(QObject):
                 if diagnostic.severity == "error"
             ]
             if errors:
+                diagnostic = errors[0]
+                self.session.set_preview_error(diagnostic.message, diagnostic.uid)
+                if diagnostic.uid:
+                    try:
+                        self.session.select_node(diagnostic.uid)
+                    except Exception as locate_error:
+                        self.session.append_run_log(
+                            f"[Preview] 无法定位错误节点 {diagnostic.uid}: {locate_error}"
+                        )
                 raise RuntimeError(errors[0].message)
             program = self.session.program
             stage_id = None
@@ -374,6 +387,8 @@ class PreviewOwner(QObject):
             prepared = builder.prepare(program)
         except Exception as exc:
             self.session.set_build_state("error")
+            if not self.session.preview_error:
+                self.session.set_preview_error(str(exc))
             self.session.append_run_log(
                 f"[Preview:BUILD_ERROR] {type(exc).__name__}: {exc}"
             )
@@ -386,6 +401,7 @@ class PreviewOwner(QObject):
             published = builder.publish(prepared)
         except Exception as exc:
             self.session.set_build_state("error")
+            self.session.set_preview_error(str(exc))
             self.session.append_run_log(
                 f"[Preview:PUBLISH_ERROR] {type(exc).__name__}: {exc}"
             )
@@ -414,6 +430,7 @@ class PreviewOwner(QObject):
         main_script = spec.project_root / "main.py"
         if not main_script.is_file():
             self.session.append_run_log(f"[Preview] 缺少真实游戏入口：{main_script}")
+            self.session.set_preview_error(f"缺少真实游戏入口：{main_script}")
             self.session.set_preview_state("error")
             return False
         process = QProcess(self)
@@ -452,6 +469,7 @@ class PreviewOwner(QObject):
         process.start()
         if not process.waitForStarted(self.START_TIMEOUT_MS):
             self.session.append_run_log(f"[Preview:START_ERROR] {process.errorString()}")
+            self.session.set_preview_error(process.errorString())
             self.process = None
             self.session.set_preview_state("error")
             return False
@@ -568,6 +586,11 @@ class PreviewOwner(QObject):
         payload = message["payload"]
         if event == "state":
             state = payload.get("state")
+            if state == "starting":
+                # restart/seek keep the process identity but begin a new
+                # deterministic execution; old observations must not be
+                # overlaid onto the new branch or density samples.
+                self.session.reset_trace(message["run_id"])
             if state in {"starting", "running", "paused", "seeking"} and not self._stale:
                 self.session.set_preview_state(state)
         elif event == "trace":
@@ -581,9 +604,19 @@ class PreviewOwner(QObject):
         elif event == "frame":
             self.session.preview_frame = payload["frame"]
         elif event == "error":
+            message = str(payload.get("message", ""))
+            uid = payload.get("uid") or _uid_from_runtime_error(message)
             self.session.append_run_log(
-                f"[Preview:{payload.get('code', 'ERROR')}] {payload.get('message', '')}"
+                f"[Preview:{payload.get('code', 'ERROR')}] {message}"
             )
+            self.session.set_preview_error(message, uid)
+            if uid:
+                try:
+                    self.session.select_node(str(uid))
+                except Exception as locate_error:
+                    self.session.append_run_log(
+                        f"[Preview] 无法定位错误节点 {uid}: {locate_error}"
+                    )
             self.session.set_preview_state("error")
         elif event == "stopped" and not self._stopping:
             self.session.set_preview_state("stopped")
@@ -594,13 +627,16 @@ class PreviewOwner(QObject):
 
     def _process_error(self, _error) -> None:
         if not self._stopping and self.process is not None:
-            self.session.append_run_log(f"[Preview:PROCESS] {self.process.errorString()}")
+            message = self.process.errorString()
+            self.session.append_run_log(f"[Preview:PROCESS] {message}")
+            self.session.set_preview_error(message)
 
     def _finished(self, exit_code: int, _exit_status) -> None:
         self._read_stdout()
         self._read_stderr()
         if not self._stopping and exit_code != 0:
             self.session.append_run_log(f"[Preview] 游戏进程退出码 {exit_code}")
+            self.session.set_preview_error(f"游戏进程退出码 {exit_code}")
             self.session.set_preview_state("error")
         elif not self._stopping:
             self.session.set_preview_state("stopped")
@@ -646,6 +682,11 @@ def _set_window_long(hwnd: int, index: int, value: int) -> None:
     user32 = _user32()
     function = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
     function(hwnd, index, value)
+
+
+def _uid_from_runtime_error(message: str) -> str | None:
+    match = re.search(r"authoring node ([A-Za-z0-9_.:-]+):", str(message))
+    return match.group(1) if match else None
 
 
 __all__ = ["PreviewHost", "PreviewOwner", "PreviewTarget"]

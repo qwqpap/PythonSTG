@@ -60,6 +60,11 @@ class SpawnRequest:
     sprite_idx: int = 0
     delay: int = 0
     acc: Tuple[float, float] = (0.0, 0.0)
+    # Straight-projectile acceleration state.  ``speed`` is the pool's
+    # normalized per-frame scalar; ``speed_accel`` changes that scalar per
+    # second.  Angular values are radians/second² and radians/second.
+    speed_accel: float = 0.0
+    motion_angular_accel: float = 0.0
     max_lifetime: float = 0.0
     radius: float = 0.0
     init: Optional[Callable] = None
@@ -139,6 +144,9 @@ class OptimizedBulletPool:
             ('angular_vel', 'f4'),      # render_angle 的角速度（弧度/秒）
             ('render_scale', 'f4'),     # per-bullet render size multiplier
             ('speed', 'f4'),            # 标量速度
+            ('speed_accel', 'f4'),      # 标量速度加速度（每秒，pool speed 单位）
+            ('motion_angular_vel', 'f4'),    # 运动角速度（弧度/秒）
+            ('motion_angular_accel', 'f4'), # 运动角加速度（弧度/秒²）
             ('alive', 'i4'),            # 存活标记
             ('sprite_idx', 'u2'),       # 精灵索引
             ('flags', 'u2'),            # 位标志 (bounce, emitter, render_angle_locked, ...)
@@ -179,6 +187,10 @@ class OptimizedBulletPool:
         self._termination_batch_queue: List[tuple[np.ndarray, Dict[str, Any], int]] = []
         self.last_alive = np.zeros(max_bullets, dtype='i4')
         self.batch_spawn_calls = 0
+        # Monotonic runtime counter used by the editor's fixed-rate aggregate
+        # Trace. It is one integer update per spawn/batch, never a callback or
+        # Python object per bullet.
+        self.spawned_total = 0
 
         # ===== 渲染优化相关 =====
         self._render_positions = np.zeros((max_bullets, 2), dtype='f4')
@@ -230,6 +242,8 @@ class OptimizedBulletPool:
         sprite_idx: int = -1,
         delay: int = 0,
         acc: Tuple[float, float] = None,
+        speed_accel: float = 0.0,
+        motion_angular_accel: float = 0.0,
         max_lifetime: float = 0.0,
         radius: float = 0.0,
         init: Callable = None,
@@ -271,6 +285,8 @@ class OptimizedBulletPool:
             self.spawn_queue.append(SpawnRequest(
                 x=x, y=y, angle=angle, speed=speed,
                 sprite_idx=sprite_idx, delay=delay, acc=acc,
+                speed_accel=speed_accel,
+                motion_angular_accel=motion_angular_accel,
                 max_lifetime=max_lifetime, radius=radius,
                 init=init, on_death=on_death,
                 friction=friction, tag=tag, time_scale=time_scale,
@@ -284,7 +300,8 @@ class OptimizedBulletPool:
             return -1
 
         idx = self.free_indices.pop()
-        self._write_bullet(idx, x, y, angle, speed, acc, sprite_idx, radius,
+        self._write_bullet(idx, x, y, angle, speed, acc, speed_accel,
+                           motion_angular_accel, sprite_idx, radius,
                            max_lifetime, friction, tag, time_scale, flags,
                            angular_vel, render_angle, render_scale,
                            curve_type, curve_param)
@@ -299,7 +316,8 @@ class OptimizedBulletPool:
 
         return idx
 
-    def _write_bullet(self, idx, x, y, angle, speed, acc, sprite_idx, radius,
+    def _write_bullet(self, idx, x, y, angle, speed, acc, speed_accel,
+                      motion_angular_accel, sprite_idx, radius,
                       max_lifetime, friction, tag, time_scale, flags,
                       angular_vel, render_angle, render_scale, curve_type, curve_param):
         """写入子弹数据到指定 slot"""
@@ -315,6 +333,9 @@ class OptimizedBulletPool:
         d['angular_vel'][idx] = angular_vel
         d['render_scale'][idx] = render_scale
         d['speed'][idx] = speed
+        d['speed_accel'][idx] = speed_accel
+        d['motion_angular_vel'][idx] = 0.0
+        d['motion_angular_accel'][idx] = motion_angular_accel
         d['sprite_idx'][idx] = sprite_idx
         d['radius'][idx] = radius
         d['lifetime'][idx] = 0.0
@@ -326,6 +347,7 @@ class OptimizedBulletPool:
         d['curve_type'][idx] = curve_type
         d['curve_param'][idx] = curve_param
         d['alive'][idx] = 1
+        self.spawned_total += 1
 
     def spawn_pattern(
         self,
@@ -382,6 +404,9 @@ class OptimizedBulletPool:
         d['angular_vel'][use_indices] = 0.0
         d['render_scale'][use_indices] = 1.0
         d['speed'][use_indices] = speed
+        d['speed_accel'][use_indices] = 0.0
+        d['motion_angular_vel'][use_indices] = 0.0
+        d['motion_angular_accel'][use_indices] = 0.0
         d['sprite_idx'][use_indices] = sprite_idx
         d['radius'][use_indices] = radius
         d['lifetime'][use_indices] = 0.0
@@ -393,6 +418,7 @@ class OptimizedBulletPool:
         d['curve_type'][use_indices] = CURVE_NONE
         d['curve_param'][use_indices] = (0.0, 0.0, 0.0, 0.0)
         d['alive'][use_indices] = 1
+        self.spawned_total += n
 
         if on_death:
             for idx in use_indices:
@@ -409,6 +435,8 @@ class OptimizedBulletPool:
         sprite_id: str = '',
         sprite_idx: int = -1,
         acc: Tuple[float, float] = (0.0, 0.0),
+        speed_accel: float = 0.0,
+        motion_angular_accel: float = 0.0,
         max_lifetime: float = 0.0,
         radius: float = 0.0,
         friction: float = 0.0,
@@ -485,6 +513,9 @@ class OptimizedBulletPool:
         d['angular_vel'][use_indices] = angular_vel
         d['render_scale'][use_indices] = render_scale
         d['speed'][use_indices] = batch_speeds
+        d['speed_accel'][use_indices] = speed_accel
+        d['motion_angular_vel'][use_indices] = 0.0
+        d['motion_angular_accel'][use_indices] = motion_angular_accel
         d['sprite_idx'][use_indices] = sprite_idx
         d['radius'][use_indices] = radius
         d['lifetime'][use_indices] = 0.0
@@ -497,6 +528,7 @@ class OptimizedBulletPool:
         d['curve_param'][use_indices] = curve_param
         d['alive'][use_indices] = 1
         self.batch_spawn_calls += 1
+        self.spawned_total += available
 
         # Formal pattern batches never install per-bullet callbacks. Clear any
         # stale sparse state defensively if a legacy path reused these slots.
@@ -835,6 +867,7 @@ class OptimizedBulletPool:
 
         idx = self.free_indices.pop()
         self._write_bullet(idx, req.x, req.y, req.angle, req.speed, req.acc,
+                           req.speed_accel, req.motion_angular_accel,
                            req.sprite_idx, req.radius, req.max_lifetime,
                            req.friction, req.tag, req.time_scale, req.flags,
                            req.angular_vel, req.render_angle, req.render_scale,
@@ -1241,6 +1274,17 @@ def _update_bullets_optimized(data, dt):
             if factor < 0.0:
                 factor = 0.0
             data[i]['speed'] *= factor
+
+        # ---- 作者可见的直线运动加速度 ----
+        # ``speed`` keeps the pool's historic normalized-per-frame scale;
+        # ``speed_accel`` is its per-second derivative.  The context converts
+        # author speed units before writing either field, so one scalar rule
+        # applies identically to single and vectorized batch spawns.
+        data[i]['speed'] += data[i]['speed_accel'] * local_dt
+        data[i]['motion_angular_vel'] += (
+            data[i]['motion_angular_accel'] * local_dt
+        )
+        data[i]['angle'] += data[i]['motion_angular_vel'] * local_dt
 
         # ---- 从 angle + speed 重建 vel（曲线/摩擦后） ----
         speed = data[i]['speed']

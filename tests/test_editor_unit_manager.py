@@ -119,7 +119,11 @@ def test_delete_registered_stage_updates_project_order(tmp_path):
     project = session.program.get_unit("demo")
     assert [ref.id for ref in project.metadata["stages"]] == ["stage", "stage_two"]
 
-    session.delete_unit("stage")
+    with pytest.raises(ProgramError, match="explicit replacement"):
+        session.delete_unit("stage")
+    assert session.program.get_unit("demo").metadata["start_stage"] == Ref("stage")
+
+    session.delete_unit("stage", replacement_start_stage="stage_two")
     project = session.program.get_unit("demo")
     assert [ref.id for ref in project.metadata["stages"]] == ["stage_two"]
     assert project.metadata["start_stage"] == Ref("stage_two")

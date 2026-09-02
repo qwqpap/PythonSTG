@@ -12,6 +12,7 @@ from src.authoring.program import (
     TemplateTarget,
     node_from_palette,
     reference_kinds_for_node,
+    unit_accepts_statements,
     validate_insert,
 )
 from src.qt_compat.QtCore import QMimeData, QRect, Qt, Signal
@@ -194,7 +195,6 @@ class NodePalette(QWidget):
         self._program: AuthoringProgram | None = None
         self._unit_id: str | None = None
         self._target_uid: str | None = None
-        self._placement = DropPlacement.AFTER
         self._recent: list[str] = []
         self._templates: tuple[TemplateTarget, ...] = ()
         self._context: tuple | None = None
@@ -205,15 +205,13 @@ class NodePalette(QWidget):
         program: AuthoringProgram | None,
         unit_id: str | None,
         target_uid: str | None,
-        placement: DropPlacement | str,
         templates: tuple[TemplateTarget, ...] = (),
     ) -> None:
-        context = (program, unit_id, target_uid, DropPlacement(placement), templates)
+        context = (program, unit_id, target_uid, templates)
         if context == self._context:
             return
         self._context = context
         self._program, self._unit_id, self._target_uid = program, unit_id, target_uid
-        self._placement = DropPlacement(placement)
         self._templates = templates
         self.refresh()
 
@@ -287,8 +285,8 @@ class NodePalette(QWidget):
             unit = self._program.get_unit(self._unit_id)
         except ProgramError as exc:
             return False, exc.message
-        if unit.kind == "Project":
-            return False, "Project 不包含执行节点"
+        if not unit_accepts_statements(unit.kind):
+            return False, f"{unit.kind} 不包含执行节点"
         references = self.reference_candidates(entry.kind)
         if entry.reference_kinds and not references:
             return False, f"请先新建 {'/'.join(entry.reference_kinds)}"
@@ -307,7 +305,7 @@ class NodePalette(QWidget):
             self._unit_id,
             node,
             self._target_uid,
-            self._placement,
+            DropPlacement.AFTER,
         )
         return check.allowed, check.reason
 

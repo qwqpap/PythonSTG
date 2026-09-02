@@ -1413,10 +1413,6 @@ def _pystg_fire_batch(owner, angles, *, x=None, y=None, speed=2.0,
     angles = list(angles)
     bullet_type = options.pop("bullet_type", "ball_m")
     color = options.pop("color", "red")
-    options.pop("accel", None)
-    options.pop("angle_accel", None)
-    if "curve_params" in options:
-        options["curve_param"] = options.pop("curve_params")
     if play_sound and hasattr(owner, "_play_danmaku_se"):
         owner._play_danmaku_se(count=len(angles), speed=speed, bullet_type=bullet_type)
     indices = context.create_bullets_batch(

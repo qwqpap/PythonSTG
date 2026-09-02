@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import random
 import shutil
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+
+import numpy as np
 
 from src.authoring.program import find_node
 from src.authoring.python_source import load_authoring_project
@@ -70,11 +73,13 @@ def test_complete_example_has_the_fixed_scope_and_static_dynamic_timeline():
     assert kinds.count("NonSpell") == 1
     assert kinds.count("Spell") == 1
     assert kinds.count("Task") == 1
+    assert kinds.count("Function") == 1
 
     task = source.program.get_unit("support_burst")
     assert [parameter.name for parameter in task.parameters] == ["bursts", "interval"]
     ring = find_node(source.program, "ring_template_call")[1]
     assert ring.kind == "TemplateCall"
+    assert find_node(source.program, "opening_mark_wave")[1].kind == "Call"
     assert "ring_burst(" in (EXAMPLE / "enemies" / "ring_fairy.py").read_text(
         encoding="utf-8"
     )
@@ -215,6 +220,55 @@ def test_existing_stage_manager_runs_the_complete_example_to_dialogue_end(
     assert pool.emitter_callbacks == {}
 
 
+def test_fixed_seed_repeats_the_complete_example_stage_manager_run(tmp_path, capsys):
+    with _built_example(tmp_path) as (_source, _target, entry):
+        registry = load_content_entry(entry)
+
+        def run_once() -> tuple[list[dict], OptimizedBulletPool]:
+            random.seed(1337)
+            np.random.seed(1337)
+            pool = OptimizedBulletPool(max_bullets=4096)
+            player = _Player()
+            manager = StageManager()
+            manager.bind_engine(pool, player, audio_manager=_Audio())
+            manager.load_stage(registry.get_stage())
+            trace: list[dict] = []
+            for _frame in range(600):
+                manager.update(1 / 60, pool, player)
+                events, _dropped = manager.drain_authoring_trace()
+                trace.extend(events)
+            return trace, pool
+
+        first_trace, first_pool = run_once()
+        second_trace, second_pool = run_once()
+
+    capsys.readouterr()
+    first_stream = [
+        (item["uid"], item["phase"], item["frame"]) for item in first_trace
+    ]
+    second_stream = [
+        (item["uid"], item["phase"], item["frame"]) for item in second_trace
+    ]
+    assert first_stream, "the demo stage must emit authoring Trace within 600 frames"
+    assert first_stream == second_stream
+
+    def snapshot(pool: OptimizedBulletPool) -> tuple:
+        alive = pool.data["alive"] > 0
+        return (
+            int(alive.sum()),
+            pool.spawned_total,
+            pool.batch_spawn_calls,
+            pool.data["pos"][alive].tobytes(),
+            pool.data["vel"][alive].tobytes(),
+        )
+
+    first_snapshot = snapshot(first_pool)
+    assert first_snapshot[0] > 0, "the demo stage must have live bullets at frame 600"
+    assert first_snapshot == snapshot(second_pool)
+    assert first_pool.emitter_callbacks == {}
+    assert second_pool.emitter_callbacks == {}
+
+
 def test_project_stage_and_spell_preview_targets_build_from_the_complete_example(
     tmp_path, qapp_session, monkeypatch
 ):
@@ -248,3 +302,20 @@ def test_handwritten_default_entry_still_registers_stage1_through_stage3():
     entry = importlib.import_module("game_content.entry")
     registry = load_content_entry(entry)
     assert tuple(registry.stage_by_id) == ("stage1", "stage2", "stage3")
+
+
+def test_handwritten_stage1_through_stage3_tick_in_the_real_stage_manager(capsys):
+    entry = importlib.import_module("game_content.entry")
+    registry = load_content_entry(entry)
+    for stage_id in ("stage1", "stage2", "stage3"):
+        pool = OptimizedBulletPool(max_bullets=4096)
+        player = _Player()
+        manager = StageManager()
+        manager.bind_engine(pool, player, audio_manager=_Audio())
+        manager.load_stage(registry.get_stage(stage_id))
+        for _frame in range(180):
+            manager.update(1 / 60, pool, player)
+        assert manager.get_frame_count() == 180
+        assert manager.current_stage is not None
+        assert pool.emitter_callbacks == {}
+    capsys.readouterr()

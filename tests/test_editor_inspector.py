@@ -7,6 +7,9 @@ import pytest
 from src.authoring.program import Expr, Ref
 from src.core.project_context import ProjectContext
 from src.editor.inspector import (
+    BulletAssetCatalog,
+    BulletPreview,
+    EmissionPreview,
     InspectorPanel,
     LiteralTextEdit,
     ParameterTable,
@@ -14,6 +17,7 @@ from src.editor.inspector import (
 )
 from src.editor.session import EditorSession
 from src.qt_compat.QtCore import Qt
+from src.qt_compat.QtGui import QColor, QImage
 from src.qt_compat.QtTest import QTest
 from src.qt_compat.QtWidgets import (
     QCheckBox,
@@ -24,6 +28,41 @@ from src.qt_compat.QtWidgets import (
     QSpinBox,
     QToolButton,
 )
+
+
+def _bullet_assets(root: Path) -> None:
+    import json
+
+    assets = root / "assets"
+    atlas = assets / "images" / "bullet"
+    atlas.mkdir(parents=True)
+    (assets / "bullet_aliases.json").write_text(
+        json.dumps(
+            {
+                "mapping": {
+                    "ball_m": {"red": "orb_red", "blue": "orb_blue"},
+                    "needle": {"red": "needle_red"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    image = QImage(96, 32, QImage.Format.Format_RGBA8888)
+    image.fill(QColor("#ff0000"))
+    assert image.save(str(atlas / "bullets.png"))
+    (atlas / "bullets.json").write_text(
+        json.dumps(
+            {
+                "__image_filename": "bullets.png",
+                "sprites": {
+                    "orb_red": {"rect": [0, 0, 32, 32]},
+                    "orb_blue": {"rect": [32, 0, 32, 32]},
+                    "needle_red": {"rect": [64, 0, 32, 32]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _project(root: Path) -> Path:
@@ -185,6 +224,8 @@ def test_unit_name_is_plain_text_and_ref_lists_use_headless_author_values(
     assert stages is not None
     stages.setPlainText("[Ref('stage'), Ref('stage2')]")
     stages.commit_requested.emit()
+    qapp_session.processEvents()
+    qapp_session.processEvents()
     assert session.program.get_unit("demo").metadata["stages"] == [
         Ref("stage"),
         Ref("stage2"),
@@ -247,9 +288,37 @@ def test_structured_literal_errors_stay_in_the_field_and_do_not_mutate(
 
     editor.setPlainText("[('Marisa', 'right', 'Go!')]")
     editor.commit_requested.emit()
+    qapp_session.processEvents()
+    qapp_session.processEvents()
     assert session.current_node.arguments["dialogue_list"] == [
         ("Marisa", "right", "Go!")
     ]
+    panel.close()
+
+
+def test_structured_literal_focus_out_defers_rebuild_until_after_qt_event(
+    tmp_path, qapp_session
+):
+    """A real focus transition must not delete LiteralTextEdit mid-handler."""
+
+    session = _session(tmp_path)
+    panel = InspectorPanel(session)
+    panel.show()
+    session.select_node("dialogue")
+    qapp_session.processEvents()
+
+    editor = panel.findChild(LiteralTextEdit, "argument_dialogue_list")
+    assert editor is not None
+    editor.setFocus()
+    editor.setPlainText("[('Marisa', 'right', 'Go!')]")
+    editor.clearFocus()
+    qapp_session.processEvents()
+    qapp_session.processEvents()
+
+    assert session.current_node.arguments["dialogue_list"] == [
+        ("Marisa", "right", "Go!")
+    ]
+    assert panel.findChild(LiteralTextEdit, "argument_dialogue_list") is not None
     panel.close()
 
 
@@ -377,3 +446,80 @@ def test_rapid_numeric_edits_do_not_crash_and_merge_into_one_undo(
     qapp_session.processEvents()
     assert session.undo_stack.count() == 1
     panel.close()
+
+
+def test_inspector_groups_fire_fields_and_uses_real_bullet_alias_thumbnails(
+    tmp_path, qapp_session
+):
+    from src.authoring.dsl import FireCircle
+
+    _bullet_assets(tmp_path)
+    session = _session(tmp_path)
+    node = FireCircle(count=16, bullet_type="ball_m", color="red")
+    session.insert_node_relative("spell_wait", "after", node)
+    panel = InspectorPanel(session)
+    panel.show()
+    qapp_session.processEvents()
+
+    for group in ("emission", "motion", "appearance"):
+        assert panel.findChild(QLabel, f"inspector_group_{group}") is not None
+    count_hint = panel.findChild(QLabel, "hint_count")
+    assert count_hint is not None and "默认" in count_hint.text()
+
+    catalog = BulletAssetCatalog(tmp_path)
+    assert catalog.bullet_types == ("ball_m", "needle")
+    assert not catalog.icon("ball_m", "red").isNull()
+    bullet_type = panel.findChild(QComboBox, "argument_bullet_type")
+    color = panel.findChild(QComboBox, "argument_color")
+    preview = panel.findChild(BulletPreview, "bullet_selection_preview")
+    shape = panel.findChild(EmissionPreview, "emission_preview_widget")
+    assert all(value is not None for value in (bullet_type, color, preview, shape))
+    assert panel._emission_spec(session.current_node) == ("circle", (16.0, 0.0))
+    assert {bullet_type.itemText(index) for index in range(bullet_type.count())} == {
+        "ball_m",
+        "needle",
+    }
+    assert {color.itemText(index) for index in range(color.count())} == {"red", "blue"}
+    assert "orb_red" in panel.findChild(QLabel, "bullet_selection_text").text()
+
+    color.setCurrentIndex(color.findText("blue"))
+    qapp_session.processEvents()
+    qapp_session.processEvents()
+    assert session.current_node.arguments["color"] == "blue"
+    assert "orb_blue" in panel.findChild(QLabel, "bullet_selection_text").text()
+    assert session.undo_stack.count() == 2  # insert + one field edit
+    panel.close()
+
+
+def test_expr_editor_completes_only_static_authoring_names(tmp_path, qapp_session):
+    session = _session(tmp_path)
+    session.select_unit("task")
+    session.select_node("task_wait")
+    session.set_node_argument("task_wait", "frames", Expr("count"))
+    panel = InspectorPanel(session)
+    panel.show()
+    qapp_session.processEvents()
+
+    editor = panel.findChild(QLineEdit, "argument_frames")
+    assert editor is not None and editor.completer() is not None
+    model = editor.completer().model()
+    candidates = {
+        model.data(model.index(row, 0))
+        for row in range(model.rowCount())
+    }
+    assert {"count", "player_x", "player_y", "difficulty", "seed"} <= candidates
+    assert "__import__" not in candidates
+    panel.close()
+
+
+def test_repo_bullet_catalog_resolves_every_runtime_alias_without_renderer():
+    root = Path(__file__).resolve().parents[1]
+    catalog = BulletAssetCatalog(root)
+    assert catalog.bullet_types
+    unresolved = []
+    for bullet_type in catalog.bullet_types:
+        for color in catalog.colors(bullet_type):
+            choice = catalog.choice(bullet_type, color)
+            if choice is None or choice.image_path is None or choice.rect is None:
+                unresolved.append((bullet_type, color))
+    assert not unresolved

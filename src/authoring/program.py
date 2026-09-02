@@ -40,6 +40,24 @@ UNIT_KINDS = frozenset(
     {"Project", "Stage", "Wave", "Enemy", "Boss", "Spell", "NonSpell", "Task", "Function"}
 )
 
+# A logical unit may have author-visible metadata without owning an executable
+# statement body.  Keep this public rule in the headless model so hover
+# validation, real inserts, and Qt surfaces cannot disagree about it.
+STATEMENT_UNIT_KINDS = frozenset(
+    {"Stage", "Wave", "Enemy", "Spell", "NonSpell", "Task", "Function"}
+)
+
+
+def unit_accepts_statements(kind: str) -> bool:
+    """Whether the existing Runtime executes ``body`` for ``kind``.
+
+    Project owns Stage references and Boss owns phase references; neither is an
+    executable statement container.  Unknown kinds are intentionally false so
+    an incomplete or unsupported source file never becomes a drop target.
+    """
+
+    return kind in STATEMENT_UNIT_KINDS
+
 CONTROL_NODE_KINDS = frozenset(
     {
         "Wait",
@@ -135,6 +153,27 @@ _REF_TARGETS: dict[tuple[str, str], frozenset[str]] = {
     ("SpawnEnemy", "enemy_class"): frozenset({"Enemy"}),
     ("SpawnTask", "task"): frozenset({"Task"}),
     ("Call", "function"): frozenset({"Function", "Task"}),
+}
+
+# A logical unit dragged from the program structure has one of these explicit
+# authoring meanings.  The Qt tree only carries a unit ID; this table keeps the
+# type-to-node decision in the headless model rather than duplicating it in a
+# sidebar or a drop handler.  Task deliberately has two meanings, so callers
+# must ask the author which one they intend instead of silently choosing one.
+_UNIT_REFERENCE_ACTIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    "Wave": (("run_wave", "RunWave"),),
+    "Boss": (("run_boss", "RunBoss"),),
+    "Enemy": (("spawn_enemy", "SpawnEnemy"),),
+    "Function": (("call", "Call"),),
+    "Task": (("call", "Call"), ("spawn_task", "SpawnTask")),
+}
+
+# Project Stage order and Boss phases are metadata references, not executable
+# statement trees.  Their target constraints remain here for the specialised
+# editor surfaces and model mutations to share.
+_REFERENCE_LIST_TARGETS: dict[tuple[str, str], frozenset[str]] = {
+    ("Project", "stages"): frozenset({"Stage"}),
+    ("Boss", "phases"): frozenset({"Spell", "NonSpell"}),
 }
 
 # The shared authoring constructors cover Wave, Enemy, and SpellCard call
@@ -569,6 +608,38 @@ class DropCheck:
 
 
 @dataclass(frozen=True)
+class UnitReferenceAction:
+    """One explicit statement meaning for a dragged logical unit."""
+
+    key: str
+    node_kind: str
+
+
+@dataclass(frozen=True)
+class UnitReferenceEdge:
+    """One source-level ``Ref`` from a logical unit to another unit."""
+
+    source_id: str
+    target_id: str
+    location: str
+    node_uid: str | None = None
+
+
+@dataclass(frozen=True)
+class UnitReferenceTree:
+    """A non-duplicating Stage reference projection for the editor sidebar."""
+
+    unit_id: str
+    kind: str | None
+    name: str | None
+    via: UnitReferenceEdge | None = None
+    children: tuple["UnitReferenceTree", ...] = ()
+    link: bool = False
+    cycle: bool = False
+    missing: bool = False
+
+
+@dataclass(frozen=True)
 class NodeLocation:
     unit_id: str
     parent_uid: str | None
@@ -895,6 +966,10 @@ def insert_node(
 ) -> AuthoringProgram:
     result = program.clone()
     unit = result.get_unit(unit_id)
+    if not unit_accepts_statements(unit.kind):
+        raise ProgramError(
+            "invalid_insert", f"{unit.kind} does not contain statement nodes"
+        )
     values = _child_list(unit, parent_uid, slot)
     if index < 0 or index > len(values):
         raise ProgramError("invalid_index", f"insert index {index} is out of range")
@@ -915,11 +990,15 @@ def insert_new_node(
     """Insert one new node at a root or explicit visual drop placement."""
 
     placement = DropPlacement(placement)
+    owner = program.get_unit(unit_id)
+    if not unit_accepts_statements(owner.kind):
+        raise ProgramError(
+            "invalid_insert", f"{owner.kind} does not contain statement nodes"
+        )
     if target_uid is None:
         if placement not in {DropPlacement.BEFORE, DropPlacement.AFTER}:
             raise ProgramError("invalid_insert", "empty logical units accept a root statement")
-        unit = program.get_unit(unit_id)
-        return insert_node(program, unit_id, None, "body", len(unit.body), node)
+        return insert_node(program, unit_id, None, "body", len(owner.body), node)
     unit, target, location = find_node(program, target_uid)
     if unit.id != unit_id:
         raise ProgramError("invalid_insert", "drop target belongs to another logical unit")
@@ -1026,8 +1105,10 @@ def _check_insert(
 
     placement = DropPlacement(placement)
     unit = program.get_unit(unit_id)
-    if unit.kind == "Project":
-        raise ProgramError("invalid_insert", "Project does not contain statements")
+    if not unit_accepts_statements(unit.kind):
+        raise ProgramError(
+            "invalid_insert", f"{unit.kind} does not contain statement nodes"
+        )
     if target_uid is None:
         if placement not in {DropPlacement.BEFORE, DropPlacement.AFTER}:
             raise ProgramError("invalid_insert", "empty logical units accept a root statement")
@@ -1137,8 +1218,10 @@ def node_from_palette(
     """
 
     del program  # reserved for future signature-derived project defaults
-    if unit_kind not in UNIT_KINDS or unit_kind == "Project":
-        raise ProgramError("invalid_context", f"{unit_kind} cannot contain statements")
+    if unit_kind not in UNIT_KINDS or not unit_accepts_statements(unit_kind):
+        raise ProgramError(
+            "invalid_context", f"{unit_kind} does not contain statement nodes"
+        )
     if template_target is not None:
         positional, keywords = _template_prototype_arguments(template_target.signature)
         return make_template_call(
@@ -1215,6 +1298,167 @@ def reference_kinds_for_field(kind: str, field: str) -> tuple[str, ...]:
     return tuple(sorted(_REF_TARGETS.get((kind, field), ())))
 
 
+def unit_reference_actions(unit_kind: str) -> tuple[UnitReferenceAction, ...]:
+    """Return the explicit node meanings available for one logical unit kind.
+
+    This is intentionally about a *dragged target* unit, not the current
+    container.  The caller still uses :func:`validate_insert` to decide whether
+    a chosen action can be placed in the current location.
+    """
+
+    return tuple(
+        UnitReferenceAction(key, node_kind)
+        for key, node_kind in _UNIT_REFERENCE_ACTIONS.get(unit_kind, ())
+    )
+
+
+def node_from_unit_reference(
+    program: AuthoringProgram,
+    owner_unit_kind: str,
+    target_id: str,
+    action: str | None = None,
+) -> Node:
+    """Create the only valid reference node for a dragged logical unit.
+
+    A target with one semantic action (for example a Wave) can be inserted
+    immediately.  A Task has both ``Call`` and ``SpawnTask`` meanings and must
+    be resolved by the UI before this function is called.  Nothing here chooses
+    the first project object or silently changes an author's intent.
+    """
+
+    target = program.get_unit(target_id)
+    actions = unit_reference_actions(target.kind)
+    if not actions:
+        raise ProgramError(
+            "unsupported_unit_reference",
+            f"{target.kind} cannot be inserted as an executable reference",
+        )
+    if action is None:
+        if len(actions) != 1:
+            choices = ", ".join(item.key for item in actions)
+            raise ProgramError(
+                "ambiguous_unit_reference",
+                f"{target.kind} requires one of: {choices}",
+            )
+        selected = actions[0]
+    else:
+        selected = next((item for item in actions if item.key == action), None)
+        if selected is None:
+            raise ProgramError(
+                "invalid_unit_reference_action",
+                f"{action!r} is not a valid action for {target.kind}",
+            )
+    return node_from_palette(selected.node_kind, program, owner_unit_kind, target.id)
+
+
+def reference_list_target_kinds(unit_kind: str, field: str) -> tuple[str, ...]:
+    """Return permitted targets for a specialised metadata reference list."""
+
+    return tuple(sorted(_REFERENCE_LIST_TARGETS.get((unit_kind, field), ())))
+
+
+def unit_reference_edges(
+    program: AuthoringProgram,
+    source_id: str,
+) -> tuple[UnitReferenceEdge, ...]:
+    """Return every explicit ``Ref`` owned by one logical unit in source order."""
+
+    unit = program.get_unit(source_id)
+    edges: list[UnitReferenceEdge] = []
+
+    def collect(value: Any, location: str, node_uid: str | None = None) -> None:
+        if isinstance(value, Ref):
+            edges.append(UnitReferenceEdge(unit.id, value.id, location, node_uid))
+        elif isinstance(value, Mapping):
+            for key, item in value.items():
+                collect(item, f"{location}.{key}", node_uid)
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                collect(item, f"{location}[{index}]", node_uid)
+
+    for name, value in unit.metadata.items():
+        collect(value, f"{unit.id}.metadata.{name}")
+    for parameter in unit.parameters:
+        if parameter.has_default:
+            collect(
+                parameter.default,
+                f"{unit.id}.parameters.{parameter.name}.default",
+            )
+    for node in unit.walk_nodes():
+        for name, value in node.arguments.items():
+            collect(value, f"{unit.id}.{node.uid}.{name}", node.uid)
+        for index, value in enumerate(node.positional_arguments):
+            collect(value, f"{unit.id}.{node.uid}.args[{index}]", node.uid)
+    return tuple(edges)
+
+
+def stage_reference_tree(
+    program: AuthoringProgram,
+    stage_id: str,
+) -> UnitReferenceTree:
+    """Project a Stage's real references without expanding shared units twice.
+
+    ``link`` indicates a previously expanded unit.  ``cycle`` is the stronger
+    case where the link points at an active ancestor.  Both preserve the source
+    relationship while keeping the sidebar finite and avoiding fake cloned
+    units.
+    """
+
+    stage = program.get_unit(stage_id)
+    if stage.kind != "Stage":
+        raise ProgramError("invalid_stage", f"{stage_id!r} is not a Stage")
+    expanded: set[str] = set()
+    active: set[str] = set()
+
+    def visit(
+        unit_id: str,
+        via: UnitReferenceEdge | None,
+    ) -> UnitReferenceTree:
+        try:
+            unit = program.get_unit(unit_id)
+        except ProgramError:
+            return UnitReferenceTree(
+                unit_id=unit_id,
+                kind=None,
+                name=None,
+                via=via,
+                link=True,
+                missing=True,
+            )
+        if unit_id in active:
+            return UnitReferenceTree(
+                unit_id=unit.id,
+                kind=unit.kind,
+                name=unit.name,
+                via=via,
+                link=True,
+                cycle=True,
+            )
+        if unit_id in expanded:
+            return UnitReferenceTree(
+                unit_id=unit.id,
+                kind=unit.kind,
+                name=unit.name,
+                via=via,
+                link=True,
+            )
+        expanded.add(unit_id)
+        active.add(unit_id)
+        try:
+            children = tuple(visit(edge.target_id, edge) for edge in unit_reference_edges(program, unit.id))
+        finally:
+            active.remove(unit_id)
+        return UnitReferenceTree(
+            unit_id=unit.id,
+            kind=unit.kind,
+            name=unit.name,
+            via=via,
+            children=children,
+        )
+
+    return visit(stage.id, None)
+
+
 def _template_prototype_arguments(
     signature: inspect.Signature | None,
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -1280,9 +1524,12 @@ def create_unit(
             raise ProgramError("missing_project", "stage registration requires exactly one Project")
         project = projects[0]
         stages = list(project.metadata.get("stages", []))
+        first_registered_stage = not stages
         stages.append(Ref(unit.id))
         project.metadata["stages"] = stages
-        if not isinstance(project.metadata.get("start_stage"), Ref):
+        if first_registered_stage or not isinstance(
+            project.metadata.get("start_stage"), Ref
+        ):
             project.metadata["start_stage"] = Ref(unit.id)
     _assert_no_new_errors(program, result)
     return result
@@ -1350,7 +1597,12 @@ def delete_unit(
                 raise ProgramError("invalid_project_stages", "the last registered Stage cannot be deleted")
             project.metadata["stages"] = stages
             if project.metadata.get("start_stage") == Ref(unit_id):
-                replacement = replacement_start_stage or stages[0].id
+                if replacement_start_stage is None:
+                    raise ProgramError(
+                        "replacement_start_stage_required",
+                        "deleting the start Stage requires an explicit replacement",
+                    )
+                replacement = replacement_start_stage
                 if Ref(replacement) not in stages:
                     raise ProgramError("invalid_start_stage", "replacement start Stage is not registered")
                 project.metadata["start_stage"] = Ref(replacement)
@@ -1421,6 +1673,19 @@ def duplicate_node(program: AuthoringProgram, uid: str) -> AuthoringProgram:
     return insert_node(
         program, unit.id, location.parent_uid, location.slot, location.index + 1, clone
     )
+
+
+def clone_node_with_new_uids(node: Node) -> Node:
+    """Return a detached subtree suitable for a new insertion.
+
+    The editor clipboard is transient, but every paste still has to obey the
+    project-wide UID invariant.  Keeping regeneration here avoids duplicating
+    tree-shape knowledge in Qt.
+    """
+
+    clone = copy.deepcopy(node)
+    _regenerate_node_uids(clone)
+    return clone
 
 
 def delete_node(program: AuthoringProgram, uid: str) -> AuthoringProgram:
@@ -1608,6 +1873,47 @@ def set_unit_field(
             ) from exc
     _assert_no_new_errors(program, result)
     return result
+
+
+def set_unit_reference_list(
+    program: AuthoringProgram,
+    unit_id: str,
+    field: str,
+    references: Sequence[str | Ref],
+) -> AuthoringProgram:
+    """Replace one specialised Project/Boss reference list atomically.
+
+    The editor uses this for drop-to-add and reordering.  It rejects unsupported
+    list surfaces, missing targets and wrong types before the generic unit field
+    writer can persist an invalid intermediate state.
+    """
+
+    owner = program.get_unit(unit_id)
+    expected = _REFERENCE_LIST_TARGETS.get((owner.kind, field))
+    if expected is None:
+        raise ProgramError(
+            "invalid_reference_list",
+            f"{owner.kind}.{field} is not a specialised reference list",
+        )
+    values = [item if isinstance(item, Ref) else Ref(item) for item in references]
+    if not values:
+        raise ProgramError(
+            "empty_reference_list",
+            f"{owner.kind}.{field} must retain at least one reference",
+        )
+    if owner.kind == "Project" and field == "stages":
+        ids = [item.id for item in values]
+        if len(ids) != len(set(ids)):
+            raise ProgramError("duplicate_stage", "Project.stages cannot contain duplicates")
+    for reference in values:
+        target = program.get_unit(reference.id)
+        if target.kind not in expected:
+            allowed = ", ".join(sorted(expected))
+            raise ProgramError(
+                "reference_type",
+                f"{owner.kind}.{field} expects {allowed}, got {target.kind}",
+            )
+    return set_unit_field(program, unit_id, field, values)
 
 
 def _assert_no_new_errors(
@@ -2344,10 +2650,15 @@ __all__ = [
     "Ref",
     "RelatedLocation",
     "SourceSpan",
+    "STATEMENT_UNIT_KINDS",
     "TemplateTarget",
     "UNIT_KINDS",
+    "UnitReferenceAction",
+    "UnitReferenceEdge",
+    "UnitReferenceTree",
     "create_unit",
     "delete_node",
+    "clone_node_with_new_uids",
     "duplicate_node",
     "delete_unit",
     "duplicate_unit",
@@ -2357,14 +2668,21 @@ __all__ = [
     "make_template_call",
     "move_node",
     "node_from_palette",
+    "node_from_unit_reference",
     "parse_author_value",
+    "reference_list_target_kinds",
     "reference_kinds_for_node",
     "reference_kinds_for_field",
     "new_uid",
     "set_argument",
     "set_template_positional_argument",
     "set_unit_field",
+    "set_unit_reference_list",
+    "stage_reference_tree",
+    "unit_reference_actions",
+    "unit_reference_edges",
     "unit_reference_locations",
+    "unit_accepts_statements",
     "validate_author_value",
     "validate_insert",
     "wrap_node",

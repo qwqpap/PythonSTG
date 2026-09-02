@@ -188,6 +188,24 @@ def _validate_event_payload(event: str, payload: dict[str, Any]) -> None:
                 "trace_batch_too_large",
                 f"trace batch exceeds {MAX_TRACE_EVENTS_PER_MESSAGE} events",
             )
+        for item in events:
+            if not isinstance(item, Mapping):
+                raise PreviewProtocolError(
+                    "invalid_payload", "trace events must be objects"
+                )
+            if item.get("kind") != "metrics":
+                continue
+            if set(item) != {"kind", "frame", "emitted", "live", "lasers"}:
+                raise PreviewProtocolError(
+                    "invalid_payload", "metrics trace has unknown or missing fields"
+                )
+            for name in ("frame", "emitted", "live", "lasers"):
+                value = item[name]
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise PreviewProtocolError(
+                        "invalid_payload",
+                        f"metrics trace {name} must be a non-negative integer",
+                    )
     if event == "frame":
         frame = payload.get("frame")
         if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:

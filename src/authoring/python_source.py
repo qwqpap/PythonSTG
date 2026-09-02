@@ -1328,7 +1328,7 @@ def _ordered_node_fields(node: Node) -> list[tuple[str, Any]]:
     order = [
         name
         for name, parameter in inspect.signature(constructor).parameters.items()
-        if name not in {"uid", "runtime_options"}
+        if name != "uid"
         and parameter.kind not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
     ]
     result = [(name, node.arguments[name]) for name in order if name in node.arguments]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import math
 import random
 import sys
 from contextlib import contextmanager
@@ -90,7 +91,17 @@ def _runtime_program(project_id: str = "runtime_bundle") -> AuthoringProgram:
                         count=8,
                         speed=3.0,
                         play_sound=False,
+                        accel=1.5,
+                        angle_accel=30.0,
+                        tag=9,
+                        friction=0.1,
+                        time_scale=0.75,
+                        bounce_x=True,
+                        spin=12.0,
                         render_angle=45.0,
+                        render_scale=1.2,
+                        max_lifetime=2.0,
+                        collision_radius=0.02,
                         uid="circle",
                     ),
                     FireArc(count=5, speed=2.0, play_sound=False, uid="arc"),
@@ -380,6 +391,11 @@ def test_generated_high_density_actions_use_runtime_batch_path(generated_bundle)
     assert pool.calls[0]["render_angles"].tolist() == pytest.approx(
         [0.7853982] * 8
     )
+    assert pool.calls[0]["speed_accel"] == pytest.approx(1.5 / 60.0)
+    assert pool.calls[0]["motion_angular_accel"] == pytest.approx(math.radians(30.0))
+    assert pool.calls[0]["radius"] == pytest.approx(0.02)
+    assert pool.calls[0]["render_scale"] == pytest.approx(1.2)
+    assert pool.calls[0]["max_lifetime"] == pytest.approx(2.0)
     assert not hasattr(pool, "spawn_bullet")
 
     real_pool = OptimizedBulletPool(max_bullets=32)
@@ -397,4 +413,9 @@ def test_generated_high_density_actions_use_runtime_batch_path(generated_bundle)
     assert real_pool.data["render_angle"][:8].tolist() == pytest.approx(
         [0.7853982] * 8
     )
+    assert real_pool.data["speed_accel"][:8].tolist() == pytest.approx([1.5 / 60.0] * 8)
+    assert real_pool.data["motion_angular_accel"][:8].tolist() == pytest.approx(
+        [math.radians(30.0)] * 8
+    )
+    assert real_pool.data["radius"][:8].tolist() == pytest.approx([0.02] * 8)
     assert real_pool.emitter_callbacks == {}

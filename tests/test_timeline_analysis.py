@@ -93,6 +93,11 @@ def test_repeat_parallel_and_parameterized_spawn_use_real_blocking_rules():
     assert projection.find("parallel").start == 30
     assert projection.find("parallel").end == 80
     assert projection.find("parallel_short").lane != projection.find("parallel_long").lane
+    assert projection.find("repeat_wait").parent_uid == "repeat"
+    assert projection.find("repeat_wait").lane != projection.find("repeat").lane
+    assert projection.find("parallel_short").parent_uid == "parallel"
+    assert projection.find("repeat").display == "aggregate"
+    assert projection.find("spawn").display == "aggregate"
     assert projection.find("spawn").start == projection.find("spawn").end == 80
     assert projection.find("task_repeat").end == 116
     assert projection.find("tail").start == 80
@@ -124,6 +129,26 @@ def test_dynamic_control_flow_is_unknown_instead_of_guessed():
     assert isinstance(projection.end, Unknown)
 
 
+def test_nodes_after_dynamic_unknown_keep_source_order_without_guessing_frames():
+    stage = Stage(
+        "stage",
+        "Stage",
+        [
+            RawPython("marker = 1", uid="raw"),
+            Wait(10, uid="after_raw_1"),
+            Wait(20, uid="after_raw_2"),
+        ],
+    )
+    projection = project_timeline(_program(stage), stage)
+
+    flat = projection.all_intervals()
+    order = [interval.uid for interval in flat]
+    assert order.index("after_raw_1") < order.index("after_raw_2")
+    for uid in ("after_raw_1", "after_raw_2"):
+        assert isinstance(projection.find(uid).start, Unknown), uid
+        assert isinstance(projection.find(uid).end, Unknown), uid
+
+
 def test_dynamic_wait_is_not_advertised_as_timeline_editable():
     stage = Stage(
         "stage",
@@ -135,6 +160,15 @@ def test_dynamic_wait_is_not_advertised_as_timeline_editable():
 
     assert isinstance(interval.end, Unknown)
     assert interval.editable == "none"
+
+
+def test_zero_duration_action_is_a_milestone_not_a_fake_span():
+    stage = Stage("stage", "Stage", [FireCircle(count=12, uid="fire")])
+
+    interval = project_timeline(_program(stage), stage).find("fire")
+
+    assert interval.start == interval.end == 0
+    assert interval.display == "milestone"
 
 
 def test_unresolved_call_reference_projects_unknown_instead_of_raising():
@@ -283,11 +317,58 @@ def test_trace_overlay_uses_only_the_selected_run_and_aggregates_repeats():
             {"run_id": "run", "uid": "wait", "phase": "start", "frame": 4},
             {"run_id": "run", "uid": "wait", "phase": "start", "frame": 8},
             {"run_id": "run", "uid": "wait", "phase": "end", "frame": 70},
+            {
+                "run_id": "run",
+                "kind": "metrics",
+                "frame": 60,
+                "emitted": 24,
+                "live": 96,
+                "lasers": 2,
+            },
         ],
         "run",
     )
 
     assert traced.trace_run_id == "run"
-    assert traced.find("wait").start == 4
-    assert traced.find("wait").end == 70
-    assert traced.end == 70
+    assert traced.find("wait").start == 0
+    assert traced.find("wait").end == 60
+    assert traced.find("wait").observed_start == 4
+    assert traced.find("wait").observed_end == 70
+    assert traced.end == 60
+    assert traced.observed_end == 70
+    assert traced.metrics[0].emitted == 24
+    assert traced.metrics[0].live == 96
+    assert traced.metrics[0].lasers == 2
+
+
+def test_trace_records_actual_if_branch_without_overwriting_static_unknown():
+    stage = Stage(
+        "stage",
+        "Stage",
+        [
+            If(
+                Expr("difficulty > 1"),
+                [Wait(10, uid="then_wait")],
+                [Wait(20, uid="else_wait")],
+                uid="branch",
+            )
+        ],
+    )
+    projection = project_timeline(_program(stage), stage)
+    traced = overlay_trace(
+        projection,
+        [
+            {"uid": "branch", "phase": "start", "frame": 0},
+            {"uid": "then_wait", "phase": "start", "frame": 0},
+            {"uid": "then_wait", "phase": "end", "frame": 10},
+            {"uid": "branch", "phase": "end", "frame": 10},
+        ],
+        "run",
+    )
+
+    branch = traced.find("branch")
+    assert isinstance(branch.end, Unknown)
+    assert branch.observed_start == 0
+    assert branch.observed_end == 10
+    assert branch.observed_branch == "then"
+    assert branch.display == "unknown"

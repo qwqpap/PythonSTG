@@ -20,6 +20,7 @@ from src.authoring.program import (
     move_node,
     set_argument,
     set_unit_field,
+    set_unit_reference_list,
 )
 from src.qt_compat.QtGui import QUndoCommand
 
@@ -94,6 +95,24 @@ class SetNodeArgumentCommand(_ProgramCommand):
 class SetUnitFieldCommand(_ProgramCommand):
     def __init__(self, session: "EditorSession", unit_id: str, name: str, value: Any) -> None:
         super().__init__(session, f"修改 {name}", lambda program: set_unit_field(program, unit_id, name, value))
+
+
+class SetUnitReferencesCommand(_ProgramCommand):
+    """One specialised Project/Boss reference-list replacement."""
+
+    def __init__(
+        self,
+        session: "EditorSession",
+        unit_id: str,
+        field: str,
+        references: tuple[str, ...],
+    ) -> None:
+        super().__init__(
+            session,
+            f"修改 {field}",
+            lambda program: set_unit_reference_list(program, unit_id, field, references),
+        )
+
 
 class MoveNodeCommand(_ProgramCommand):
     def __init__(
@@ -247,4 +266,5 @@ __all__ = [
     "MoveNodeCommand",
     "SetNodeArgumentCommand",
     "SetUnitFieldCommand",
+    "SetUnitReferencesCommand",
 ]

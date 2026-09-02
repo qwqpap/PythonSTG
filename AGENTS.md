@@ -12,12 +12,14 @@ roadmap is the only implementation order and status record for the editor.
 The mandatory order is:
 
 ```text
-CD0 -> CD1 -> CD2 -> CD3 -> CD4 -> CD5 -> CD6 -> CD7
+CD0 -> CD1 -> CD2 -> CD3 -> CD4
 ```
 
-Do not start a later phase while an earlier phase gate is red. The previous
-Scene/Pattern/Graph editor is archived at tag `archive/editor-v1-f9e0798`; it is
-not a compatibility target and must not be restored through shims, feature
+Do not start a later phase while an earlier phase gate is red. `697d9a5` is the
+implementation baseline for this route; historic CD0-CD7 evidence is available
+through Git history but does not prove the current usability-focused gates. The
+previous Scene/Pattern/Graph editor is archived at tag `archive/editor-v1-f9e0798`;
+it is not a compatibility target and must not be restored through shims, feature
 flags, hidden menus, or retained tests.
 
 ## Fixed product contract

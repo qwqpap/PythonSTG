@@ -144,26 +144,30 @@ class StageContext(SpellCardContext):
 
     def create_bullet(self, x: float, y: float, angle: float, speed: float,
                       bullet_type: str = "ball_m", color: str = "red",
-                      accel: float = 0, angle_accel: float = 0,
+                      accel: float = 0.0, angle_accel: float = 0.0,
                       owner=None,
-                      # v2 扩展参数
                       tag: int = 0,
                       friction: float = 0.0,
                       time_scale: float = 1.0,
                       bounce_x: bool = False,
                       bounce_y: bool = False,
                       spin: float = 0.0,
-                      render_angle: float = None,
+                      render_angle: float | None = None,
+                      render_scale: float = 1.0,
+                      max_lifetime: float = 0.0,
+                      collision_radius: float = 0.0,
                       curve_type: int = CURVE_NONE,
-                      curve_params: tuple = None,
+                      curve_params: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
                       **kwargs) -> int:
         """
-        创建子弹（v2: 支持 tag / friction / time_scale / bounce / spin / curve）
+        创建一颗直线运动子弹。
 
         Args:
             x, y: 位置（归一化坐标）
             angle: 角度（度，0=右，90=上，-90=下）
-            speed: 速度（每秒）
+            speed: 作者速度标度。
+            accel: 每秒改变 ``speed`` 的作者标度（正值加速、负值减速）。
+            angle_accel: 运动角的角加速度（度/秒²）；不影响 ``spin``。
             bullet_type: 弹幕类型
             color: 颜色
             tag: 分组标签
@@ -172,8 +176,15 @@ class StageContext(SpellCardContext):
             bounce_x/bounce_y: 边界反弹
             spin: 渲染角角速度（度/秒）
             render_angle: 初始渲染朝向（度，None=跟随运动角）
+            render_scale: 渲染尺寸倍率
+            max_lifetime: 最长存活秒数（0=无限）
+            collision_radius: 归一化碰撞半径
             curve_type: 内置曲线类型 (CURVE_SIN_SPEED 等)
             curve_params: 曲线参数 (amplitude, frequency, phase, base)
+
+        ``accel`` 与 ``angle_accel`` 都受 ``time_scale`` 影响。单发与
+        :meth:`create_bullets_batch` 使用相同的单位转换和半隐式 Euler
+        更新：先更新速度/角速度，再推进本帧位置与朝向。
         """
         sprite_id = self._resolve_sprite_id(bullet_type, color)
         angle_rad = math.radians(angle)
@@ -193,6 +204,8 @@ class StageContext(SpellCardContext):
             x=x, y=y,
             angle=angle_rad,
             speed=speed / 60.0,
+            speed_accel=accel / 60.0,
+            motion_angular_accel=math.radians(angle_accel),
             sprite_id=sprite_id,
             tag=tag,
             friction=friction,
@@ -200,6 +213,9 @@ class StageContext(SpellCardContext):
             flags=flags,
             angular_vel=math.radians(spin),
             render_angle=ra,
+            render_scale=render_scale,
+            max_lifetime=max_lifetime,
+            radius=collision_radius,
             curve_type=curve_type,
             curve_param=curve_params,
         )
@@ -224,6 +240,8 @@ class StageContext(SpellCardContext):
         color: str = "red",
         sprite_id: str = None,
         sprite_idx: int = -1,
+        accel: float = 0.0,
+        angle_accel: float = 0.0,
         tag: int = 0,
         friction: float = 0.0,
         time_scale: float = 1.0,
@@ -233,14 +251,15 @@ class StageContext(SpellCardContext):
         render_angle: float = None,
         max_lifetime: float = 0.0,
         render_scale: float = 1.0,
+        collision_radius: float = 0.0,
         curve_type: int = 0,
-        curve_param: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        curve_params: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
     ) -> np.ndarray:
         """Create a heterogeneous formal-runtime burst in one pool operation.
 
-        This is the batch equivalent of :meth:`create_bullet`: public angles
-        are degrees and speeds are per second, while the pool receives radians
-        and normalized units per frame.
+        This is the batch equivalent of :meth:`create_bullet`.  In particular,
+        ``accel`` is author speed units/second and ``angle_accel`` is
+        degrees/second² for every bullet in the burst.
         """
         position_array = np.asarray(positions, dtype=np.float32)
         angle_array = np.asarray(angles, dtype=np.float32)
@@ -277,8 +296,11 @@ class StageContext(SpellCardContext):
                 positions=position_array,
                 angles=angle_radians,
                 speeds=speed_per_frame,
+                speed_accel=accel / 60.0,
+                motion_angular_accel=math.radians(angle_accel),
                 sprite_id=resolved_sprite_id,
                 sprite_idx=sprite_idx,
+                radius=collision_radius,
                 tag=tag,
                 friction=friction,
                 time_scale=time_scale,
@@ -288,7 +310,7 @@ class StageContext(SpellCardContext):
                 max_lifetime=max_lifetime,
                 render_scale=render_scale,
                 curve_type=curve_type,
-                curve_param=curve_param,
+                curve_param=curve_params,
             )
         else:
             spawned = []
@@ -300,8 +322,11 @@ class StageContext(SpellCardContext):
                     y=float(y),
                     angle=float(angle_rad),
                     speed=float(speed_value),
+                    speed_accel=accel / 60.0,
+                    motion_angular_accel=math.radians(angle_accel),
                     sprite_id=resolved_sprite_id,
                     sprite_idx=sprite_idx,
+                    radius=collision_radius,
                     tag=tag,
                     friction=friction,
                     time_scale=time_scale,
@@ -311,7 +336,7 @@ class StageContext(SpellCardContext):
                     max_lifetime=max_lifetime,
                     render_scale=render_scale,
                     curve_type=curve_type,
-                    curve_param=curve_param,
+                    curve_param=curve_params,
                 )
                 if idx >= 0:
                     spawned.append(idx)

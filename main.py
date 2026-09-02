@@ -106,6 +106,8 @@ class _EditorPreviewChannel:
         self._protocol_output = sys.stdout.buffer
         self._controls = queue.SimpleQueue()
         self._closed = False
+        self._last_metric_frame = -1
+        self._last_spawned_total = 0
         # Existing game diagnostics remain useful, but stdout is reserved for
         # the protocol so the Qt client never has to guess which lines are JSON.
         sys.stdout = sys.stderr
@@ -178,11 +180,48 @@ class _EditorPreviewChannel:
             self.emit("stopped", {})
         self._closed = True
 
+    def reset_metrics(self):
+        self._last_metric_frame = -1
+        self._last_spawned_total = 0
+
+    def metric_sample(self, frame, bullet_pool, laser_pool, *, force=False):
+        """Return one fixed-rate aggregate sample without per-bullet hooks."""
+
+        frame = max(0, int(frame))
+        spawned_total = max(0, int(getattr(bullet_pool, "spawned_total", 0)))
+        if frame < self._last_metric_frame or spawned_total < self._last_spawned_total:
+            self._last_metric_frame = -1
+            self._last_spawned_total = spawned_total
+        if not force and (frame % 12 != 0 or frame == self._last_metric_frame):
+            return None
+        emitted = max(0, spawned_total - self._last_spawned_total)
+        alive = getattr(bullet_pool, "data", None)
+        live = int(alive["alive"].sum()) if alive is not None else 0
+        lasers = int(getattr(laser_pool, "laser_count", 0)) + int(
+            getattr(laser_pool, "bent_laser_count", 0)
+        )
+        self._last_metric_frame = frame
+        self._last_spawned_total = spawned_total
+        return {
+            "kind": "metrics",
+            "frame": frame,
+            "emitted": emitted,
+            "live": max(0, live),
+            "lasers": max(0, lasers),
+        }
+
 
 _PREVIEW_CHANNEL = None
 
 
-def _flush_preview_runtime(channel, stage_manager, *, force_frame=False):
+def _flush_preview_runtime(
+    channel,
+    stage_manager,
+    bullet_pool,
+    laser_pool,
+    *,
+    force_frame=False,
+):
     if channel is None:
         return
     while True:
@@ -196,6 +235,14 @@ def _flush_preview_runtime(channel, stage_manager, *, force_frame=False):
         if not events:
             break
     frame = stage_manager.get_frame_count()
+    sample = channel.metric_sample(
+        frame,
+        bullet_pool,
+        laser_pool,
+        force=force_frame,
+    )
+    if sample is not None:
+        channel.emit("trace", {"events": [sample]})
     if force_frame or frame % 6 == 0:
         channel.emit("frame", {"frame": frame})
 
@@ -1197,6 +1244,8 @@ def main():
                 background_renderer=background_renderer,
                 character=run_character,
             )
+            if _PREVIEW_CHANNEL is not None:
+                _PREVIEW_CHANNEL.reset_metrics()
 
             # QQBot UDP emoji bullets are spawned into the main enemy bullet pool.
             from src.game.emoji_danmaku import EmojiDanmakuSystem
@@ -1579,7 +1628,9 @@ def main():
                     if preview_fast_forward_target is not None:
                         if not paused:
                             stage_manager.update(dt, bullet_pool, player)
-                        _flush_preview_runtime(_PREVIEW_CHANNEL, stage_manager)
+                        _flush_preview_runtime(
+                            _PREVIEW_CHANNEL, stage_manager, bullet_pool, laser_pool
+                        )
                         continue
                     loading_render_start = time.perf_counter() if PROFILE_MODE else 0.0
                     ctx.viewport = window.viewport
@@ -1638,7 +1689,9 @@ def main():
 
                 if stage_manager.loading_info:
                     if preview_fast_forward_target is not None:
-                        _flush_preview_runtime(_PREVIEW_CHANNEL, stage_manager)
+                        _flush_preview_runtime(
+                            _PREVIEW_CHANNEL, stage_manager, bullet_pool, laser_pool
+                        )
                         continue
                     loading_render_start = time.perf_counter() if PROFILE_MODE else 0.0
                     ctx.viewport = window.viewport
@@ -1804,7 +1857,9 @@ def main():
                 hud.state.point_value = item_pool.stats.point_rate
                 active_boss = _get_active_boss()
                 hud.update_from_boss(active_boss)
-                _flush_preview_runtime(_PREVIEW_CHANNEL, stage_manager)
+                _flush_preview_runtime(
+                    _PREVIEW_CHANNEL, stage_manager, bullet_pool, laser_pool
+                )
 
                 if preview_fast_forward_target is not None:
                     continue
@@ -1971,6 +2026,7 @@ def main():
                 break  # Break inner loop, go back to top `while True:` where `run_main_menu` is
             elif game_result_state == "RESTART":
                 if _PREVIEW_CHANNEL is not None:
+                    _PREVIEW_CHANNEL.reset_metrics()
                     _PREVIEW_CHANNEL.emit("state", {"state": "starting"})
                 pass   # Just continue inner loop, re-initializing everything except Main Menu
             else:

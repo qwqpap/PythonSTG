@@ -69,8 +69,8 @@ python main.py --profile
 
 ```
 
-新的关卡编辑器正在按 [代码驱动编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md)
-重建。唯一作者真源是声明式 Python；旧 Scene/Pattern JSON 编辑器不再提供兼容入口。
+关卡编辑器正在按 [代码驱动编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md)
+继续打磨创作工作流。唯一作者真源是声明式 Python；旧 Scene/Pattern JSON 编辑器不再提供兼容入口。
 纹理、自机、敌人、背景、对话和 UI 等独立资产工具继续由各自脚本启动。
 
 ### 开发依赖（编辑器与测试）
@@ -139,7 +139,7 @@ flowchart TB
 | [纹理资产系统](docs/TEXTURE_ASSET_SYSTEM.md) | 图集加载、精灵定义、动画配置 |
 | [开发工具链](docs/DEVTOOLS_PHASE1.md) | 资源校验、热重载和独立预览工具 |
 | [编辑器架构边界](docs/EDITOR_ARCHITECTURE.md) | Python 作者核心、生成器、Qt、预览和 Timeline 的依赖约束 |
-| [编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) | CD0-CD7 实施顺序、边界、验收文件与 Gate |
+| [编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) | CD0-CD4 创作工作流、弹幕设计、Timeline 与验收 Gate |
 
 也可以本地启动 VitePress 文档站点：
 

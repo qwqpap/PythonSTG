@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterable, Sequence
 
-from src.qt_compat.QtCore import QMimeData, Qt, Signal
+from src.qt_compat.QtCore import QEvent, QMimeData, Qt, Signal
 from src.qt_compat.QtWidgets import (
     QButtonGroup,
+    QAbstractItemView,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QStackedWidget,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 
 RESOURCE_MIME = "application/x-pystg-resource"
+UNIT_REFERENCE_MIME = "application/x-pystg-unit-ref"
 _ROLE_URI = int(Qt.ItemDataRole.UserRole)
 
 
@@ -53,6 +58,148 @@ class ResourceListWidget(QListWidget):
         if items:
             data.setData(RESOURCE_MIME, str(items[0].data(_ROLE_URI)).encode("utf-8"))
         return data
+
+
+class UnitTreeWidget(QTreeWidget):
+    """Program-structure tree that can drag only a logical-unit identity."""
+
+    unit_activated = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.itemDoubleClicked.connect(
+            lambda item, _column: self._emit_unit(item)
+        )
+
+    def mimeTypes(self) -> list[str]:
+        return [UNIT_REFERENCE_MIME]
+
+    def mimeData(self, items) -> QMimeData:
+        data = QMimeData()
+        if items:
+            unit_id = items[0].data(0, _ROLE_URI)
+            if unit_id:
+                data.setData(UNIT_REFERENCE_MIME, str(unit_id).encode("utf-8"))
+        return data
+
+    def _emit_unit(self, item: QTreeWidgetItem) -> None:
+        unit_id = item.data(0, _ROLE_URI)
+        if unit_id:
+            self.unit_activated.emit(str(unit_id))
+
+
+class UnitReferenceListWidget(QListWidget):
+    """A specialised Project/Boss Ref list with no local authoring state.
+
+    The list paints a projection supplied by ``EditorSession``.  On every drop
+    it emits only a unit ID plus the requested insertion index; the window
+    validates and commits a single undoable headless mutation before refreshing
+    this projection again.
+    """
+
+    reference_dropped = Signal(str, int)
+    unit_activated = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self._allowed_ids: set[str] = set()
+        self.itemDoubleClicked.connect(
+            lambda item: self._activate(item)
+        )
+
+    def set_references(
+        self,
+        references: Sequence[tuple[str, str]],
+        *,
+        allowed_ids: Iterable[str],
+    ) -> None:
+        self._allowed_ids = {str(item) for item in allowed_ids}
+        self.blockSignals(True)
+        try:
+            self.clear()
+            for index, (unit_id, label) in enumerate(references, start=1):
+                item = QListWidgetItem(f"{index}. {label}")
+                item.setData(_ROLE_URI, unit_id)
+                self.addItem(item)
+        finally:
+            self.blockSignals(False)
+
+    def mimeTypes(self) -> list[str]:
+        return [UNIT_REFERENCE_MIME]
+
+    def mimeData(self, items) -> QMimeData:
+        data = QMimeData()
+        if items:
+            unit_id = items[0].data(_ROLE_URI)
+            if unit_id:
+                data.setData(UNIT_REFERENCE_MIME, str(unit_id).encode("utf-8"))
+        return data
+
+    def dragEnterEvent(self, event) -> None:
+        if self._accepts(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._accepts(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:
+        unit_id = self._unit_id_from_mime(event.mimeData())
+        if unit_id is None or unit_id not in self._allowed_ids:
+            event.ignore()
+            return
+        self.reference_dropped.emit(unit_id, self._drop_index(event.position().toPoint()))
+        event.acceptProposedAction()
+
+    def viewportEvent(self, event) -> bool:
+        """Handle real QListWidget viewport drops as well as direct Qt events."""
+
+        if event.type() == QEvent.Type.DragEnter:
+            self.dragEnterEvent(event)
+            return event.isAccepted()
+        if event.type() == QEvent.Type.DragMove:
+            self.dragMoveEvent(event)
+            return event.isAccepted()
+        if event.type() == QEvent.Type.Drop:
+            self.dropEvent(event)
+            return event.isAccepted()
+        return super().viewportEvent(event)
+
+    def _accepts(self, mime: QMimeData) -> bool:
+        unit_id = self._unit_id_from_mime(mime)
+        return unit_id is not None and unit_id in self._allowed_ids
+
+    @staticmethod
+    def _unit_id_from_mime(mime: QMimeData) -> str | None:
+        if not mime.hasFormat(UNIT_REFERENCE_MIME):
+            return None
+        value = bytes(mime.data(UNIT_REFERENCE_MIME)).decode("utf-8").strip()
+        return value or None
+
+    def _drop_index(self, position) -> int:
+        item = self.itemAt(position)
+        if item is None:
+            return self.count()
+        index = self.row(item)
+        if position.y() > self.visualItemRect(item).center().y():
+            index += 1
+        return index
+
+    def _activate(self, item: QListWidgetItem) -> None:
+        unit_id = item.data(_ROLE_URI)
+        if unit_id:
+            self.unit_activated.emit(str(unit_id))
 
 
 class ActivitySidebar(QWidget):
@@ -118,4 +265,11 @@ def _titled_view(title: str, view: QWidget) -> QWidget:
     return container
 
 
-__all__ = ["ActivitySidebar", "RESOURCE_MIME", "ResourceListWidget"]
+__all__ = [
+    "ActivitySidebar",
+    "RESOURCE_MIME",
+    "ResourceListWidget",
+    "UNIT_REFERENCE_MIME",
+    "UnitReferenceListWidget",
+    "UnitTreeWidget",
+]

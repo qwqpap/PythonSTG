@@ -22,6 +22,11 @@ def _write_project(root: Path) -> Path:
         "stage = Stage('stage', 'Stage', [Wait(12, uid='wait')])\n",
         encoding="utf-8",
     )
+    (root / "spell.py").write_text(
+        "from src.authoring.dsl import Spell, Wait\n\n"
+        "spell = Spell('spell', 'Spell', body=[Wait(30, uid='spell_wait')])\n",
+        encoding="utf-8",
+    )
     return root
 
 
@@ -157,3 +162,83 @@ def test_session_log_and_trace_are_hard_bounded(tmp_path, qapp_session):
     assert session.run_log[0] == "line 188"
     assert len(session.trace_events) == 4096
     assert session.trace_events[0]["uid"] == "904"
+
+
+def test_spell_target_builds_the_real_practice_stage_and_stays_visible(
+    tmp_path, qapp_session, monkeypatch
+):
+    from src.compiler.practice import PRACTICE_STAGE_ID
+    from src.editor.window import EditorWindow
+
+    session = _session(tmp_path)
+    window = EditorWindow(session)
+    builder = _Builder(tmp_path / "generated")
+    (tmp_path / "generated").mkdir()
+    owner = PreviewOwner(session, window.preview_host, builder=builder)
+    launched = []
+    monkeypatch.setattr(owner, "_launch", lambda spec: launched.append(spec) or True)
+
+    assert owner.run(PreviewTarget("spell", "spell"))
+    qapp_session.processEvents()
+    assert builder.prepared_program.get_unit(PRACTICE_STAGE_ID).kind == "Stage"
+    assert launched[0].stage_id == PRACTICE_STAGE_ID
+    assert session.preview_target == ("spell", "spell")
+    assert "Spell 练习场" in window.preview_target_label.text()
+    assert "spell" in window.preview_target_label.text()
+    assert window.build_status_label.text() == "构建：成功"
+    window.close()
+
+
+def test_preview_error_is_visible_and_selects_its_author_node(
+    tmp_path, qapp_session
+):
+    from src.editor.window import EditorWindow
+
+    session = _session(tmp_path)
+    window = EditorWindow(session)
+    window.show()
+    qapp_session.processEvents()
+    owner = window.preview_owner
+    session.select_unit("spell")
+    owner._handle_event(
+        {
+            "event": "error",
+            "payload": {
+                "code": "runtime_error",
+                "message": "authoring node spell_wait: ValueError: bad expression",
+            },
+            "run_id": "test",
+        }
+    )
+    qapp_session.processEvents()
+
+    assert session.preview_state == "error"
+    assert "bad expression" in session.preview_error
+    assert session.current_node_uid == "spell_wait"
+    assert window.preview_error_label.isVisible()
+    assert "spell_wait" in window.preview_error_label.text()
+    assert "bad expression" in window.preview_error_label.text()
+    window.close()
+
+
+def test_restart_starting_state_discards_old_trace_for_the_same_run(
+    tmp_path, qapp_session
+):
+    session = _session(tmp_path)
+    owner = PreviewOwner(session, PreviewHost())
+    session.reset_trace("same-run")
+    session.append_trace(
+        [{"uid": "wait", "phase": "end", "frame": 99}],
+        run_id="same-run",
+    )
+
+    owner._handle_event(
+        {
+            "event": "state",
+            "payload": {"state": "starting"},
+            "run_id": "same-run",
+        }
+    )
+
+    assert session.trace_run_id == "same-run"
+    assert tuple(session.trace_events) == ()

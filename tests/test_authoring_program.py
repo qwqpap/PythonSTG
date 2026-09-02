@@ -50,6 +50,8 @@ from src.authoring.program import (
     DropPlacement,
     Node,
     ProgramError,
+    STATEMENT_UNIT_KINDS,
+    clone_node_with_new_uids,
     create_unit,
     delete_node,
     delete_unit,
@@ -58,10 +60,18 @@ from src.authoring.program import (
     insert_node,
     insert_new_node,
     move_node,
+    node_from_palette,
+    node_from_unit_reference,
     parse_author_value,
+    reference_list_target_kinds,
     set_argument,
     set_template_positional_argument,
     set_unit_field,
+    set_unit_reference_list,
+    stage_reference_tree,
+    unit_accepts_statements,
+    unit_reference_actions,
+    unit_reference_edges,
     validate_insert,
     wrap_node,
 )
@@ -138,6 +148,52 @@ def test_complete_nontrivial_program_validates_and_has_stable_semantics():
         "Task",
         "Function",
     }
+
+
+def test_unit_reference_factory_and_stage_projection_keep_real_refs_explicit():
+    program = _complete_program()
+
+    assert [item.key for item in unit_reference_actions("Wave")] == ["run_wave"]
+    assert [item.key for item in unit_reference_actions("Task")] == ["call", "spawn_task"]
+    wave_node = node_from_unit_reference(program, "Stage", "wave_1")
+    assert wave_node.kind == "RunWave"
+    assert wave_node.arguments["wave_class"] == Ref("wave_1")
+    with pytest.raises(ProgramError, match="requires one of"):
+        node_from_unit_reference(program, "Stage", "burst_task")
+    task_node = node_from_unit_reference(program, "Stage", "burst_task", "spawn_task")
+    assert task_node.kind == "SpawnTask"
+    assert task_node.arguments["task"] == Ref("burst_task")
+
+    stage_edges = unit_reference_edges(program, "stage_1")
+    assert [edge.target_id for edge in stage_edges] == ["wave_1", "boss_1"]
+    projection = stage_reference_tree(program, "stage_1")
+    assert [child.unit_id for child in projection.children] == ["wave_1", "boss_1"]
+    assert [child.unit_id for child in projection.children[1].children] == [
+        "nonspell_1",
+        "spell_1",
+    ]
+
+
+def test_special_reference_lists_are_typed_atomic_model_operations():
+    program = _complete_program()
+    program = create_unit(program, Stage("stage_2", "第二关"), register_stage=False)
+
+    assert reference_list_target_kinds("Project", "stages") == ("Stage",)
+    assert reference_list_target_kinds("Boss", "phases") == ("NonSpell", "Spell")
+    updated = set_unit_reference_list(
+        program,
+        "demo",
+        "stages",
+        ("stage_1", "stage_2"),
+    )
+    assert updated.get_unit("demo").metadata["stages"] == [
+        Ref("stage_1"),
+        Ref("stage_2"),
+    ]
+    with pytest.raises(ProgramError, match="expects Stage"):
+        set_unit_reference_list(updated, "demo", "stages", ("wave_1",))
+    with pytest.raises(ProgramError, match="cannot contain duplicates"):
+        set_unit_reference_list(updated, "demo", "stages", ("stage_1", "stage_1"))
 
 
 @pytest.mark.parametrize(
@@ -900,6 +956,22 @@ def test_move_wrap_rejects_an_occupied_wrapper_without_mutating_the_program():
     assert program.semantic_data() == before
 
 
+def test_editor_clipboard_clone_regenerates_the_entire_subtree_uid_set():
+    source = Repeat(
+        2,
+        [If(True, [Wait(1, uid="inside")], [], uid="condition")],
+        uid="wrapper",
+    )
+
+    clone = clone_node_with_new_uids(source)
+
+    assert clone.semantic_data() != source.semantic_data()
+    assert {node.uid for node in clone.walk()}.isdisjoint(
+        {node.uid for node in source.walk()}
+    )
+    assert clone.arguments == source.arguments
+
+
 def test_new_node_insert_supports_root_slots_wrap_parallel_and_dry_run():
     program = AuthoringProgram.from_units(
         [Function("flow", "Flow", body=[If(True, [], [], uid="condition"), Wait(1, uid="tail")])]
@@ -932,6 +1004,30 @@ def test_new_node_insert_supports_root_slots_wrap_parallel_and_dry_run():
     assert not rejected.allowed and "missing" in rejected.reason
 
 
+def test_non_statement_units_reject_every_statement_insertion_surface():
+    assert STATEMENT_UNIT_KINDS == frozenset(
+        {"Stage", "Wave", "Enemy", "Spell", "NonSpell", "Task", "Function"}
+    )
+    for kind in STATEMENT_UNIT_KINDS:
+        assert unit_accepts_statements(kind)
+    for kind in ("Project", "Boss", "Unknown"):
+        assert not unit_accepts_statements(kind)
+
+    program = _complete_program()
+    before = program.semantic_data()
+    for unit_id in ("demo", "boss_1"):
+        unit = program.get_unit(unit_id)
+        assert not validate_insert(program, unit_id, Wait(1)).allowed
+        with pytest.raises(ProgramError, match="does not contain statement nodes"):
+            node_from_palette("Wait", program, unit.kind)
+        with pytest.raises(ProgramError, match="does not contain statement nodes"):
+            insert_node(program, unit_id, None, "body", 0, Wait(1))
+        with pytest.raises(ProgramError, match="does not contain statement nodes"):
+            insert_new_node(program, unit_id, Wait(1))
+
+    assert program.semantic_data() == before
+
+
 def test_logical_unit_create_duplicate_and_delete_update_refs_and_uids():
     program = AuthoringProgram.from_units(
         [
@@ -953,9 +1049,28 @@ def test_logical_unit_create_duplicate_and_delete_update_refs_and_uids():
         duplicated, Function("caller", "Caller", body=[Call(Ref("task_b"))])
     )
 
+    with pytest.raises(ProgramError, match="explicit replacement"):
+        delete_unit(linked, "stage_a")
+    assert linked.get_unit("demo").metadata == {
+        "start_stage": Ref("stage_a"), "stages": [Ref("stage_a"), Ref("stage_b")]
+    }
+
     deleted = delete_unit(linked, "stage_a", replacement_start_stage="stage_b")
     assert deleted.get_unit("demo").metadata == {
         "start_stage": Ref("stage_b"), "stages": [Ref("stage_b")]
     }
     with pytest.raises(ProgramError, match="referenced"):
         delete_unit(deleted, "task_b")
+
+
+def test_first_registered_stage_replaces_stale_start_reference():
+    program = AuthoringProgram.from_units(
+        [Project("demo", "Demo", Ref("missing"), [])]
+    )
+
+    created = create_unit(program, Stage("stage_a", "A"), register_stage=True)
+
+    project = created.get_unit("demo")
+    assert project.metadata["stages"] == [Ref("stage_a")]
+    assert project.metadata["start_stage"] == Ref("stage_a")
+    assert not [item for item in created.validate() if item.severity == "error"]

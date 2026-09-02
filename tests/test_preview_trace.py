@@ -3,6 +3,9 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
 
 from src.authoring.dsl import Project, Ref, Repeat, Stage, Wait
 from src.authoring.program import AuthoringProgram
@@ -49,6 +52,31 @@ def test_stage_manager_collects_trace_without_per_bullet_callbacks():
     ]
     assert dropped == 0
     assert not hasattr(context, "bullet_trace_callback")
+
+
+def test_preview_density_sample_is_fixed_rate_aggregate_without_callbacks():
+    from main import _EditorPreviewChannel
+
+    channel = _EditorPreviewChannel.__new__(_EditorPreviewChannel)
+    channel._last_metric_frame = -1
+    channel._last_spawned_total = 0
+    data = np.zeros(8, dtype=[("alive", "i4")])
+    data["alive"][:3] = 1
+    pool = SimpleNamespace(spawned_total=5, data=data)
+    lasers = SimpleNamespace(laser_count=2, bent_laser_count=1)
+
+    sample = channel.metric_sample(12, pool, lasers)
+    assert sample == {
+        "kind": "metrics",
+        "frame": 12,
+        "emitted": 5,
+        "live": 3,
+        "lasers": 3,
+    }
+    assert channel.metric_sample(13, pool, lasers) is None
+    pool.spawned_total = 9
+    assert channel.metric_sample(24, pool, lasers)["emitted"] == 4
+    assert not hasattr(pool, "bullet_trace_callback")
 
 
 def test_codegen_wraps_real_author_nodes_and_preserves_control_flow():

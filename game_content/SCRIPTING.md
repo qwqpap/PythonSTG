@@ -126,12 +126,12 @@ spellcard = MySpell
 ```python
 self.fire(
     angle=90,           # 角度（度）
-    speed=2.5,          # 速度（单位/秒）
+    speed=2.5,          # 速度（作者速度标度）
     bullet_type="ball_m",
     color="blue",
     # 可选扩展：
-    accel=0.0,          # 加速度（每秒加速）
-    angle_accel=0.0,    # 角度加速（旋转弹，度/秒）
+    accel=0.0,          # 标量加速度（每秒改变 speed）
+    angle_accel=0.0,    # 运动角加速度（度/秒²；不影响渲染 spin）
     tag=0,              # 分组标签
     friction=0.0,       # 阻尼（0~1，越大减速越快）
     time_scale=1.0,     # 时间缩放（0=冻结，1=正常）

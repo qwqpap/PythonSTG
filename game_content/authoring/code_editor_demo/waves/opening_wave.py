@@ -1,10 +1,11 @@
-from src.authoring.dsl import Ref, SpawnEnemy, Wait, Wave
+from src.authoring.dsl import Call, Ref, SpawnEnemy, Wait, Wave
 
 
 wave = Wave(
     id="opening_wave",
     name="开场妖精",
     body=[
+        Call(Ref("mark_wave"), arguments=["opening"], uid="opening_mark_wave"),
         SpawnEnemy(
             Ref("aimed_fairy"),
             x=-0.45,

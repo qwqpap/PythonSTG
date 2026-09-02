@@ -20,6 +20,7 @@ from src.authoring.program import (
     Ref,
     TemplateTarget,
     find_node,
+    unit_accepts_statements,
 )
 from src.authoring.python_source import (
     AuthoringSourceProject,
@@ -112,6 +113,9 @@ class EditorSession(QObject):
         self.build_state = "idle"
         self.preview_state = "stopped"
         self.preview_frame = 0
+        self.preview_target: tuple[str, str | None] | None = None
+        self.preview_error = ""
+        self.preview_error_uid: str | None = None
         self.last_build_identity: str | None = None
         self.trace_run_id: str | None = None
         self.run_log = deque(maxlen=512)
@@ -277,13 +281,12 @@ class EditorSession(QObject):
         self._pending_tombstone_external.clear()
         self._external_keep.clear()
         self._remember_saved_semantics()
-        units = sorted(
-            source_project.program.logical_units(),
-            key=lambda unit: (unit.kind != "Project", unit.kind, unit.id),
-        )
-        self.current_unit_id = units[0].id if units else None
+        self.current_unit_id = self._initial_unit_id()
         self.current_node_uid = None
         self.current_source_path = self._path_for_unit(self.current_unit_id)
+        self.preview_target = None
+        self.preview_error = ""
+        self.preview_error_uid = None
         self._watch_project_files()
         self.project_changed.emit()
         self.program_changed.emit()
@@ -308,6 +311,9 @@ class EditorSession(QObject):
         self._external_keep.clear()
         self.set_build_state("idle")
         self.set_preview_state("stopped")
+        self.preview_target = None
+        self.preview_error = ""
+        self.preview_error_uid = None
         self.last_build_identity = None
         self.trace_run_id = None
         self.run_log.clear()
@@ -353,7 +359,7 @@ class EditorSession(QObject):
 
     def set_node_argument(self, uid: str, name: str, value: Any) -> None:
         unit, _node, _location = find_node(self.program, uid)
-        self._require_editable_unit(unit.id)
+        self._require_statement_unit(unit.id)
         from .commands import SetNodeArgumentCommand
 
         self.undo_stack.push(SetNodeArgumentCommand(self, uid, name, value))
@@ -364,6 +370,21 @@ class EditorSession(QObject):
 
         self.undo_stack.push(SetUnitFieldCommand(self, unit_id, name, value))
 
+    def set_unit_references(
+        self,
+        unit_id: str,
+        field: str,
+        references: tuple[str, ...],
+    ) -> None:
+        """Replace a Project/Boss specialised Ref list through the one Undo stack."""
+
+        self._require_editable_unit(unit_id)
+        from .commands import SetUnitReferencesCommand
+
+        self.undo_stack.push(
+            SetUnitReferencesCommand(self, unit_id, field, references)
+        )
+
     def move_node(
         self,
         uid: str,
@@ -373,7 +394,7 @@ class EditorSession(QObject):
         target_slot: str | None = None,
     ) -> None:
         unit, _node, _location = find_node(self.program, uid)
-        self._require_editable_unit(unit.id)
+        self._require_statement_unit(unit.id)
         from .commands import MoveNodeCommand
 
         self.undo_stack.push(
@@ -395,7 +416,7 @@ class EditorSession(QObject):
         target_slot: str | None = None,
     ) -> None:
         unit, _target, _location = find_node(self.program, target_uid)
-        self._require_editable_unit(unit.id)
+        self._require_statement_unit(unit.id)
         from .commands import InsertNodeCommand
 
         self.undo_stack.push(
@@ -408,21 +429,21 @@ class EditorSession(QObject):
         unit = self.current_unit
         if unit is None:
             raise ProgramError("no_unit", "请先选择一个逻辑单元")
-        self._require_editable_unit(unit.id)
+        self._require_statement_unit(unit.id)
         from .commands import AppendNodeCommand
 
         self.undo_stack.push(AppendNodeCommand(self, unit.id, node))
 
     def delete_node(self, uid: str) -> None:
         unit, _node, _location = find_node(self.program, uid)
-        self._require_editable_unit(unit.id)
+        self._require_statement_unit(unit.id)
         from .commands import DeleteNodeCommand
 
         self.undo_stack.push(DeleteNodeCommand(self, uid))
 
     def duplicate_node(self, uid: str) -> None:
         unit, _node, _location = find_node(self.program, uid)
-        self._require_editable_unit(unit.id)
+        self._require_statement_unit(unit.id)
         from .commands import DuplicateNodeCommand
 
         self.undo_stack.push(DuplicateNodeCommand(self, uid))
@@ -612,6 +633,22 @@ class EditorSession(QObject):
         if self.preview_state != state:
             self.preview_state = state
             self.preview_changed.emit(state)
+
+    def set_preview_target(self, kind: str, unit_id: str | None = None) -> None:
+        target = (str(kind), str(unit_id) if unit_id is not None else None)
+        if self.preview_target == target:
+            return
+        self.preview_target = target
+        self.preview_changed.emit(self.preview_state)
+
+    def set_preview_error(self, message: str, uid: str | None = None) -> None:
+        message = str(message)
+        uid = str(uid) if uid else None
+        if self.preview_error == message and self.preview_error_uid == uid:
+            return
+        self.preview_error = message
+        self.preview_error_uid = uid
+        self.preview_changed.emit(self.preview_state)
 
     def append_run_log(self, text: str) -> None:
         for line in str(text).replace("\r\n", "\n").replace("\r", "\n").splitlines():
@@ -817,7 +854,7 @@ class EditorSession(QObject):
         unit_ids = {unit.id for unit in self.program.logical_units()}
         self.current_unit_id = previous_unit if previous_unit in unit_ids else None
         if self.current_unit_id is None and unit_ids:
-            self.current_unit_id = sorted(unit_ids)[0]
+            self.current_unit_id = self._initial_unit_id()
         self.current_source_path = (
             previous_source
             if previous_source in self.source_project.files
@@ -840,6 +877,32 @@ class EditorSession(QObject):
                 return relative
         return None
 
+    def _initial_unit_id(self) -> str | None:
+        """Choose the author-facing entry without hiding a broken Project.
+
+        A supported, valid project opens at its declared start Stage.  If the
+        Project declaration itself is incomplete, retain that Project surface so
+        its diagnostics are visible instead of silently selecting an arbitrary
+        Stage.  Projects without a Project unit use stable ordering as the
+        parser's fallback behavior.
+        """
+
+        if self.source_project is None:
+            return None
+        units = tuple(self.program.logical_units())
+        project = next((unit for unit in units if unit.kind == "Project"), None)
+        if project is not None:
+            start = project.metadata.get("start_stage")
+            if isinstance(start, Ref):
+                try:
+                    stage = self.program.get_unit(start.id)
+                except ProgramError:
+                    stage = None
+                if stage is not None and stage.kind == "Stage":
+                    return stage.id
+            return project.id
+        return min((unit.id for unit in units), default=None)
+
     def _require_editable_unit(self, unit_id: str) -> None:
         if self.source_project is None:
             raise SourceSaveError("project_closed", "no authoring project is open")
@@ -848,6 +911,14 @@ class EditorSession(QObject):
             raise SourceSaveError("read_only", "unsupported Python is read-only")
         if document.conflict and not document.overwrite_confirmed:
             raise SourceConflictError()
+
+    def _require_statement_unit(self, unit_id: str) -> None:
+        self._require_editable_unit(unit_id)
+        unit = self.program.get_unit(unit_id)
+        if not unit_accepts_statements(unit.kind):
+            raise ProgramError(
+                "invalid_insert", f"{unit.kind} does not contain statement nodes"
+            )
 
     def _watch_project_files(self) -> None:
         watched = self.file_watcher.files()

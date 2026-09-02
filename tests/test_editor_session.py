@@ -83,9 +83,28 @@ def test_session_owns_build_preview_and_selection_state(tmp_path, qapp_session):
 
     assert session.build_state == "idle"
     assert session.preview_state == "stopped"
-    assert session.current_unit.kind == "Project"
+    assert session.current_unit.kind == "Stage"
+    assert session.current_unit_id == "stage"
 
     session.select_source(Path("stages/stage.py"))
     assert session.current_unit_id == "stage"
     assert session.current_document.path == root / "stages" / "stage.py"
     assert "Stage(" in session.source_text
+
+
+def test_invalid_start_stage_keeps_project_selected_for_diagnostics(tmp_path, qapp_session):
+    root = _write_project(tmp_path / "authoring")
+    project_path = root / "project.py"
+    project_path.write_text(
+        project_path.read_text(encoding="utf-8").replace(
+            "start_stage=Ref('stage')", "start_stage=Ref('missing')"
+        ),
+        encoding="utf-8",
+    )
+    session = EditorSession(project_context=ProjectContext(Path.cwd()))
+
+    session.open_project(root)
+
+    assert session.current_unit.kind == "Project"
+    assert session.current_unit_id == "demo"
+    assert any(item.severity == "error" for item in session.diagnostics)

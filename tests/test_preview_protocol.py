@@ -84,6 +84,19 @@ def test_protocol_enforces_line_and_trace_batch_bounds():
         )
 
 
+def test_protocol_accepts_only_bounded_non_negative_metric_samples():
+    sample = {"kind": "metrics", "frame": 12, "emitted": 8, "live": 20, "lasers": 1}
+    message = event_message("r", "trace", {"events": [sample]})
+    assert decode_message(encode_message(message)) == message
+    for invalid in (
+        {**sample, "live": -1},
+        {**sample, "frame": True},
+        {**sample, "extra": 1},
+    ):
+        with pytest.raises(PreviewProtocolError):
+            event_message("r", "trace", {"events": [invalid]})
+
+
 def test_frame_event_requires_a_non_negative_integer():
     assert event_message("r", "frame", {"frame": 0})["payload"]["frame"] == 0
     for value in (-1, True, 1.5, "1"):

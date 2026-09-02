@@ -60,7 +60,7 @@ src/
 │  ├─ commands.py         # QUndoCommand 模型操作
 │  ├─ sidebars.py         # 程序/文件/全局资产/Stage 资产
 │  ├─ node_palette.py     # 常驻节点库：搜索、兼容过滤、引用候选、模板
-│  ├─ program_tree.py     # 自定义绘制纵向程序流与四区拖拽覆盖层
+│  ├─ program_tree.py     # 自定义绘制纵向程序流与插入线/容器/包裹拖放反馈
 │  ├─ inspector.py        # 由 DSL 类型注解生成字段编辑器
 │  ├─ code_view.py        # 作者/生成 Python 只读查看
 │  ├─ output.py           # Problems 和有界运行日志
@@ -129,10 +129,16 @@ source_path: Path
 `Project` 用引用声明 Stage 顺序和 start stage。其他单元通过 `Ref` 建立显式依赖。
 解析器先收集工程内 ID，再验证引用和父子上下文。
 
+`program.py` 公开 `unit_accepts_statements(kind) -> bool`。它只回答现有 Runtime 是否执行该
+逻辑单元的 `body`：Project 与 Boss 为 false，Stage/Wave/Enemy/Spell/NonSpell/Task/Function
+为 true。插入验证、原型工厂和 Qt 不得各自维护不同判断；Project 关卡顺序与 Boss phases
+使用专用引用表面，而不是空节点树。
+
 ### 3.4 纯模型操作
 
 `program.py` 提供无 UI 副作用的操作：
 
+- `unit_accepts_statements(kind)`；
 - `insert_node(parent, slot, index, node)`；
 - `delete_node(uid)`；
 - `move_node(uid, target, placement)`；
@@ -150,6 +156,11 @@ source_path: Path
 
 新增或修改 Runtime 公共方法时，必须在同一变更中更新 DSL 签名映射和 parity 测试。
 Inspector 读取 Python 类型注解；不得维护单独的 JSON 参数描述器。
+
+所有公开发射参数必须显式存在于 DSL 签名。包括弹型、颜色、tag、加速度/角加速度、阻尼、
+时间缩放、反弹、自转、渲染角、缩放、寿命和曲线；作者入口不得使用不可发现的通用 kwargs。
+单发与 batch codegen 必须得到同一运动语义。无法由 Runtime 实现的公开参数是构建错误，不能
+静默 `pop` 或退化。
 
 控制节点定义允许的 children slot：
 
@@ -345,24 +356,29 @@ Panel 读取 Session 并调用公开命令工厂；不得自己保存第二份�
 Editor/Game 是两个独立可关闭组，关闭后有固定菜单动作恢复。Inspector 是右侧辅助栏。
 Timeline 永久挂在底部，可调高度但无关闭动作。
 
-左侧为上下分栏：上方保留四视图，下方常驻节点库（`node_palette.py`）。节点库只
-保存中文标签和类别；构造函数参数、父子规则与引用候选类型分别由 headless
-`node_from_palette`、`validate_insert` 和 `reference_kinds_for_node` 推导。缺少引用候选时
-节点库显示明确的新建对应逻辑单元入口。新节点拖拽使用瞬态 MIME
-`application/x-pystg-node-prototype`，只携带节点或模板 identity。
+左侧为上下分栏：上方的程序结构有“全部单元”和“当前 Stage 调用链”两种投影，下方常驻
+节点库（`node_palette.py`）。节点库只保存中文标签和类别；构造函数参数、父子规则与引用
+候选类型分别由 headless `node_from_palette`、`validate_insert` 和
+`reference_kinds_for_node` 推导。缺少引用候选时节点库显示明确的新建对应逻辑单元入口。
+新节点使用瞬态 MIME `application/x-pystg-node-prototype`，逻辑单元使用
+`application/x-pystg-unit-ref`；两者都只携带 identity，不保存作者数据。
 
-中央程序流（`program_tree.py` 的 `ProgramFlow`）是自定义绘制的纵向块式投影：
-每个节点一张缩进卡片；`Repeat`/`If`/`At`/`SpawnTask` 直接展示嵌套区域；空容器
-显示"拖到这里添加内容"；`If` 显示"条件成立/否则"；`Parallel` 分支在宽视口并排、
-窄视口纵向堆叠；支持折叠、边缘自动滚动、悬停 450ms 自动展开、Esc 取消拖动。
+中央程序流（`program_tree.py` 的 `ProgramFlow`）是自定义绘制的纵向块式投影：每个节点一张
+缩进卡片；`Repeat`/`If`/`At`/`SpawnTask` 直接展示嵌套区域；空容器显示“拖到这里添加内容”；
+`If` 显示“条件成立/否则”；`Parallel` 分支在宽视口并排、窄视口纵向堆叠；支持折叠、边缘
+自动滚动、悬停展开和 Esc 取消拖动。Project 与 Boss 改为各自的关卡顺序/phases 表面。
 
-程序节点拖拽先计算唯一 `DropPlacement`：`BEFORE`、`AFTER`、`CHILD`、`WRAP`。
-拖动期间只显示候选，释放时生成恰一个 `QUndoCommand`。Inspector 和资源拖拽同理。
-放置成功后选中新节点、闪烁高亮，并把 Inspector 滚动到建议首先修改的字段。
+程序节点拖拽先计算唯一 `DropPlacement`：`BEFORE`、`AFTER`、`CHILD`、`WRAP`。Before/After
+用节点间插入线，Child 用可见容器内容区，Wrap 用可见手柄或 Alt 拖放；不得再用悬浮四区
+放大面板或全局插入模式。已有节点只从拖动手柄移动。释放时生成恰一个 `QUndoCommand`；
+Inspector 和资源拖拽同理。放置成功后选中新节点、闪烁高亮，并把 Inspector 滚动到建议
+首先修改的字段。
 Inspector 从 DSL 注解生成 Literal、Ref、常量/Expr、资源、列表/字典控件；Task/Function
-参数使用名称/类型/默认值三列表格，提交仍进入同一个 Undo 栈。模板原型从已解析签名取得
-默认参数，保存时保持模板调用而不展开。显式外部模板的节点库签名通过模块源码静态读取，
-编辑/刷新节点库不得 import 或执行外部模块；可信代码只在构建展开阶段执行。
+参数使用名称/类型/默认值三列表格，提交仍进入同一个 Undo 栈。它以中文展示位置、发射形状、
+运动、外观、声音和生命周期，能从现有 alias/atlas 查询弹型缩略图和参数几何示意，但不能
+复制 DSL 默认值、父子规则或 Runtime 语义。模板原型从已解析签名取得默认参数，保存时保持
+模板调用而不展开。显式外部模板的节点库签名通过模块源码静态读取，编辑/刷新节点库不得
+import 或执行外部模块；可信代码只在构建展开阶段执行。
 只有明确的 `res://` 语义字段显示资源拖入与文件选择；逻辑单元显示名等普通字符串使用
 普通文本框，不伪装为资源字段。
 
@@ -400,7 +416,8 @@ Run 在临时构建完成全部验证前不停止旧预览。验证成功后，o
 
 控制消息只允许：`pause`、`resume`、`restart`、`seek`、`stop`。事件只允许：`ready`、
 `state`、`frame`、`trace`、`error`、`stopped`。消息带协议版本和本次 run identity；过期
-进程事件丢弃。stdout/stderr 和 Trace 队列都有硬上限。
+进程事件丢弃。`trace` 可携带节点边界和固定采样的 emitted/live/laser 聚合指标，但不得
+携带逐子弹回调或无界事件流。stdout/stderr 和 Trace 队列都有硬上限。
 
 Windows `PreviewHost` 只负责发现该 QProcess 创建的 GLFW 顶层窗口、验证 PID、保存原
 window style/parent、调用 Win32 `SetParent` 和尺寸/焦点同步，并在退出时恢复/释放。
@@ -421,20 +438,26 @@ Headless Timeline analyzer 输出 `TimelineInterval`，不序列化回作者文�
 
 ```python
 uid: str
-start: int | Unknown
-end: int | Unknown
+parent_uid: str | None
+start: int | Unknown                 # 静态预计
+end: int | Unknown                   # 静态预计
+observed_start: int | None           # 同一 run identity 的 Trace
+observed_end: int | None
 lane: str
 kind: static | branch | parallel | spawned | template | dynamic
+display: span | milestone | aggregate | unknown
 editable: none | wait | duration | at
 children: tuple[TimelineInterval, ...]
 ```
 
-静态规则：顺序累加、`Wait` 推进、常量 Repeat 展开时间、Parallel 分泳道且 awaited 取最长、
-SpawnTask 不阻塞、If 显示分支范围。动态循环、RawPython、动态 Expr 和未知模板传播
-`Unknown`，不猜数值。
+投影还包含章节、lane 层级和可选的有界指标桶。静态规则：顺序累加、`Wait` 推进、常量
+Repeat 计算聚合时间、Parallel 分泳道且 awaited 取最长、SpawnTask 不阻塞、If 显示分支范围。
+父容器显示为章节背景或括号，叶节点显示真实区间；零时长动作用 milestone；动态循环、
+RawPython、动态 Expr 和未知模板传播 `Unknown`，不猜数值，后续节点仍保留源顺序。
 
-Trace overlay 以 run identity 和 `uid` 合并本次实际 start/end/branch。它不修改静态模型、
-源文件、dirty 或 Undo。点击区间选择节点，点击节点选择对应区间。
+Trace overlay 以 run identity 和 `uid` 填入 `observed_start/observed_end/branch`，而非覆盖
+静态 start/end。它不修改静态模型、源文件、dirty 或 Undo。点击区间选择节点，点击节点选择
+对应区间。
 
 反向编辑必须先证明目标参数是字面量：`Wait.frames`、任意声明为 `duration` 的字面量参数、
 `At.frame`。除此之外 Timeline 不产生命令。
@@ -476,9 +499,10 @@ Pattern/Scene contribution。`src/game.events`、适配器和生命周期批处�
 ### Qt 集
 
 - 四种侧栏、中央组恢复、Inspector、永久 Timeline；
-- Before/After/Child/Wrap；Inspector/资产拖拽；
+- 全部单元/当前 Stage 调用链、逻辑单元直接拖放、插入线/Child/Wrap；
+- Inspector/资产拖拽、弹型缩略图、Expr 补全与输入不崩溃；
 - 模板调用保留、Undo/Redo、冲突/重开；
-- Run/stale/rebuild/stop；三种 Timeline 反向编辑。
+- Run/stale/rebuild/stop；三种 Timeline 反向编辑、预计/Trace 对比和有界密度指标。
 
 ### Windows native gate
 
@@ -503,6 +527,7 @@ git diff --cached --check
 真实 Windows gate 必须清除 `QT_QPA_PLATFORM` 后单独运行。重型完整引擎测试独立执行，
 不绑定每次 UI 修改。
 
-预算：DSL/生成器快速集 <15 秒；新编辑器完整自动化 <60 秒；PR 主门禁 <5 分钟；新作者
-核心、compiler、editor、preview 支持总代码目标不超过 12,000 行；最终产品代码净删除显著
-大于新增。预算失败是性能证据红，不得通过删断言或跳过真实路径变绿。
+预算：DSL/生成器快速集 <15 秒；新编辑器完整自动化 <60 秒；PR 主门禁 <5 分钟；节点库
+筛选/刷新 <50ms、拖拽落点计算 p95 <16ms、2,000 个 Timeline 投影元素的平移/缩放 p95
+<33ms。产品代码不设物理总行硬上限，但每阶段报告净增、净删、已删除旧交互和性能变化。
+预算失败是性能证据红，不得通过删断言或跳过真实路径变绿。

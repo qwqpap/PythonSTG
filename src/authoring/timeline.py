@@ -45,6 +45,11 @@ class TimelineInterval:
     editable: str = "none"
     label: str = ""
     children: tuple["TimelineInterval", ...] = ()
+    parent_uid: str | None = None
+    observed_start: int | None = None
+    observed_end: int | None = None
+    observed_branch: str | None = None
+    display: str = "auto"
 
     def __post_init__(self) -> None:
         if self.kind not in {
@@ -58,6 +63,36 @@ class TimelineInterval:
             raise ValueError(f"unsupported Timeline kind: {self.kind}")
         if self.editable not in {"none", "wait", "duration", "at"}:
             raise ValueError(f"unsupported Timeline edit: {self.editable}")
+        if self.display == "auto":
+            if isinstance(self.start, Unknown) or isinstance(self.end, Unknown):
+                display = "unknown"
+            elif self.children:
+                display = "aggregate"
+            elif self.start == self.end:
+                display = "milestone"
+            else:
+                display = "span"
+            object.__setattr__(self, "display", display)
+        elif self.display not in {"span", "milestone", "aggregate", "unknown"}:
+            raise ValueError(f"unsupported Timeline display: {self.display}")
+        if self.observed_branch not in {None, "then", "else"}:
+            raise ValueError(f"unsupported observed branch: {self.observed_branch}")
+
+
+@dataclass(frozen=True)
+class TimelineMetricSample:
+    """One bounded runtime density sample, never an authoring document."""
+
+    frame: int
+    emitted: int
+    live: int
+    lasers: int
+
+    def __post_init__(self) -> None:
+        for name in ("frame", "emitted", "live", "lasers"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"Timeline metric {name} must be a non-negative integer")
 
 
 @dataclass(frozen=True)
@@ -66,6 +101,7 @@ class TimelineProjection:
     intervals: tuple[TimelineInterval, ...]
     end: Frame
     trace_run_id: str | None = None
+    metrics: tuple[TimelineMetricSample, ...] = ()
 
     def all_intervals(self) -> tuple[TimelineInterval, ...]:
         values: list[TimelineInterval] = []
@@ -81,6 +117,16 @@ class TimelineProjection:
 
     def find(self, uid: str) -> TimelineInterval | None:
         return next((item for item in self.all_intervals() if item.uid == uid), None)
+
+    @property
+    def observed_end(self) -> int | None:
+        values = [
+            interval.observed_end
+            for interval in self.all_intervals()
+            if interval.observed_end is not None
+        ]
+        values.extend(sample.frame for sample in self.metrics)
+        return max(values) if values else None
 
 
 class TimelineAnalyzer:
@@ -105,6 +151,7 @@ class TimelineAnalyzer:
             "main",
             {},
             (selected.id,),
+            parent_uid=None,
         )
         return TimelineProjection(selected.id, intervals, end)
 
@@ -117,10 +164,12 @@ class TimelineAnalyzer:
         unit_stack: tuple[str, ...],
         *,
         collect: bool = True,
+        parent_uid: str | None,
     ) -> tuple[tuple[TimelineInterval, ...], Frame]:
         intervals: list[TimelineInterval] = []
         for node in nodes:
             interval = self._node(node, cursor, lane, environment, unit_stack)
+            interval = replace(interval, parent_uid=parent_uid)
             if collect:
                 intervals.append(interval)
             cursor = interval.end
@@ -151,11 +200,24 @@ class TimelineAnalyzer:
             frame = _integer(node.arguments.get("frame"), environment)
             body_start = _at_frame(start, frame, node.uid)
             children, end = self._sequence(
-                node.children.get("body", ()), body_start, lane, environment, unit_stack
+                node.children.get("body", ()),
+                body_start,
+                f"{lane}/body:{node.uid}",
+                environment,
+                unit_stack,
+                parent_uid=node.uid,
             )
             editable = "at" if _literal_integer(node.arguments.get("frame")) is not None else "none"
             return TimelineInterval(
-                node.uid, start, end, lane, _static_kind(end), editable, label, children
+                node.uid,
+                start,
+                end,
+                lane,
+                _static_kind(end),
+                editable,
+                label,
+                children,
+                display=_aggregate_display(end),
             )
 
         if kind in {"MoveTo", "MoveLinear"}:
@@ -179,7 +241,12 @@ class TimelineAnalyzer:
         if kind == "Repeat":
             count = _integer(node.arguments.get("count"), environment)
             children, body_end = self._sequence(
-                node.children.get("body", ()), start, lane, environment, unit_stack
+                node.children.get("body", ()),
+                start,
+                f"{lane}/body:{node.uid}",
+                environment,
+                unit_stack,
+                parent_uid=node.uid,
             )
             duration = _difference(body_end, start)
             if count is None or duration is None:
@@ -187,14 +254,26 @@ class TimelineAnalyzer:
             else:
                 end = _advance(start, max(0, count) * duration, "")
             return TimelineInterval(
-                node.uid, start, end, lane, _static_kind(end), label=label, children=children
+                node.uid,
+                start,
+                end,
+                lane,
+                _static_kind(end),
+                label=label,
+                children=children,
+                display=_aggregate_display(end),
             )
 
         if kind == "ForEach":
             iterable = _resolved(node.arguments.get("iterable"), environment)
             count = len(iterable) if isinstance(iterable, (list, tuple)) else None
             children, body_end = self._sequence(
-                node.children.get("body", ()), start, lane, environment, unit_stack
+                node.children.get("body", ()),
+                start,
+                f"{lane}/body:{node.uid}",
+                environment,
+                unit_stack,
+                parent_uid=node.uid,
             )
             duration = _difference(body_end, start)
             if count is None or duration is None:
@@ -202,12 +281,24 @@ class TimelineAnalyzer:
             else:
                 end = _advance(start, count * duration, "")
             return TimelineInterval(
-                node.uid, start, end, lane, _static_kind(end), label=label, children=children
+                node.uid,
+                start,
+                end,
+                lane,
+                _static_kind(end),
+                label=label,
+                children=children,
+                display=_aggregate_display(end),
             )
 
         if kind == "While":
             children, _ = self._sequence(
-                node.children.get("body", ()), start, lane, environment, unit_stack
+                node.children.get("body", ()),
+                start,
+                f"{lane}/body:{node.uid}",
+                environment,
+                unit_stack,
+                parent_uid=node.uid,
             )
             return TimelineInterval(
                 node.uid,
@@ -217,6 +308,7 @@ class TimelineAnalyzer:
                 "dynamic",
                 label=label,
                 children=children,
+                display="unknown",
             )
 
         if kind == "If":
@@ -230,6 +322,7 @@ class TimelineAnalyzer:
                     branch_lane,
                     environment,
                     unit_stack,
+                    parent_uid=node.uid,
                 )
                 children.extend(values)
                 branch_ends[suffix] = branch_end
@@ -246,6 +339,7 @@ class TimelineAnalyzer:
                 "branch" if not isinstance(end, Unknown) else "dynamic",
                 label=label,
                 children=tuple(children),
+                display=_aggregate_display(end),
             )
 
         if kind == "Parallel":
@@ -259,6 +353,7 @@ class TimelineAnalyzer:
                     branch_lane,
                     environment,
                     unit_stack,
+                    parent_uid=node.uid,
                 )
                 children.extend(values)
                 ends.append(branch_end)
@@ -271,6 +366,7 @@ class TimelineAnalyzer:
                 "parallel",
                 label=label,
                 children=tuple(children),
+                display=_aggregate_display(end),
             )
 
         if kind == "SpawnTask":
@@ -285,6 +381,7 @@ class TimelineAnalyzer:
                     values if isinstance(values, Mapping) else {},
                     unit_stack,
                     expected={"Task"},
+                    parent_uid=node.uid,
                 )
             else:
                 children, _ = self._sequence(
@@ -293,9 +390,17 @@ class TimelineAnalyzer:
                     spawn_lane,
                     environment,
                     unit_stack,
+                    parent_uid=node.uid,
                 )
             return TimelineInterval(
-                node.uid, start, start, lane, "spawned", label=label, children=tuple(children)
+                node.uid,
+                start,
+                start,
+                lane,
+                "spawned",
+                label=label,
+                children=tuple(children),
+                display="aggregate",
             )
 
         if kind == "Call":
@@ -318,9 +423,17 @@ class TimelineAnalyzer:
                 call_values,
                 unit_stack,
                 expected={"Task", "Function"},
+                parent_uid=node.uid,
             )
             return TimelineInterval(
-                node.uid, start, end, lane, _static_kind(end), label=label, children=children
+                node.uid,
+                start,
+                end,
+                lane,
+                _static_kind(end),
+                label=label,
+                children=children,
+                display=_aggregate_display(end),
             )
 
         if kind == "RunWave":
@@ -331,17 +444,37 @@ class TimelineAnalyzer:
                 {},
                 unit_stack,
                 expected={"Wave"},
+                parent_uid=node.uid,
             )
             return TimelineInterval(
-                node.uid, start, end, lane, _static_kind(end), label=label, children=children
+                node.uid,
+                start,
+                end,
+                lane,
+                _static_kind(end),
+                label=label,
+                children=children,
+                display=_aggregate_display(end),
             )
 
         if kind == "RunBoss":
             children, end = self._boss_sequence(
-                node.arguments.get("boss_def"), start, lane, environment, unit_stack
+                node.arguments.get("boss_def"),
+                start,
+                lane,
+                environment,
+                unit_stack,
+                parent_uid=node.uid,
             )
             return TimelineInterval(
-                node.uid, start, end, lane, _static_kind(end), label=label, children=children
+                node.uid,
+                start,
+                end,
+                lane,
+                _static_kind(end),
+                label=label,
+                children=children,
+                display=_aggregate_display(end),
             )
 
         if kind == "TemplateCall":
@@ -349,12 +482,24 @@ class TimelineAnalyzer:
                 self._register_template_target(node)
                 expanded = expand_nodes([node], self.template_registry)
                 _, end = self._sequence(
-                    expanded, start, lane, environment, unit_stack, collect=False
+                    expanded,
+                    start,
+                    lane,
+                    environment,
+                    unit_stack,
+                    collect=False,
+                    parent_uid=node.uid,
                 )
             except (TemplateExpansionError, TemplateResolutionError) as exc:
                 end = Unknown(f"{node.uid}: {exc.code}")
             return TimelineInterval(
-                node.uid, start, end, lane, "template" if not isinstance(end, Unknown) else "dynamic", label=label
+                node.uid,
+                start,
+                end,
+                lane,
+                "template" if not isinstance(end, Unknown) else "dynamic",
+                label=label,
+                display=_aggregate_display(end),
             )
 
         if kind in {"RawPython", "Break", "Continue", "Return"}:
@@ -365,6 +510,7 @@ class TimelineAnalyzer:
                 lane,
                 "dynamic",
                 label=label,
+                display="unknown",
             )
 
         return TimelineInterval(node.uid, start, start, lane, "static", label=label)
@@ -405,9 +551,16 @@ class TimelineAnalyzer:
         unit_stack: tuple[str, ...],
         *,
         expected: set[str],
+        parent_uid: str,
     ) -> tuple[TimelineInterval, ...]:
         return self._referenced_sequence(
-            target, start, lane, arguments, unit_stack, expected=expected
+            target,
+            start,
+            lane,
+            arguments,
+            unit_stack,
+            expected=expected,
+            parent_uid=parent_uid,
         )[0]
 
     def _referenced_sequence(
@@ -419,6 +572,7 @@ class TimelineAnalyzer:
         unit_stack: tuple[str, ...],
         *,
         expected: set[str],
+        parent_uid: str,
     ) -> tuple[tuple[TimelineInterval, ...], Frame]:
         if not isinstance(target, Ref):
             return (), Unknown("引用不是静态 Ref")
@@ -431,7 +585,14 @@ class TimelineAnalyzer:
         if unit.kind not in expected:
             return (), Unknown(f"引用类型错误: {target.id}")
         environment = _bind_parameters(unit, arguments)
-        return self._sequence(unit.body, start, lane, environment, (*unit_stack, unit.id))
+        return self._sequence(
+            unit.body,
+            start,
+            lane,
+            environment,
+            (*unit_stack, unit.id),
+            parent_uid=parent_uid,
+        )
 
     def _boss_sequence(
         self,
@@ -440,6 +601,8 @@ class TimelineAnalyzer:
         lane: str,
         environment: Mapping[str, Any],
         unit_stack: tuple[str, ...],
+        *,
+        parent_uid: str,
     ) -> tuple[tuple[TimelineInterval, ...], Frame]:
         del environment
         if not isinstance(target, Ref):
@@ -461,7 +624,12 @@ class TimelineAnalyzer:
                 return tuple(children), Unknown(f"未解析 phase: {phase_ref.id}")
             phase_lane = f"{lane}/boss:{boss.id}:phase:{index + 1}"
             values, _ = self._sequence(
-                phase.body, cursor, phase_lane, {}, (*unit_stack, boss.id, phase.id)
+                phase.body,
+                cursor,
+                phase_lane,
+                {},
+                (*unit_stack, boss.id, phase.id),
+                parent_uid=parent_uid,
             )
             children.extend(values)
             limit = phase.metadata.get("time_limit", 60.0)
@@ -518,13 +686,26 @@ def overlay_trace(
     trace_events: Iterable[Mapping[str, Any]],
     run_id: str,
 ) -> TimelineProjection:
-    """Return a projection whose observed node bounds use one run's Trace."""
+    """Attach one run's observations without changing the static projection."""
 
     starts: dict[str, list[int]] = {}
     ends: dict[str, list[int]] = {}
+    metrics: dict[int, TimelineMetricSample] = {}
     for event in trace_events:
         event_run = event.get("run_id", run_id)
         if event_run != run_id:
+            continue
+        if event.get("kind") == "metrics":
+            try:
+                sample = TimelineMetricSample(
+                    frame=event.get("frame"),
+                    emitted=event.get("emitted"),
+                    live=event.get("live"),
+                    lasers=event.get("lasers"),
+                )
+            except (TypeError, ValueError):
+                continue
+            metrics[sample.frame] = sample
             continue
         uid = event.get("uid")
         phase = event.get("phase")
@@ -539,23 +720,32 @@ def overlay_trace(
         children = tuple(apply(child) for child in interval.children)
         observed_starts = starts.get(interval.uid, ())
         observed_ends = ends.get(interval.uid, ())
-        if not observed_starts and not observed_ends:
-            return replace(interval, children=children)
-        start: Frame = min(observed_starts) if observed_starts else interval.start
-        end: Frame = (
-            max(observed_ends)
-            if observed_ends
-            else Unknown(f"{interval.uid}: 本次运行尚未结束")
+        branch = None
+        if interval.kind in {"branch", "dynamic"} and children:
+            observed_lanes = {
+                child.lane
+                for child in _walk_intervals(children)
+                if child.observed_start is not None or child.observed_end is not None
+            }
+            if any(lane.endswith(":then") for lane in observed_lanes):
+                branch = "then"
+            elif any(lane.endswith(":else") for lane in observed_lanes):
+                branch = "else"
+        return replace(
+            interval,
+            children=children,
+            observed_start=min(observed_starts) if observed_starts else None,
+            observed_end=max(observed_ends) if observed_ends else None,
+            observed_branch=branch,
         )
-        return replace(interval, start=start, end=end, children=children)
 
     intervals = tuple(apply(interval) for interval in projection.intervals)
-    observed_end = intervals[-1].end if intervals else projection.end
     return TimelineProjection(
         projection.unit_id,
         intervals,
-        observed_end,
+        projection.end,
         trace_run_id=run_id,
+        metrics=tuple(metrics[frame] for frame in sorted(metrics)),
     )
 
 
@@ -630,6 +820,18 @@ def _static_kind(end: Frame) -> str:
     return "dynamic" if isinstance(end, Unknown) else "static"
 
 
+def _aggregate_display(end: Frame) -> str:
+    return "unknown" if isinstance(end, Unknown) else "aggregate"
+
+
+def _walk_intervals(
+    intervals: Sequence[TimelineInterval],
+) -> Iterable[TimelineInterval]:
+    for interval in intervals:
+        yield interval
+        yield from _walk_intervals(interval.children)
+
+
 def _label(node: Node) -> str:
     if node.kind == "Wait":
         return f"Wait · {node.arguments.get('frames')} 帧"
@@ -650,6 +852,7 @@ __all__ = [
     "Frame",
     "TimelineAnalyzer",
     "TimelineInterval",
+    "TimelineMetricSample",
     "TimelineProjection",
     "Unknown",
     "overlay_trace",

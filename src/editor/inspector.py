@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
+import math
 import types
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
@@ -17,11 +20,12 @@ from src.authoring.program import (
     parse_author_value,
     reference_kinds_for_field,
 )
-from src.qt_compat.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from src.qt_compat.QtGui import QColor, QPainter, QPen
+from src.qt_compat.QtCore import QPointF, QRect, QRectF, QStringListModel, Qt, QTimer, Signal
+from src.qt_compat.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from src.qt_compat.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -43,6 +47,76 @@ from .sidebars import RESOURCE_MIME
 
 
 _EXPR_TOGGLE_TIP = "把常量改为表达式"
+
+_GROUP_ORDER = (
+    "basic",
+    "position",
+    "emission",
+    "motion",
+    "appearance",
+    "sound",
+    "lifecycle",
+    "advanced",
+)
+_GROUP_LABELS = {
+    "basic": "基础",
+    "position": "位置",
+    "emission": "发射形状",
+    "motion": "运动",
+    "appearance": "外观",
+    "sound": "声音",
+    "lifecycle": "生命周期",
+    "advanced": "高级",
+}
+_FIELD_LABELS = {
+    "name": "名称", "title": "标题", "subtitle": "副标题",
+    "frames": "等待帧数", "frame": "目标帧", "count": "数量",
+    "condition": "条件", "iterable": "迭代对象", "target": "目标变量",
+    "value": "值", "assign": "结果变量", "arguments": "位置参数",
+    "keywords": "关键字参数", "function": "函数", "task": "任务",
+    "wave_class": "波次", "boss_def": "Boss", "enemy_class": "敌机",
+    "is_midboss": "中途 Boss", "x": "横坐标 X", "y": "纵坐标 Y",
+    "dx": "水平位移 ΔX", "dy": "垂直位移 ΔY", "duration": "持续帧数",
+    "angle": "角度", "start_angle": "起始角", "center_angle": "中心角",
+    "arc_angle": "扇形角度", "offset_angle": "瞄准偏移角",
+    "angle_offset": "角度偏移", "orbit_radius": "轨道半径",
+    "theta": "轨道角", "speed": "速度", "accel": "加速度",
+    "angle_accel": "角加速度", "friction": "阻尼", "time_scale": "时间倍率",
+    "bounce_x": "水平反弹", "bounce_y": "垂直反弹", "spin": "自转速度",
+    "radial_speed": "径向速度", "angular_velocity": "轨道角速度",
+    "curve_type": "曲线类型", "curve_params": "曲线参数",
+    "bullet_type": "弹型", "color": "颜色", "render_angle": "渲染角度",
+    "render_scale": "渲染缩放", "collision_radius": "碰撞半径",
+    "render_mode": "渲染模式", "sprite": "精灵资源", "texture": "纹理资源",
+    "texture_id": "纹理标识", "animations": "动画映射",
+    "width": "宽度", "length": "长度", "l1": "前段长度",
+    "l2": "中段长度", "l3": "后段长度", "laser": "激光对象",
+    "bgm": "关卡 BGM", "boss_bgm": "Boss BGM", "background": "背景资源",
+    "dialogue_list": "对话资源", "play_sound": "播放音效", "volume": "音量",
+    "hp": "生命值", "score": "击破分数", "bonus": "符卡奖励",
+    "time_limit": "时间限制", "max_lifetime": "最大存在时间",
+    "hitbox_radius": "受击半径", "on_time": "启动时间", "off_time": "消隐时间",
+    "initial_delay_frames": "首次延迟", "min_interval": "最小间隔",
+    "sample_rate": "采样频率", "clear_bullets_on_death": "死亡时清弹",
+    "is_survival": "生存符", "is_timeout": "超时符", "drops": "掉落物",
+    "tag": "标签", "source": "Python 代码", "node": "控制目标",
+    "head": "列表头", "to_items": "转换为列表", "wait": "等待完成",
+    "practice_unlock": "练习模式解锁", "stages": "关卡顺序",
+    "start_stage": "开始关卡", "phases": "Boss 阶段",
+}
+_FIELD_UNITS = {
+    "frames": "帧", "frame": "帧", "duration": "帧", "time_limit": "秒",
+    "initial_delay_frames": "帧", "min_interval": "帧", "on_time": "帧",
+    "off_time": "帧", "x": "标准化场坐标", "y": "标准化场坐标",
+    "dx": "标准化场坐标", "dy": "标准化场坐标", "angle": "度",
+    "start_angle": "度", "center_angle": "度", "arc_angle": "度",
+    "offset_angle": "度", "angle_offset": "度", "theta": "度",
+    "speed": "场单位/帧", "accel": "场单位/帧²", "angle_accel": "度/帧²",
+    "spin": "度/帧", "angular_velocity": "度/帧",
+}
+_FIRE_KINDS = frozenset(
+    {"Fire", "FireCircle", "FireArc", "FireAtPlayer", "FirePolar", "FireOrbit"}
+)
 
 # (owner_kind, field) takes precedence, then the field-name fallback.  The
 # spinboxes enforce these bounds directly so out-of-range input is visible.
@@ -126,7 +200,11 @@ def _range_tooltip(owner_kind, name, annotation, value) -> str:
     if type_text is None:
         type_text = "常量 | 表达式"
     lines = [str(name), f"类型: {type_text}"]
-    if value is not None and not isinstance(value, Expr):
+    if (
+        value is not inspect.Parameter.empty
+        and value is not None
+        and not isinstance(value, Expr)
+    ):
         lines.append(f"默认: {value!r}"[:80])
     bounds = _field_range(owner_kind or "", name or "")
     if bounds is not None:
@@ -151,6 +229,202 @@ def marker_point(
     """Map authoring coordinates to pixels on a full play-field rectangle."""
 
     return (x + 1) / 2 * width, (1 - y * _Y_ASPECT) / 2 * height
+
+
+def _field_group(owner_kind: str, name: str) -> str:
+    if name in {"x", "y", "dx", "dy"}:
+        return "position"
+    if owner_kind in _FIRE_KINDS and name in {
+        "count", "angle", "start_angle", "center_angle", "arc_angle",
+        "offset_angle", "angle_offset", "orbit_radius", "theta",
+    }:
+        return "emission"
+    if name in {
+        "speed", "accel", "angle_accel", "friction", "time_scale",
+        "bounce_x", "bounce_y", "spin", "radial_speed", "angular_velocity",
+        "duration", "curve_type", "curve_params",
+    }:
+        return "motion"
+    if name in {
+        "bullet_type", "color", "render_angle", "render_scale",
+        "collision_radius", "render_mode", "sprite", "texture", "texture_id",
+        "animations", "width", "length", "l1", "l2", "l3",
+    }:
+        return "appearance"
+    if name in {"bgm", "boss_bgm", "play_sound", "volume"} or (
+        owner_kind in {"PlayBGM", "PlaySE"} and name == "name"
+    ):
+        return "sound"
+    if name in {
+        "hp", "score", "bonus", "time_limit", "max_lifetime", "hitbox_radius",
+        "on_time", "off_time", "initial_delay_frames", "min_interval",
+        "sample_rate", "clear_bullets_on_death", "is_survival", "is_timeout",
+        "drops",
+    }:
+        return "lifecycle"
+    if name in {
+        "tag", "source", "node", "head", "to_items", "wait", "assign",
+        "arguments", "keywords", "laser",
+    }:
+        return "advanced"
+    return "basic"
+
+
+def _field_hint(owner_kind: str, name: str, default: Any) -> str:
+    parts: list[str] = []
+    unit = _FIELD_UNITS.get(name)
+    if unit:
+        parts.append(f"单位：{unit}")
+    if default is not inspect.Parameter.empty:
+        text = repr(default)
+        parts.append(f"默认：{text[:64]}")
+    bounds = _field_range(owner_kind, name)
+    if bounds is not None:
+        parts.append(f"范围：{bounds[0]} ～ {bounds[1]}")
+    return "  ·  ".join(parts)
+
+
+@dataclass(frozen=True)
+class BulletSpriteChoice:
+    bullet_type: str
+    color: str
+    sprite_id: str
+    image_path: Path | None = None
+    rect: tuple[int, int, int, int] | None = None
+
+
+class BulletAssetCatalog:
+    """Read aliases and atlas rectangles without importing the renderer."""
+
+    def __init__(self, project_root: Path | None) -> None:
+        self.project_root = project_root.resolve() if project_root is not None else None
+        self.mapping: dict[str, dict[str, str]] = {}
+        self._sprites: dict[str, tuple[Path, tuple[int, int, int, int]]] = {}
+        self._icons: dict[tuple[str, str], QIcon] = {}
+        if self.project_root is not None:
+            self._load()
+
+    def _load(self) -> None:
+        assets = self.project_root / "assets"
+        alias_path = assets / "bullet_aliases.json"
+        try:
+            payload = json.loads(alias_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return
+        mapping = payload.get("mapping", {}) if isinstance(payload, dict) else {}
+        if isinstance(mapping, dict):
+            self.mapping = {
+                str(kind): {
+                    str(color): str(sprite)
+                    for color, sprite in colors.items()
+                    if isinstance(color, str) and isinstance(sprite, str)
+                }
+                for kind, colors in mapping.items()
+                if isinstance(kind, str) and isinstance(colors, dict)
+            }
+        image_root = assets / "images"
+        if not image_root.is_dir():
+            return
+        for config in sorted(image_root.rglob("*.json")):
+            try:
+                atlas = json.loads(config.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            if not isinstance(atlas, dict) or not isinstance(atlas.get("sprites"), dict):
+                continue
+            image_name = atlas.get("__image_filename")
+            if not isinstance(image_name, str):
+                continue
+            image_path = (config.parent / image_name).resolve()
+            if not image_path.is_file():
+                continue
+            for sprite_id, spec in atlas["sprites"].items():
+                rect = spec.get("rect") if isinstance(spec, dict) else None
+                if (
+                    isinstance(sprite_id, str)
+                    and isinstance(rect, list)
+                    and len(rect) == 4
+                    and all(isinstance(value, int) for value in rect)
+                ):
+                    self._sprites.setdefault(sprite_id, (image_path, tuple(rect)))
+
+    @property
+    def bullet_types(self) -> tuple[str, ...]:
+        return tuple(sorted(self.mapping))
+
+    def colors(self, bullet_type: str) -> tuple[str, ...]:
+        return tuple(sorted(self.mapping.get(bullet_type, {})))
+
+    def choice(self, bullet_type: str, color: str) -> BulletSpriteChoice | None:
+        sprite_id = self.mapping.get(bullet_type, {}).get(color)
+        if sprite_id is None:
+            return None
+        source = self._sprites.get(sprite_id)
+        return BulletSpriteChoice(
+            bullet_type,
+            color,
+            sprite_id,
+            source[0] if source else None,
+            source[1] if source else None,
+        )
+
+    def icon(self, bullet_type: str, color: str) -> QIcon:
+        key = (bullet_type, color)
+        cached = self._icons.get(key)
+        if cached is not None:
+            return cached
+        choice = self.choice(bullet_type, color)
+        icon = QIcon()
+        if choice is not None and choice.image_path is not None and choice.rect is not None:
+            source = QPixmap(str(choice.image_path))
+            if not source.isNull():
+                x, y, width, height = choice.rect
+                pixmap = source.copy(QRect(x, y, width, height)).scaled(
+                    32,
+                    32,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                icon = QIcon(pixmap)
+        self._icons[key] = icon
+        return icon
+
+
+class BulletPreview(QWidget):
+    """Current alias/atlas selection, not a second gameplay renderer."""
+
+    def __init__(
+        self,
+        catalog: BulletAssetCatalog,
+        bullet_type: str,
+        color: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("bullet_selection_preview")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        image = QLabel(self)
+        image.setObjectName("bullet_selection_thumbnail")
+        image.setFixedSize(42, 42)
+        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon = catalog.icon(bullet_type, color)
+        if not icon.isNull():
+            image.setPixmap(icon.pixmap(36, 36))
+        else:
+            image.setText("？")
+        layout.addWidget(image)
+        text = QLabel(self)
+        text.setObjectName("bullet_selection_text")
+        text.setWordWrap(True)
+        choice = catalog.choice(bullet_type, color)
+        if choice is None:
+            text.setText(f"{bullet_type} × {color}\n当前组合没有弹型别名")
+            text.setStyleSheet("color: #f85149;")
+        else:
+            text.setText(f"{bullet_type} × {color}\n精灵：{choice.sprite_id}")
+            text.setStyleSheet("color: #8b949e;")
+        layout.addWidget(text, 1)
 
 
 class ResourceLineEdit(QLineEdit):
@@ -287,6 +561,89 @@ class CoordinatePreview(QWidget):
         painter.end()
 
 
+class EmissionPreview(QWidget):
+    """Parameter geometry for fire shapes; it never simulates gameplay."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("emission_preview")
+        self.setMinimumHeight(120)
+        self._reader = lambda: None
+
+    def configure(self, reader) -> None:
+        self._reader = reader
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.fillRect(self.rect(), QColor("#10141a"))
+        border = QRectF(8.0, 6.0, self.width() - 16, self.height() - 12)
+        painter.setPen(QPen(QColor("#3a414e"), 1))
+        painter.drawRoundedRect(border, 4, 4)
+        spec = self._reader()
+        if spec is None or spec[0] == "hint":
+            painter.setPen(QColor("#f0883e"))
+            painter.drawText(
+                border,
+                Qt.AlignmentFlag.AlignCenter,
+                spec[1] if spec else "无可预览的发射参数",
+            )
+            painter.end()
+            return
+        kind, values = spec
+        center = QPointF(border.center())
+        radius = min(border.width(), border.height()) * 0.36
+        painter.setPen(QPen(QColor("#58a6e7"), 1.6))
+        painter.setBrush(QColor("#58a6e7"))
+        painter.drawEllipse(center, 3.0, 3.0)
+
+        def ray(angle: float, length: float = radius) -> None:
+            radians = math.radians(angle)
+            end = QPointF(
+                center.x() + math.cos(radians) * length,
+                center.y() - math.sin(radians) * length,
+            )
+            painter.drawLine(center, end)
+            painter.drawEllipse(end, 2.5, 2.5)
+
+        if kind == "circle":
+            count, start = values
+            for index in range(max(1, min(int(count), 24))):
+                ray(start + index * 360.0 / max(1, int(count)))
+        elif kind == "arc":
+            count, center_angle, arc = values
+            count = max(1, min(int(count), 24))
+            for index in range(count):
+                ratio = 0.5 if count == 1 else index / (count - 1)
+                ray(center_angle - arc / 2 + arc * ratio)
+        elif kind == "orbit":
+            orbit_radius, theta, angular_velocity = values
+            display_radius = max(10.0, min(radius, abs(orbit_radius) * radius * 4))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor("#a371f7"), 1.4, Qt.PenStyle.DashLine))
+            painter.drawEllipse(center, display_radius, display_radius)
+            radians = math.radians(theta)
+            point = QPointF(
+                center.x() + math.cos(radians) * display_radius,
+                center.y() - math.sin(radians) * display_radius,
+            )
+            painter.setBrush(QColor("#a371f7"))
+            painter.drawEllipse(point, 4.0, 4.0)
+            painter.setPen(QColor("#8b949e"))
+            painter.drawText(border.adjusted(6, 6, -6, -6), f"ω {angular_velocity:g}°/帧")
+        else:
+            ray(values[0])
+            if kind == "aimed":
+                painter.setPen(QPen(QColor("#f0883e"), 1, Qt.PenStyle.DashLine))
+                painter.drawText(
+                    border.adjusted(6, 6, -6, -6),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                    "朝向玩家",
+                )
+        painter.end()
+
+
 class ParameterTable(QWidget):
     """Small explicit table for Task/Function signature parameters."""
 
@@ -378,9 +735,13 @@ class InspectorPanel(QWidget):
         self.form.setContentsMargins(8, 8, 8, 8)
         self._suggested_widget: QWidget | None = None
         self._coordinate_preview: CoordinatePreview | None = None
+        self._emission_preview: EmissionPreview | None = None
+        self._bullet_catalog_root: Path | None = None
+        self._bullet_catalog = BulletAssetCatalog(None)
         self._commit_depth = 0
         self._rebuild_scheduled = False
         self.session.selection_changed.connect(self.refresh)
+        self.session.project_changed.connect(self.refresh)
         self.refresh()
 
     def refresh(self) -> None:
@@ -407,34 +768,56 @@ class InspectorPanel(QWidget):
         while self.form.rowCount():
             self.form.removeRow(0)
         self._suggested_widget = None
+        self._coordinate_preview = None
+        self._emission_preview = None
         node = self.session.current_node
         unit = self.session.current_unit
+        self._ensure_bullet_catalog()
         if node is not None:
             constructor = dsl.NODE_CONSTRUCTORS.get(node.kind)
             annotations = get_type_hints(constructor) if constructor is not None else {}
             defaults = _constructor_defaults(constructor)
             self.form.addRow("节点类型", QLabel(node.kind))
             self.form.addRow("UID", QLabel(node.uid))
-            self._add_coordinate_preview(node)
             suggested = self._suggested_field_name(node, constructor)
-            for name, value in _node_fields(node, constructor):
-                self._add_field(
-                    name,
-                    value,
-                    annotations.get(name, Any),
-                    node.kind,
-                    defaults.get(name, inspect.Parameter.empty),
-                    mark_suggested=name == suggested,
-                    commit=lambda new_value, uid=node.uid, key=name: (
-                        self.session.set_node_argument(uid, key, new_value)
-                    ),
-                )
+            fields = _node_fields(node, constructor)
+            for group in _GROUP_ORDER:
+                grouped = [
+                    (name, value)
+                    for name, value in fields
+                    if _field_group(node.kind, name) == group
+                ]
+                has_coordinate = group == "position" and _coordinate_spec_kind(node) is not None
+                has_emission = group == "emission" and node.kind in _FIRE_KINDS
+                has_bullet = group == "appearance" and node.kind in _FIRE_KINDS
+                if not grouped and not has_coordinate and not has_emission and not has_bullet:
+                    continue
+                self._add_section(group)
+                if has_coordinate:
+                    self._add_coordinate_preview(node)
+                if has_emission:
+                    self._add_emission_preview(node)
+                if has_bullet:
+                    self._add_bullet_preview(node)
+                for name, value in grouped:
+                    self._add_field(
+                        name,
+                        value,
+                        annotations.get(name, Any),
+                        node.kind,
+                        defaults.get(name, inspect.Parameter.empty),
+                        mark_suggested=name == suggested,
+                        commit=lambda new_value, uid=node.uid, key=name: (
+                            self.session.set_node_argument(uid, key, new_value)
+                        ),
+                    )
             return
         if unit is not None:
             constructor = dsl.UNIT_CONSTRUCTORS[unit.kind]
             annotations = get_type_hints(constructor)
             defaults = _constructor_defaults(constructor)
             self.form.addRow("逻辑单元", QLabel(unit.kind))
+            self._add_section("basic")
             self._add_field(
                 "名称",
                 unit.name,
@@ -449,20 +832,48 @@ class InspectorPanel(QWidget):
             )
             if "parameters" in inspect.signature(constructor).parameters:
                 self._add_parameter_field(unit)
-            for name, value in _unit_fields(unit.metadata, constructor):
-                self._add_field(
-                    name,
-                    value,
-                    annotations.get(name, Any),
-                    unit.kind,
-                    defaults.get(name, inspect.Parameter.empty),
-                    mark_suggested=False,
-                    commit=lambda new_value, unit_id=unit.id, key=name: (
-                        self.session.set_unit_field(unit_id, key, new_value)
-                    ),
-                )
+            fields = _unit_fields(unit.metadata, constructor)
+            for group in _GROUP_ORDER:
+                grouped = [
+                    (name, value)
+                    for name, value in fields
+                    if _field_group(unit.kind, name) == group
+                ]
+                if not grouped:
+                    continue
+                if group != "basic":
+                    self._add_section(group)
+                for name, value in grouped:
+                    self._add_field(
+                        name,
+                        value,
+                        annotations.get(name, Any),
+                        unit.kind,
+                        defaults.get(name, inspect.Parameter.empty),
+                        mark_suggested=False,
+                        commit=lambda new_value, unit_id=unit.id, key=name: (
+                            self.session.set_unit_field(unit_id, key, new_value)
+                        ),
+                    )
             return
         self.form.addRow(QLabel("当前文件不可视化编辑"))
+
+    def _ensure_bullet_catalog(self) -> None:
+        context = self.session.project_context
+        root = context.root.resolve() if context is not None else None
+        if root == self._bullet_catalog_root:
+            return
+        self._bullet_catalog_root = root
+        self._bullet_catalog = BulletAssetCatalog(root)
+
+    def _add_section(self, group: str) -> None:
+        header = QLabel(_GROUP_LABELS[group], self)
+        header.setObjectName(f"inspector_group_{group}")
+        header.setStyleSheet(
+            "color: #58a6e7; font-weight: 600; padding-top: 8px; "
+            "border-bottom: 1px solid #30363d;"
+        )
+        self.form.addRow(header)
 
     def focus_suggested_field(self) -> None:
         """Focus the field the author most likely wants to change next."""
@@ -522,7 +933,6 @@ class InspectorPanel(QWidget):
         commit,
         field_name: str | None = None,
     ) -> None:
-        del default  # defaults are resolved by _suggested_field_name
         container = QWidget(self)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -538,6 +948,13 @@ class InspectorPanel(QWidget):
         if isinstance(editor, ResourceLineEdit):
             row.addWidget(self._browse_button(editor, name))
         layout.addLayout(row)
+        hint = _field_hint(owner_kind, name, default)
+        if hint:
+            hint_label = QLabel(hint, container)
+            hint_label.setObjectName(f"hint_{field_name or name}")
+            hint_label.setStyleSheet("color: #6e7681; font-size: 11px;")
+            hint_label.setWordWrap(True)
+            layout.addWidget(hint_label)
         error_label = QLabel("", container)
         error_label.setStyleSheet("color: #f85149;")
         error_label.setWordWrap(True)
@@ -546,11 +963,27 @@ class InspectorPanel(QWidget):
         editor.setObjectName(f"argument_{field_name or name}")
         editor.setProperty("pystg_annotation", str(annotation))
         editor.setProperty("pystg_field", field_name or name)
-        label = QLabel(name + (" ▸建议调整" if mark_suggested else ""), container)
+        visible_name = _FIELD_LABELS.get(name, name)
+        label = QLabel(
+            visible_name + ("  ·  建议调整" if mark_suggested else ""),
+            container,
+        )
+        label.setToolTip(_range_tooltip(owner_kind, name, annotation, default))
         if mark_suggested:
             label.setStyleSheet("color: #f0883e;")
             self._suggested_widget = self._focus_proxy(editor)
         self.form.addRow(label, container)
+
+    def _add_bullet_preview(self, node) -> None:
+        bullet_type = str(node.arguments.get("bullet_type", "ball_m"))
+        color = str(node.arguments.get("color", "red"))
+        preview = BulletPreview(
+            self._bullet_catalog,
+            bullet_type,
+            color,
+            self,
+        )
+        self.form.addRow(QLabel("当前弹型", self), preview)
 
     def _add_coordinate_preview(self, node) -> None:
         """Show a mini play field when the node edits a position-like value."""
@@ -565,6 +998,62 @@ class InspectorPanel(QWidget):
         self._coordinate_preview = preview
         labels = {"point": "位置", "delta": "增量", "actor": "位置"}
         self.form.addRow(QLabel(labels.get(spec_kind, "位置"), self), preview)
+
+    def _add_emission_preview(self, node) -> None:
+        preview = EmissionPreview(self)
+        preview.setObjectName("emission_preview_widget")
+        preview.configure(lambda: self._emission_spec(node))
+        self._emission_preview = preview
+        self.form.addRow(QLabel("形状示意", self), preview)
+
+    def _emission_spec(self, node):
+        def numeric(name: str, default: float) -> float | None:
+            original = node.arguments.get(name, default)
+            editor = self.findChild(QWidget, f"argument_{name}")
+            value = self._current_value(editor, original) if editor is not None else original
+            if isinstance(value, Expr) or isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            return float(value)
+
+        if node.kind == "FireCircle":
+            count = numeric("count", 12)
+            start = numeric("start_angle", 0.0)
+            return (
+                ("circle", (count, start))
+                if count is not None and start is not None
+                else ("hint", "发射参数含表达式，无法绘制静态圆环")
+            )
+        if node.kind == "FireArc":
+            count = numeric("count", 5)
+            center = numeric("center_angle", -90.0)
+            arc = numeric("arc_angle", 60.0)
+            return (
+                ("arc", (count, center, arc))
+                if None not in {count, center, arc}
+                else ("hint", "发射参数含表达式，无法绘制静态扇形")
+            )
+        if node.kind in {"FirePolar", "FireOrbit"}:
+            radius = numeric("orbit_radius", 0.1)
+            theta = numeric("theta", 0.0)
+            angular = numeric("angular_velocity", 0.0)
+            return (
+                ("orbit", (radius, theta, angular))
+                if None not in {radius, theta, angular}
+                else ("hint", "轨道参数含表达式，无法绘制静态轨迹")
+            )
+        if node.kind == "FireAtPlayer":
+            offset = numeric("offset_angle", 0.0)
+            return (
+                ("aimed", (offset,))
+                if offset is not None
+                else ("hint", "偏移角含表达式，无法绘制静态方向")
+            )
+        angle = numeric("angle", -90.0)
+        return (
+            ("ray", (angle,))
+            if angle is not None
+            else ("hint", "角度含表达式，无法绘制静态方向")
+        )
 
     def _coordinate_spec(self, node):
         """Current paint spec, reading live editor values when present."""
@@ -631,6 +1120,10 @@ class InspectorPanel(QWidget):
         name: str,
         commit,
     ) -> QWidget:
+        if owner_kind in _FIRE_KINDS and name in {"bullet_type", "color"}:
+            return self._bullet_alias_editor(
+                str(value), owner_kind, name, commit
+            )
         if isinstance(value, Ref):
             return self._ref_editor(value, owner_kind, name, commit)
         if isinstance(value, Expr):
@@ -704,6 +1197,67 @@ class InspectorPanel(QWidget):
                 )
         return widget
 
+    def _bullet_alias_editor(
+        self,
+        value: str,
+        owner_kind: str,
+        name: str,
+        commit,
+    ) -> QWidget:
+        del owner_kind
+        node = self.session.current_node
+        bullet_type = str(
+            node.arguments.get("bullet_type", "ball_m") if node is not None else "ball_m"
+        )
+        color = str(node.arguments.get("color", "red") if node is not None else "red")
+        options = (
+            self._bullet_catalog.bullet_types
+            if name == "bullet_type"
+            else self._bullet_catalog.colors(bullet_type)
+        )
+        if value not in options:
+            options = (value, *options)
+        widget = QComboBox(self)
+        widget.setEditable(True)
+        widget.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        widget.setToolTip(
+            "输入可搜索；列表只来自 assets/bullet_aliases.json 中真实可用的别名"
+        )
+        for option in options:
+            option_type = option if name == "bullet_type" else bullet_type
+            option_color = color if name == "bullet_type" else option
+            widget.addItem(
+                self._bullet_catalog.icon(option_type, option_color),
+                option,
+                option,
+            )
+        current_index = widget.findText(value)
+        if current_index >= 0:
+            widget.setCurrentIndex(current_index)
+        else:
+            widget.setEditText(value)
+        widget.setEnabled(self.session.can_edit)
+        completer = widget.completer()
+        if completer is not None:
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+
+        def submit(original=value) -> None:
+            selected = widget.currentText().strip()
+            if selected not in options:
+                self._show_field_error(name, f"未知{_FIELD_LABELS[name]}：{selected}")
+                return
+            self._commit_after_event(commit, selected, name, original)
+
+        if self.session.can_edit:
+            widget.currentIndexChanged.connect(
+                lambda index: submit() if index >= 0 else None
+            )
+            line_edit = widget.lineEdit()
+            if line_edit is not None:
+                line_edit.editingFinished.connect(submit)
+        return widget
+
     def _literal_combo(self, value, options: tuple, name: str, commit) -> QWidget:
         widget = QComboBox(self)
         for option in options:
@@ -767,6 +1321,13 @@ class InspectorPanel(QWidget):
         widget.setPlaceholderText("表达式，如 player_x")
         widget.setReadOnly(not self.session.can_edit)
         if self.session.can_edit:
+            candidates = self._expression_candidates()
+            completer = QCompleter(QStringListModel(candidates, widget), widget)
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+            widget.setCompleter(completer)
+        if self.session.can_edit:
             widget.editingFinished.connect(
                 lambda editor=widget, original=value: self._commit_after_event(
                     commit, Expr(editor.text()), name, original
@@ -774,6 +1335,39 @@ class InspectorPanel(QWidget):
             )
             widget.textChanged.connect(self._refresh_coordinate_preview)
         return widget
+
+    def _expression_candidates(self) -> list[str]:
+        """Static authoring names only; no expression is imported or executed."""
+
+        candidates = {
+            "player_x",
+            "player_y",
+            "difficulty",
+            "seed",
+            "frame",
+            "self.x",
+            "self.y",
+        }
+        unit = self.session.current_unit
+        if unit is not None:
+            candidates.update(parameter.name for parameter in unit.parameters)
+
+            def visit(node) -> None:
+                if node.kind == "Set":
+                    name = node.arguments.get("name")
+                    if isinstance(name, str) and name.isidentifier():
+                        candidates.add(name)
+                if node.kind == "ForEach":
+                    target = node.arguments.get("target")
+                    if isinstance(target, str) and target.isidentifier():
+                        candidates.add(target)
+                for children in node.children.values():
+                    for child in children:
+                        visit(child)
+
+            for node in unit.body:
+                visit(node)
+        return sorted(candidates)
 
     def _expr_toggle(
         self,
@@ -902,6 +1496,8 @@ class InspectorPanel(QWidget):
     def _refresh_coordinate_preview(self, *_args) -> None:
         if self._coordinate_preview is not None:
             self._coordinate_preview.update()
+        if self._emission_preview is not None:
+            self._emission_preview.update()
 
     def _commit_literal_text(
         self, editor: QPlainTextEdit, callback, name: str, original: Any = _UNSET
@@ -911,7 +1507,11 @@ class InspectorPanel(QWidget):
         except ValueError as exc:
             self._show_field_error(name, str(exc))
             return
-        self._commit(callback, value, name, original)
+        # LiteralTextEdit emits from focusOutEvent.  Parsing is safe while Qt
+        # dispatches that event, but a successful model commit emits
+        # selection_changed and rebuilds this panel.  Queue the mutation so
+        # the editor cannot be deleted under its own focus-out handler.
+        self._commit_after_event(callback, value, name, original)
 
     def _show_field_error(self, name: str, message: str) -> None:
         error_label = self.findChild(QLabel, f"error_{name}")
@@ -1086,6 +1686,9 @@ def _field_type(annotation: Any, value: Any) -> type | None:
 
 
 __all__ = [
+    "BulletAssetCatalog",
+    "BulletPreview",
+    "EmissionPreview",
     "InspectorPanel",
     "ParameterTable",
     "ResourceLineEdit",

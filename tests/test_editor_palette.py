@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from time import perf_counter
 
 from src.authoring import dsl
 from src.authoring.program import DropPlacement, find_node, node_from_palette
@@ -156,7 +157,7 @@ def test_palette_remember_keeps_recent_entries_session_only(tmp_path, qapp_sessi
     reopened.open_project(tmp_path / "authoring")
     reopened.select_unit("stage")
     other = NodePalette()
-    other.set_context(reopened.program, "stage", None, DropPlacement.AFTER)
+    other.set_context(reopened.program, "stage", None)
     assert other._recent == []
     other.close()
     window.close()
@@ -300,9 +301,27 @@ def test_palette_selection_change_neither_reenters_nor_clones_the_program(
     assert calls["refresh"] <= 2, "selection change must not cascade refreshes"
     assert clones["n"] == 0, "compatibility checks must not clone the program"
 
-    # Mode switches land in the same budget: one bounded refresh, no cascade.
+    # Changing the current insertion anchor stays in the same bounded budget;
+    # there is deliberately no global insertion-mode state anymore.
     calls["refresh"] = 0
-    window.insert_mode_buttons[DropPlacement.CHILD].click()
+    session.select_node("wait")
     qapp_session.processEvents()
     assert calls["refresh"] <= 2
+    assert not hasattr(window, "insert_mode_buttons")
+    window.close()
+
+
+def test_palette_filter_refresh_stays_within_interaction_budget(
+    tmp_path, qapp_session
+):
+    window = _window(tmp_path)
+    palette = window.node_palette
+    samples: list[float] = []
+    for query in ("等待", "Fire", "移动", "", "重复") * 6:
+        started = perf_counter()
+        palette.search.setText(query)
+        qapp_session.processEvents()
+        samples.append(perf_counter() - started)
+    p95 = sorted(samples)[int(len(samples) * 0.95) - 1]
+    assert p95 < 0.050
     window.close()
