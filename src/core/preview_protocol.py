@@ -14,6 +14,9 @@ from typing import Any, Mapping
 PREVIEW_PROTOCOL_VERSION = 1
 MAX_PREVIEW_LINE_BYTES = 64 * 1024
 MAX_TRACE_EVENTS_PER_MESSAGE = 256
+# One shared fixed-seed default so the editor, the game entry, and their tests
+# cannot drift apart on preview reproducibility.
+PREVIEW_DEFAULT_SEED = 1337
 
 CONTROL_TYPES = frozenset({"pause", "resume", "restart", "seek", "stop"})
 EVENT_TYPES = frozenset(
@@ -217,6 +220,7 @@ __all__ = [
     "EVENT_TYPES",
     "MAX_PREVIEW_LINE_BYTES",
     "MAX_TRACE_EVENTS_PER_MESSAGE",
+    "PREVIEW_DEFAULT_SEED",
     "PREVIEW_PROTOCOL_VERSION",
     "PreviewProtocolError",
     "control_message",

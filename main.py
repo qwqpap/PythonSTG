@@ -5,7 +5,6 @@ import sys
 import os
 import json
 import time
-import importlib
 import queue
 import threading
 import ctypes
@@ -22,14 +21,13 @@ from src.core.window import GameWindow, FrameClock, EVENT_QUIT, EVENT_KEYDOWN
 from src.core.input_manager import KeyboardState, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_z, KEY_ESCAPE, KEY_c
 from src.core.audio_backend import init_audio_backend
 from src.render import Renderer
-from src.game.bullet import BulletPool
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.bomb import trigger_player_bomb
-from src.game.player import Player, check_collisions, load_player
+from src.game.player import load_player
 from src.game.stage import StageManager
 from src.game.boss import BossManager
 from src.game.laser import LaserPool, get_laser_texture_data
-from src.game.item import ItemPool, ItemConfig
+from src.game.item import ItemPool
 from src.game.audio import GameAudioBank, AudioManager
 from src.game.userdata import (
     get_settings,
@@ -41,8 +39,8 @@ from src.game.userdata import (
 )
 from src.resource.sprite import SpriteManager
 from src.core import (
-    GameConfig, get_config, init_config,
-    CollisionManager, get_collision_manager, init_sprite_registry,
+    init_config,
+    get_collision_manager, init_sprite_registry,
     get_project_context, EngineSession, ProjectContextError,
 )
 from src.resource.texture_asset import TextureAssetManager
@@ -62,6 +60,7 @@ from src.devtools.hotreload import HotReloadManager
 from src.compiler.content_entry import load_content_entry
 from src.core.preview_protocol import (
     MAX_PREVIEW_LINE_BYTES,
+    PREVIEW_DEFAULT_SEED,
     PreviewProtocolError,
     decode_message,
     encode_message,
@@ -731,8 +730,7 @@ def run_debug_menu(window, ctx, screen_size, stage_class):
                 elif event['key'] == KEY_b:
                     # 清除当前选中的 Bookmark 标记（仅对书签项生效）
                     if entries[selected_index].get("is_bookmark") and entries[selected_index].get("target"):
-                        sc_class = None
-                        # 找到对应的 script_class 以清除标记
+                        # 清除所有 Boss 阶段的 DEBUG_BOOKMARK 标记
                         for attr_name in vars(stage_class):
                             if attr_name.startswith('_'):
                                 continue
@@ -834,7 +832,6 @@ def load_resources(ctx, texture_asset_manager: TextureAssetManager):
         sys.exit()
 
     all_sprite_ids = texture_asset_manager.get_all_sprite_ids()
-    default_sprite_id = 'star_small1' if 'star_small1' in all_sprite_ids else next(iter(all_sprite_ids), None)
 
     textures = texture_asset_manager.create_all_gl_textures(ctx, flip_y=True)
 
@@ -921,7 +918,7 @@ def run_main_menu(window, ctx, screen_size, audio_manager) -> int:
     audio_manager.play_bgm("00", announce=False)
 
     while True:
-        dt = clock.tick(60)
+        clock.tick(60)
 
         for event in window.poll_events():
             if event['type'] == EVENT_QUIT:
@@ -1217,7 +1214,9 @@ def main():
             # ===== 决定本局自机与 RNG 种子 =====
             if EDITOR_PREVIEW_MODE:
                 run_character = settings.last_character
-                seed_text = _get_cli_option("--preview-seed=") or "1337"
+                seed_text = _get_cli_option("--preview-seed=") or str(
+                    PREVIEW_DEFAULT_SEED
+                )
                 try:
                     run_seed = int(seed_text)
                 except ValueError as exc:

@@ -102,3 +102,25 @@ def test_frame_event_requires_a_non_negative_integer():
     for value in (-1, True, 1.5, "1"):
         with pytest.raises(PreviewProtocolError):
             event_message("r", "frame", {"frame": value})
+
+
+def test_preview_default_seed_is_single_sourced_from_the_protocol():
+    import inspect
+    import re
+    from pathlib import Path
+
+    from src.core.preview_protocol import PREVIEW_DEFAULT_SEED
+    from src.editor.preview import PreviewOwner
+
+    assert PREVIEW_DEFAULT_SEED == 1337
+    default = inspect.signature(PreviewOwner.__init__).parameters["seed"].default
+    assert default == PREVIEW_DEFAULT_SEED
+
+    root = Path(__file__).resolve().parents[1]
+    main_source = (root / "main.py").read_text(encoding="utf-8")
+    assert "PREVIEW_DEFAULT_SEED" in main_source
+    assert re.search(
+        r'_get_cli_option\("--preview-seed="\)\s*or\s*str\(\s*PREVIEW_DEFAULT_SEED\s*\)',
+        main_source,
+    ), "main.py preview fallback must use the shared PREVIEW_DEFAULT_SEED"
+    assert 'or "1337"' not in main_source

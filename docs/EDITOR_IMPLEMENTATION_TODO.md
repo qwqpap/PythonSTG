@@ -430,6 +430,21 @@ JSON、16 sprite configs、745 sprites、142 images，0 error/0 warning）通过
 `game_content/authoring/code_editor_demo/functions/mark_wave.py` 目前未跟踪，需随维护者
 提交工作树一并入库，方满足"受版本控制完整工程"的字面要求。
 
+Gate 后补充（2026-09-03，提交 93fa5cf 之后的消融测试与质量修复）：以 14 个破坏性变异
+做消融测试，逐一验证实现行为确实被测试捕获：Trace 覆盖静态预计、RawPython 投影为静态、
+SpawnTask 阻塞主游标、动态 Wait 标记可编辑、移除字面量反向编辑守卫、reveal 失效、密度
+指标丢失、生成代码不发射 Trace、批量计数移除、seed 常量漂移、main.py 接线回退、动态未知
+源顺序丢失、确定性测试敏感性（交替分配顺序）——全部 KILLED。两个 survivor 已修复：内联
+body 的 SpawnTask 不阻塞规则没有任何测试（新增
+`test_inline_spawn_task_body_does_not_block_the_main_cursor` 后重验 KILLED）；
+`TimelineCanvas.interval_clicked` 是无连接方的死信号（移除）。质量修复：预览固定 seed
+默认值单源化为 `src.core.preview_protocol.PREVIEW_DEFAULT_SEED`（main.py 回退与
+`PreviewOwner` 默认共用，配 inspect+接线守卫测试，两个漂移变异均 KILLED）；pyflakes
+清理 main.py 未用 import 与死变量（`clock.tick` 保留调用仅去绑定）、preview.py 未用
+import、示例工程 crossing_wave 中遗留的机器生成 `Set('i', 0)` 节点。修复后重跑：全量
+514 项测试通过（0 failed/0 skipped）、compileall、资产校验、`git diff --check`、两个
+真实 Windows 原生 verifier 均再次 PASS。
+
 ## 9. 预算、最终门禁与报告格式
 
 目标预算：DSL/compiler 快速集小于 15 秒；编辑器自动化小于 60 秒；PR 主门禁小于 5 分钟。

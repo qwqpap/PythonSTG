@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.authoring.dsl import Project, RawPython, Ref, Stage, Task, Wait
+from src.authoring.dsl import Project, RawPython, Ref, Stage, Wait
 from src.authoring.program import AuthoringProgram, ProgramError, find_node
 from src.authoring.timeline import Unknown, project_timeline
 from src.core.project_context import ProjectContext

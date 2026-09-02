@@ -11,10 +11,11 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.compiler.package_builder import PackageBuilder, PreparedBuild
+from src.compiler.package_builder import PackageBuilder
 from src.compiler.practice import PRACTICE_STAGE_ID, practice_program
 from src.core.preview_protocol import (
     MAX_PREVIEW_LINE_BYTES,
+    PREVIEW_DEFAULT_SEED,
     PreviewProtocolError,
     control_message,
     decode_message,
@@ -301,7 +302,7 @@ class PreviewOwner(QObject):
         *,
         builder: PackageBuilder | None = None,
         python_executable: str | None = None,
-        seed: int = 1337,
+        seed: int = PREVIEW_DEFAULT_SEED,
     ) -> None:
         super().__init__(parent)
         self.session = session

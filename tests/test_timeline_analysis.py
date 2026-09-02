@@ -104,6 +104,33 @@ def test_repeat_parallel_and_parameterized_spawn_use_real_blocking_rules():
     assert projection.end == 85
 
 
+def test_inline_spawn_task_body_does_not_block_the_main_cursor():
+    stage = Stage(
+        "stage",
+        "Stage",
+        [
+            Wait(10, uid="intro_wait"),
+            SpawnTask(
+                body=[Wait(40, uid="spawned_wait")],
+                uid="inline_spawn",
+            ),
+            Wait(5, uid="tail"),
+        ],
+    )
+    projection = project_timeline(_program(stage), stage)
+
+    spawn = projection.find("inline_spawn")
+    assert spawn.start == projection.find("intro_wait").end == 10
+    assert spawn.end == 10
+    assert spawn.display == "aggregate"
+    spawned_wait = projection.find("spawned_wait")
+    assert spawned_wait.start == 10
+    assert spawned_wait.end == 50
+    assert spawned_wait.lane != spawn.lane
+    assert projection.find("tail").start == 10
+    assert projection.end == 15
+
+
 def test_dynamic_control_flow_is_unknown_instead_of_guessed():
     stage = Stage(
         "stage",

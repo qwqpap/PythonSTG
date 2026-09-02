@@ -77,7 +77,6 @@ def _layout_timeline_intervals(
 class TimelineCanvas(QWidget):
     """Small lane renderer with only the three contract-approved drag edits."""
 
-    interval_clicked = Signal(str)
     edit_requested = Signal(str, int)
     seek_requested = Signal(int)
 
@@ -150,7 +149,6 @@ class TimelineCanvas(QWidget):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "选择逻辑单元以查看代码时间投影")
             return
 
-        intervals = projection.all_intervals()
         lanes = _lanes(projection)
         lane_index = {lane: index for index, lane in enumerate(lanes)}
         maximum = max(60, _maximum_known_frame(projection))
@@ -322,7 +320,6 @@ class TimelineCanvas(QWidget):
             self.session.select_node(uid)
         except ProgramError:
             return
-        self.interval_clicked.emit(uid)
         self.selected_uid = uid
         if painted.interval.editable != "none":
             self._drag = (
