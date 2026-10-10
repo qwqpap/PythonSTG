@@ -32,7 +32,7 @@ from src.qt_compat.QtCore import (
     QTimer,
     Signal,
 )
-from src.qt_compat.QtGui import QColor, QCursor, QDrag, QDragMoveEvent, QDropEvent, QPainter, QPen
+from src.qt_compat.QtGui import QColor, QDrag, QDragMoveEvent, QDropEvent, QPainter, QPen
 from src.qt_compat.QtWidgets import QScrollArea, QWidget
 
 from .node_palette import PROTOTYPE_MIME, CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, entry_for_kind
