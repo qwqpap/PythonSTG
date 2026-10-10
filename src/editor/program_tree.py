@@ -32,11 +32,12 @@ from src.qt_compat.QtCore import (
     QTimer,
     Signal,
 )
-from src.qt_compat.QtGui import QColor, QDrag, QDragMoveEvent, QDropEvent, QPainter, QPen
+from src.qt_compat.QtGui import QColor, QCursor, QDrag, QDragMoveEvent, QDropEvent, QPainter, QPen
 from src.qt_compat.QtWidgets import QScrollArea, QWidget
 
-from .node_palette import PROTOTYPE_MIME, _CATEGORY_COLORS, _DEFAULT_COLOR, entry_for_kind
+from .node_palette import PROTOTYPE_MIME, CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, entry_for_kind
 from .sidebars import RESOURCE_MIME, UNIT_REFERENCE_MIME
+from .theme import PALETTE
 
 
 NODE_MIME = "application/x-pystg-node"
@@ -59,8 +60,8 @@ _AUTOSCROLL_EDGE_PX = 28
 _AUTOSCROLL_STEP_PX = 10
 _MIN_COLUMN_WIDTH = 230
 _MARGIN = 12
-_CARD_HEIGHT = 34
-_CARD_GAP = 24
+_CARD_HEIGHT = 28
+_CARD_GAP = 14
 _INSERT_HIT_HEIGHT = 22
 # Full-height handles need a forgiving physical target on 960 px windows.
 _HANDLE_WIDTH = 36
@@ -628,7 +629,7 @@ class _FlowCanvas(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         exposed = event.rect().adjusted(-4, -4, 4, 4)
-        painter.fillRect(event.rect(), QColor("#171a20"))
+        painter.fillRect(event.rect(), QColor("#2b2b2b"))
         # QScrollArea already moves this widget.  Paint and input must both
         # use its content coordinates; translating a second time hides the
         # cards which are still hit-testable after scrolling.
@@ -656,30 +657,50 @@ class _FlowCanvas(QWidget):
         node = element.node
         assert node is not None
         selected = element.uid in self._flow.selected_uids
-        background = QColor("#294d70" if selected else "#252a33")
-        border = QColor("#58a6e7" if selected else "#3a414e")
-        painter.setPen(QPen(border, 1))
-        painter.setBrush(background)
-        painter.drawRoundedRect(element.rect, 6, 6)
-        accent = QColor(_CATEGORY_COLORS.get(entry_for_kind(node.kind).category, _DEFAULT_COLOR)) if node.kind not in {"Branch", "TemplateCall"} else QColor("#bc8cff")
+        # 专业 DCC 观感：节点是"代码行"而不是卡片 —— 用整行底色表达选中/悬停，
+        # 用底部分隔线与左侧类别色条建立层级，不再描边加投影。
+        if selected:
+            background = QColor(PALETTE.row_selected)
+        elif element.uid == getattr(self, "_hover_uid", None):
+            background = QColor(PALETTE.row_hover)
+        else:
+            background = None
+        if background is not None:
+            painter.fillRect(element.rect, background)
+        painter.setPen(QPen(QColor(PALETTE.separator), 1))
+        painter.drawLine(
+            element.rect.left(), element.rect.bottom(),
+            element.rect.right(), element.rect.bottom(),
+        )
+        accent = QColor(
+            PALETTE.template
+            if node.kind in {"Branch", "TemplateCall"}
+            else CATEGORY_COLORS.get(
+                entry_for_kind(node.kind).category, DEFAULT_CATEGORY_COLOR
+            )
+        )
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(accent)
-        painter.drawRoundedRect(
-            QRect(element.rect.left() + 2, element.rect.top() + 6, 3, element.rect.height() - 12),
-            1, 1,
+        painter.drawRect(
+            QRect(
+                element.rect.left() + 2,
+                element.rect.top() + 3,
+                PALETTE.card_bar_width,
+                element.rect.height() - 6,
+            )
         )
-        x = element.rect.left() + 8
+        x = element.rect.left() + 10
         slots = self._child_slots(node)
         if slots:
             chevron_rect = self._chevron_rect(element)
-            painter.setPen(QPen(QColor("#8b949e"), 1))
+            painter.setPen(QPen(QColor("#b9b9b9"), 1))
             painter.setFont(self._base_font(bold=False))
             painter.drawText(
                 chevron_rect, Qt.AlignmentFlag.AlignCenter,
                 "▾" if node.uid not in self._collapsed else "▸",
             )
             x = chevron_rect.right() + 4
-        painter.setPen(QPen(QColor("#d0d7de"), 1))
+        painter.setPen(QPen(QColor("#e8e8e8"), 1))
         painter.setFont(self._base_font(bold=True))
         label = element.label
         target = _reference_target(node)
@@ -705,7 +726,7 @@ class _FlowCanvas(QWidget):
             available -= used
             badge_right -= used
         metrics = painter.fontMetrics()
-        painter.setPen(QPen(QColor("#d0d7de"), 1))
+        painter.setPen(QPen(QColor("#e8e8e8"), 1))
         painter.drawText(
             QRect(x, element.rect.top(), max(10, available), element.rect.height()),
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
@@ -714,8 +735,8 @@ class _FlowCanvas(QWidget):
         self._paint_card_handles(painter, element)
         if reference_width:
             rect = self._reference_open_rect(element)
-            painter.setPen(QPen(QColor("#58a6e7"), 1))
-            painter.setBrush(QColor("#1c3248"))
+            painter.setPen(QPen(QColor("#3a6ea5"), 1))
+            painter.setBrush(QColor("#31465c"))
             painter.drawRoundedRect(rect, 4, 4)
             painter.setFont(self._base_font(bold=False))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "打开内容")
@@ -725,21 +746,21 @@ class _FlowCanvas(QWidget):
         wrap_rect = self._wrap_handle_rect(element)
         painter.setFont(self._base_font(bold=False))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#8b949e"))
+        painter.setBrush(QColor("#b9b9b9"))
         for offset_x in (-3, 3):
             for offset_y in (-5, 0, 5):
                 painter.drawEllipse(drag_rect.center() + QPoint(offset_x, offset_y), 1, 1)
-        painter.setPen(QPen(QColor("#a371f7"), 1))
+        painter.setPen(QPen(QColor("#b18cd9"), 1))
         painter.drawText(wrap_rect, Qt.AlignmentFlag.AlignCenter, "包裹")
 
     def _badges(self, node: Node) -> tuple[tuple[str, str], ...]:
         badges: list[tuple[str, str]] = []
         if node_is_dynamic(node):
-            badges.append(("动态", "#d29922"))
+            badges.append(("动态", "#d9a01c"))
         if node.kind == "TemplateCall":
-            badges.append(("模板", "#a371f7"))
+            badges.append(("模板", "#b18cd9"))
         if self._diagnostics.get(node.uid):
-            badges.append(("错误", "#f85149"))
+            badges.append(("错误", "#d06a6a"))
         return tuple(badges)
 
     def _draw_chip(
@@ -763,7 +784,7 @@ class _FlowCanvas(QWidget):
         return width + 4
 
     def _paint_head(self, painter: QPainter, element: _Element) -> None:
-        painter.setPen(QPen(QColor("#8b949e"), 1))
+        painter.setPen(QPen(QColor("#b9b9b9"), 1))
         painter.setFont(self._base_font(bold=False))
         painter.drawText(
             element.rect.adjusted(2, 0, 0, 0),
@@ -780,14 +801,14 @@ class _FlowCanvas(QWidget):
         )
         if active:
             allowed = self._drop_check.allowed
-            painter.setPen(QPen(QColor("#238636" if allowed else "#8b1a1a"), 2, Qt.PenStyle.SolidLine))
+            painter.setPen(QPen(QColor("#6aa84f" if allowed else "#4a2a2a"), 2, Qt.PenStyle.SolidLine))
             painter.setBrush(QColor(35, 134, 54, 70 if allowed else 60))
         else:
-            pen = QPen(QColor("#58a6e7" if dashed else "#3a414e"), 1, Qt.PenStyle.DashLine)
+            pen = QPen(QColor("#3a6ea5" if dashed else "#1f1f1f"), 1, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(element.rect, 6, 6)
-        painter.setPen(QPen(QColor("#8b949e"), 1))
+        painter.setPen(QPen(QColor("#b9b9b9"), 1))
         painter.setFont(self._base_font(bold=False))
         painter.drawText(
             element.rect.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignCenter,
@@ -795,10 +816,10 @@ class _FlowCanvas(QWidget):
         )
 
     def _paint_summary(self, painter: QPainter, element: _Element) -> None:
-        painter.setPen(QPen(QColor("#3a414e"), 1))
-        painter.setBrush(QColor("#20252d"))
-        painter.drawRoundedRect(element.rect, 6, 6)
-        painter.setPen(QPen(QColor("#8b949e"), 1))
+        painter.setPen(QPen(QColor("#1f1f1f"), 1))
+        painter.setBrush(QColor("#2f2f2f"))
+        painter.drawRoundedRect(element.rect, 3, 3)
+        painter.setPen(QPen(QColor("#b9b9b9"), 1))
         painter.setFont(self._base_font(bold=False))
         painter.drawText(
             element.rect.adjusted(20, 12, -20, -12),
@@ -807,7 +828,7 @@ class _FlowCanvas(QWidget):
         )
 
     def _paint_folded(self, painter: QPainter, element: _Element) -> None:
-        painter.setPen(QPen(QColor("#6e7681"), 1))
+        painter.setPen(QPen(QColor("#6b6b6b"), 1))
         painter.setFont(self._base_font(bold=False))
         painter.drawText(
             element.rect.adjusted(2, 0, 0, 0),
@@ -816,26 +837,47 @@ class _FlowCanvas(QWidget):
         )
 
     def _paint_insertion_guides(self, painter: QPainter, exposed: QRect) -> None:
-        """Render the concrete before/after targets used by hit testing."""
+        """Render the concrete before/after targets used by hit testing.
 
+        DCC 观感：默认只在节点缝隙画一条安静的引导线，鼠标经过或正在拖放时
+        才把落点标记和提示显出来，避免每个缝隙都挂一个大按钮。
+        """
+
+        cursor = self.mapFromGlobal(QCursor.pos())
         for rect, location in self._layout.insertions:
             if not rect.intersects(exposed):
                 continue
             active = self._drop_candidate == location
+            hovered = rect.contains(cursor)
+            if not (hovered or active or self._drop_active):
+                continue
             color = QColor(
-                "#2ea043" if active and self._drop_check.allowed
-                else "#f85149" if active
-                else "#58a6e7" if self._drop_active
-                else "#3a536b"
+                PALETTE.ok if active and self._drop_check.allowed
+                else PALETTE.error if active
+                else PALETTE.accent if self._drop_active
+                else PALETTE.accent_soft
             )
             painter.setPen(QPen(color, 2 if active else 1))
             painter.drawLine(rect.left() + 10, rect.center().y(), rect.right() - 10, rect.center().y())
-            button = QRect(rect.center().x() - 28, rect.top(), 56, rect.height())
-            painter.setBrush(QColor("#1c2733"))
-            painter.drawRoundedRect(button, 4, 4)
-            painter.setPen(QColor("#8dc5f1"))
+            if not (hovered or active):
+                continue
+            center = rect.center()
+            chip = QRect(center.x() - 9, center.y() - 9, 18, 18)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(PALETTE.accent if active else PALETTE.panel_header))
+            painter.drawEllipse(chip)
+            painter.setPen(QColor(PALETTE.text_on_accent if active else PALETTE.accent_text))
+            font = self._base_font(bold=True)
+            painter.setFont(font)
+            painter.drawText(chip, Qt.AlignmentFlag.AlignCenter, "＋")
+            label = "插入到这里" if active else "插入"
+            painter.setPen(QColor(PALETTE.text_muted))
             painter.setFont(self._base_font(bold=False))
-            painter.drawText(button, Qt.AlignmentFlag.AlignCenter, "＋ 添加")
+            painter.drawText(
+                QRect(center.x() + 14, center.y() - 9, 90, 18),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                label,
+            )
 
     def _paint_drop_overlay(self, painter: QPainter) -> None:
         if not self._drop_active or self._drop_candidate is None:
@@ -848,13 +890,13 @@ class _FlowCanvas(QWidget):
         if element.kind == "card":
             self._paint_card_indicator(painter, element, placement, allowed)
         elif not allowed:
-            painter.setPen(QPen(QColor("#8b1a1a"), 2))
+            painter.setPen(QPen(QColor("#4a2a2a"), 2))
             painter.drawRoundedRect(element.rect.adjusted(-2, -2, 2, 2), 6, 6)
 
     def _paint_card_indicator(
         self, painter: QPainter, element: _Element, placement: DropPlacement, allowed: bool
     ) -> None:
-        color = QColor("#238636" if allowed else "#8b1a1a")
+        color = QColor("#6aa84f" if allowed else "#4a2a2a")
         rect = element.rect
         if placement == DropPlacement.BEFORE:
             return
@@ -875,7 +917,7 @@ class _FlowCanvas(QWidget):
         element = self._layout.cards.get(self._flash_uid)
         if element is None:
             return
-        painter.setPen(QPen(QColor("#238636"), 3))
+        painter.setPen(QPen(QColor("#6aa84f"), 3))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(element.rect.adjusted(-2, -2, 2, 2), 8, 8)
 
@@ -1336,9 +1378,9 @@ class ProgramFlow(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setStyleSheet(
-            "QScrollArea { background: #171a20; border: 0; }"
-            "QScrollBar:vertical { background: #171a20; width: 10px; }"
-            "QScrollBar::handle:vertical { background: #3a414e; border-radius: 4px; "
+            "QScrollArea { background: #2b2b2b; border: 0; }"
+            "QScrollBar:vertical { background: #2b2b2b; width: 10px; }"
+            "QScrollBar::handle:vertical { background: #1f1f1f; border-radius: 4px; "
             "min-height: 24px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )

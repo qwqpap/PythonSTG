@@ -435,10 +435,10 @@ class BulletPreview(QWidget):
         choice = catalog.choice(bullet_type, color)
         if choice is None:
             text.setText(f"{bullet_type} × {color}\n当前组合没有弹型别名")
-            text.setStyleSheet("color: #f85149;")
+            text.setStyleSheet("color: #d06a6a;")
         else:
             text.setText(f"{bullet_type} × {color}\n精灵：{choice.sprite_id}")
-            text.setStyleSheet("color: #8b949e;")
+            text.setStyleSheet("color: #b9b9b9;")
         layout.addWidget(text, 1)
 
 
@@ -505,14 +505,14 @@ class CoordinatePreview(QWidget):
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#10141a"))
+        painter.fillRect(self.rect(), QColor("#262626"))
         spec = self._reader()
         border = QRectF(8.0, 6.0, self.width() - 16, self.height() - 12)
-        painter.setPen(QPen(QColor("#3a414e"), 1))
+        painter.setPen(QPen(QColor("#1f1f1f"), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(border, 4, 4)
         center = QPointF(border.center())
-        painter.setPen(QPen(QColor("#262c34"), 1))
+        painter.setPen(QPen(QColor("#1f1f1f"), 1))
         painter.drawLine(
             QPointF(border.left(), center.y()),
             QPointF(border.right(), center.y()),
@@ -522,12 +522,12 @@ class CoordinatePreview(QWidget):
             QPointF(center.x(), border.bottom()),
         )
         if spec is None or spec[0] == "none":
-            painter.setPen(QColor("#6e7681"))
+            painter.setPen(QColor("#6b6b6b"))
             painter.drawText(border, Qt.AlignmentFlag.AlignCenter, "无坐标参数")
             painter.end()
             return
         if spec[0] == "hint":
-            painter.setPen(QColor("#f0883e"))
+            painter.setPen(QColor("#d9a01c"))
             painter.drawText(border, Qt.AlignmentFlag.AlignCenter, spec[1])
             painter.end()
             return
@@ -539,11 +539,11 @@ class CoordinatePreview(QWidget):
                 center.x() + dx / 2 * width,
                 center.y() - dy * _Y_ASPECT / 2 * height,
             )
-            painter.setPen(QPen(QColor("#3fb950"), 2))
+            painter.setPen(QPen(QColor("#6aa84f"), 2))
             painter.drawLine(center, target)
-            painter.setBrush(QColor("#3fb950"))
+            painter.setBrush(QColor("#6aa84f"))
             painter.drawEllipse(target, 4, 4)
-            painter.setPen(QColor("#c9d1d9"))
+            painter.setPen(QColor("#e8e8e8"))
             painter.drawText(
                 QPointF(target.x() + 6, target.y() - 4), f"Δ({dx:g}, {dy:g})"
             )
@@ -554,7 +554,7 @@ class CoordinatePreview(QWidget):
         u, v = marker_point(x, y, border.width(), border.height())
         marker = QPointF(border.left() + u, border.top() + v)
         inside = border.adjusted(6, 6, -6, -6).contains(marker)
-        color = QColor("#f85149") if off_screen or not inside else QColor("#58a6e7")
+        color = QColor("#d06a6a") if off_screen or not inside else QColor("#3a6ea5")
         painter.setPen(QPen(color, 2))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         radius = 6.0
@@ -592,13 +592,13 @@ class EmissionPreview(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#10141a"))
+        painter.fillRect(self.rect(), QColor("#262626"))
         border = QRectF(8.0, 6.0, self.width() - 16, self.height() - 12)
-        painter.setPen(QPen(QColor("#3a414e"), 1))
+        painter.setPen(QPen(QColor("#1f1f1f"), 1))
         painter.drawRoundedRect(border, 4, 4)
         spec = self._reader()
         if spec is None or spec[0] == "hint":
-            painter.setPen(QColor("#f0883e"))
+            painter.setPen(QColor("#d9a01c"))
             painter.drawText(
                 border,
                 Qt.AlignmentFlag.AlignCenter,
@@ -609,8 +609,8 @@ class EmissionPreview(QWidget):
         kind, values = spec
         center = QPointF(border.center())
         radius = min(border.width(), border.height()) * 0.36
-        painter.setPen(QPen(QColor("#58a6e7"), 1.6))
-        painter.setBrush(QColor("#58a6e7"))
+        painter.setPen(QPen(QColor("#3a6ea5"), 1.6))
+        painter.setBrush(QColor("#3a6ea5"))
         painter.drawEllipse(center, 3.0, 3.0)
 
         def ray(angle: float, length: float = radius) -> None:
@@ -636,21 +636,21 @@ class EmissionPreview(QWidget):
             orbit_radius, theta, angular_velocity = values
             display_radius = max(10.0, min(radius, abs(orbit_radius) * radius * 4))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor("#a371f7"), 1.4, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor("#b18cd9"), 1.4, Qt.PenStyle.DashLine))
             painter.drawEllipse(center, display_radius, display_radius)
             radians = math.radians(theta)
             point = QPointF(
                 center.x() + math.cos(radians) * display_radius,
                 center.y() - math.sin(radians) * display_radius,
             )
-            painter.setBrush(QColor("#a371f7"))
+            painter.setBrush(QColor("#b18cd9"))
             painter.drawEllipse(point, 4.0, 4.0)
-            painter.setPen(QColor("#8b949e"))
+            painter.setPen(QColor("#b9b9b9"))
             painter.drawText(border.adjusted(6, 6, -6, -6), f"ω {angular_velocity:g}°/帧")
         else:
             ray(values[0])
             if kind == "aimed":
-                painter.setPen(QPen(QColor("#f0883e"), 1, Qt.PenStyle.DashLine))
+                painter.setPen(QPen(QColor("#d9a01c"), 1, Qt.PenStyle.DashLine))
                 painter.drawText(
                     border.adjusted(6, 6, -6, -6),
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
@@ -952,8 +952,8 @@ class InspectorPanel(QWidget):
         header = QLabel(_GROUP_LABELS[group], self)
         header.setObjectName(f"inspector_group_{group}")
         header.setStyleSheet(
-            "color: #58a6e7; font-weight: 600; padding-top: 4px; "
-            "border-bottom: 1px solid #30363d;"
+            "color: #3a6ea5; font-weight: 600; padding-top: 4px; "
+            "border-bottom: 1px solid #3a3a3a;"
         )
         self.form.addRow(header)
 
@@ -1178,7 +1178,7 @@ class InspectorPanel(QWidget):
             tooltip = editor.toolTip()
             editor.setToolTip(f"{tooltip}\n{hint}" if tooltip else hint)
         error_label = QLabel("", container)
-        error_label.setStyleSheet("color: #f85149;")
+        error_label.setStyleSheet("color: #d06a6a;")
         error_label.setWordWrap(True)
         error_label.setObjectName(f"error_{name}")
         error_label.hide()
@@ -1211,7 +1211,7 @@ class InspectorPanel(QWidget):
             tooltip += "\n建议先调整此项。"
         label.setToolTip(tooltip)
         if mark_suggested:
-            label.setStyleSheet("color: #f0883e;")
+            label.setStyleSheet("color: #d9a01c;")
             self._suggested_widget = self._focus_proxy(editor)
         if add_to_form:
             if isinstance(editor, QPlainTextEdit):
@@ -1352,7 +1352,7 @@ class InspectorPanel(QWidget):
         layout.addWidget(table)
         error = QLabel("", container)
         error.setObjectName("error_parameters")
-        error.setStyleSheet("color: #f85149;")
+        error.setStyleSheet("color: #d06a6a;")
         error.setWordWrap(True)
         layout.addWidget(error)
         self.form.addRow(QLabel("参数表", self))

@@ -214,32 +214,32 @@ class TimelineCanvas(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         exposed = QRectF(event.rect().adjusted(-2, -2, 2, 2))
-        painter.fillRect(event.rect(), QColor("#1e1f22"))
+        painter.fillRect(event.rect(), QColor("#2b2b2b"))
         projection = self.projection
         if projection is None or not projection.intervals:
-            painter.setPen(QColor("#8b8d94"))
+            painter.setPen(QColor("#b9b9b9"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "选择内容以查看时间安排")
             return
 
         if any(isinstance(item.interval.start, Unknown) or isinstance(item.interval.end, Unknown) for item in self._painted):
             unknown_left = self.timed_right + 16
-            painter.fillRect(QRectF(unknown_left, 0, max(0, self.width() - unknown_left), self.height()), QColor("#25222b"))
-            painter.setPen(QPen(QColor("#9b8da8"), 1, Qt.PenStyle.DashLine))
+            painter.fillRect(QRectF(unknown_left, 0, max(0, self.width() - unknown_left), self.height()), QColor("#4a2a2a"))
+            painter.setPen(QPen(QColor("#b18cd9"), 1, Qt.PenStyle.DashLine))
             painter.drawLine(round(unknown_left), 0, round(unknown_left), self.height())
 
         colors = {
-            "static": QColor("#356a9a"),
-            "branch": QColor("#8559a5"),
-            "parallel": QColor("#347f72"),
-            "spawned": QColor("#9a6b32"),
-            "template": QColor("#a24f72"),
-            "dynamic": QColor("#5f6269"),
+            "static": QColor("#3a6ea5"),
+            "branch": QColor("#b18cd9"),
+            "parallel": QColor("#6aa84f"),
+            "spawned": QColor("#d9a01c"),
+            "template": QColor("#b18cd9"),
+            "dynamic": QColor("#7d7d7d"),
         }
         for index, painted in enumerate(self._painted):
             y = _RULER_HEIGHT + index * (_LANE_HEIGHT + _LANE_GAP)
             if y + _LANE_HEIGHT < exposed.top() or y > exposed.bottom():
                 continue
-            background = QColor("#292b30") if index % 2 == 0 else QColor("#25272b")
+            background = QColor("#2f2f2f") if index % 2 == 0 else QColor("#2b2b2b")
             painter.fillRect(QRectF(_ORIGIN_X, y, self.width() - _ORIGIN_X, _LANE_HEIGHT), background)
 
         for painted in self._painted:
@@ -252,7 +252,7 @@ class TimelineCanvas(QWidget):
             color = colors[interval.kind]
             selected = interval.uid == self.selected_uid
             if selected:
-                color = QColor("#487eae")
+                color = QColor("#3a6ea5")
             if interval.display == "aggregate":
                 aggregate = QColor(color)
                 aggregate.setAlpha(35)
@@ -265,12 +265,12 @@ class TimelineCanvas(QWidget):
                 painter.drawLine(round(rect.right()), round(rect.top() + 6), round(rect.right()), round(rect.bottom() - 5))
             elif interval.display == "milestone":
                 painter.setBrush(color)
-                painter.setPen(QPen(QColor("#f4f4f4"), 1))
+                painter.setPen(QPen(QColor("#e8e8e8"), 1))
                 painter.drawEllipse(rect)
             else:
                 painter.fillRect(rect, color)
             mode = _drag_mode(interval)
-            pen = QPen(QColor("#9bc8ed") if selected else color.lighter(140), 2 if selected else 1)
+            pen = QPen(QColor("#8fc0ea") if selected else color.lighter(140), 2 if selected else 1)
             if interval.kind == "dynamic":
                 pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
@@ -282,9 +282,9 @@ class TimelineCanvas(QWidget):
                 painter.drawText(rect.adjusted(6, 0, -6, 0), Qt.AlignmentFlag.AlignVCenter, "时间待定")
             self._paint_observation(painter, interval, rect, exposed)
             if mode in {"wait", "duration"}:
-                painter.fillRect(QRectF(rect.right() - 3, rect.top(), 3, rect.height()), QColor("#f4f4f4"))
+                painter.fillRect(QRectF(rect.right() - 3, rect.top(), 3, rect.height()), QColor("#e8e8e8"))
             elif mode == "at":
-                painter.setPen(QColor("#f4f4f4"))
+                painter.setPen(QColor("#e8e8e8"))
                 painter.drawText(rect.adjusted(2, 0, -2, 0), Qt.AlignmentFlag.AlignRight, "↔")
 
         if self._drag is not None:
@@ -295,7 +295,7 @@ class TimelineCanvas(QWidget):
                 ghost.translate(delta, 0)
             else:
                 ghost.setWidth(max(0.0, ghost.width() + delta))
-            painter.setPen(QPen(QColor("#f4c95d"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor("#d9a01c"), 2, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(ghost)
             painter.drawText(
@@ -314,11 +314,11 @@ class TimelineCanvas(QWidget):
 
         if self.cursor_available:
             cursor_x = _ORIGIN_X + self.cursor_frame * self.pixels_per_frame
-            painter.setPen(QPen(QColor("#ff4b4b"), 2))
+            painter.setPen(QPen(QColor("#d06a6a"), 2))
             painter.drawLine(int(cursor_x), 0, int(cursor_x), self.height())
         if self.scrub_frame is not None:
             scrub_x = _ORIGIN_X + self.scrub_frame * self.pixels_per_frame
-            painter.setPen(QPen(QColor("#f4c95d"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor("#d9a01c"), 2, Qt.PenStyle.DashLine))
             painter.drawLine(int(scrub_x), 0, int(scrub_x), self.height())
 
         # Keep names visible when horizontally scrolling a long arrangement.
@@ -326,7 +326,7 @@ class TimelineCanvas(QWidget):
         label_left = self._label_left()
         header_top = self._header_top()
         viewport_bottom = header_top + self._viewport_height()
-        painter.fillRect(QRectF(label_left, 0, _ORIGIN_X, self.height()), QColor("#202226"))
+        painter.fillRect(QRectF(label_left, 0, _ORIGIN_X, self.height()), QColor("#262626"))
         for index, painted in enumerate(self._painted):
             y = _RULER_HEIGHT + index * (_LANE_HEIGHT + _LANE_GAP)
             if y + _LANE_HEIGHT < exposed.top() or y > exposed.bottom():
@@ -340,22 +340,22 @@ class TimelineCanvas(QWidget):
                 continue
             selected = painted.interval.uid == self.selected_uid
             if selected:
-                painter.fillRect(QRectF(label_left, y, _ORIGIN_X - 1, _LANE_HEIGHT), QColor("#2b4358"))
+                painter.fillRect(QRectF(label_left, y, _ORIGIN_X - 1, _LANE_HEIGHT), QColor("#31465c"))
             elif painted.interval.children:
-                painter.fillRect(QRectF(label_left, y, _ORIGIN_X - 1, _LANE_HEIGHT), QColor("#272b31"))
+                painter.fillRect(QRectF(label_left, y, _ORIGIN_X - 1, _LANE_HEIGHT), QColor("#303030"))
             text_left = label_left + 8 + min(4, painted.depth) * 12
             if painted.depth:
-                painter.setPen(QColor("#606773"))
+                painter.setPen(QColor("#7d7d7d"))
                 painter.drawLine(round(text_left - 6), y + 9, round(text_left - 6), y + 23)
                 painter.drawLine(round(text_left - 6), y + 16, round(text_left - 2), y + 16)
             if visible_bottom - visible_top < painter.fontMetrics().height() + 2:
                 continue
-            painter.setPen(QColor("#e0e4eb") if selected else QColor("#bdc4ce"))
+            painter.setPen(QColor("#ffffff") if selected else QColor("#b9b9b9"))
             label = self._label_for(painted)
             label_rect = QRectF(text_left, visible_top, label_left + _ORIGIN_X - text_left - 8, visible_bottom - visible_top)
             text = painter.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, max(0, round(label_rect.width())))
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextSingleLine, text)
-        painter.setPen(QColor("#3b4049"))
+        painter.setPen(QColor("#3a3a3a"))
         painter.drawLine(round(label_left + _ORIGIN_X - 1), 0, round(label_left + _ORIGIN_X - 1), self.height())
         self._paint_ruler(painter, exposed, header_top, label_left)
 
@@ -372,8 +372,8 @@ class TimelineCanvas(QWidget):
     def _paint_ruler(self, painter: QPainter, exposed: QRectF, top: int, label_left: int) -> None:
         # The ruler and the source-order heading form one fixed top row while
         # the interval rows scroll beneath it. Frame coordinates stay absolute.
-        painter.fillRect(QRectF(0, top, self.width(), _RULER_HEIGHT), QColor("#25272b"))
-        painter.setPen(QColor("#858992"))
+        painter.fillRect(QRectF(0, top, self.width(), _RULER_HEIGHT), QColor("#2b2b2b"))
+        painter.setPen(QColor("#b9b9b9"))
         step = _ruler_step(self.pixels_per_frame)
         first_tick = max(0, int((exposed.left() - _ORIGIN_X) / self.pixels_per_frame) // step * step)
         last_tick = min(self._maximum + 1, int((exposed.right() - _ORIGIN_X) / self.pixels_per_frame) + step)
@@ -383,22 +383,22 @@ class TimelineCanvas(QWidget):
             painter.drawText(int(x + 3), top + 15, f"{frame} 帧")
         if any(isinstance(item.interval.start, Unknown) or isinstance(item.interval.end, Unknown) for item in self._painted):
             unknown_left = self.timed_right + 16
-            painter.fillRect(QRectF(unknown_left, top, max(0, self.width() - unknown_left), _RULER_HEIGHT), QColor("#25222b"))
-            painter.setPen(QColor("#9b8da8"))
+            painter.fillRect(QRectF(unknown_left, top, max(0, self.width() - unknown_left), _RULER_HEIGHT), QColor("#4a2a2a"))
+            painter.setPen(QColor("#b18cd9"))
             painter.drawText(QRectF(unknown_left + 8, top, 340, _RULER_HEIGHT), Qt.AlignmentFlag.AlignVCenter, "运行后确定时间")
         if self.cursor_available:
             x = _ORIGIN_X + self.cursor_frame * self.pixels_per_frame
-            painter.setPen(QPen(QColor("#ff4b4b"), 2))
+            painter.setPen(QPen(QColor("#d06a6a"), 2))
             painter.drawLine(round(x), top, round(x), top + _RULER_HEIGHT)
         if self.scrub_frame is not None:
             x = _ORIGIN_X + self.scrub_frame * self.pixels_per_frame
-            painter.setPen(QPen(QColor("#f4c95d"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor("#d9a01c"), 2, Qt.PenStyle.DashLine))
             painter.drawLine(round(x), top, round(x), top + _RULER_HEIGHT)
             painter.drawText(QRectF(x + 4, top + 2, 90, _RULER_HEIGHT - 4), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, f"→ {self.scrub_frame} 帧")
-        painter.fillRect(QRectF(label_left, top, _ORIGIN_X, _RULER_HEIGHT), QColor("#25272b"))
-        painter.setPen(QColor("#a9adb5"))
+        painter.fillRect(QRectF(label_left, top, _ORIGIN_X, _RULER_HEIGHT), QColor("#2b2b2b"))
+        painter.setPen(QColor("#b9b9b9"))
         painter.drawText(QRectF(label_left + 8, top, _ORIGIN_X - 16, _RULER_HEIGHT), Qt.AlignmentFlag.AlignVCenter, "步骤顺序")
-        painter.setPen(QColor("#3b4049"))
+        painter.setPen(QColor("#3a3a3a"))
         painter.drawLine(label_left, top + _RULER_HEIGHT - 1, self.width(), top + _RULER_HEIGHT - 1)
 
     def _label_for(self, painted: _PaintedInterval) -> str:
@@ -438,7 +438,7 @@ class TimelineCanvas(QWidget):
         )
         observed = QRectF(x, static_rect.bottom() - 5, width, 4)
         if observed.intersects(exposed):
-            painter.fillRect(observed, QColor("#ff9f43"))
+            painter.fillRect(observed, QColor("#d9a01c"))
 
     def _paint_metrics(
         self,
@@ -450,8 +450,8 @@ class TimelineCanvas(QWidget):
         chart = QRectF(_ORIGIN_X, top, self.timed_right - _ORIGIN_X, _METRICS_HEIGHT - 8)
         if not chart.intersects(exposed):
             return
-        painter.fillRect(chart, QColor("#25272b"))
-        painter.setPen(QColor("#c8cad0"))
+        painter.fillRect(chart, QColor("#2b2b2b"))
+        painter.setPen(QColor("#b9b9b9"))
         painter.drawText(6, top + 17, "弹幕密度")
         samples = projection.metrics
         maximum = max(
@@ -461,9 +461,9 @@ class TimelineCanvas(QWidget):
             *(sample.lasers for sample in samples),
         )
         colors = {
-            "emitted": QColor("#f4c95d"),
-            "live": QColor("#58a6ff"),
-            "lasers": QColor("#ff7b72"),
+            "emitted": QColor("#d9a01c"),
+            "live": QColor("#8fc0ea"),
+            "lasers": QColor("#d06a6a"),
         }
         labels = {
             "live": "存活",
@@ -475,11 +475,11 @@ class TimelineCanvas(QWidget):
         for name in ("live", "emitted", "lasers"):
             painter.setPen(QPen(colors[name], 2))
             painter.drawLine(legend_x, top + 11, legend_x + 12, top + 11)
-            painter.setPen(QColor("#c8cad0"))
+            painter.setPen(QColor("#b9b9b9"))
             painter.drawText(legend_x + 16, top + 16, labels[name])
             legend_x += 76 if name != "emitted" else 126
         plot = chart.adjusted(0, 20, 0, 0)
-        painter.setPen(QColor("#4b5059"))
+        painter.setPen(QColor("#353535"))
         painter.drawLine(
             round(plot.left()),
             round(plot.bottom()),

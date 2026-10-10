@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PySTG 关卡编辑器 · 三个视觉方向样张</title>
+<style>
+  /* ============ 样张外壳（不属于任何方案） ============ */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    background: #eef0f3; color: #1f2328; padding: 22px 26px 60px;
+  }
+  .page-head h1 { font-size: 20px; margin: 0 0 6px; font-weight: 700; }
+  .page-head p { margin: 0 0 4px; color: #5b6472; font-size: 13px; line-height: 1.7; }
+  .page-head code { background: #dde1e7; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  .switcher { display: flex; gap: 8px; margin: 18px 0 14px; flex-wrap: wrap; }
+  .switcher input { position: absolute; opacity: 0; pointer-events: none; }
+  .switcher label {
+    display: inline-flex; flex-direction: column; gap: 2px; cursor: pointer;
+    background: #fff; border: 1px solid #d5dae1; border-radius: 10px;
+    padding: 9px 16px; font-size: 13.5px; font-weight: 600; color: #2b3138;
+    box-shadow: 0 1px 2px rgba(16,22,32,.05); transition: .12s;
+  }
+  .switcher label span { font-weight: 400; font-size: 11.5px; color: #7b8494; }
+  .switcher label:hover { border-color: #b9c1cc; }
+  #dA:checked ~ .switcher label[for="dA"],
+  #dB:checked ~ .switcher label[for="dB"],
+  #dC:checked ~ .switcher label[for="dC"] {
+    border-color: #2f6fed; box-shadow: 0 0 0 2px rgba(47,111,237,.18); color: #17408f;
+  }
+  .shot { display: none; }
+  #dA:checked ~ .shots .shot-a,
+  #dB:checked ~ .shots .shot-b,
+  #dC:checked ~ .shots .shot-c { display: block; }
+
+  .note {
+    margin: 14px 0 0; background: #fff; border: 1px solid #dde2e8; border-left: 3px solid #2f6fed;
+    border-radius: 8px; padding: 12px 16px; font-size: 12.5px; line-height: 1.85; color: #414a57;
+  }
+  .note b { color: #1f2328; }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+  .note li { margin: 2px 0; }
+
+  /* ============ 三个方案的公共骨架（尺寸/结构完全一致） ============ */
+  .app {
+    margin-top: 4px; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 10px 30px rgba(14,20,30,.16);
+    font-size: 12.5px; line-height: 1.45;
+  }
+  .app, .app * { box-sizing: border-box; }
+  .app .menubar { display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 32px; font-size: 12.5px; }
+  .app .toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; }
+  .app .navseg { display: flex; gap: 2px; padding: 2px; border-radius: 8px; }
+  .app .navseg .seg { padding: 4px 13px; border-radius: 6px; font-size: 12.5px; }
+  .app .toolbar .grow { flex: 1; }
+  .app .tbtn { padding: 4px 12px; border-radius: 7px; font-size: 12.5px; }
+  .app .tbtn.primary { font-weight: 600; }
+  .app .runstate { font-size: 12px; padding-left: 4px; }
+
+  .app .body { display: flex; height: 560px; }
+  .app .side { width: 232px; display: flex; flex-direction: column; }
+  .app .side-head { padding: 9px 12px; font-size: 12.5px; font-weight: 600; }
+  .app .tabs { display: flex; gap: 2px; padding: 0 6px 8px; }
+  .app .tabs .tab { flex: 1; text-align: center; white-space: nowrap; padding: 4px 0; border-radius: 6px; font-size: 12.5px; }
+  .app .newbtn { margin: 0 10px 8px; padding: 6px 10px; border-radius: 7px; font-size: 12.5px; }
+  .app .tree { flex: 1; padding: 2px 6px 8px; overflow: hidden; }
+  .app .tgroup { padding: 5px 8px; font-size: 12.5px; }
+  .app .titem { padding: 5px 8px 5px 20px; border-radius: 6px; font-size: 12.5px; }
+  .app .titem.sel { font-weight: 600; }
+  .app .titem.sub { padding-left: 34px; }
+
+  .app .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .app .crumbs { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 12px; }
+  .app .crumbs .grow { flex: 1; }
+  .app .section-head { display: flex; align-items: center; gap: 10px; padding: 4px 14px 10px; }
+  .app .section-head .title { font-size: 14.5px; font-weight: 700; }
+  .app .section-head .grow { flex: 1; }
+  .app .flow { flex: 1; overflow: auto; padding: 0 14px 14px; }
+
+  .app .node { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+  .app .node .bar { width: 3px; align-self: stretch; border-radius: 2px; }
+  .app .node .kind { font-weight: 600; white-space: nowrap; }
+  .app .node .param { opacity: .78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app .node .grow { flex: 1; }
+  .app .node .dots { opacity: .5; letter-spacing: 1px; font-size: 11px; }
+  .app .node .wrap { font-size: 11.5px; }
+  .app .emptyline { display: flex; align-items: center; gap: 8px; height: 22px; padding: 0 4px; }
+  .app .emptyline .plus { font-size: 11.5px; opacity: .55; }
+  .app .emptyline .rule { flex: 1; height: 1px; }
+  .app .nest { margin: 6px 0 6px 0; padding-left: 16px; }
+  .app .branches { display: flex; gap: 12px; padding: 8px 0 0 14px; }
+  .app .branch { flex: 1; }
+  .app .branch .branch-title { font-size: 12px; padding-bottom: 6px; }
+
+  .app .inspector { width: 268px; display: flex; flex-direction: column; }
+  .app .insp-head { padding: 9px 12px; font-size: 12.5px; font-weight: 600; display: flex; }
+  .app .insp-head .grow { flex: 1; }
+  .app .insp-head .x { opacity: .45; }
+  .app .insp-scroll { flex: 1; padding: 4px 12px 12px; overflow: hidden; }
+  .app .group { margin: 10px 0 4px; font-size: 12px; font-weight: 700; }
+  .app .field { display: grid; grid-template-columns: 68px 1fr auto; gap: 8px; align-items: center; margin: 7px 0; }
+  .app .field .flabel { font-size: 12px; text-align: right; }
+  .app .field .input { padding: 4px 8px; font-size: 12.5px; min-height: 26px; display: flex; align-items: center; }
+  .app .field .badge { font-size: 11px; opacity: .55; }
+  .app .field .act { font-size: 12px; opacity: .5; }
+
+  .app .timeline { height: 176px; display: flex; flex-direction: column; --tl-label: 116px; --tl-gutter: 12px; }
+  .app .tl-head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; font-size: 12.5px; }
+  .app .tl-head .grow { flex: 1; }
+  .app .tl-head .tbtn { padding: 3px 10px; }
+  .app .tl-sum { padding: 0 12px 6px; font-size: 12px; }
+  .app .ruler { position: relative; height: 18px; font-size: 11px; margin: 0 var(--tl-gutter) 0 var(--tl-label); }
+  .app .ruler span { position: absolute; top: 2px; transform: translateX(-50%); }
+  .app .ruler span.first { transform: none; }
+  .app .ruler .tick { position: absolute; top: 0; width: 1px; height: 4px; }
+  .app .tl-rows { padding: 6px 12px 10px; }
+  .app .tl-row { display: flex; align-items: center; height: 22px; }
+  .app .tl-row .rlabel { width: calc(var(--tl-label) - 12px); flex: none; font-size: 12px; padding-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app .tl-row .lane { flex: 1; position: relative; height: 14px; }
+  .app .tl-row .blk { position: absolute; top: 1px; height: 12px; border-radius: 3px; }
+
+  /* ================= 方案 A：浅色卡片风 ================= */
+  .dirA { background: #f5f6f8; color: #1f2328; border: 1px solid #e3e6ea; }
+  .dirA .menubar { background: #ffffff; border-bottom: 1px solid #e9ecf0; color: #3b424c; }
+  .dirA .toolbar { background: #ffffff; border-bottom: 1px solid #e9ecf0; }
+  .dirA .navseg { background: #eef1f5; }
+  .dirA .navseg .seg { color: #55606e; }
+  .dirA .navseg .seg.on { background: #ffffff; color: #17408f; font-weight: 600; box-shadow: 0 1px 2px rgba(20,30,50,.10); }
+  .dirA .tbtn { background: #fff; border: 1px solid #dbe0e6; color: #333a44; }
+  .dirA .tbtn.primary { background: #2f6fed; border-color: #2f6fed; color: #fff; }
+  .dirA .runstate { color: #7b8494; }
+  .dirA .side { background: #fbfcfd; border-right: 1px solid #e6e9ee; }
+  .dirA .side-head { color: #1f2328; }
+  .dirA .tabs .tab { color: #66707d; }
+  .dirA .tabs .tab.on { background: #e8effd; color: #17408f; font-weight: 600; }
+  .dirA .newbtn { background: #fff; border: 1px dashed #c9d1da; color: #5a6472; text-align: center; }
+  .dirA .tgroup { color: #8a929e; font-weight: 600; }
+  .dirA .titem { color: #333a44; }
+  .dirA .titem.sel { background: #e8effd; color: #17408f; }
+  .dirA .main { background: #f5f6f8; }
+  .dirA .crumbs { color: #6b7280; border-bottom: 1px solid #e9ecf0; }
+  .dirA .flow { padding-top: 10px; }
+  .dirA .node { background: #ffffff; border: 1px solid #e3e6ea; border-radius: 6px; box-shadow: 0 1px 2px rgba(20,30,50,.05); margin-bottom: 6px; }
+  .dirA .node.flow-card { border-left: 3px solid #2f6fed; }
+  .dirA .node.action { border-left: 3px solid #16a34a; }
+  .dirA .node.wait { border-left: 3px solid #d97706; }
+  .dirA .node.audio { border-left: 3px solid #a855f7; }
+  .dirA .node.ctrl { border-left: 3px solid #0ea5e9; }
+  .dirA .emptyline .rule { background: #dfe4ea; }
+  .dirA .container { background: #fff; border: 1px dashed #d7dde4; border-radius: 6px; padding: 4px 8px 8px; margin-bottom: 6px; }
+  .dirA .container > .node { margin-bottom: 4px; }
+  .dirA .branch-title { color: #8a929e; }
+  .dirA .inspector { background: #ffffff; border-left: 1px solid #e6e9ee; }
+  .dirA .insp-head { color: #1f2328; border-bottom: 1px solid #eef1f5; }
+  .dirA .group { color: #17408f; }
+  .dirA .group::after { content: ""; display: block; height: 1px; background: #eef1f5; margin-top: 5px; }
+  .dirA .field .flabel { color: #55606e; }
+  .dirA .field .input { background: #f7f8fa; border: 1px solid transparent; border-bottom: 1px solid #dbe0e6; border-radius: 4px; color: #1f2328; }
+  .dirA .timeline { background: #ffffff; border-top: 1px solid #e6e9ee; }
+  .dirA .tl-head { color: #1f2328; }
+  .dirA .tl-sum { color: #7b8494; }
+  .dirA .ruler { color: #98a1ae; border-bottom: 1px solid #eef1f5; }
+  .dirA .ruler .tick { background: #e6e9ee; }
+  .dirA .tl-row .rlabel { color: #55606e; }
+  .dirA .tl-row .lane { background: #f7f8fa; border-radius: 3px; }
+  .dirA .blk.b1 { background: #cfe0fd; border: 1px solid #9dbdf7; }
+  .dirA .blk.b2 { background: #fde8c8; border: 1px solid #f3c887; }
+  .dirA .blk.b3 { background: #d8f3e3; border: 1px solid #9ad9b8; }
+
+  /* ================= 方案 B：精修深色（分层 + 单一强调色） ================= */
+  .dirB { background: #12151a; color: #e6edf3; border: 1px solid #2f3742; }
+  .dirB .menubar { background: #161a21; border-bottom: 1px solid #2f3742; color: #c3ccd7; }
+  .dirB .toolbar { background: #191d24; border-bottom: 1px solid #2f3742; }
+  .dirB .navseg { background: #12151a; border: 1px solid #2f3742; }
+  .dirB .navseg .seg { color: #9aa4b2; }
+  .dirB .navseg .seg.on { background: #222831; color: #e6edf3; font-weight: 600; }
+  .dirB .tbtn { background: #222831; border: 1px solid #2f3742; color: #d6dee7; }
+  .dirB .tbtn.primary { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  .dirB .runstate { color: #9aa4b2; }
+  .dirB .side { background: #191d24; border-right: 1px solid #2f3742; }
+  .dirB .side-head { color: #e6edf3; }
+  .dirB .tabs .tab { color: #9aa4b2; }
+  .dirB .tabs .tab.on { background: #22303f; color: #e6edf3; font-weight: 600; }
+  .dirB .newbtn { background: #222831; border: 1px dashed #3a444f; color: #aab4c0; text-align: center; }
+  .dirB .tgroup { color: #7d8794; font-weight: 600; }
+  .dirB .titem { color: #d6dee7; }
+  .dirB .titem.sel { background: #22303f; color: #ffffff; }
+  .dirB .main { background: #12151a; }
+  .dirB .crumbs { color: #9aa4b2; border-bottom: 1px solid #2f3742; }
+  .dirB .flow { padding-top: 10px; }
+  .dirB .node { background: #222831; border: 1px solid #2f3742; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.35); margin-bottom: 6px; }
+  .dirB .node.flow-card { border-left: 3px solid #3b82f6; }
+  .dirB .node.action { border-left: 3px solid #3fb950; }
+  .dirB .node.wait { border-left: 3px solid #d29922; }
+  .dirB .node.audio { border-left: 3px solid #a371f7; }
+  .dirB .node.ctrl { border-left: 3px solid #58a6e7; }
+  .dirB .emptyline .rule { background: #2a313a; }
+  .dirB .container { background: #191d24; border: 1px dashed #333c47; border-radius: 6px; padding: 4px 8px 8px; margin-bottom: 6px; }
+  .dirB .container > .node { background: #222831; }
+  .dirB .branch-title { color: #7d8794; }
+  .dirB .inspector { background: #191d24; border-left: 1px solid #2f3742; }
+  .dirB .insp-head { color: #e6edf3; border-bottom: 1px solid #262d36; }
+  .dirB .group { color: #7aa7f0; }
+  .dirB .group::after { content: ""; display: block; height: 1px; background: #262d36; margin-top: 5px; }
+  .dirB .field .flabel { color: #aab4c0; }
+  .dirB .field .input { background: #12151a; border: 1px solid #2f3742; border-radius: 5px; color: #e6edf3; }
+  .dirB .timeline { background: #191d24; border-top: 1px solid #2f3742; }
+  .dirB .tl-head { color: #e6edf3; }
+  .dirB .tl-sum { color: #9aa4b2; }
+  .dirB .ruler { color: #7d8794; border-bottom: 1px solid #262d36; }
+  .dirB .ruler .tick { background: #2f3742; }
+  .dirB .tl-row .rlabel { color: #aab4c0; }
+  .dirB .tl-row .lane { background: #12151a; border-radius: 3px; }
+  .dirB .blk.b1 { background: #1f4a8a; border: 1px solid #3b82f6; }
+  .dirB .blk.b2 { background: #6b4a12; border: 1px solid #d29922; }
+  .dirB .blk.b3 { background: #1c4d33; border: 1px solid #3fb950; }
+
+  /* ================= 方案 C：专业 DCC 风（紧凑深色） ================= */
+  .dirC { background: #2b2b2b; color: #e8e8e8; border: 1px solid #1f1f1f; border-radius: 4px; }
+  .dirC .menubar { background: #262626; border-bottom: 1px solid #1c1c1c; color: #cfcfcf; }
+  .dirC .toolbar { background: #333333; border-bottom: 1px solid #1f1f1f; padding: 5px 12px; }
+  .dirC .navseg { background: #2b2b2b; }
+  .dirC .navseg .seg { color: #b9b9b9; border-radius: 4px; }
+  .dirC .navseg .seg.on { background: #4a4a4a; color: #ffffff; font-weight: 600; }
+  .dirC .tbtn { background: #3c3c3c; border: 1px solid #262626; color: #e0e0e0; border-radius: 4px; }
+  .dirC .tbtn.primary { background: #3a6ea5; border-color: #2d5883; color: #fff; }
+  .dirC .runstate { color: #a8a8a8; }
+  .dirC .side { background: #303030; border-right: 1px solid #1f1f1f; }
+  .dirC .side-head { background: #3c3c3c; color: #f0f0f0; border-bottom: 1px solid #1f1f1f; }
+  .dirC .tabs { padding: 6px 8px; }
+  .dirC .tabs .tab { color: #b0b0b0; border-radius: 3px; }
+  .dirC .tabs .tab.on { background: #454545; color: #fff; font-weight: 600; }
+  .dirC .newbtn { background: #3a3a3a; border: 1px solid #4d4d4d; color: #d8d8d8; text-align: center; border-radius: 4px; }
+  .dirC .tgroup { color: #9a9a9a; font-weight: 600; }
+  .dirC .titem { color: #dcdcdc; border-radius: 3px; }
+  .dirC .titem.sel { background: #3a6ea5; color: #ffffff; }
+  .dirC .main { background: #2b2b2b; }
+  .dirC .crumbs { color: #a8a8a8; background: #303030; border-bottom: 1px solid #1f1f1f; }
+  .dirC .section-head { padding: 8px 14px; background: #333333; border-bottom: 1px solid #1f1f1f; }
+  .dirC .flow { padding: 0; }
+  .dirC .node { background: transparent; border: none; border-radius: 0; border-bottom: 1px solid #353535; padding: 5px 12px; }
+  .dirC .node.sel { background: #3a6ea5; }
+  .dirC .node .bar { width: 3px; }
+  .dirC .node.action .bar { background: #6aa84f; }
+  .dirC .node.wait .bar { background: #d9a01c; }
+  .dirC .node.audio .bar { background: #9a6ad9; }
+  .dirC .node.ctrl .bar { background: #58a6e7; }
+  .dirC .emptyline { height: 18px; }
+  .dirC .emptyline .rule { background: #3a3a3a; }
+  .dirC .container { background: #2f2f2f; border: 1px solid #3c3c3c; border-radius: 3px; padding: 0 0 4px; margin: 0; }
+  .dirC .container > .node { border-bottom: 1px solid #353535; }
+  .dirC .branch-title { color: #9a9a9a; background: #3c3c3c; padding: 3px 8px; }
+  .dirC .inspector { background: #303030; border-left: 1px solid #1f1f1f; }
+  .dirC .insp-head { background: #3c3c3c; color: #f0f0f0; border-bottom: 1px solid #1f1f1f; }
+  .dirC .group { color: #f0f0f0; background: #3c3c3c; padding: 3px 8px; margin: 8px -12px 4px; }
+  .dirC .field { grid-template-columns: 76px 1fr auto; margin: 4px 0; }
+  .dirC .field .flabel { color: #cccccc; }
+  .dirC .field .input { background: #262626; border: 1px solid #454545; border-radius: 3px; color: #f0f0f0; min-height: 22px; padding: 2px 6px; }
+  .dirC .timeline { background: #303030; border-top: 1px solid #1f1f1f; }
+  .dirC .tl-head { background: #3c3c3c; color: #f0f0f0; border-bottom: 1px solid #1f1f1f; }
+  .dirC .tl-sum { color: #a8a8a8; }
+  .dirC .ruler { color: #9a9a9a; background: #353535; margin: 0; padding: 0 12px; }
+  .dirC .ruler .tick { background: #4a4a4a; }
+  .dirC .tl-rows { padding: 4px 12px 8px; }
+  .dirC .tl-row { height: 20px; }
+  .dirC .tl-row .rlabel { color: #cccccc; }
+  .dirC .tl-row .lane { background: #262626; border-radius: 2px; }
+  .dirC .blk.b1 { background: #3a6ea5; border: 1px solid #5b8fc9; }
+  .dirC .blk.b2 { background: #a3760f; border: 1px solid #d9a01c; }
+  .dirC .blk.b3 { background: #4f7a3a; border: 1px solid #6aa84f; }
+
+  /* 三个方案的时间线标尺文字都要看得清 */
+  .dirA .ruler { color: #6b7280; }
+  .dirB .ruler { color: #9aa4b2; }
+  .dirC .ruler { color: #b9b9b9; }
+
+  /* 细节标注层 */
+  .app .hotspot { position: relative; }
+  .app .marker {
+    position: absolute; font-size: 10.5px; padding: 1px 6px; border-radius: 999px;
+    background: #f0883e; color: #1a1a1a; font-weight: 700; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="page-head">
+  <h1>PySTG 关卡编辑器 · 三个视觉方向样张</h1>
+  <p>三张图<strong>结构完全相同</strong>（同一份 HTML 骨架、同尺寸同数据），只切换视觉 token：颜色分层、边框、圆角、字号字重、间距、控件语义色。</p>
+  <p>数据取自真实工程 <code>game_content/authoring/code_editor_demo</code> 的关卡单元「雾之湖代码演示」。点上面的按钮切换方向。</p>
+</div>
+
+<input type="radio" name="dir" id="dA" checked>
+<input type="radio" name="dir" id="dB">
+<input type="radio" name="dir" id="dC">
+<div class="switcher">
+  <label for="dA">方案 A ｜ 浅色卡片风 <span>#f5f6f8 底 · 白卡片 · 电蓝强调</span></label>
+  <label for="dB">方案 B ｜ 精修深色 <span>三级分层 · 单一强调色</span></label>
+  <label for="dC">方案 C ｜ 专业 DCC 风 <span>紧凑行式 · 高信息密度</span></label>
+</div>
+
+<div class="shots">
+  <!-- ============================================================= -->
+  <!-- 一张样张的骨架；三个方向复用同一结构                            -->
+  <!-- ============================================================= -->
+  <div class="shot shot-a">
+    <div class="app dirA">
+      <div class="menubar"><span>文件</span><span>编辑</span><span>视图</span><span>运行</span></div>
+      <div class="toolbar">
+        <div class="navseg"><span class="seg on">编辑步骤</span><span class="seg">游戏画面</span><span class="seg">并排预览</span></div>
+        <span style="width:1px;height:18px;background:#dbe0e6"></span>
+        <span class="tbtn primary">运行关卡 · F5</span>
+        <span class="tbtn">暂停</span>
+        <span class="tbtn">停止</span>
+        <span class="runstate">已停止</span>
+      </div>
+      <div class="body">
+        <div class="side">
+          <div class="side-head">内容导航</div>
+          <div class="tabs"><span class="tab on">内容</span><span class="tab">源码</span><span class="tab">资源</span><span class="tab">本关</span></div>
+          <div class="newbtn">＋ 新建内容…</div>
+          <div class="tree">
+            <div class="tgroup">这一关的内容</div>
+            <div class="titem sel">关卡 · 雾之湖代码演示</div>
+            <div class="titem sub">波次 · 开场妖精</div>
+            <div class="titem sub">函数 · 记录当前 Wave</div>
+            <div class="titem sub">敌人 · 自机狙妖精</div>
+            <div class="titem sub">敌人 · 环射妖精</div>
+            <div class="titem sub">波次 · 交叉火力</div>
+            <div class="titem sub">Boss · 露米娅</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="crumbs"><span>‹ 返回</span><span>关卡 · 雾之湖代码演示</span><span class="grow"></span><span>提示</span></div>
+          <div class="section-head"><span class="title">出场安排</span><span class="grow"></span><span class="tbtn">＋ 添加步骤</span></div>
+          <div class="flow">
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="node flow-card"><span class="bar"></span><span class="kind">切换背景</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="node audio"><span class="bar"></span><span class="kind">播放背景音乐</span><span class="param">res://assets/audio/music/00.wav</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="node wait"><span class="bar"></span><span class="kind">等待</span><span class="param">30 帧</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="container">
+              <div class="node ctrl" style="border:0;box-shadow:none;margin:0"><span class="bar"></span><span class="kind">定时执行</span><span class="param">35 帧</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              <div class="nest">
+                <div class="node audio" style="margin-bottom:0"><span class="bar"></span><span class="kind">播放音效</span><span class="param">res://assets/audio/se/se_alert.wav</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              </div>
+            </div>
+            <div class="container">
+              <div class="node ctrl" style="border:0;box-shadow:none;margin:0"><span class="bar"></span><span class="kind">并行</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              <div class="branches">
+                <div class="branch">
+                  <div class="branch-title">分支 1</div>
+                  <div class="node wait" style="margin-bottom:0"><span class="bar"></span><span class="kind">等待</span><span class="param">18 帧</span></div>
+                </div>
+                <div class="branch">
+                  <div class="branch-title">分支 2</div>
+                  <div class="node wait" style="margin-bottom:0"><span class="bar"></span><span class="kind">等待</span><span class="param">40 帧</span></div>
+                </div>
+              </div>
+              <div class="emptyline"><span class="rule"></span><span class="plus">＋ 新建分支</span><span class="rule"></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="inspector">
+          <div class="insp-head"><span>属性 · 关卡</span><span class="grow"></span><span class="x">✕</span></div>
+          <div class="insp-scroll">
+            <div class="group">基础</div>
+            <div class="field"><span class="flabel">名称</span><span class="input">雾之湖代码演示</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">标题</span><span class="input">Code Driven Stage</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">副标题</span><span class="input">静态投影与运行 Trace</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">背景资源</span><span class="input">nd/demo.json</span><span class="act">…</span></div>
+            <div class="group">声音</div>
+            <div class="field"><span class="flabel">关卡 BGM</span><span class="input">/music/00.wav</span><span class="act">…</span></div>
+            <div class="field"><span class="flabel">Boss BGM</span><span class="input" style="opacity:.5">（未设置）</span><span class="act">…</span></div>
+            <div class="group">进度</div>
+            <div class="field"><span class="flabel">开始关</span><span class="input">关卡 · 雾之湖代码演示</span><span class="act">…</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="timeline">
+        <div class="tl-head"><span>时间线</span><span class="grow"></span><span class="tbtn">当前内容</span><span class="tbtn">－</span><span class="tbtn">＋</span><span class="tbtn">展开时间线</span></div>
+        <div class="tl-sum">预计时间 · 尚无预览</div>
+        <div class="ruler">
+          <span class="first" style="left:0%">0 帧</span><span style="left:14%">120</span><span style="left:28%">240</span>
+          <span style="left:42%">360</span><span style="left:56%">480</span><span style="left:70%">600</span>
+          <span style="left:84%">720</span><span style="left:97%">840</span>
+          <i class="tick" style="left:14%"></i><i class="tick" style="left:28%"></i><i class="tick" style="left:42%"></i>
+          <i class="tick" style="left:56%"></i><i class="tick" style="left:70%"></i><i class="tick" style="left:84%"></i>
+        </div>
+        <div class="tl-rows">
+          <div class="tl-row"><span class="rlabel">切换背景</span><span class="lane"></span></div>
+          <div class="tl-row"><span class="rlabel">播放背景音乐</span><span class="lane"><i class="blk b1" style="left:0;width:70%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">等待 30</span><span class="lane"><i class="blk b2" style="left:2%;width:14%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">定时执行 35</span><span class="lane"><i class="blk b3" style="left:16%;width:17%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">　└ 播放音效</span><span class="lane"><i class="blk b1" style="left:18%;width:3%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">并行 · 分支1</span><span class="lane"><i class="blk b2" style="left:33%;width:9%"></i></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <b>方案 A 做了什么：</b>
+      <ul>
+        <li>浅色底 + 纯白卡片：卡片靠 1px 边框和极浅投影浮起来，不再和画布混成一片。</li>
+        <li>弹幕节点用左侧 3px 色条区分类别（蓝=流程 / 绿=动作 / 橙=等待 / 紫=音频），复用现有 <code>_CATEGORY_COLORS</code> 语义，字面不再上色。</li>
+        <li>插入点改成"细线 + ＋ 在这里插入"，只在节点缝隙出现，不再每行常驻一个大按钮。</li>
+        <li>属性面板：字段名右对齐、输入框统一宽度、下划线式输入框减少边框噪声、去掉重复的「常量」胶囊。</li>
+        <li>导航（编辑步骤/游戏画面/并排预览）收进分段控件，运行控制独立成组，只留「运行关卡 · F5」是主按钮。</li>
+        <li>时间线抬高到 168px 并去掉每格「帧」字，只在起点标 0 帧。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="shot shot-b">
+    <div class="app dirB">
+      <div class="menubar"><span>文件</span><span>编辑</span><span>视图</span><span>运行</span></div>
+      <div class="toolbar">
+        <div class="navseg"><span class="seg on">编辑步骤</span><span class="seg">游戏画面</span><span class="seg">并排预览</span></div>
+        <span style="width:1px;height:18px;background:#2f3742"></span>
+        <span class="tbtn primary">运行关卡 · F5</span>
+        <span class="tbtn">暂停</span>
+        <span class="tbtn">停止</span>
+        <span class="runstate">已停止</span>
+      </div>
+      <div class="body">
+        <div class="side">
+          <div class="side-head">内容导航</div>
+          <div class="tabs"><span class="tab on">内容</span><span class="tab">源码</span><span class="tab">资源</span><span class="tab">本关</span></div>
+          <div class="newbtn">＋ 新建内容…</div>
+          <div class="tree">
+            <div class="tgroup">这一关的内容</div>
+            <div class="titem sel">关卡 · 雾之湖代码演示</div>
+            <div class="titem sub">波次 · 开场妖精</div>
+            <div class="titem sub">函数 · 记录当前 Wave</div>
+            <div class="titem sub">敌人 · 自机狙妖精</div>
+            <div class="titem sub">敌人 · 环射妖精</div>
+            <div class="titem sub">波次 · 交叉火力</div>
+            <div class="titem sub">Boss · 露米娅</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="crumbs"><span>‹ 返回</span><span>关卡 · 雾之湖代码演示</span><span class="grow"></span><span>提示</span></div>
+          <div class="section-head"><span class="title">出场安排</span><span class="grow"></span><span class="tbtn">＋ 添加步骤</span></div>
+          <div class="flow">
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="node flow-card"><span class="bar"></span><span class="kind">切换背景</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="node audio"><span class="bar"></span><span class="kind">播放背景音乐</span><span class="param">res://assets/audio/music/00.wav</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="node wait"><span class="bar"></span><span class="kind">等待</span><span class="param">30 帧</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="emptyline"><span class="rule"></span><span class="plus">＋ 在这里插入</span><span class="rule"></span></div>
+            <div class="container">
+              <div class="node ctrl" style="border:0;box-shadow:none;margin:0"><span class="bar"></span><span class="kind">定时执行</span><span class="param">35 帧</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              <div class="nest">
+                <div class="node audio" style="margin-bottom:0"><span class="bar"></span><span class="kind">播放音效</span><span class="param">res://assets/audio/se/se_alert.wav</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              </div>
+            </div>
+            <div class="container">
+              <div class="node ctrl" style="border:0;box-shadow:none;margin:0"><span class="bar"></span><span class="kind">并行</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              <div class="branches">
+                <div class="branch">
+                  <div class="branch-title">分支 1</div>
+                  <div class="node wait" style="margin-bottom:0"><span class="bar"></span><span class="kind">等待</span><span class="param">18 帧</span></div>
+                </div>
+                <div class="branch">
+                  <div class="branch-title">分支 2</div>
+                  <div class="node wait" style="margin-bottom:0"><span class="bar"></span><span class="kind">等待</span><span class="param">40 帧</span></div>
+                </div>
+              </div>
+              <div class="emptyline"><span class="rule"></span><span class="plus">＋ 新建分支</span><span class="rule"></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="inspector">
+          <div class="insp-head"><span>属性 · 关卡</span><span class="grow"></span><span class="x">✕</span></div>
+          <div class="insp-scroll">
+            <div class="group">基础</div>
+            <div class="field"><span class="flabel">名称</span><span class="input">雾之湖代码演示</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">标题</span><span class="input">Code Driven Stage</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">副标题</span><span class="input">静态投影与运行 Trace</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">背景资源</span><span class="input">nd/demo.json</span><span class="act">…</span></div>
+            <div class="group">声音</div>
+            <div class="field"><span class="flabel">关卡 BGM</span><span class="input">/music/00.wav</span><span class="act">…</span></div>
+            <div class="field"><span class="flabel">Boss BGM</span><span class="input" style="opacity:.5">（未设置）</span><span class="act">…</span></div>
+            <div class="group">进度</div>
+            <div class="field"><span class="flabel">开始关</span><span class="input">关卡 · 雾之湖代码演示</span><span class="act">…</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="timeline">
+        <div class="tl-head"><span>时间线</span><span class="grow"></span><span class="tbtn">当前内容</span><span class="tbtn">－</span><span class="tbtn">＋</span><span class="tbtn">展开时间线</span></div>
+        <div class="tl-sum">预计时间 · 尚无预览</div>
+        <div class="ruler">
+          <span class="first" style="left:0%">0 帧</span><span style="left:14%">120</span><span style="left:28%">240</span>
+          <span style="left:42%">360</span><span style="left:56%">480</span><span style="left:70%">600</span>
+          <span style="left:84%">720</span><span style="left:97%">840</span>
+          <i class="tick" style="left:14%"></i><i class="tick" style="left:28%"></i><i class="tick" style="left:42%"></i>
+          <i class="tick" style="left:56%"></i><i class="tick" style="left:70%"></i><i class="tick" style="left:84%"></i>
+        </div>
+        <div class="tl-rows">
+          <div class="tl-row"><span class="rlabel">切换背景</span><span class="lane"></span></div>
+          <div class="tl-row"><span class="rlabel">播放背景音乐</span><span class="lane"><i class="blk b1" style="left:0;width:70%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">等待 30</span><span class="lane"><i class="blk b2" style="left:2%;width:14%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">定时执行 35</span><span class="lane"><i class="blk b3" style="left:16%;width:17%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">　└ 播放音效</span><span class="lane"><i class="blk b1" style="left:18%;width:3%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">并行 · 分支1</span><span class="lane"><i class="blk b2" style="left:33%;width:9%"></i></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <b>方案 B 做了什么：</b>
+      <ul>
+        <li>保留深色，但把"糊成一片"改成三级分层：底 <code>#12151a</code> → 面板 <code>#191d24</code> → 卡片 <code>#222831</code>，每级差一档亮度。</li>
+        <li>边框统一 <code>#2f3742</code>，文字三级 <code>#e6edf3 / #9aa4b2 / #6b7280</code>，对比度够看。</li>
+        <li>整套只留一个强调色（蓝 <code>#3b82f6</code>），橙/紫只给"等待/音频"两种语义，不再到处点缀。</li>
+        <li>其余交互改进（插入线、属性对齐、导航分组、时间线高度）与方案 A 相同，只是配色不同。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="shot shot-c">
+    <div class="app dirC">
+      <div class="menubar"><span>文件</span><span>编辑</span><span>视图</span><span>运行</span></div>
+      <div class="toolbar">
+        <div class="navseg"><span class="seg on">编辑步骤</span><span class="seg">游戏画面</span><span class="seg">并排预览</span></div>
+        <span style="width:1px;height:18px;background:#1f1f1f"></span>
+        <span class="tbtn primary">运行关卡 · F5</span>
+        <span class="tbtn">暂停</span>
+        <span class="tbtn">停止</span>
+        <span class="runstate">已停止</span>
+      </div>
+      <div class="body">
+        <div class="side">
+          <div class="side-head">内容导航</div>
+          <div class="tabs"><span class="tab on">内容</span><span class="tab">源码</span><span class="tab">资源</span><span class="tab">本关</span></div>
+          <div class="newbtn">＋ 新建内容…</div>
+          <div class="tree">
+            <div class="tgroup">这一关的内容</div>
+            <div class="titem sel">关卡 · 雾之湖代码演示</div>
+            <div class="titem sub">波次 · 开场妖精</div>
+            <div class="titem sub">函数 · 记录当前 Wave</div>
+            <div class="titem sub">敌人 · 自机狙妖精</div>
+            <div class="titem sub">敌人 · 环射妖精</div>
+            <div class="titem sub">波次 · 交叉火力</div>
+            <div class="titem sub">Boss · 露米娅</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="crumbs"><span>‹ 返回</span><span>关卡 · 雾之湖代码演示</span><span class="grow"></span><span>提示</span></div>
+          <div class="section-head"><span class="title">出场安排</span><span class="grow"></span><span class="tbtn">＋ 添加步骤</span></div>
+          <div class="flow">
+            <div class="node flow-card"><span class="bar" style="background:#58a6e7"></span><span class="kind">切换背景</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="node audio"><span class="bar"></span><span class="kind">播放背景音乐</span><span class="param">res://assets/audio/music/00.wav</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="node wait"><span class="bar"></span><span class="kind">等待</span><span class="param">30 帧</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            <div class="container">
+              <div class="node ctrl"><span class="bar"></span><span class="kind">定时执行</span><span class="param">35 帧</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              <div class="node audio" style="padding-left:28px"><span class="bar"></span><span class="kind">播放音效</span><span class="param">res://assets/audio/se/se_alert.wav</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+            </div>
+            <div class="container">
+              <div class="node ctrl"><span class="bar"></span><span class="kind">并行</span><span class="grow"></span><span class="dots">⠿</span><span class="wrap">包裹</span></div>
+              <div class="branches" style="padding:0">
+                <div class="branch">
+                  <div class="branch-title">分支 1</div>
+                  <div class="node wait" style="border-bottom:0"><span class="bar"></span><span class="kind">等待</span><span class="param">18 帧</span></div>
+                </div>
+                <div class="branch">
+                  <div class="branch-title">分支 2</div>
+                  <div class="node wait" style="border-bottom:0"><span class="bar"></span><span class="kind">等待</span><span class="param">40 帧</span></div>
+                </div>
+              </div>
+              <div class="emptyline" style="padding:0 8px 4px"><span class="plus">＋ 新建分支</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="inspector">
+          <div class="insp-head"><span>属性 · 关卡</span><span class="grow"></span><span class="x">✕</span></div>
+          <div class="insp-scroll">
+            <div class="group">基础</div>
+            <div class="field"><span class="flabel">名称</span><span class="input">雾之湖代码演示</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">标题</span><span class="input">Code Driven Stage</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">副标题</span><span class="input">静态投影与运行 Trace</span><span class="badge"></span></div>
+            <div class="field"><span class="flabel">背景资源</span><span class="input">nd/demo.json</span><span class="act">…</span></div>
+            <div class="group">声音</div>
+            <div class="field"><span class="flabel">关卡 BGM</span><span class="input">/music/00.wav</span><span class="act">…</span></div>
+            <div class="field"><span class="flabel">Boss BGM</span><span class="input" style="opacity:.5">（未设置）</span><span class="act">…</span></div>
+            <div class="group">进度</div>
+            <div class="field"><span class="flabel">开始关</span><span class="input">关卡 · 雾之湖代码演示</span><span class="act">…</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="timeline">
+        <div class="tl-head"><span>时间线</span><span class="grow"></span><span class="tbtn">当前内容</span><span class="tbtn">－</span><span class="tbtn">＋</span><span class="tbtn">展开时间线</span></div>
+        <div class="tl-sum">预计时间 · 尚无预览</div>
+        <div class="ruler">
+          <span class="first" style="left:0%">0 帧</span><span style="left:14%">120</span><span style="left:28%">240</span>
+          <span style="left:42%">360</span><span style="left:56%">480</span><span style="left:70%">600</span>
+          <span style="left:84%">720</span><span style="left:97%">840</span>
+          <i class="tick" style="left:14%"></i><i class="tick" style="left:28%"></i><i class="tick" style="left:42%"></i>
+          <i class="tick" style="left:56%"></i><i class="tick" style="left:70%"></i><i class="tick" style="left:84%"></i>
+        </div>
+        <div class="tl-rows">
+          <div class="tl-row"><span class="rlabel">切换背景</span><span class="lane"></span></div>
+          <div class="tl-row"><span class="rlabel">播放背景音乐</span><span class="lane"><i class="blk b1" style="left:0;width:70%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">等待 30</span><span class="lane"><i class="blk b2" style="left:2%;width:14%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">定时执行 35</span><span class="lane"><i class="blk b3" style="left:16%;width:17%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">　└ 播放音效</span><span class="lane"><i class="blk b1" style="left:18%;width:3%"></i></span></div>
+          <div class="tl-row"><span class="rlabel">并行 · 分支1</span><span class="lane"><i class="blk b2" style="left:33%;width:9%"></i></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <b>方案 C 做了什么：</b>
+      <ul>
+        <li>取消卡片式节点，改成"整行 + 底部分隔线"的代码行投影：同一屏能多看 5～6 个节点，信息密度最高。</li>
+        <li>选中态用整行底色（蓝），类别只用左侧细色条标记，不再给每张卡片描边加投影。</li>
+        <li>区块标题栏（内容导航 / 属性 / 时间线）用统一的深灰条，像 Blender / Unreal 的面板头。</li>
+        <li>属性面板变密集表格：字段名固定 76px 右对齐，行高更小，一屏能放下更多参数。</li>
+        <li>插入点只在鼠标经过时出现（样张里已省略常驻的插入行），程序流更接近"读代码"而不是"读表单"。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="note" style="border-left-color:#8b949e">
+  <b>三个方向共同的看点（不随方案变化）：</b>
+  <ul>
+    <li>顶部把「编辑步骤 / 游戏画面 / 并排预览」收成导航分段控件，把「运行关卡 · F5」变成唯一主按钮，暂停/停止降为次要 —— 解决现在"6 个按钮长得一样、分不清切换还是执行"。</li>
+    <li>节点之间只在缝隙出现插入线（A/B），不再每行常驻一个大号「＋ 添加」按钮冒充输入框。</li>
+    <li>属性面板字段名右对齐、输入框等宽、去掉重复的「常量」标签 —— 现在这些会让面板看着乱。</li>
+    <li>时间线从 90px 下限抬到 168px，刻度去掉重复的「帧」字，只在起点标注单位。</li>
+  </ul>
+</div>
+</body>
+</html>

@@ -36,19 +36,18 @@ from src.qt_compat.QtWidgets import (
     QWidget,
 )
 
+from .theme import (
+    CATEGORY_COLORS as THEME_CATEGORY_COLORS,
+    DEFAULT_CATEGORY_COLOR as THEME_DEFAULT_CATEGORY_COLOR,
+)
+
 
 PROTOTYPE_MIME = "application/x-pystg-node-prototype"
 _ROLE_KIND = int(Qt.ItemDataRole.UserRole)
 _ROLE_COLOR = _ROLE_KIND + 1
-_CATEGORY_COLORS = {
-    "时间与控制": "#58a6e7",
-    "关卡流程": "#a371f7",
-    "移动": "#3fb950",
-    "弹幕": "#f85149",
-    "激光": "#d29922",
-    "模板": "#bc8cff",
-}
-_DEFAULT_COLOR = "#8b949e"
+# 类别色与默认色是共享视觉 token，唯一定义在 src.editor.theme，这里只再导出。
+CATEGORY_COLORS = _CATEGORY_COLORS = dict(THEME_CATEGORY_COLORS)
+DEFAULT_CATEGORY_COLOR = _DEFAULT_COLOR = THEME_DEFAULT_CATEGORY_COLOR
 _ADVANCED_KINDS = frozenset({
     "At", "While", "If", "Else", "ForEach", "Parallel", "SpawnTask", "Break",
     "Continue", "Return", "Set", "Call", "RawPython", "FirePolar", "FireOrbit",
@@ -125,14 +124,14 @@ class _PaletteDelegate(QStyledItemDelegate):
         rect = QRect(option.rect)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         if selected:
-            painter.fillRect(rect, QColor("#294d70"))
+            painter.fillRect(rect, QColor("#3a6ea5"))
         elif index.data(Qt.ItemDataRole.DisplayRole) and not index.parent().isValid():
-            painter.fillRect(rect, QColor("#16191f"))
+            painter.fillRect(rect, QColor("#3c3c3c"))
         color = index.data(_ROLE_COLOR) or _DEFAULT_COLOR
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
         if text and not index.parent().isValid():
             # Category headers keep their plain look, slightly dimmed.
-            painter.setPen(QColor("#8b949e"))
+            painter.setPen(QColor("#b9b9b9"))
             painter.setFont(option.font)
             painter.drawText(
                 rect.adjusted(8, 0, -4, 0), Qt.AlignmentFlag.AlignVCenter, text
@@ -145,11 +144,11 @@ class _PaletteDelegate(QStyledItemDelegate):
         )
         font = option.font
         if selected:
-            painter.setPen(QColor("#f0f6fc"))
+            painter.setPen(QColor("#ffffff"))
         elif index.flags() & Qt.ItemFlag.ItemIsEnabled:
-            painter.setPen(QColor("#c9d1d9"))
+            painter.setPen(QColor("#e8e8e8"))
         else:
-            painter.setPen(QColor("#6e7681"))
+            painter.setPen(QColor("#6b6b6b"))
         painter.setFont(font)
         metrics = painter.fontMetrics()
         painter.drawText(
@@ -190,7 +189,7 @@ class NodePalette(QWidget):
         self.tree.setObjectName("node_palette_tree")
         self.tree.setHeaderHidden(True)
         self.tree.setItemDelegate(_PaletteDelegate(self.tree))
-        self.tree.setStyleSheet("QTreeWidget { background: #171a20; border: 1px solid #3a414e; }")
+        self.tree.setStyleSheet("QTreeWidget { background: #2b2b2b; border: 1px solid #1f1f1f; }")
         self.tree.setDragEnabled(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.itemDoubleClicked.connect(self._activate)
@@ -442,7 +441,7 @@ class NodeInsertPopup(QWidget):
         self.setObjectName("node_insert_popup")
         self.resize(360, 430)
         self.setMinimumSize(300, 240)
-        self.setStyleSheet("#node_insert_popup { background: #1c2128; border: 1px solid #58a6e7; }")
+        self.setStyleSheet("#node_insert_popup { background: #2b2b2b; border: 1px solid #3a6ea5; }")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         title = QLabel("在这里添加步骤", self)

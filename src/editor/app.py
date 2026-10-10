@@ -10,6 +10,7 @@ from typing import Sequence
 from src.qt_compat.QtWidgets import QApplication
 from src.qt_compat.QtGui import QFont
 
+from .theme import STYLESHEET
 from .window import EditorWindow
 
 
@@ -24,6 +25,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("PySTG 关卡编辑器")
     app.setFont(QFont("Microsoft YaHei UI", 9))
+    # 应用级样式表：让对话框、菜单、工具提示等顶层弹窗与主窗口共用同一套 token。
+    app.setStyleSheet(STYLESHEET)
     window = EditorWindow()
     if arguments.project is not None:
         window.open_project(arguments.project)

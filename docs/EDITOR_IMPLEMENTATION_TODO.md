@@ -95,6 +95,56 @@ Performance、Usability；真人验收未发生时仍为 not run。
 任务与 Gate。第 1 节描述路线建立时的基线，第 9 节用于阶段/路线最终验收。
 整体产品或架构调整仍需完整阅读本文及架构文档。
 
+### 当前维护任务：视觉重做（方案 C，专业 DCC 风）（2026-10-10）
+
+维护者选定方案 C 并明确要求"只改视觉，别改业务逻辑"。本任务是交互与视觉维护，
+不新增阶段、不改历史勾选；作者格式、Runtime、单一 Session/Undo、显式 Run 契约不变。
+
+| Owner | 允许编辑 | 必须完成 |
+| --- | --- | --- |
+| 协调 Agent（唯一写者） | `src/editor/theme.py`（新增）、`app.py`、`window.py`、`sidebars.py`、`inspector.py`、`program_tree.py`、`node_palette.py`、`timeline.py`、`onboarding.py`，本文与架构文档 | 颜色/间距/字号单源化；应用级样式表；程序流紧凑行式；插入点默认只画引导线；面板头统一；白弹窗消失 |
+| 独立验证 Agent | 只读 | 复核交互链与视觉 token 覆盖；报告未观察类别，不更改实现 |
+
+denylist：`src/authoring/**`、`src/compiler/**`、`src/core/**`、`src/game/**`、
+`game_content/**`、`tests/**`、`.claude/settings.local.json`、生成产物，以及任何信号连接、
+命令构造、session 调用与数据语义改动。
+
+验收（严格限定在视觉层）：
+
+1. 深色主题必须在对话框、菜单、工具提示、下拉列表等顶层弹窗同样生效，不得再出现白色弹窗；
+2. 编辑器内不再有散落的颜色字面值，颜色/间距/字号只从 `theme.py` 取值；
+3. 交互行为不变：选中、拖放命中、插入落点、Undo/Redo、预览控制、Timeline 反向编辑与
+   seek 判定都必须与改动前一致；
+4. 只有真实 Windows 渲染才能算 Native 证据，offscreen 只记 Structural。
+
+**本任务 Evidence（2026-10-10；视觉重做完成，不更新阶段勾选）**：
+
+- Structural：新增 `src/editor/theme.py`（43 个颜色/几何 token + 由 token 生成的 QSS），
+  `app.py` 改为 `app.setStyleSheet(STYLESHEET)` 应用级挂载；`window.py` 删除原 321 行、
+  自相矛盾的内联 QSS（原第 280 与 312 行对 `QTreeWidget` 边框、255 与 314 行对
+  `QTabWidget::pane` 各写了一次相反规则）。`window.py`、`inspector.py`、`onboarding.py`
+  内的颜色字面值已全部改为 token 读取；`program_tree.py`、`timeline.py`、`node_palette.py`
+  仍有数值等价字面值未替换（见下方未完成项）。`compileall` 与 `pyflakes` 通过（仅剩
+  `commands.py` 一处改动前既有、与本次无关的未用导入）。
+- Runtime：not run（本轮只动视觉层，未运行 StageManager 或生成关卡；不冒充 Runtime 证据）。
+- Native：真实 Windows `windows` 平台 1:1 渲染取样：主窗口 `rgb(43,43,43)`、
+  `_UnitDialog` `rgb(43,43,43)`、`QMenu` `rgb(60,60,60)`、`QMessageBox` `rgb(43,43,43)`
+  —— 改动前对话框与菜单实测为 `#f3f3f3` 白底黑字，现已统一为深色。1500×940 实机窗口抓图
+  确认程序流为 28px 紧凑行（原 34px）+ 左侧类别色条 + 底部分隔线，默认不再逐缝显示
+  "＋ 添加"大按钮，鼠标经过才显示引导线与落点标记；时间线下限 176px、初始 190px
+  （原 90/160）。
+- Performance：not run（未测量整体预算）。仅记录 1500×940 抓图正常、无布局报错。
+- Usability：维护者验收 not run；本轮由维护者选定方向、Agent 实现，未经真人试用确认。
+
+复查入口：`C:/Users/m1573/anaconda3/python.exe -m src.editor.app`，打开入门示例后确认
+对话框/菜单为深色、程序流为紧凑行式、插入点悬停才出现、时间线不再被压成一条缝。
+即时检查：`python -m compileall -q src/editor`、`python -m pyflakes`（传 `src/editor/*.py`
+展开后的路径）、`git diff --check`。
+
+未完成项（不冒充已完成）：`program_tree.py`、`timeline.py`、`node_palette.py` 内仍有约 60 处
+与 `theme.py` 数值等价的颜色字面值；它们当前显示正确且集中在自绘控件内，下一轮继续替换为
+token 读取后，"颜色只有一个来源"这一条才完全成立。
+
 ### 当前维护任务：截图暴露的显示混乱（2026-10-10）
 
 维护者截图证明，上一轮可执行输入链不代表信息含义与绘制已经清晰。此次仅修显示与浏览入口。

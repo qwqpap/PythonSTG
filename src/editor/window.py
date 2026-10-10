@@ -88,6 +88,7 @@ from .sidebars import (
     UnitTreeWidget,
 )
 from .timeline import TimelinePanel
+from .theme import PALETTE
 
 
 _ROLE_VALUE = int(Qt.ItemDataRole.UserRole)
@@ -156,7 +157,7 @@ class _UnitDialog(QDialog):
         )
         self.phase_hint = QLabel("Boss 至少需要一个阶段，请先新建符卡或非符。", self)
         self.phase_hint.setWordWrap(True)
-        self.phase_hint.setStyleSheet("color: #f0883e;")
+        self.phase_hint.setProperty("role", "error")
         self.phase_hint.setVisible(self.phase.count() == 0)
         self.kind_hint = QLabel(self)
         self.kind_hint.setWordWrap(True)
@@ -238,87 +239,6 @@ class _UnitDialog(QDialog):
         )
 
 
-_WINDOW_STYLESHEET = """
-    QWidget { font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; font-size: 14px; }
-    QMainWindow, QDialog { background: #1c2128; color: #c9d1d9; }
-    QLabel { color: #c9d1d9; background: transparent; }
-    QMenuBar { background: #16191f; color: #c9d1d9; border-bottom: 1px solid #3a414e; }
-    QMenuBar::item { padding: 4px 10px; background: transparent; }
-    QMenuBar::item:selected { background: #294d70; }
-    QMenu { background: #1f242c; color: #c9d1d9; border: 1px solid #3a414e; }
-    QMenu::item { padding: 4px 24px 4px 12px; }
-    QMenu::item:selected { background: #294d70; }
-    QMenu::separator { height: 1px; background: #3a414e; margin: 4px 6px; }
-    QDockWidget { color: #c9d1d9; font-weight: 600; }
-    QDockWidget::title { background: #16191f; padding: 5px 10px;
-        border-bottom: 1px solid #3a414e; }
-    QTabWidget::pane { border: 1px solid #3a414e; background: #171a20; top: -1px; }
-    QTabBar::tab { background: #16191f; color: #8b949e; padding: 5px 14px;
-        border: 1px solid #3a414e; border-bottom: none; }
-    QTabBar::tab:selected { color: #f0f6fc; background: #171a20;
-        border-bottom: 2px solid #58a6e7; }
-    QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #3a414e;
-        border-radius: 4px; padding: 4px 12px; }
-    QPushButton:hover { background: #2d333b; border-color: #58a6e7; }
-    QPushButton:pressed { background: #294d70; }
-    QPushButton:checked { background: #1f4a73; border-color: #58a6e7;
-        color: #f0f6fc; font-weight: 600; }
-    QPushButton:disabled { background: #1a1e24; color: #484f58;
-        border-color: #262c34; }
-    QLineEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QComboBox {
-        background: #0f1216; color: #c9d1d9; border: 1px solid #3a414e;
-        border-radius: 4px; padding: 2px 6px; selection-background-color: #294d70; }
-    QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus,
-    QPlainTextEdit:focus, QComboBox:focus { border: 1px solid #58a6e7; }
-    QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled,
-    QPlainTextEdit:disabled, QComboBox:disabled { color: #6e7681; }
-    QComboBox QAbstractItemView { background: #1f242c; color: #c9d1d9;
-        selection-background-color: #294d70; }
-    QScrollArea { background: #171a20; border: none; }
-    QScrollArea > QWidget > QWidget { background: transparent; }
-    QScrollArea > QWidget > QScrollBar { background: #171a20; }
-    QTreeWidget, QListWidget { background: #171a20; color: #c9d1d9;
-        border: 1px solid #3a414e; }
-    QTreeWidget::item, QListWidget::item { padding: 2px; }
-    QTreeWidget::item:selected, QListWidget::item:selected { background: #294d70; }
-    QHeaderView::section { background: #16191f; color: #8b949e; border: none;
-        border-right: 1px solid #3a414e; padding: 4px 6px; }
-    QScrollBar:vertical { background: #171a20; width: 10px; margin: 0; }
-    QScrollBar::handle:vertical { background: #3a414e; border-radius: 4px;
-        min-height: 24px; }
-    QScrollBar:horizontal { background: #171a20; height: 10px; margin: 0; }
-    QScrollBar::handle:horizontal { background: #3a414e; border-radius: 4px;
-        min-width: 24px; }
-    QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
-    QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
-    QCheckBox { color: #c9d1d9; spacing: 6px; }
-    QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #3a414e;
-        border-radius: 3px; background: #0f1216; }
-    QCheckBox::indicator:checked { background: #58a6e7;
-        image: url(none); }
-    QSplitter::handle { background: #12161b; }
-    QSplitter::handle:horizontal { width: 3px; }
-    QSplitter::handle:vertical { height: 3px; }
-    QToolTip { background: #1f242c; color: #c9d1d9; border: 1px solid #3a414e;
-        padding: 2px; }
-    QStatusBar { background: #16191f; color: #8b949e; }
-    QStatusBar::item { border: none; }
-    QToolBar { background: #20242a; border: none; border-bottom: 1px solid #333941; spacing: 6px; padding: 4px 8px; }
-    QToolButton { color: #c9d1d9; background: transparent; border: 1px solid transparent;
-        border-radius: 5px; padding: 5px 8px; min-height: 22px; }
-    QToolButton:hover { background: #30363e; }
-    QToolButton:checked { color: #d4e9fb; background: #29475e; border-color: #47738f; }
-    QToolButton:disabled { color: #656e78; }
-    QTreeWidget, QListWidget { border: none; }
-    QTreeWidget::item, QListWidget::item { padding: 5px 2px; }
-    QTabWidget::pane { border: none; }
-    QDockWidget::title { padding: 5px 10px; border: none; }
-    QPushButton { min-height: 24px; }
-    QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { min-height: 24px; }
-    QWidget#workspace_navigation { background: #20242a; }
-    QWidget#program_toolbar { background: #1c2128; }
-    QToolButton#run_primary { background: #294d70; color: #f0f6fc; }
-"""
 
 
 class _CurrentPageStack(QStackedWidget):
@@ -351,7 +271,8 @@ class EditorWindow(QMainWindow):
         self._insert_owner_id: str | None = None
         self.setWindowTitle("PySTG 关卡编辑器")
         self.resize(1280, 800)
-        self.setStyleSheet(_WINDOW_STYLESHEET)
+        # 视觉 token 由应用级样式表统一提供（src.editor.theme）。窗口不再自带 QSS，
+        # 否则对话框、菜单、工具提示这些顶层弹窗拿不到深色主题，会出现白色弹窗。
         self._build_actions()
         self._build_layout()
         self._connect_session()
@@ -494,7 +415,7 @@ class EditorWindow(QMainWindow):
         self.next_step_hint = QLabel("从“文件 → 新建工程”开始，或打开已有工程。", unit_panel)
         self.next_step_hint.setObjectName("authoring_next_step")
         self.next_step_hint.setWordWrap(True)
-        self.next_step_hint.setStyleSheet("color: #8b949e; padding: 4px;")
+        self.next_step_hint.setProperty("role", "muted")
         unit_panel_layout.addWidget(self.next_step_hint)
         self.next_step_hint.hide()
         self.file_list = QListWidget(self)
@@ -571,7 +492,7 @@ class EditorWindow(QMainWindow):
         program_toolbar_layout = QHBoxLayout(program_toolbar)
         program_toolbar_layout.setContentsMargins(8, 4, 8, 4)
         self.steps_title = QLabel("编辑步骤", program_toolbar)
-        self.steps_title.setStyleSheet("font-weight: 600;")
+        self.steps_title.setObjectName("section_title")
         program_toolbar_layout.addWidget(self.steps_title)
         program_toolbar_layout.addStretch(1)
         self.add_node_button = QPushButton("＋ 添加步骤", program_toolbar)
@@ -662,17 +583,17 @@ class EditorWindow(QMainWindow):
         controls_layout.setSpacing(3)
         self.preview_target_label = QLabel("运行目标：尚未运行", controls)
         self.preview_target_label.setObjectName("preview_target")
-        self.preview_target_label.setStyleSheet("color: #8b949e;")
+        self.preview_target_label.setProperty("role", "muted")
         self.preview_target_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         controls_layout.addWidget(self.preview_target_label)
         self.build_status_label = QLabel("构建：空闲", controls)
         self.build_status_label.setObjectName("preview_build_status")
-        self.build_status_label.setStyleSheet("color: #8b949e;")
+        self.build_status_label.setProperty("role", "muted")
         self.build_status_label.hide()
         controls_layout.addWidget(self.build_status_label)
         self.preview_error_label = QLabel("", controls)
         self.preview_error_label.setObjectName("preview_error")
-        self.preview_error_label.setStyleSheet("color: #f85149;")
+        self.preview_error_label.setProperty("role", "error")
         self.preview_error_label.setWordWrap(True)
         self.preview_error_label.hide()
         controls_layout.addWidget(self.preview_error_label)
@@ -772,13 +693,17 @@ class EditorWindow(QMainWindow):
         self.timeline_panel.set_preview_owner(self.preview_owner)
         self.timeline_dock = QDockWidget("时间线", self)
         self.timeline_dock.setObjectName("timeline_dock")
-        self.timeline_dock.setMinimumHeight(90)
+        self.timeline_dock.setMinimumHeight(PALETTE.timeline_minimum_height)
         self.timeline_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.timeline_dock.setWidget(self.timeline_panel)
         timeline_title = QWidget(self.timeline_dock)
+        timeline_title.setObjectName("timeline_header")
+        timeline_title.setAutoFillBackground(True)
         timeline_title_layout = QHBoxLayout(timeline_title)
         timeline_title_layout.setContentsMargins(10, 0, 6, 0)
-        timeline_title_layout.addWidget(QLabel("时间线", timeline_title))
+        timeline_title_label = QLabel("时间线", timeline_title)
+        timeline_title_label.setObjectName("panel_title")
+        timeline_title_layout.addWidget(timeline_title_label)
         timeline_title_layout.addStretch(1)
         self.expand_timeline_button = QToolButton(timeline_title)
         self.expand_timeline_button.setObjectName("expand_timeline")
@@ -802,8 +727,12 @@ class EditorWindow(QMainWindow):
         self.insert_popup = NodeInsertPopup(self)
         self.insert_popup.node_chosen.connect(self._insert_popup_node)
         self.insert_popup.create_reference_requested.connect(self._create_popup_reference)
-        self.resizeDocks([self.left_dock, self.inspector_dock], [220, 300], Qt.Orientation.Horizontal)
-        self.resizeDocks([self.timeline_dock], [160], Qt.Orientation.Vertical)
+        self.resizeDocks(
+            [self.left_dock, self.inspector_dock],
+            [PALETTE.navigation_width, PALETTE.inspector_width],
+            Qt.Orientation.Horizontal,
+        )
+        self.resizeDocks([self.timeline_dock], [PALETTE.timeline_height], Qt.Orientation.Vertical)
         self._set_workspace_mode("steps")
 
     @staticmethod
@@ -911,7 +840,7 @@ class EditorWindow(QMainWindow):
         parts = []
         for unit_id, *_location in valid[-2:]:
             previous = self.session.program.get_unit(unit_id)
-            parts.append(f'<a style="color:#8eb8d8;" href="{escape(unit_id)}">{escape(previous.name)}</a>')
+            parts.append(f'<a style="color:#8fc0ea;" href="{escape(unit_id)}">{escape(previous.name)}</a>')
         if unit:
             parts.append(escape(self._unit_label(unit)))
         self.breadcrumb.setText(" › ".join(parts) if parts else "未打开工程")
@@ -960,14 +889,14 @@ class EditorWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 12, 12, 12)
         title = QLabel("关卡顺序", panel)
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        title.setProperty("role", "title")
         layout.addWidget(title)
         hint = QLabel(
             "从左侧“全部单元”拖动关卡到这里以加入工程；拖动已有项目可调整顺序。",
             panel,
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #8b949e;")
+        hint.setProperty("role", "muted")
         layout.addWidget(hint)
         self.project_stage_list = UnitReferenceListWidget(panel)
         self.project_stage_list.setObjectName("project_stage_order")
@@ -1004,14 +933,14 @@ class EditorWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 12, 12, 12)
         title = QLabel("Boss 阶段", panel)
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        title.setProperty("role", "title")
         layout.addWidget(title)
         hint = QLabel(
             "从左侧拖动非符或符卡到这里；拖动已有阶段可调整顺序。",
             panel,
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #8b949e;")
+        hint.setProperty("role", "muted")
         layout.addWidget(hint)
         self.boss_phase_list = UnitReferenceListWidget(panel)
         self.boss_phase_list.setObjectName("boss_phase_order")

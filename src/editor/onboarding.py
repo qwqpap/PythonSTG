@@ -19,7 +19,7 @@ def _wrapped_label(text: str, parent: QWidget, *, muted: bool = False) -> QLabel
     label.setMinimumWidth(0)
     label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
     if muted:
-        label.setStyleSheet("color: #8b949e;")
+        label.setStyleSheet("color: #b9b9b9;")
     return label
 
 
@@ -39,7 +39,7 @@ class WelcomePanel(QWidget):
         layout.addStretch(1)
 
         title = _wrapped_label("做第一段弹幕", self)
-        title.setStyleSheet("font-size: 22px; font-weight: 600; color: #f0f6fc;")
+        title.setStyleSheet("font-size: 22px; font-weight: 600; color: #ffffff;")
         layout.addWidget(title)
         layout.addWidget(_wrapped_label(
             "先从一段能运行的示例开始。修改参数、运行看看，再学习怎样组合步骤。",
@@ -50,7 +50,7 @@ class WelcomePanel(QWidget):
         self.new_project_button.setObjectName("welcome_new_project")
         self.new_project_button.setToolTip("创建带可运行弹幕的新工程，所有步骤都能继续修改")
         self.new_project_button.setStyleSheet(
-            "background: #1f4a73; border-color: #58a6e7; padding: 10px 12px;"
+            "background: #3a6ea5; border-color: #3a6ea5; padding: 10px 12px;"
         )
         self.new_project_button.clicked.connect(self.new_project_requested)
         layout.addWidget(self.new_project_button)
@@ -90,7 +90,7 @@ class AuthoringGuide(QWidget):
         layout.setSpacing(5)
         self.title_label = _wrapped_label("", self)
         self.title_label.setObjectName("authoring_guide_title")
-        self.title_label.setStyleSheet("color: #f0f6fc; font-weight: 600;")
+        self.title_label.setStyleSheet("color: #ffffff; font-weight: 600;")
         self.description_label = _wrapped_label("", self, muted=True)
         self.description_label.setObjectName("authoring_guide_description")
         layout.addWidget(self.title_label)
