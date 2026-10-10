@@ -63,8 +63,9 @@ _MARGIN = 12
 _CARD_HEIGHT = 28
 _CARD_GAP = 14
 _INSERT_HIT_HEIGHT = 22
-# Full-height handles need a forgiving physical target on 960 px windows.
-_HANDLE_WIDTH = 36
+# Full-height handles need a forgiving physical target on 960 px windows;
+# 「套一层」这类三字标签需要 44 px 才不至于顶到热区边缘。
+_HANDLE_WIDTH = 44
 _INDENT = 24
 _HEAD_HEIGHT = 20
 _LANDING_HEIGHT = 34
@@ -751,7 +752,7 @@ class _FlowCanvas(QWidget):
             for offset_y in (-5, 0, 5):
                 painter.drawEllipse(drag_rect.center() + QPoint(offset_x, offset_y), 1, 1)
         painter.setPen(QPen(QColor("#b18cd9"), 1))
-        painter.drawText(wrap_rect, Qt.AlignmentFlag.AlignCenter, "包裹")
+        painter.drawText(wrap_rect, Qt.AlignmentFlag.AlignCenter, "套一层")
 
     def _badges(self, node: Node) -> tuple[tuple[str, str], ...]:
         badges: list[tuple[str, str]] = []
@@ -1094,7 +1095,7 @@ class _FlowCanvas(QWidget):
                     tooltip = "拖动以移动节点\n" + tooltip
                     self.setCursor(Qt.CursorShape.OpenHandCursor)
                 elif self._wrap_handle_rect(hovered).contains(position):
-                    tooltip = "把空容器拖到这里包裹该节点\n" + tooltip
+                    tooltip = "拖一个空容器（重复/条件/定时/并行）到这里，把该步骤套进它里面\n" + tooltip
                     self.setCursor(Qt.CursorShape.PointingHandCursor)
                 else:
                     self.unsetCursor()
@@ -1229,7 +1230,7 @@ class _FlowCanvas(QWidget):
         if target is None:
             self._drop_candidate = None
             self._drop_check = DropCheck(
-                False, "请拖到插入线、容器内容区或卡片的包裹手柄"
+                False, "请拖到插入线、容器内容区或卡片右侧的「套一层」区"
             )
             event.ignore()
             self.drop_feedback.emit(self._drop_check.reason)
@@ -1259,7 +1260,7 @@ class _FlowCanvas(QWidget):
         position = event.position().toPoint()
         target = self._drop_target(position)
         if target is None:
-            self.drop_feedback.emit("请拖到插入线、容器内容区或卡片的包裹手柄")
+            self.drop_feedback.emit("请拖到插入线、容器内容区或卡片右侧的「套一层」区")
             self._end_drop()
             event.ignore()
             return
@@ -1306,7 +1307,7 @@ class _FlowCanvas(QWidget):
         target = self._layout.cards.get(uid) if uid else None
         target_label = target.label if target is not None else "程序"
         if placement == DropPlacement.WRAP:
-            return f"把 {target_label} 包裹在 {subject} 外层"
+            return f"把 {target_label} 套进 {subject} 里"
         if placement == DropPlacement.CHILD:
             return f"把 {subject} 放入 {target_label}"
         if placement == DropPlacement.BEFORE:
