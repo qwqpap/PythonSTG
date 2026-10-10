@@ -29,10 +29,14 @@ docs/project_assessment_*.md
 docs/project_assessment_*.html
 docs/project_assessment_*.pdf
 tools/render_markdown_pdf.py
+# 资产工具默认导出物，可随时重新生成
+/sprite_catalog.png
+/combat_assets_gallery.html
 
 # Editor / IDE local config
 imgui.ini
 .claude/worktrees/
+.claude/settings.local.json
 
 # Local scratch tests
 tests/test_player_shot_fire_rate.py
@@ -52,6 +56,11 @@ tests/test_window_key_sync.py
 
 # Disposable output of the code-driven level compiler
 /game_content/generated/
+
+# 本地试用/临时作者工程与本地计划文件，不入库
+/game_content/authoring/my_game/
+/game_content/authoring/my_game_*/
+/.zcode/
 
 # 本地 Claude Code 项目说明（不分发）
 /CLAUDE.md
