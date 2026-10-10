@@ -239,6 +239,8 @@ class _FlowCanvas(QWidget):
         self._press_insert = None
         self._press_reference = None
         self._hover_uid: str | None = None
+        self._hover_insertion = None
+        self._last_pointer: QPoint | None = None
         self._hover_since = QElapsedTimer()
         self._autoscroll_direction = 0
         self._layout_width: int | None = None
@@ -634,6 +636,8 @@ class _FlowCanvas(QWidget):
         # QScrollArea already moves this widget.  Paint and input must both
         # use its content coordinates; translating a second time hides the
         # cards which are still hit-testable after scrolling.
+        # use its content coordinates; translating a second time hides the
+        # cards which are still hit-testable after scrolling.
         for element in self._layout.elements:
             if not element.rect.intersects(exposed):
                 continue
@@ -837,45 +841,111 @@ class _FlowCanvas(QWidget):
             f"… {element.label}",
         )
 
+    def _nearest_insertion(self, position: QPoint, *, reach: int | None = None):
+        """Return the insertion nearest the pointer if it is close enough to count.
+
+        用来决定"鼠标停在两个步骤之间"时该亮哪一条插入线；没有靠近的落点就返回 None，
+        默认不画任何引导线。绘制路径传入 `reach` 时复用鼠标事件已经算好的那条缝隙，
+        避免绘制与命中测试各自读一次光标位置而产生偏差。
+        """
+
+        limit = _INSERT_HIT_HEIGHT if reach is None else reach
+        best = None
+        best_distance = None
+        for rect, location in self._layout.insertions:
+            if rect.left() <= position.x() <= rect.right():
+                distance = abs(rect.center().y() - position.y())
+            else:
+                nearest_x = min(max(position.x(), rect.left()), rect.right())
+                dx = position.x() - nearest_x
+                dy = rect.center().y() - position.y()
+                distance = (dx * dx + dy * dy) ** 0.5
+            if distance > limit:
+                continue
+            if best_distance is None or distance < best_distance:
+                best, best_distance = (rect, location), distance
+        return best
+
+    def _update_hover_insertion(self, position: QPoint) -> None:
+        """Repaint only when the pointed-at gap changes, so the ＋ 圆点跟着鼠标走。"""
+
+        self._last_pointer = QPoint(position)
+        nearest = self._nearest_insertion(position)
+        # 逐字段比较：落点元组每次都是新建对象，用身份比较会让"同一条缝隙"永远判定为不同。
+        if self._same_insertion(nearest, self._hover_insertion):
+            return
+        self._hover_insertion = nearest
+        self.update()
+
+    @staticmethod
+    def _same_insertion(left, right) -> bool:
+        if left is None or right is None:
+            return left is right
+        return left[0] == right[0] and left[1] == right[1]
+
+    def leaveEvent(self, event) -> None:
+        """鼠标离开画布就收起插入提示，避免残留一个 ＋ 圆点。"""
+
+        if self._hover_insertion is not None:
+            self._hover_insertion = None
+            self._last_pointer = None
+            self.update()
+        super().leaveEvent(event)
+
+    def wheelEvent(self, event) -> None:
+        """滚动会换掉光标下的缝隙，先收起提示，等下一次鼠标移动再重算。"""
+
+        self._hover_insertion = None
+        super().wheelEvent(event)
+
     def _paint_insertion_guides(self, painter: QPainter, exposed: QRect) -> None:
         """Render the concrete before/after targets used by hit testing.
 
-        DCC 观感：默认只在节点缝隙画一条安静的引导线，鼠标经过或正在拖放时
-        才把落点标记和提示显出来，避免每个缝隙都挂一个大按钮。
+        DCC 观感：不逐缝常驻大按钮，但鼠标停在两个步骤之间时必须看得出"这里能加东西"：
+        亮出该处引导线，并在**鼠标所在位置**画一个小 ＋ 圆点和提示，松手即插在该位置。
+        正在拖放时所有落点同时亮起，方便比较。悬停目标来自鼠标事件（`_hover_insertion`），
+        绘制阶段不再自己读一次光标位置，避免与命中测试判断不一致。
         """
 
-        cursor = self.mapFromGlobal(QCursor.pos())
-        for rect, location in self._layout.insertions:
+        cursor = self._last_pointer
+        drop_active = self._drop_active or self._drop_candidate is not None
+        if drop_active:
+            targets = list(self._layout.insertions)
+        elif self._hover_insertion is not None:
+            targets = [self._hover_insertion]
+        else:
+            targets = []
+        for rect, location in targets:
             if not rect.intersects(exposed):
                 continue
             active = self._drop_candidate == location
-            hovered = rect.contains(cursor)
-            if not (hovered or active or self._drop_active):
-                continue
             color = QColor(
                 PALETTE.ok if active and self._drop_check.allowed
                 else PALETTE.error if active
-                else PALETTE.accent if self._drop_active
+                else PALETTE.accent if drop_active
                 else PALETTE.accent_soft
             )
             painter.setPen(QPen(color, 2 if active else 1))
             painter.drawLine(rect.left() + 10, rect.center().y(), rect.right() - 10, rect.center().y())
-            if not (hovered or active):
+            if not drop_active and not self._same_insertion((rect, location), self._hover_insertion):
                 continue
-            center = rect.center()
+            # 圆点跟着鼠标走，让"插在这里"这件事没有歧义。
+            center_x = rect.center().x()
+            if not drop_active and cursor is not None:
+                center_x = min(max(cursor.x(), rect.left() + 20), rect.right() - 20)
+            center = QPoint(center_x, rect.center().y())
             chip = QRect(center.x() - 9, center.y() - 9, 18, 18)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(PALETTE.accent if active else PALETTE.panel_header))
             painter.drawEllipse(chip)
             painter.setPen(QColor(PALETTE.text_on_accent if active else PALETTE.accent_text))
-            font = self._base_font(bold=True)
-            painter.setFont(font)
+            painter.setFont(self._base_font(bold=True))
             painter.drawText(chip, Qt.AlignmentFlag.AlignCenter, "＋")
-            label = "插入到这里" if active else "插入"
+            label = "松开即插到这里" if active else "添加步骤"
             painter.setPen(QColor(PALETTE.text_muted))
             painter.setFont(self._base_font(bold=False))
             painter.drawText(
-                QRect(center.x() + 14, center.y() - 9, 90, 18),
+                QRect(center.x() + 14, center.y() - 9, 110, 18),
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                 label,
             )
@@ -1079,10 +1149,13 @@ class _FlowCanvas(QWidget):
         else:
             insertion = self._insert_at(position)
             if insertion is not None:
+                # 工具提示/光标由本分支负责，悬停高亮交给同一条状态，避免两处判断走偏。
+                self._update_hover_insertion(position)
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
                 self.setToolTip("在这里添加步骤；也可从动作库拖入。")
                 super().mouseMoveEvent(event)
                 return
+            self._update_hover_insertion(position)
             hovered = self._card_at(position)
             if hovered is not None and hovered.node is not None:
                 target = _reference_target(hovered.node)
