@@ -91,6 +91,9 @@ def _get_cli_option(prefix: str):
 CONTENT_ENTRY_MODULE = _get_cli_option("--content-entry=") or "game_content.entry"
 EDITOR_PREVIEW_RUN_ID = _get_cli_option("--editor-preview=")
 EDITOR_PREVIEW_MODE = EDITOR_PREVIEW_RUN_ID is not None
+AUTHORING_ROOT = _get_cli_option("--authoring-root=")
+if AUTHORING_ROOT:
+    sys.path.insert(0, str(Path(AUTHORING_ROOT).resolve()))
 CONTENT_ENTRY = load_content_entry(CONTENT_ENTRY_MODULE)
 ALL_STAGES = list(CONTENT_ENTRY.stages)
 START_STAGE = CONTENT_ENTRY.start_stage
@@ -107,6 +110,7 @@ class _EditorPreviewChannel:
         self._closed = False
         self._last_metric_frame = -1
         self._last_spawned_total = 0
+        self.timeline_unit_id = _get_cli_option("--preview-unit-id=")
         # Existing game diagnostics remain useful, but stdout is reserved for
         # the protocol so the Qt client never has to guess which lines are JSON.
         sys.stdout = sys.stderr
@@ -233,7 +237,8 @@ def _flush_preview_runtime(
         )
         if not events:
             break
-    frame = stage_manager.get_frame_count()
+    frame = stage_manager.get_timeline_frame(channel.timeline_unit_id)
+    frame = max(0, int(frame or 0))
     sample = channel.metric_sample(
         frame,
         bullet_pool,
@@ -241,9 +246,22 @@ def _flush_preview_runtime(
         force=force_frame,
     )
     if sample is not None:
+        if stage_manager.timeline_stage_id:
+            sample["stage_id"] = stage_manager.timeline_stage_id
+        if channel.timeline_unit_id:
+            sample["unit_id"] = channel.timeline_unit_id
         channel.emit("trace", {"events": [sample]})
     if force_frame or frame % 6 == 0:
-        channel.emit("frame", {"frame": frame})
+        context = stage_manager.current_context
+        unit_frames = ({unit_id: context.get_unit_timeline_frame(unit_id)
+                        for unit_id in list(context._authoring_unit_origins)[-128:]}
+                       if context is not None else {})
+        channel.emit("frame", {"frame": frame,
+                               "runtime_frame": stage_manager.get_frame_count(),
+                               "stage_frame": stage_manager.get_timeline_frame(),
+                               "stage_id": stage_manager.timeline_stage_id,
+                               "unit_id": channel.timeline_unit_id,
+                               "unit_frames": unit_frames})
 
 
 def _stage_class_by_id(stage_id: str):
@@ -1003,6 +1021,7 @@ def main():
             print(f"[main] 准备回放: {rep}")
 
     preview_pending_seek = None
+    preview_pending_unit = None
     while True:
         # 选定模式：正常 / 回放
         replay_playback = pending_replay_playback
@@ -1049,7 +1068,9 @@ def main():
 
         while True:
             preview_fast_forward_target = preview_pending_seek
+            preview_fast_forward_unit = preview_pending_unit
             preview_pending_seek = None
+            preview_pending_unit = None
             # ===== 先创建加载画面渲染器（不依赖任何纹理资源） =====
             loading_renderer = LoadingScreenRenderer(ctx, screen_size[0], screen_size[1])
 
@@ -1326,7 +1347,8 @@ def main():
                     audio_manager.set_bgm_volume(0.0)
                     _PREVIEW_CHANNEL.emit(
                         "state",
-                        {"state": "seeking", "frame": preview_fast_forward_target},
+                        {"state": "seeking", "frame": preview_fast_forward_target,
+                         "unit_id": preview_fast_forward_unit},
                     )
                 else:
                     _PREVIEW_CHANNEL.emit("state", {"state": "running"})
@@ -1444,10 +1466,12 @@ def main():
                             audio_manager.set_se_volume(settings.se_volume)
                             audio_manager.set_bgm_volume(settings.bgm_volume)
                             preview_pending_seek = None
+                            preview_pending_unit = None
                             game_result_state = "RESTART"
                             running = False
                         elif command == "seek":
                             preview_pending_seek = control["payload"]["frame"]
+                            preview_pending_unit = control["payload"].get("unit_id")
                             game_result_state = "RESTART"
                             running = False
                         elif command == "stop":
@@ -1457,14 +1481,15 @@ def main():
                         continue
                     if (
                         preview_fast_forward_target is not None
-                        and stage_manager.get_frame_count() >= preview_fast_forward_target
+                        and stage_manager.get_timeline_frame(preview_fast_forward_unit) is not None
+                        and stage_manager.get_timeline_frame(preview_fast_forward_unit) >= preview_fast_forward_target
                     ):
                         preview_fast_forward_target = None
                         audio_manager.set_se_volume(settings.se_volume)
                         audio_manager.set_bgm_volume(settings.bgm_volume)
                         _PREVIEW_CHANNEL.emit(
                             "state",
-                            {"state": "running", "frame": stage_manager.get_frame_count()},
+                            {"state": "running", "frame": stage_manager.get_timeline_frame(preview_fast_forward_unit)},
                         )
 
                 for event in window.poll_events():
@@ -1618,6 +1643,8 @@ def main():
                 # StageManager.is_finished 在最后一个 stage 没有 _next_stage_class 时置 True，
                 # 这意味着包括 ending 对话 + staff roll 都跑完了。
                 if getattr(stage_manager, "is_finished", False) and not paused:
+                    if preview_fast_forward_target is not None:
+                        raise RuntimeError(f"快进目标不可达：关卡已结束（目标 {preview_fast_forward_target} 帧）")
                     print("[main] 检测到全通关 → 结束预览" if EDITOR_PREVIEW_MODE else "[main] 检测到全通关 → 回主菜单")
                     game_result_state = "PREVIEW_STOP" if EDITOR_PREVIEW_MODE else "MAIN_MENU"
                     running = False
@@ -1663,6 +1690,8 @@ def main():
 
                 # Continue 菜单弹出时 / Game Over 黑屏期间，世界完全冻结
                 world_frozen = paused or (continue_state != "none")
+                if preview_fast_forward_target is not None and continue_state != "none":
+                    raise RuntimeError("快进因玩家死亡而停止；请缩短目标范围或重新运行")
 
                 update_start = time.perf_counter() if PROFILE_MODE else 0.0
                 if not world_frozen:
@@ -2041,7 +2070,8 @@ if __name__ == "__main__":
     except Exception as exc:
         if _PREVIEW_CHANNEL is not None:
             _PREVIEW_CHANNEL.emit(
-                "error", {"code": "runtime_error", "message": f"{type(exc).__name__}: {exc}"}
+                "error", {"code": "runtime_error", "message": f"{type(exc).__name__}: {exc}",
+                          "uid": getattr(exc, "authoring_uid", None)}
             )
         raise
     finally:

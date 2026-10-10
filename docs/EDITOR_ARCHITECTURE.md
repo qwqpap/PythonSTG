@@ -4,6 +4,28 @@
 [`EDITOR_PRODUCT_VISION.md`](EDITOR_PRODUCT_VISION.md)，实施顺序和证据见
 [`EDITOR_IMPLEMENTATION_TODO.md`](EDITOR_IMPLEMENTATION_TODO.md)。
 
+按所改行为查阅对应章节，整体架构或产品契约调整时完整阅读：
+
+| 修改涉及 | 章节 |
+| --- | --- |
+| 作者数据、DSL、源码保存、模板 | 1–7 |
+| 构建、生成代码、入口 | 4、7–9 |
+| 选择、Undo、Inspector、程序流、资产 | 10–12，涉及持久化时加读 5 |
+| 预览、进程、练习场、seek | 8、13–14 |
+| Timeline、静态预计与 Trace | 13、15 |
+| 删除边界、测试与阶段验收 | 16–18 和 TODO 对应 Gate |
+
+本文描述工程约束，不记录功能完成状态；当前实现和历史证据应分别核对。
+
+入门界面仍依赖同一个 EditorSession：`src/editor/onboarding.py` 只展示欢迎页、当前内容
+说明及已有动作按钮；`src/editor/starter_content.py` 只用普通 DSL 构造可编辑示例。
+`project_creation.py` 通过标准源码写回器完成新建；`window.py` 负责选择、导航和单次 Undo
+组合。示例和“添加一波弹幕”都不保存独立预设参数，不拥有另一套调度或预览。
+
+2026-10-08：维护者已要求删除测试套件和验证脚本。第 17–18 节中的套件命令是历史约定，
+不再要求重建或执行；当前修复采用即时功能检查，仍分别报告 Runtime、Native、Performance
+和真人 Usability 的实际观察范围。
+
 ## 1. 依赖方向
 
 ```text
@@ -55,11 +77,11 @@ src/
 ├─ editor/
 │  ├─ __init__.py
 │  ├─ app.py              # CLI、QApplication、ProjectContext、窗口创建
-│  ├─ window.py           # 固定布局和公开动作接线
+│  ├─ window.py           # 步骤主导布局、导航与公开动作接线
 │  ├─ session.py          # 一个工程的唯一状态所有者
 │  ├─ commands.py         # QUndoCommand 模型操作
 │  ├─ sidebars.py         # 程序/文件/全局资产/Stage 资产
-│  ├─ node_palette.py     # 常驻节点库：搜索、兼容过滤、引用候选、模板
+│  ├─ node_palette.py     # 就地搜索/可选节点库：兼容过滤、引用候选、模板
 │  ├─ program_tree.py     # 自定义绘制纵向程序流与插入线/容器/包裹拖放反馈
 │  ├─ inspector.py        # 由 DSL 类型注解生成字段编辑器
 │  ├─ code_view.py        # 作者/生成 Python 只读查看
@@ -212,12 +234,14 @@ Inspector 读取 Python 类型注解；不得维护单独的 JSON 参数描述�
 ### 5.4 外部修改状态机
 
 ```text
-clean + supported disk change      -> reload, clear undo
-dirty + any disk change            -> conflict, freeze save
+clean + empty undo + supported change -> reload
+dirty or nonempty undo + disk change  -> conflict, freeze save
 conflict + keep memory             -> explicit overwrite after confirmation
 conflict + reload disk             -> replace model, clear undo
 any + unsupported disk structure   -> readonly diagnostic, preserve bytes
 ```
+
+即使文件已保存，非空 Undo 历史也需要用户明确选择后才能丢弃；只有 clean 且空栈时可自动重载。
 
 新建文件在首次保存前只存在于内存；删除文件先进入可撤销墓碑。墓碑仍参与文件监视，磁盘
 变化同样要求 keep/reload 决策。多文件保存保存前快照磁盘和文档元状态，任一写入失败时
@@ -316,11 +340,13 @@ validate memory model
   -> preview owner starts new process
 ```
 
-`PackageBuilder.prepare()` 只生成和验证临时目录，不知道 Qt 或预览进程。编辑器收到已验证
-的 prepared build 后才停止旧预览并等待退出，再调用 `PackageBuilder.publish()`。发布时先把
-旧正式目录原子改名为备份，再把临时目录改名为正式目录；成功后删除备份。验证失败删除临时
-目录，正式目录和旧预览均保持不动；发布失败则回滚正式目录并由 preview owner 重新启动旧
-构建。Windows 文件占用错误必须明确报告，不静默覆盖。CLI 构建没有预览步骤，直接 publish。
+`PackageBuilder.prepare()` 在全新的 headless Python 构建进程中展开模板、生成代码、编译、
+导入并验证注册结果；CLI 有 60 秒超时。GUI 由 `PreviewOwner` 异步启动同一构建入口，允许
+停止，不在 Qt 信号处理期间同步执行模板。构建进程每次重新读源码，不复用旧模板模块或字节码。
+独立构建通过后才停止旧预览，并调用 `begin_publish()` 保留旧正式目录备份。新游戏已进入
+运行状态、且 Windows 子窗口实际嵌入后才 `commit()` 删除备份；发布或启动失败先回滚生成包，
+再恢复旧启动参数、目标和构建标识，重新启动旧构建。验证失败时旧预览无需停止。CLI 没有
+游戏握手步骤，`publish()` 直接完成发布。文件占用或恢复失败必须报告，不能声称旧预览仍在运行。
 
 生成哈希只覆盖规范化作者语义、模板版本/源码和生成器版本，不包含绝对路径或时间戳。
 同一输入连续构建必须逐字节一致。
@@ -352,12 +378,16 @@ Panel 读取 Session 并调用公开命令工厂；不得自己保存第二份�
 
 ## 11. Qt 布局与交互
 
-`window.py` 组装固定工作区，不实现领域验证。Activity Bar 只切换左侧内容；中央
-Editor/Game 是两个独立可关闭组，关闭后有固定菜单动作恢复。Inspector 是右侧辅助栏。
-Timeline 永久挂在底部，可调高度但无关闭动作。
+`window.py` 组装步骤主导工作区，不实现领域验证。默认中央只展示编辑步骤；引用可直接打开，
+顶部返回/路径恢复原单元、选择与滚动位置。导航优先显示当前关卡的出场/引用关系，全部内容
+是管理入口。Inspector 是右侧辅助栏，基础参数优先；帮助、源码、节点库和预览按需展开。
+宽窗口可显式选择并排预览，窄窗口在步骤/画面之间切换；Run 不永久挤压步骤。
+Timeline 保留底部概要，可展开详细阅读，不建立第二作者文档。
+左侧“源码”页按中文内容名称列出作者文件，完整相对路径放在提示中；单击打开对应只读
+作者源码，“编辑步骤”可返回编排。源码页不是新手添加内容的入口。
 
-左侧为上下分栏：上方的程序结构有“全部单元”和“当前 Stage 调用链”两种投影，下方常驻
-节点库（`node_palette.py`）。节点库只保存中文标签和类别；构造函数参数、父子规则与引用
+步骤之间与空容器的 + 是主要添加入口，弹出 `node_palette.py` 的同后端搜索，支持上下、
+Enter 和 Esc；完整节点库可从视图菜单打开，不默认占据半个侧栏。节点库只保存中文标签和类别；构造函数参数、父子规则与引用
 候选类型分别由 headless `node_from_palette`、`validate_insert` 和
 `reference_kinds_for_node` 推导。缺少引用候选时节点库显示明确的新建对应逻辑单元入口。
 新节点使用瞬态 MIME `application/x-pystg-node-prototype`，逻辑单元使用
@@ -367,6 +397,9 @@ Timeline 永久挂在底部，可调高度但无关闭动作。
 缩进卡片；`Repeat`/`If`/`At`/`SpawnTask` 直接展示嵌套区域；空容器显示“拖到这里添加内容”；
 `If` 显示“条件成立/否则”；`Parallel` 分支在宽视口并排、窄视口纵向堆叠；支持折叠、边缘
 自动滚动、悬停展开和 Esc 取消拖动。Project 与 Boss 改为各自的关卡顺序/phases 表面。
+普通单体容器不再添加无意义的“内容”标题；非空容器复用末尾插入线，不再绘制重复尾槽。
+只有真正空的根或分支保留添加落点，`If`/`Parallel` 的分支标题保留语义。引用卡片优先
+显示中文内容名称，拖动手柄使用点阵，包裹入口明确标为“包裹”。
 
 程序节点拖拽先计算唯一 `DropPlacement`：`BEFORE`、`AFTER`、`CHILD`、`WRAP`。Before/After
 用节点间插入线，Child 用可见容器内容区，Wrap 用可见手柄或 Alt 拖放；不得再用悬浮四区
@@ -381,14 +414,19 @@ Inspector 从 DSL 注解生成 Literal、Ref、常量/Expr、资源、列表/字
 import 或执行外部模块；可信代码只在构建展开阶段执行。
 只有明确的 `res://` 语义字段显示资源拖入与文件选择；逻辑单元显示名等普通字符串使用
 普通文本框，不伪装为资源字段。
+浮点参数使用精确文本输入，不经有限小数位的 spinbox 截断；提交、保存和重新解析保持原值。
+引用选择显示内容名称，重复名称附 ID；保存仍是英文 ID，允许直接输入 ID。
+属性中的打开按钮按当前文本解析目标，与提交使用相同的名称/ID 对应，不读取过期的下拉选中项。
 
 作者源码和生成源码视图使用只读文本控件。受支持文件也不提供任意文本编辑器；外部编辑
 由文件监视器加载。首版所有作者可见 UI 字符串为简体中文。
 
 ## 12. 资产视图
 
-全局资产从 `ProjectContext` 根扫描稳定支持扩展名，不跟随当前工作目录。Stage 资产集合
-算法：
+全局资产从 `ProjectContext` 根扫描稳定支持扩展名，不跟随当前工作目录。扫描排除隐藏
+文件/目录、已知构建/依赖目录、顶层 `docs/` 和开发配置文件；普通游戏 JSON 与自定义
+资源目录保留。资源页支持按名称/位置搜索和图片、音频、字体、数据分类；列表显示短文件名，
+完整相对路径与原始 `res://` 放在提示中，拖拽继续携带原始 URI。Stage 资产集合算法：
 
 1. 从当前 Stage 开始遍历 `Ref`；
 2. 防循环并按逻辑单元 ID 稳定排序；
@@ -405,14 +443,15 @@ import 或执行外部模块；可信代码只在构建展开阶段执行。
 
 ```text
 stopped -> building -> starting -> running <-> paused
-running/paused + edit -> stale
+running/paused + edit -> same transport + stale flag
 any -> stopping -> stopped
 any process failure -> error -> stopped
 ```
 
 Run 在临时构建完成全部验证前不停止旧预览。验证成功后，owner 发送 stop、等待有界超时、
-必要时终止旧进程；确认退出后调用 builder 原子发布，再启动新进程。发布失败时 builder
-回滚，owner 重新启动旧构建。编辑只把 running/paused 标为 stale。
+必要时终止旧进程；确认退出后调用 builder 原子发布，再启动新进程。发布或启动失败时
+builder 回滚，owner 重新启动旧构建；新进程握手及嵌入完成前不能确认构建成功。编辑只设置
+源码已改标记，不改变 running/paused 播放状态。
 
 控制消息只允许：`pause`、`resume`、`restart`、`seek`、`stop`。事件只允许：`ready`、
 `state`、`frame`、`trace`、`error`、`stopped`。消息带协议版本和本次 run identity；过期
@@ -454,6 +493,11 @@ children: tuple[TimelineInterval, ...]
 Repeat 计算聚合时间、Parallel 分泳道且 awaited 取最长、SpawnTask 不阻塞、If 显示分支范围。
 父容器显示为章节背景或括号，叶节点显示真实区间；零时长动作用 milestone；动态循环、
 RawPython、动态 Expr 和未知模板传播 `Unknown`，不猜数值，后续节点仍保留源顺序。
+Qt 时间线为每个源步骤安排独立一行；固定左列显示中文名称与层级，右侧区间按真实帧数
+比例绘制，不用最小块宽伪造时长，也不将文字挤入短区间。父容器使用章节括号；未知时间
+放在明确的非时间区域。横向滚动保持名称可见，纵向滚动保持标尺/左列标题可见；部分可见
+行在可见区域足以容纳完整字时仍显示名称，不绘制半截文字；选中项定位为固定标尺预留空间。首次显示/切换内容适应视口，同内容
+编辑和 Trace 更新保留手动缩放。绘制布局不修改 headless 时间推导或源码语义。
 
 Trace overlay 以 run identity 和 `uid` 填入 `observed_start/observed_end/branch`，而非覆盖
 静态 start/end。它不修改静态模型、源文件、dirty 或 Undo。点击区间选择节点，点击节点选择
@@ -461,6 +505,9 @@ Trace overlay 以 run identity 和 `uid` 填入 `observed_start/observed_end/bra
 
 反向编辑必须先证明目标参数是字面量：`Wait.frames`、任意声明为 `duration` 的字面量参数、
 `At.frame`。除此之外 Timeline 不产生命令。
+时长右缘的命中优先于相邻区块正文，命中容差不改变实际绘制区间；正文拖动不修改时长。
+循环范围是临时查看状态：切换投影内容重置默认范围，同内容编辑和 Trace 更新保留手填值；
+启用循环绑定内容与运行 identity，不兼容目标不可 seek，也不把循环范围保存为作者数据。
 
 ## 16. 删除边界
 
@@ -513,19 +560,22 @@ Pattern/Scene contribution。`src/game.events`、适配器和生命周期批处�
 
 ## 18. 合并检查与预算
 
-每阶段按 TODO 运行 focused gate。最终合并基线：
+每阶段按 TODO 运行 focused gate。局部修改先验证受影响行为，通过后无需无故重复扩大测试。
+文档措辞、链接和导航修改只检查链接、入口与 `npm run docs:build`，不据此更新技术 Gate。
+阶段/路线完成仍执行 TODO 第 9 节全部最终门禁；维护者已删除测试套件与原生验证脚本，因此
+第 17 节列出的测试分类、以及历史 Gate 中的 pytest/verifier 命令只作行为核对清单，不再是
+当前工作树的执行入口。当前快速合并检查基线：
 
 ```powershell
-$env:QT_QPA_PLATFORM = "offscreen"
-python -m pytest -q <new fast/editor suites>
-python -m compileall -q main.py src game_content tools tests
+python -m compileall -q main.py src game_content tools
 python tools/validate_assets.py --format json
 git diff --check
 git diff --cached --check
 ```
 
-真实 Windows gate 必须清除 `QT_QPA_PLATFORM` 后单独运行。重型完整引擎测试独立执行，
-不绑定每次 UI 修改。
+行为核对仍要求真实路径：headless 作者/编译器改动经独立子进程走真实 Runtime，界面改动在
+真实 Windows PySide6 窗口与 GLFW 子窗口复现实际输入链（`$env:QT_QPA_PLATFORM` 必须清除，
+offscreen 只作 Structural 证据）。维护者要求的即时检查不改变本文件定义的架构边界。
 
 预算：DSL/生成器快速集 <15 秒；新编辑器完整自动化 <60 秒；PR 主门禁 <5 分钟；节点库
 筛选/刷新 <50ms、拖拽落点计算 p95 <16ms、2,000 个 Timeline 投影元素的平移/缩放 p95

@@ -10,6 +10,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from src.authoring import dsl
 from src.authoring.program import (
     AuthoringProgram,
     DropPlacement,
@@ -37,6 +38,7 @@ from src.authoring.python_source import (
     resolve_external_conflict,
     save_python_source,
 )
+from src.authoring.templates import definition_from_callable
 from src.core.project_context import ProjectContext
 from src.qt_compat.QtCore import QFileSystemWatcher, QObject, Signal
 from src.qt_compat.QtGui import QUndoStack
@@ -81,6 +83,20 @@ _IGNORED_ASSET_DIRECTORIES = frozenset(
         "venv",
     }
 )
+_IGNORED_ASSET_FILE_NAMES = frozenset(
+    {
+        "package.json",
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "project.pystg.json",
+        "composer.json",
+        "composer.lock",
+        "deno.json",
+        "deno.lock",
+        "jsconfig.json",
+        "tsconfig.json",
+    }
+)
 
 
 class EditorSession(QObject):
@@ -106,12 +122,16 @@ class EditorSession(QObject):
     ) -> None:
         super().__init__(parent)
         self.project_context = project_context
+        self._project_context_locked = project_context is not None
+        self._global_assets_cache: tuple[str, ...] = ()
         self.source_project: AuthoringSourceProject | None = None
         self.current_unit_id: str | None = None
         self.current_node_uid: str | None = None
+        self.selected_node_uids: tuple[str, ...] = ()
         self.current_source_path: Path | None = None
         self.build_state = "idle"
         self.preview_state = "stopped"
+        self.preview_stale = False
         self.preview_frame = 0
         self.preview_target: tuple[str, str | None] | None = None
         self.preview_error = ""
@@ -128,6 +148,8 @@ class EditorSession(QObject):
         self._pending_tombstone_external: set[Path] = set()
         self._external_keep: set[Path] = set()
         self._saving = False
+        self._source_text_cache: dict[Path, tuple[SourceDocument, object, str, str]] = {}
+        self._current_node_cache: tuple[AuthoringProgram, str, Node] | None = None
         self.undo_stack.cleanChanged.connect(self._emit_dirty)
 
     @property
@@ -153,10 +175,15 @@ class EditorSession(QObject):
     def current_node(self) -> Node | None:
         if self.source_project is None or self.current_node_uid is None:
             return None
+        cached = self._current_node_cache
+        if cached is not None and cached[0] is self.program and cached[1] == self.current_node_uid:
+            return cached[2]
         try:
-            return find_node(self.program, self.current_node_uid)[1]
+            node = find_node(self.program, self.current_node_uid)[1]
         except ProgramError:
             return None
+        self._current_node_cache = (self.program, self.current_node_uid, node)
+        return node
 
     @property
     def current_document(self) -> SourceDocument | None:
@@ -215,6 +242,25 @@ class EditorSession(QObject):
             return ()
         targets: dict[str, TemplateTarget] = {}
         external_definitions: dict[str, tuple] = {}
+
+        # Built-ins are trusted DSL surface, so their signatures and source
+        # locations can be read directly without importing project modules.
+        # This also makes a canonical ``ring_burst`` call discoverable when a
+        # source file merely imports it from ``src.authoring.dsl``; external
+        # template discovery below remains explicitly import-authorized and
+        # source-only.
+        for value in dsl.BUILTIN_TEMPLATES:
+            definition = definition_from_callable(value)
+            targets[definition.identity] = TemplateTarget(
+                identity=definition.identity,
+                symbol=definition.symbol,
+                display_name=definition.symbol,
+                module=definition.function.__module__,
+                resolved=True,
+                definition_path=definition.source_path or None,
+                definition_span=definition.span,
+                signature=definition.signature,
+            )
         for document in self.source_project.files.values():
             for definition in document.templates:
                 targets[definition.identity] = TemplateTarget(
@@ -266,16 +312,30 @@ class EditorSession(QObject):
             return ""
         if document.read_only or document.unit is None:
             return document.text
+        cached = self._source_text_cache.get(document.path)
+        if cached is not None and (
+            cached[0] is document
+            and cached[1] is document.unit
+            and cached[2] == document.text
+        ):
+            return cached[3]
         try:
-            return render_python_source(document)
+            text = render_python_source(document)
         except SourceSaveError:
             return document.text
+        self._source_text_cache[document.path] = (
+            document, document.unit, document.text, text
+        )
+        return text
 
     def open_project(self, root: str | Path) -> AuthoringSourceProject:
         source_project = load_authoring_project(root)
-        if self.project_context is None:
+        if not self._project_context_locked:
             self.project_context = ProjectContext.discover(source_project.root)
+        elif self.project_context is None:
+            raise ProgramError("project_context_missing", "工程上下文不可用")
         self.source_project = source_project
+        self._global_assets_cache = _scan_project_assets(self.project_context.root)
         self.undo_stack.clear()
         self._pending_external.clear()
         self._pending_tombstone_external.clear()
@@ -283,16 +343,30 @@ class EditorSession(QObject):
         self._remember_saved_semantics()
         self.current_unit_id = self._initial_unit_id()
         self.current_node_uid = None
+        self.selected_node_uids = ()
+        self._source_text_cache.clear()
         self.current_source_path = self._path_for_unit(self.current_unit_id)
         self.preview_target = None
+        self.preview_frame = 0
         self.preview_error = ""
         self.preview_error_uid = None
+        self.build_state = "idle"
+        self.preview_state = "stopped"
+        self.preview_stale = False
+        self.last_build_identity = None
+        self.trace_run_id = None
+        self.run_log.clear()
+        self.trace_events.clear()
         self._watch_project_files()
         self.project_changed.emit()
         self.program_changed.emit()
         self.selection_changed.emit()
         self.source_changed.emit()
         self.problems_changed.emit()
+        self.build_changed.emit(self.build_state)
+        self.preview_changed.emit(self.preview_state)
+        self.log_changed.emit()
+        self.trace_changed.emit()
         self._emit_dirty()
         return source_project
 
@@ -301,8 +375,13 @@ class EditorSession(QObject):
         if watched:
             self.file_watcher.removePaths(watched)
         self.source_project = None
+        self._global_assets_cache = ()
+        if not self._project_context_locked:
+            self.project_context = None
         self.current_unit_id = None
         self.current_node_uid = None
+        self.selected_node_uids = ()
+        self._source_text_cache.clear()
         self.current_source_path = None
         self.undo_stack.clear()
         self._saved_semantics.clear()
@@ -311,6 +390,7 @@ class EditorSession(QObject):
         self._external_keep.clear()
         self.set_build_state("idle")
         self.set_preview_state("stopped")
+        self.set_preview_stale(False)
         self.preview_target = None
         self.preview_error = ""
         self.preview_error_uid = None
@@ -327,8 +407,11 @@ class EditorSession(QObject):
 
     def select_unit(self, unit_id: str) -> None:
         unit = self.program.get_unit(unit_id)
+        if self.current_unit_id == unit.id and self.current_node_uid is None:
+            return
         self.current_unit_id = unit.id
         self.current_node_uid = None
+        self.selected_node_uids = ()
         self.current_source_path = self._path_for_unit(unit.id)
         self.selection_changed.emit()
         self.source_changed.emit()
@@ -343,29 +426,71 @@ class EditorSession(QObject):
         self.current_source_path = path
         self.current_unit_id = document.unit.id if document.unit is not None else None
         self.current_node_uid = None
+        self.selected_node_uids = ()
         self.selection_changed.emit()
         self.source_changed.emit()
 
-    def select_node(self, uid: str | None) -> None:
+    def select_node(
+        self, uid: str | None, *, selected_uids: tuple[str, ...] | None = None
+    ) -> None:
+        previous = (self.current_unit_id, self.current_node_uid, self.selected_node_uids)
+        previous_source = self.current_source_path
         if uid is None:
             self.current_node_uid = None
+            self.selected_node_uids = ()
         else:
             unit, _node, _location = find_node(self.program, uid)
+            selection = tuple(dict.fromkeys(selected_uids or (uid,)))
+            if uid not in selection:
+                selection = (*selection, uid)
+            for selected_uid in selection:
+                if selected_uid == uid:
+                    continue
+                if find_node(self.program, selected_uid)[0].id != unit.id:
+                    raise ProgramError("invalid_selection", "不能跨逻辑单元选择节点")
             self.current_unit_id = unit.id
             self.current_source_path = self._path_for_unit(unit.id)
             self.current_node_uid = uid
+            self.selected_node_uids = selection
+            self._current_node_cache = (self.program, uid, _node)
+        if previous == (self.current_unit_id, self.current_node_uid, self.selected_node_uids):
+            return
         self.selection_changed.emit()
-        self.source_changed.emit()
+        if previous_source != self.current_source_path:
+            self.source_changed.emit()
 
     def set_node_argument(self, uid: str, name: str, value: Any) -> None:
         unit, _node, _location = find_node(self.program, uid)
         self._require_statement_unit(unit.id)
+        if name in _node.arguments and _same_value(_node.arguments[name], value):
+            return
         from .commands import SetNodeArgumentCommand
 
         self.undo_stack.push(SetNodeArgumentCommand(self, uid, name, value))
 
+    def unset_node_argument(self, uid: str, name: str) -> None:
+        unit, node, _location = find_node(self.program, uid)
+        self._require_statement_unit(unit.id)
+        from .commands import UnsetNodeArgumentCommand
+
+        command = UnsetNodeArgumentCommand(self, uid, name)
+        # Validate through the headless operation even for a no-op; required
+        # and unknown names must not silently become successful GUI requests.
+        if name not in node.arguments:
+            return
+        self.undo_stack.push(command)
+
     def set_unit_field(self, unit_id: str, name: str, value: Any) -> None:
         self._require_editable_unit(unit_id)
+        unit = self.program.get_unit(unit_id)
+        if name == "name":
+            unchanged = _same_value(unit.name, value)
+        elif name == "parameters":
+            unchanged = _same_value(unit.parameters, value)
+        else:
+            unchanged = name in unit.metadata and _same_value(unit.metadata[name], value)
+        if unchanged:
+            return
         from .commands import SetUnitFieldCommand
 
         self.undo_stack.push(SetUnitFieldCommand(self, unit_id, name, value))
@@ -494,7 +619,17 @@ class EditorSession(QObject):
     def global_assets(self) -> tuple[str, ...]:
         if self.project_context is None:
             return ()
-        return _scan_project_assets(self.project_context.root)
+        return self._global_assets_cache
+
+    def refresh_global_assets(self) -> tuple[str, ...]:
+        """Rescan project assets only on an explicit project-level refresh."""
+
+        self._global_assets_cache = (
+            _scan_project_assets(self.project_context.root)
+            if self.project_context is not None
+            else ()
+        )
+        return self._global_assets_cache
 
     @property
     def current_stage_id(self) -> str | None:
@@ -625,7 +760,6 @@ class EditorSession(QObject):
             "running",
             "paused",
             "seeking",
-            "stale",
             "stopping",
             "error",
         }:
@@ -633,6 +767,14 @@ class EditorSession(QObject):
         if self.preview_state != state:
             self.preview_state = state
             self.preview_changed.emit(state)
+
+    def set_preview_stale(self, stale: bool) -> None:
+        """Report source freshness without changing the running transport state."""
+
+        stale = bool(stale)
+        if self.preview_stale != stale:
+            self.preview_stale = stale
+            self.preview_changed.emit(self.preview_state)
 
     def set_preview_target(self, kind: str, unit_id: str | None = None) -> None:
         target = (str(kind), str(unit_id) if unit_id is not None else None)
@@ -752,7 +894,9 @@ class EditorSession(QObject):
     def _apply_program(self, program: AuthoringProgram) -> None:
         if self.source_project is None:
             raise ProgramError("project_closed", "no authoring project is open")
-        self.source_project.program = program.clone()
+        # Commands retain immutable before/after snapshots.  Headless mutations
+        # copy before changing them; applying a snapshot must not copy it again.
+        self.source_project.program = program
         desired_ids = {unit.id for unit in self.source_project.program.logical_units()}
         for relative, document in tuple(self.source_project.files.items()):
             if document.unit is None:
@@ -793,8 +937,6 @@ class EditorSession(QObject):
             self.source_project.files[relative] = document
         self._sync_dirty_flags()
         self.source_project.refresh_program()
-        self.selection_changed.emit()
-        self.source_changed.emit()
         self.problems_changed.emit()
         self.program_changed.emit()
         self._emit_dirty()
@@ -861,6 +1003,8 @@ class EditorSession(QObject):
             else self._path_for_unit(self.current_unit_id)
         )
         self.current_node_uid = None
+        self.selected_node_uids = ()
+        self._source_text_cache.clear()
         self._watch_project_files()
         self.project_changed.emit()
         self.selection_changed.emit()
@@ -947,6 +1091,10 @@ class EditorSession(QObject):
         self.dirty_changed.emit(self.dirty)
 
 
+def _same_value(left: Any, right: Any) -> bool:
+    return type(left) is type(right) and left == right
+
+
 def _references(value: Any):
     if isinstance(value, Ref):
         yield value
@@ -984,7 +1132,12 @@ def _resource_values(value: Any):
 
 
 def _scan_project_assets(root: Path) -> tuple[str, ...]:
-    """Scan supported project assets without entering build, cache, or archive trees."""
+    """List resource files, not hidden tool caches or project/build manifests.
+
+    JSON is still a supported game resource (backgrounds, dialogues and sprite
+    descriptions).  Only known development metadata is omitted; explicit
+    authoring references are projected independently by ``stage_assets``.
+    """
 
     root = root.resolve()
     values: list[str] = []
@@ -994,13 +1147,22 @@ def _scan_project_assets(root: Path) -> tuple[str, ...]:
         directory_names[:] = sorted(
             name
             for name in directory_names
-            if name not in _IGNORED_ASSET_DIRECTORIES
+            if not name.startswith(".")
+            and name.casefold() not in _IGNORED_ASSET_DIRECTORIES
+            and not (not relative_directory.parts and name.casefold() == "docs")
             and not (
                 relative_directory.parts == ("game_content",)
                 and name == "generated"
             )
         )
         for file_name in sorted(file_names):
+            lowered_name = file_name.casefold()
+            if (
+                file_name.startswith(".")
+                or lowered_name in _IGNORED_ASSET_FILE_NAMES
+                or lowered_name.startswith(("tsconfig.", "jsconfig."))
+            ):
+                continue
             path = current / file_name
             if path.suffix.lower() not in _ASSET_SUFFIXES or not path.is_file():
                 continue

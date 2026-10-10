@@ -19,6 +19,7 @@ from src.authoring.program import (
     insert_new_node,
     move_node,
     set_argument,
+    unset_argument,
     set_unit_field,
     set_unit_reference_list,
 )
@@ -45,7 +46,7 @@ class _ProgramCommand(QUndoCommand):
     ) -> None:
         super().__init__(text)
         self._session = session
-        self._before = session.program.clone()
+        self._before = session.program
         self._after = transform(self._before)
         self._redo_uid, self._undo_uid = redo_uid, undo_uid
         self._redo_unit_id, self._undo_unit_id = redo_unit_id, undo_unit_id
@@ -69,32 +70,26 @@ class _ProgramCommand(QUndoCommand):
         self._apply(self._before, self._undo_uid, self._undo_unit_id)
 
 class SetNodeArgumentCommand(_ProgramCommand):
-    """One argument edit; consecutive numeric edits merge into one user action."""
+    """One completed field edit or Timeline gesture is one Undo action.
 
-    _MERGE_ID = 0x5341
+    Inspector commits on Enter/focus-out, not each key or spin step.  Merging
+    separate completed edits merely because their target matches loses the
+    user's focus/gesture boundary.
+    """
 
     def __init__(self, session: "EditorSession", uid: str, name: str, value: Any) -> None:
         super().__init__(session, f"修改 {name}", lambda program: set_argument(program, uid, name, value))
-        self._target_uid, self._field = uid, name
-        self._mergeable = isinstance(value, (int, float)) and not isinstance(value, bool)
-
-    def id(self) -> int:
-        return self._MERGE_ID if self._mergeable else -1
-
-    def mergeWith(self, other: QUndoCommand) -> bool:
-        if not isinstance(other, SetNodeArgumentCommand):
-            return False
-        if not (self._mergeable and other._mergeable):
-            return False
-        if other._target_uid != self._target_uid or other._field != self._field:
-            return False
-        self._after = other._after
-        self.setText(other.text())
-        return True
 
 class SetUnitFieldCommand(_ProgramCommand):
     def __init__(self, session: "EditorSession", unit_id: str, name: str, value: Any) -> None:
         super().__init__(session, f"修改 {name}", lambda program: set_unit_field(program, unit_id, name, value))
+
+
+class UnsetNodeArgumentCommand(_ProgramCommand):
+    def __init__(self, session: "EditorSession", uid: str, name: str) -> None:
+        super().__init__(
+            session, f"恢复默认 {name}", lambda program: unset_argument(program, uid, name)
+        )
 
 
 class SetUnitReferencesCommand(_ProgramCommand):
@@ -265,6 +260,7 @@ __all__ = [
     "InsertNodeCommand",
     "MoveNodeCommand",
     "SetNodeArgumentCommand",
+    "UnsetNodeArgumentCommand",
     "SetUnitFieldCommand",
     "SetUnitReferencesCommand",
 ]

@@ -20,6 +20,7 @@ from collections import abc as collections_abc
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import (
     Any,
@@ -121,6 +122,153 @@ _CHILD_SLOTS: dict[str, tuple[str, ...]] = {
     "SpawnTask": ("body",),
 }
 
+_LITERAL_MINIMUMS: dict[tuple[str, str], int] = {
+    ("Wait", "frames"): 0,
+    ("At", "frame"): 0,
+    ("Repeat", "count"): 0,
+    ("MoveTo", "duration"): 0,
+    ("MoveLinear", "duration"): 0,
+    ("FireCircle", "count"): 1,
+    ("FireArc", "count"): 1,
+}
+
+
+def numeric_field_range(owner_kind: str, name: str) -> tuple[int | None, int | None] | None:
+    """Return headless numeric bounds shared by validation and Inspector."""
+
+    minimum = _LITERAL_MINIMUMS.get((owner_kind, name))
+    return (minimum, None) if minimum is not None else None
+
+
+@lru_cache(maxsize=128)
+def _constructor_signature(constructor: Any) -> inspect.Signature:
+    """Cache stable DSL reflection, never mutable authoring model results."""
+
+    return inspect.signature(constructor)
+
+
+@lru_cache(maxsize=128)
+def _constructor_type_hints(constructor: Any) -> Mapping[str, Any]:
+    return types.MappingProxyType(get_type_hints(constructor))
+
+# A positive literal Wait is the only authoring construct whose suspension is
+# provable without evaluating runtime state.  Keep this small abstract domain
+# in the headless model so source validation, insertion checks, and generated
+# template validation share one answer about potentially busy While loops.
+_NO_YIELD = 0
+_YIELDS = 1
+_UNKNOWN_YIELD = 2
+_PROGRESS_ERROR = "non_yielding_loop"
+
+
+@dataclass(frozen=True)
+class _ProgressFlow:
+    """Possible exits from one sequence, with yield state on each path."""
+
+    fallthrough: frozenset[int] = frozenset()
+    breaks: frozenset[int] = frozenset()
+    continues: frozenset[int] = frozenset()
+    returns: frozenset[int] = frozenset()
+    may_suspend: bool = False
+
+
+def _merge_yield_state(left: int, right: int) -> int:
+    if left == _YIELDS or right == _YIELDS:
+        return _YIELDS
+    if left == _UNKNOWN_YIELD or right == _UNKNOWN_YIELD:
+        return _UNKNOWN_YIELD
+    return _NO_YIELD
+
+
+def _merge_progress_states(
+    prefixes: Iterable[int], suffixes: Iterable[int]
+) -> frozenset[int]:
+    return frozenset(
+        _merge_yield_state(prefix, suffix)
+        for prefix in prefixes
+        for suffix in suffixes
+    )
+
+
+def _union_progress_flows(*flows: _ProgressFlow) -> _ProgressFlow:
+    return _ProgressFlow(
+        fallthrough=frozenset(item for flow in flows for item in flow.fallthrough),
+        breaks=frozenset(item for flow in flows for item in flow.breaks),
+        continues=frozenset(item for flow in flows for item in flow.continues),
+        returns=frozenset(item for flow in flows for item in flow.returns),
+        may_suspend=any(flow.may_suspend for flow in flows),
+    )
+
+
+def _compose_progress_flows(
+    prefix: _ProgressFlow, suffix: _ProgressFlow
+) -> _ProgressFlow:
+    """Compose two sequences while preserving exits that skip the suffix."""
+
+    if not prefix.fallthrough:
+        return prefix
+    return _ProgressFlow(
+        fallthrough=_merge_progress_states(prefix.fallthrough, suffix.fallthrough),
+        breaks=prefix.breaks
+        | _merge_progress_states(prefix.fallthrough, suffix.breaks),
+        continues=prefix.continues
+        | _merge_progress_states(prefix.fallthrough, suffix.continues),
+        returns=prefix.returns
+        | _merge_progress_states(prefix.fallthrough, suffix.returns),
+        may_suspend=prefix.may_suspend or suffix.may_suspend,
+    )
+
+
+def _unknownize_progress_states(values: Iterable[int]) -> frozenset[int]:
+    """Mark paths controlled by a dynamic expression as unknown.
+
+    A path that already yielded remains guaranteed to have yielded.  A path
+    without a proof of suspension becomes unknown instead of being rejected;
+    this is what keeps Expr, RawPython, and other runtime-dependent code
+    extensible without making the safety check optimistic.
+    """
+
+    return frozenset(
+        _YIELDS if value == _YIELDS else _UNKNOWN_YIELD for value in values
+    )
+
+
+def _static_literal(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str, list, tuple, dict)):
+        return value
+    if not isinstance(value, Expr):
+        return _NO_STATIC_LITERAL
+    try:
+        return ast.literal_eval(value.source)
+    except (ValueError, SyntaxError, MemoryError, RecursionError):
+        return _NO_STATIC_LITERAL
+
+
+_NO_STATIC_LITERAL = object()
+
+
+def _static_truth(value: Any) -> bool | None:
+    literal = _static_literal(value)
+    if literal is _NO_STATIC_LITERAL:
+        return None
+    try:
+        return bool(literal)
+    except Exception:
+        return None
+
+
+def _static_int(value: Any) -> int | None:
+    literal = _static_literal(value)
+    if type(literal) is int:
+        return literal
+    return None
+
+
+def _static_length(value: Any) -> int | None:
+    if isinstance(value, (list, tuple)):
+        return len(value)
+    return None
+
 _STAGE_ACTIONS = frozenset(
     {"RunWave", "RunBoss", "SetBackground", "PlayBGM", "PlayDialogue", "PlaySE"}
 )
@@ -146,6 +294,19 @@ _UNIT_ACTIONS: dict[str, frozenset[str]] = {
     "Task": ACTION_NODE_KINDS,
     "Function": ACTION_NODE_KINDS,
 }
+
+def node_kind_allowed_in_unit(kind: str, unit_kind: str) -> bool:
+    """Check a palette kind's unit context without needing a valid prototype.
+
+    References and nested control placement still require validate_insert;
+    this query only decides whether a missing-reference creation entry belongs
+    in the current unit's palette.
+    """
+
+    if not unit_accepts_statements(unit_kind):
+        return False
+    return kind in CONTROL_NODE_KINDS or kind == "TemplateCall" or kind in _UNIT_ACTIONS[unit_kind]
+
 
 _REF_TARGETS: dict[tuple[str, str], frozenset[str]] = {
     ("RunWave", "wave_class"): frozenset({"Wave"}),
@@ -269,8 +430,17 @@ class _NoDefault:
     def __deepcopy__(self, memo: dict[int, Any]) -> "_NoDefault":
         return self
 
+    def __reduce__(self):
+        return (_no_default, ())
+
 
 _NO_DEFAULT = _NoDefault()
+
+
+def _no_default() -> _NoDefault:
+    """Restore the omitted-default sentinel across build worker boundaries."""
+
+    return _NO_DEFAULT
 
 
 @dataclass(frozen=True)
@@ -426,6 +596,7 @@ class LogicalUnit:
     source_path: Path | None = None
     assignment_name: str | None = None
     source_span: SourceSpan | None = None
+    source_imports: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind not in UNIT_KINDS:
@@ -440,6 +611,16 @@ class LogicalUnit:
             raise ProgramError("invalid_unit_body", f"{self.kind}.body must contain nodes")
         self.parameters = _validated_parameters(self.parameters, self.id)
         self.metadata = dict(self.metadata)
+        self.source_imports = tuple(self.source_imports)
+        for statement in self.source_imports:
+            if not isinstance(statement, str):
+                raise ProgramError("invalid_import", "source imports must be Python import statements")
+            try:
+                imported = ast.parse(statement, mode="exec").body
+            except SyntaxError as exc:
+                raise ProgramError("invalid_import", f"invalid source import: {exc.msg}") from exc
+            if len(imported) != 1 or not isinstance(imported[0], (ast.Import, ast.ImportFrom)):
+                raise ProgramError("invalid_import", "source imports may contain only import statements")
         for key, value in self.metadata.items():
             validate_author_value(value, f"{self.id}.{key}")
         if self.assignment_name is None:
@@ -452,7 +633,7 @@ class LogicalUnit:
         for node in self.body:
             yield from node.walk()
 
-    def semantic_data(self) -> dict[str, Any]:
+    def semantic_data(self, *, include_body: bool = True) -> dict[str, Any]:
         return {
             "kind": self.kind,
             "id": self.id,
@@ -470,7 +651,8 @@ class LogicalUnit:
                 for item in self.parameters
             ],
             "metadata": _value_data(self.metadata),
-            "body": [node.semantic_data() for node in self.body],
+            "body": [node.semantic_data() for node in self.body] if include_body else [],
+            **({"source_imports": list(self.source_imports)} if self.source_imports else {}),
         }
 
 
@@ -647,6 +829,21 @@ class NodeLocation:
     index: int
 
 
+@dataclass(frozen=True)
+class InsertContext:
+    """Resolved target geometry for one hover refresh, not a model index.
+
+    The caller must discard this after any model mutation.  A scratch program
+    that only adds a reference unit may reuse it while sharing the same owner.
+    """
+
+    owner: LogicalUnit
+    target_uid: str | None
+    target: Node | None
+    location: NodeLocation | None
+    ancestors: tuple[Node, ...]
+
+
 def validate_author_value(value: Any, path: str = "value") -> None:
     if isinstance(value, str) and value.startswith("res://"):
         if "\\" in value or value.count("#") > 1:
@@ -739,7 +936,7 @@ def parse_author_value(source: str) -> Any:
                         )
                     keywords[keyword_argument.arg] = parse(keyword_argument.value)
                 try:
-                    inspect.signature(constructor).bind(*positional, **keywords)
+                    _constructor_signature(constructor).bind(*positional, **keywords)
                     return constructor(*positional, **keywords)
                 except (TypeError, ValueError) as exc:
                     raise ProgramError(
@@ -1092,6 +1289,23 @@ def _validate_node_in_context(
         raise ProgramError("invalid_insert", problems[0].message)
 
 
+def prepare_insert_context(
+    program: AuthoringProgram, unit_id: str, target_uid: str | None
+) -> InsertContext:
+    """Resolve shared placement geometry once before checking palette entries."""
+
+    owner = program.get_unit(unit_id)
+    if target_uid is None:
+        return InsertContext(owner, None, None, None, ())
+    target_unit, target, location = find_node(program, target_uid)
+    if target_unit is not owner:
+        raise ProgramError("invalid_insert", "drop target belongs to another logical unit")
+    return InsertContext(
+        owner, target_uid, target, location,
+        _ancestor_chain(program, unit_id, target_uid),
+    )
+
+
 def _check_insert(
     program: AuthoringProgram,
     unit_id: str,
@@ -1100,6 +1314,7 @@ def _check_insert(
     placement: DropPlacement | str,
     *,
     target_slot: str | None = None,
+    context: InsertContext | None = None,
 ) -> tuple[str, ...]:
     """Structural dry run for one insertion; never clones or fully validates."""
 
@@ -1109,15 +1324,19 @@ def _check_insert(
         raise ProgramError(
             "invalid_insert", f"{unit.kind} does not contain statement nodes"
         )
+    if context is None:
+        context = prepare_insert_context(program, unit_id, target_uid)
+    if context.owner is not unit or context.target_uid != target_uid:
+        raise ProgramError("invalid_insert", "insert context belongs to another model or target")
     if target_uid is None:
         if placement not in {DropPlacement.BEFORE, DropPlacement.AFTER}:
             raise ProgramError("invalid_insert", "empty logical units accept a root statement")
         _validate_node_in_context(program, unit, node, ())
         return ()
-    _unit, target, _location = find_node(program, target_uid)
-    if _unit.id != unit_id:
-        raise ProgramError("invalid_insert", "drop target belongs to another logical unit")
-    ancestors = _ancestor_chain(program, unit_id, target_uid)
+    target = context.target
+    if target is None:
+        raise ProgramError("invalid_insert", "insert context has no target")
+    ancestors = context.ancestors
 
     if placement in {DropPlacement.BEFORE, DropPlacement.AFTER}:
         _validate_node_in_context(program, unit, node, ancestors)
@@ -1173,30 +1392,57 @@ def validate_insert(
     placement: DropPlacement | str = DropPlacement.AFTER,
     *,
     target_slot: str | None = None,
+    context: InsertContext | None = None,
 ) -> DropCheck:
     """Return drop feasibility without mutating, cloning, or fully validating.
 
     The palette and the flow call this on every hover, so it must stay cheap:
     only the placement resolution and the inserted node's own context rules are
     checked.  The full model validation still guards the real insertion.
+    ``context`` may reuse target geometry within the same hover refresh only.
     """
 
     slots: tuple[str, ...] = ()
-    if target_uid is not None:
-        try:
-            _unit, target, _location = find_node(program, target_uid)
+    try:
+        if context is None:
+            context = prepare_insert_context(program, unit_id, target_uid)
+        if context.owner is not program.get_unit(unit_id) or context.target_uid != target_uid:
+            raise ProgramError("invalid_insert", "insert context belongs to another model or target")
+        if context.target is not None:
+            target = context.target
             if target.kind == "Parallel":
                 slots = tuple(branch.uid for branch in target.children.get("branches", ())) + (
                     "new_branch",
                 )
             else:
                 slots = _CHILD_SLOTS.get(target.kind, ())
-        except ProgramError as exc:
-            return DropCheck(False, exc.message)
-    try:
         _check_insert(
-            program, unit_id, node, target_uid, placement, target_slot=target_slot
+            program, unit_id, node, target_uid, placement, target_slot=target_slot,
+            context=context,
         )
+        # Most palette hovers remain a cheap structural check.  A node that
+        # can introduce a While back edge needs the same full-program progress
+        # proof as the real immutable insertion, otherwise the dry run could
+        # advertise a drop that the commit immediately rejects.
+        needs_progress_proof = _contains_progress_sensitive_node(
+            node, program.get_unit(unit_id)
+        )
+        if DropPlacement(placement) == DropPlacement.WRAP and target_uid is not None:
+            # Wrapping can suppress an existing Wait (for example with a false
+            # While/If) even when the new node cannot execute a back edge itself.
+            needs_progress_proof = needs_progress_proof or any(
+                ancestor.kind == "While"
+                for ancestor in context.ancestors
+            )
+        if needs_progress_proof:
+            insert_new_node(
+                program,
+                unit_id,
+                node,
+                target_uid,
+                placement,
+                target_slot=target_slot,
+            )
     except (ProgramError, ProgramValidationError) as exc:
         return DropCheck(False, exc.message, slots)
     return DropCheck(True, slots=slots)
@@ -1239,7 +1485,9 @@ def node_from_palette(
         "Wait": lambda: dsl.Wait(60),
         "At": lambda: dsl.At(0, []),
         "Repeat": lambda: dsl.Repeat(1, []),
-        "While": lambda: dsl.While(Expr("True"), []),
+        # An empty While must be safe to preview and fill in.  A hand-written
+        # While(True, ...) is still checked by the headless progress validator.
+        "While": lambda: dsl.While(Expr("False"), []),
         "If": lambda: dsl.If(Expr("True"), []),
         "Else": lambda: dsl.Else([]),
         "ForEach": lambda: dsl.ForEach("item", [], []),
@@ -1776,7 +2024,7 @@ def set_argument(
     from . import dsl
 
     constructor = dsl.NODE_CONSTRUCTORS.get(node.kind)
-    signature = inspect.signature(constructor) if constructor is not None else None
+    signature = _constructor_signature(constructor) if constructor is not None else None
     parameter = signature.parameters.get(name) if signature is not None else None
     accepts_extra = bool(
         signature
@@ -1800,6 +2048,44 @@ def set_argument(
         ) from exc
     node.arguments = canonical.arguments
     node.children = canonical.children
+    _assert_no_new_errors(program, result)
+    return result
+
+
+def unset_argument(program: AuthoringProgram, uid: str, name: str) -> AuthoringProgram:
+    """Restore a declared optional DSL argument to its omitted-source default."""
+
+    if not _is_python_identifier(name):
+        raise ProgramError("invalid_argument", "argument name must be a Python identifier")
+    if name == "uid":
+        raise ProgramError("invalid_argument", "uid is node identity, not an argument")
+    _unit, original_node, _location = find_node(program, uid)
+    if name in _CHILD_SLOTS.get(original_node.kind, ()):
+        raise ProgramError(
+            "invalid_argument", f"{original_node.kind}.{name} is a child slot, not an argument"
+        )
+    from . import dsl
+
+    constructor = dsl.NODE_CONSTRUCTORS.get(original_node.kind)
+    signature = _constructor_signature(constructor) if constructor is not None else None
+    parameter = signature.parameters.get(name) if signature is not None else None
+    if parameter is None or parameter.kind in {
+        inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD
+    }:
+        raise ProgramError("invalid_argument", f"{original_node.kind} has no optional argument {name!r}")
+    if parameter.default is inspect.Parameter.empty:
+        raise ProgramError("invalid_argument", f"{original_node.kind}.{name} is required and cannot be omitted")
+
+    result = program.clone()
+    _unit, node, _location = find_node(result, uid)
+    node.arguments.pop(name, None)
+    try:
+        canonical = _canonical_node(node)
+    except (TypeError, ProgramError) as exc:
+        raise ProgramError(
+            "invalid_argument", f"invalid {node.kind}.{name}: {exc}"
+        ) from exc
+    node.arguments = canonical.arguments
     _assert_no_new_errors(program, result)
     return result
 
@@ -1841,7 +2127,7 @@ def set_unit_field(
     elif name == "parameters":
         from . import dsl
 
-        if "parameters" not in inspect.signature(
+        if "parameters" not in _constructor_signature(
             dsl.UNIT_CONSTRUCTORS[unit.kind]
         ).parameters:
             raise ProgramError(
@@ -1853,7 +2139,7 @@ def set_unit_field(
     else:
         from . import dsl
 
-        signature = inspect.signature(dsl.UNIT_CONSTRUCTORS[unit.kind])
+        signature = _constructor_signature(dsl.UNIT_CONSTRUCTORS[unit.kind])
         if name not in signature.parameters or name in {
             "id",
             "name",
@@ -2009,6 +2295,303 @@ def _source_path(unit: LogicalUnit) -> str:
     return str(unit.source_path) if unit.source_path is not None else ""
 
 
+def _progress_normal(*, may_suspend: bool = False) -> _ProgressFlow:
+    return _ProgressFlow(fallthrough=frozenset({_NO_YIELD}), may_suspend=may_suspend)
+
+
+def _progress_sequence(
+    unit: LogicalUnit,
+    nodes: Sequence[Node],
+    active_loop: Node | None,
+    diagnostics: list[Diagnostic],
+) -> _ProgressFlow:
+    flow = _ProgressFlow(fallthrough=frozenset({_NO_YIELD}))
+    for node in nodes:
+        if not flow.fallthrough:
+            break
+        flow = _compose_progress_flows(
+            flow,
+            _progress_node(unit, node, active_loop, diagnostics),
+        )
+    return flow
+
+
+def _progress_node(
+    unit: LogicalUnit,
+    node: Node,
+    active_loop: Node | None,
+    diagnostics: list[Diagnostic],
+) -> _ProgressFlow:
+    kind = node.kind
+    args = node.arguments
+
+    if kind == "Wait":
+        frames = args.get("frames")
+        if type(frames) is int:
+            return _ProgressFlow(
+                fallthrough=frozenset({_YIELDS if frames > 0 else _NO_YIELD}),
+                may_suspend=frames > 0,
+            )
+        return _ProgressFlow(
+            fallthrough=frozenset({_UNKNOWN_YIELD}), may_suspend=True
+        )
+
+    if kind == "Break":
+        return _ProgressFlow(breaks=frozenset({_NO_YIELD}))
+    if kind == "Continue":
+        # A Continue in a separately generated helper (Parallel/SpawnTask) is
+        # structurally diagnosed elsewhere.  Treat it as a normal no-yield
+        # path here so it cannot accidentally make an enclosing loop appear
+        # safe.
+        if active_loop is None:
+            return _progress_normal()
+        return _ProgressFlow(continues=frozenset({_NO_YIELD}))
+    if kind == "Return":
+        return _ProgressFlow(returns=frozenset({_NO_YIELD}))
+
+    if kind == "If":
+        condition = _static_truth(args.get("condition"))
+        body = _progress_sequence(
+            unit, node.children.get("body", ()), active_loop, diagnostics
+        )
+        else_body = node.children.get("else_body", ())
+        if condition is True:
+            return body
+        if condition is False:
+            return _progress_sequence(unit, else_body, active_loop, diagnostics)
+        alternate = (
+            _progress_sequence(unit, else_body, active_loop, diagnostics)
+            if else_body
+            else _progress_normal()
+        )
+        merged = _union_progress_flows(body, alternate)
+        return _ProgressFlow(
+            fallthrough=_unknownize_progress_states(merged.fallthrough),
+            breaks=_unknownize_progress_states(merged.breaks),
+            continues=_unknownize_progress_states(merged.continues),
+            returns=_unknownize_progress_states(merged.returns),
+            may_suspend=merged.may_suspend,
+        )
+
+    if kind == "At":
+        # At waits until a runtime clock reaches the target, which may be
+        # zero or already elapsed.  It is therefore an unknown suspension,
+        # followed by its ordinary child sequence.
+        wait = _ProgressFlow(
+            fallthrough=frozenset({_UNKNOWN_YIELD}), may_suspend=True
+        )
+        body = _progress_sequence(
+            unit, node.children.get("body", ()), active_loop, diagnostics
+        )
+        return _compose_progress_flows(wait, body)
+
+    if kind == "While":
+        condition = _static_truth(args.get("condition"))
+        if condition is False:
+            return _progress_normal()
+
+        body = _progress_sequence(
+            unit, node.children.get("body", ()), node, diagnostics
+        )
+        back_edges = body.fallthrough | body.continues
+        if condition is True and any(state != _YIELDS for state in back_edges):
+            diagnostics.append(
+                _node_diag(
+                    unit,
+                    node,
+                    _PROGRESS_ERROR,
+                    "While 存在无法证明会挂起的回边；请在每条回边前加入正数 "
+                    "Wait (positive Wait, frames > 0)，或使用 Break/Return 退出循环",
+                )
+            )
+
+        if condition is True:
+            # A static true loop only reaches the following statement through
+            # Break.  Return exits the containing generated function.
+            return _ProgressFlow(
+                fallthrough=body.breaks,
+                returns=body.returns,
+                may_suspend=body.may_suspend or _YIELDS in back_edges,
+            )
+
+        # A dynamic condition may skip the body altogether.  Preserve the
+        # possibility of a break/return, but mark it unknown because deciding
+        # whether the loop executes is runtime state.
+        completion = body.breaks
+        return _ProgressFlow(
+            fallthrough=frozenset({_UNKNOWN_YIELD}) | _unknownize_progress_states(completion),
+            returns=_unknownize_progress_states(body.returns),
+            may_suspend=body.may_suspend,
+        )
+
+    if kind == "Repeat":
+        count = _static_int(args.get("count"))
+        body = _progress_sequence(
+            unit, node.children.get("body", ()), node, diagnostics
+        ) if count != 0 else _ProgressFlow()
+        return _progress_bounded_loop(body, count)
+
+    if kind == "ForEach":
+        length = _static_length(args.get("iterable"))
+        body = _progress_sequence(
+            unit, node.children.get("body", ()), node, diagnostics
+        ) if length != 0 else _ProgressFlow()
+        return _progress_bounded_loop(body, length)
+
+    if kind == "Parallel":
+        branches = node.children.get("branches", ())
+        branch_flows = [
+            # Branches and inline spawned bodies execute in helper coroutines;
+            # a Continue there cannot target the caller's loop.
+            _progress_sequence(
+                unit, branch.children.get("body", ()), None, diagnostics
+            )
+            for branch in branches
+        ]
+        wait = args.get("wait", True)
+        if wait is False:
+            return _progress_normal()
+        if wait is not True or not branch_flows:
+            return _ProgressFlow(
+                fallthrough=frozenset({_UNKNOWN_YIELD}), may_suspend=True
+            )
+        completions = [
+            flow.fallthrough | flow.breaks | flow.continues | flow.returns
+            for flow in branch_flows
+        ]
+        if any(not values for values in completions):
+            return _ProgressFlow(
+                may_suspend=any(flow.may_suspend for flow in branch_flows)
+            )
+        combined = frozenset({_NO_YIELD})
+        for values in completions:
+            combined = _merge_progress_states(combined, values)
+        return _ProgressFlow(
+            fallthrough=combined,
+            may_suspend=any(flow.may_suspend for flow in branch_flows),
+        )
+
+    if kind == "SpawnTask":
+        if "body" in node.children:
+            _progress_sequence(
+                unit, node.children.get("body", ()), None, diagnostics
+            )
+        return _progress_normal()
+
+    if kind in {"Branch", "Else"}:
+        return _progress_sequence(
+            unit, node.children.get("body", ()), active_loop, diagnostics
+        )
+
+    if kind in {"RawPython", "TemplateCall"}:
+        return _ProgressFlow(
+            fallthrough=frozenset({_UNKNOWN_YIELD}), may_suspend=True
+        )
+
+    # These nodes await a runtime coroutine whose suspension depends on the
+    # referenced unit, actor state, or duration.  Keep the result unknown.
+    if kind in {"Call", "RunWave", "RunBoss", "PlayDialogue", "MoveTo", "MoveLinear"}:
+        return _ProgressFlow(
+            fallthrough=frozenset({_UNKNOWN_YIELD}), may_suspend=True
+        )
+    return _progress_normal()
+
+
+def _progress_bounded_loop(
+    body: _ProgressFlow,
+    count: int | None,
+) -> _ProgressFlow:
+    """Summarize Repeat/ForEach without treating their finite back edge as an error."""
+
+    if count == 0:
+        return _progress_normal()
+    if count is None:
+        # Unknown iteration counts may be empty.  If the body has no possible
+        # suspension, the lack of a yield is provable; otherwise the path is
+        # intentionally unknown to avoid rejecting dynamic authoring code.
+        # An unknown count/iterable can always be empty, so the loop has a
+        # normal exit even when every non-empty execution enters an infinite
+        # nested loop.  Its yield state is known only when the body cannot
+        # suspend at all.
+        output = (
+            frozenset({_UNKNOWN_YIELD})
+            if body.may_suspend
+            else frozenset({_NO_YIELD})
+        )
+        return _ProgressFlow(
+            fallthrough=output,
+            returns=_unknownize_progress_states(body.returns)
+            if body.may_suspend
+            else body.returns,
+            may_suspend=body.may_suspend,
+        )
+
+    if count < 0:
+        return _progress_normal()
+
+    current = frozenset({_NO_YIELD})
+    exits: set[int] = set()
+    returns: set[int] = set()
+    # Yield states reach a fixed point very quickly.  The final iteration is
+    # still modeled after this bounded prefix, so huge literal counts do not
+    # turn validation into an O(count) operation.
+    iterations = min(count, 8)
+    for index in range(iterations):
+        if not current:
+            break
+        breaks = _merge_progress_states(current, body.breaks)
+        returns.update(_merge_progress_states(current, body.returns))
+        if index == count - 1:
+            exits.update(breaks)
+            exits.update(_merge_progress_states(current, body.fallthrough))
+            exits.update(_merge_progress_states(current, body.continues))
+        else:
+            exits.update(breaks)
+            current = _merge_progress_states(
+                current, body.fallthrough | body.continues
+            )
+    if count > iterations and current:
+        exits.update(_merge_progress_states(current, body.breaks))
+        exits.update(
+            _merge_progress_states(
+                current, body.fallthrough | body.continues
+            )
+        )
+    return _ProgressFlow(
+        fallthrough=frozenset(exits),
+        returns=frozenset(returns),
+        may_suspend=body.may_suspend,
+    )
+
+
+def _progress_diagnostics(unit: LogicalUnit) -> list[Diagnostic]:
+    diagnostics: list[Diagnostic] = []
+    _progress_sequence(unit, unit.body, None, diagnostics)
+    return diagnostics
+
+
+def _contains_progress_sensitive_node(node: Node, unit: LogicalUnit) -> bool:
+    """Whether an inserted subtree can introduce an executable loop back edge."""
+
+    if node.kind == "Continue":
+        return True
+    if node.kind == "While":
+        if _static_truth(node.arguments.get("condition")) is False:
+            # The palette's empty While(False) prototype cannot execute its
+            # body.  Do not clone and validate thousands of unrelated nodes
+            # every time the palette checks that harmless default.
+            return False
+        body = _progress_sequence(unit, node.children.get("body", ()), node, [])
+        if body.fallthrough or body.continues:
+            return True
+        # A loop that exits via Break/Return still may contain a nested loop.
+    return any(
+        _contains_progress_sensitive_node(child, unit)
+        for children in node.children.values()
+        for child in children
+    )
+
+
 def _validate_unit(
     unit: LogicalUnit,
     unit_index: Mapping[str, LogicalUnit],
@@ -2066,29 +2649,32 @@ def _validate_unit(
             )
     for node in unit.body:
         diagnostics.extend(_validate_node(unit, node, unit_index, ()))
+    diagnostics.extend(_progress_diagnostics(unit))
     return diagnostics
 
 
-def _canonical_unit(unit: LogicalUnit) -> LogicalUnit:
+def _canonical_unit(unit: LogicalUnit, *, include_body: bool = True) -> LogicalUnit:
     from . import dsl
 
     constructor = dsl.UNIT_CONSTRUCTORS[unit.kind]
-    signature = inspect.signature(constructor)
+    signature = _constructor_signature(constructor)
     values: dict[str, Any] = {"id": unit.id, "name": unit.name}
     if "body" in signature.parameters:
-        values["body"] = copy.deepcopy(unit.body)
+        values["body"] = copy.deepcopy(unit.body) if include_body else []
     if "parameters" in signature.parameters:
         values["parameters"] = copy.deepcopy(unit.parameters)
     values.update(copy.deepcopy(unit.metadata))
-    return constructor(**values)
+    canonical = constructor(**values)
+    canonical.source_imports = unit.source_imports
+    return canonical
 
 
 def _validate_unit_signature(unit: LogicalUnit) -> list[Diagnostic]:
     from . import dsl
 
     constructor = dsl.UNIT_CONSTRUCTORS[unit.kind]
-    signature = inspect.signature(constructor)
-    type_hints = get_type_hints(constructor)
+    signature = _constructor_signature(constructor)
+    type_hints = _constructor_type_hints(constructor)
     metadata_parameters = {
         name: parameter
         for name, parameter in signature.parameters.items()
@@ -2135,12 +2721,14 @@ def _validate_unit_signature(unit: LogicalUnit) -> list[Diagnostic]:
     if diagnostics:
         return diagnostics
     try:
-        canonical = _canonical_unit(unit)
+        # Nodes are validated separately below.  Unit field/default validation
+        # must not copy and serialize their entire bodies again for every edit.
+        canonical = _canonical_unit(unit, include_body=False)
     except (TypeError, ProgramError) as exc:
         return [
             _unit_diag(unit, "invalid_unit_field", f"invalid {unit.kind} metadata: {exc}")
         ]
-    if canonical.semantic_data() != unit.semantic_data():
+    if canonical.semantic_data(include_body=False) != unit.semantic_data(include_body=False):
         diagnostics.append(
             _unit_diag(
                 unit,
@@ -2210,7 +2798,7 @@ def _validate_node(
         target_name = node.arguments.get(field_name)
         if not _is_python_identifier(target_name):
             diagnostics.append(_node_diag(unit, node, "invalid_target", f"{node.kind}.{field_name} must be an identifier"))
-    if node.kind in {"CreateLaser", "CreateBentLaser"} and "assign" in node.arguments:
+    if node.kind in {"CreateLaser", "CreateBentLaser", "Call"} and "assign" in node.arguments:
         target_name = node.arguments["assign"]
         if not _is_python_identifier(target_name):
             diagnostics.append(
@@ -2241,16 +2829,12 @@ def _validate_node(
                     f"PlayDialogue.dialogue_list: {dialogue_error}",
                 )
             )
-    literal_rules = {
-        "Wait": (("frames", 0),),
-        "At": (("frame", 0),),
-        "Repeat": (("count", 0),),
-        "MoveTo": (("duration", 0),),
-        "MoveLinear": (("duration", 0),),
-        "FireCircle": (("count", 1),),
-        "FireArc": (("count", 1),),
-    }
-    for name, minimum in literal_rules.get(node.kind, ()):
+    literal_rules = tuple(
+        (name, minimum)
+        for (kind, name), minimum in _LITERAL_MINIMUMS.items()
+        if kind == node.kind
+    )
+    for name, minimum in literal_rules:
         if name not in node.arguments:
             continue
         value = node.arguments[name]
@@ -2398,8 +2982,8 @@ def _validate_node_signature(unit: LogicalUnit, node: Node) -> list[Diagnostic]:
     constructor = dsl.NODE_CONSTRUCTORS.get(node.kind)
     if constructor is None:
         return []
-    signature = inspect.signature(constructor)
-    type_hints = get_type_hints(constructor)
+    signature = _constructor_signature(constructor)
+    type_hints = _constructor_type_hints(constructor)
     accepts_extra = any(
         parameter.kind == inspect.Parameter.VAR_KEYWORD
         for parameter in signature.parameters.values()
@@ -2639,6 +3223,7 @@ __all__ = [
     "DropCheck",
     "DropPlacement",
     "Expr",
+    "InsertContext",
     "LogicalUnit",
     "NODE_KINDS",
     "Node",
@@ -2667,9 +3252,12 @@ __all__ = [
     "insert_node",
     "make_template_call",
     "move_node",
+    "numeric_field_range",
     "node_from_palette",
+    "node_kind_allowed_in_unit",
     "node_from_unit_reference",
     "parse_author_value",
+    "prepare_insert_context",
     "reference_list_target_kinds",
     "reference_kinds_for_node",
     "reference_kinds_for_field",
@@ -2683,6 +3271,7 @@ __all__ = [
     "unit_reference_edges",
     "unit_reference_locations",
     "unit_accepts_statements",
+    "unset_argument",
     "validate_author_value",
     "validate_insert",
     "wrap_node",

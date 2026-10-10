@@ -128,6 +128,9 @@ class StageContext(SpellCardContext):
         self._background_transitions: List[Dict[str, Any]] = []
         self._lifecycle_trace: List[LifecycleEvent] = []
         self._runtime_frame = 0
+        self._timeline_origin = 0
+        self._authoring_unit_origins: Dict[str, int] = {}
+        self.authoring_stage_id = None
         self._authoring_trace = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
         self._authoring_trace_dropped = 0
         self._script_event_handlers: Dict[str, Any] = {}
@@ -680,7 +683,19 @@ class StageContext(SpellCardContext):
             raise ValueError("runtime frame must be a non-negative integer")
         self._runtime_frame = frame
 
-    def emit_authoring_trace(self, uid: str, phase: str) -> None:
+    def set_timeline_origin(self, runtime_frame: int) -> None:
+        self.set_runtime_frame(runtime_frame)
+        self._timeline_origin = runtime_frame
+
+    @property
+    def timeline_frame(self) -> int:
+        return max(0, self._runtime_frame - self._timeline_origin)
+
+    def get_unit_timeline_frame(self, unit_id: str) -> int | None:
+        origin = self._authoring_unit_origins.get(unit_id)
+        return None if origin is None else max(0, self.timeline_frame - origin)
+
+    def emit_authoring_trace(self, uid: str, phase: str, *, owner=None, unit_id: str | None = None) -> None:
         """Queue one sparse author-node boundary without performing I/O."""
 
         if not isinstance(uid, str) or not uid.strip():
@@ -689,9 +704,20 @@ class StageContext(SpellCardContext):
             raise ValueError("authoring trace phase must be 'start' or 'end'")
         if len(self._authoring_trace) == self.AUTHORING_TRACE_LIMIT:
             self._authoring_trace_dropped += 1
-        self._authoring_trace.append(
-            {"uid": uid.strip(), "phase": phase, "frame": self._runtime_frame}
-        )
+        event = {"uid": uid.strip(), "phase": phase, "frame": self.timeline_frame,
+                 "runtime_frame": self._runtime_frame}
+        if self.authoring_stage_id:
+            event['stage_id'] = self.authoring_stage_id
+        if owner is not None and unit_id:
+            clock = max(0, int(getattr(owner, 'time', 0)))
+            origins = getattr(owner, '_pystg_trace_origins', None)
+            if origins is None:
+                origins = {}
+                owner._pystg_trace_origins = origins
+            origin = origins.setdefault(unit_id, clock)
+            event.update(unit_id=unit_id, unit_frame=max(0, clock - origin))
+            self._authoring_unit_origins.setdefault(unit_id, self.timeline_frame - event['unit_frame'])
+        self._authoring_trace.append(event)
 
     def drain_authoring_trace(self, limit: int = 256) -> tuple[dict[str, Any], ...]:
         """Drain at most one bounded transport batch from the runtime queue."""

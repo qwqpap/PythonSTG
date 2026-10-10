@@ -397,6 +397,7 @@ def Call(
     arguments: Sequence[AuthorValue] = (),
     keywords: Mapping[str, AuthorValue] | None = None,
     *,
+    assign: str | None = None,
     uid: str | None = None,
 ) -> Node:
     values: dict[str, Any] = {"function": function}
@@ -404,6 +405,8 @@ def Call(
         values["arguments"] = list(arguments)
     if keywords:
         values["keywords"] = dict(keywords)
+    if assign is not None:
+        values["assign"] = assign
     return _node("Call", arguments=values, uid=uid)
 
 

@@ -1,6 +1,6 @@
-# PyQt5 纹理资产管理器
+# PySide6 纹理资产管理器
 
-基于 PyQt5 的可视化纹理资产编辑工具，直接集成游戏引擎的统一纹理管理系统。
+通过 `src.qt_compat` 使用 PySide6 的可视化纹理资产编辑工具，直接集成游戏引擎的统一纹理管理系统。
 
 ## 功能特性
 
@@ -20,7 +20,7 @@
 
 ### 引擎集成
 - 直接使用 `src/resource/unified_texture.py` 的统一纹理系统
-- 可以在发现问题时直接修复引擎代码
+- 引擎问题在获得授权的任务范围内修复，并验证受影响的资产加载路径
 - 配置文件格式与引擎完全兼容
 
 ## 运行方式
@@ -30,8 +30,15 @@ python tools/asset/asset_manager_qt.py
 ```
 
 ## 依赖
-- PyQt5
+- PySide6（版本以仓库 `requirements-dev.txt` 为准）
 - pygame（开发依赖中的兼容运行时）
+
+从仓库根目录安装：
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
+```
 
 ## 快捷键
 
@@ -101,7 +108,7 @@ python tools/asset/asset_manager_qt.py
 
 ## 与 Web 版本的区别
 
-相比之前的 Web 版本，PyQt5 版本有以下优势：
+相比之前的 Web 版本，Qt 版本有以下特点：
 
 1. **直接引擎集成**: 可以直接 import 引擎模块，无需 API 层
 2. **更快响应**: 原生 GUI，无网络延迟

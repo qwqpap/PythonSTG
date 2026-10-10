@@ -172,8 +172,10 @@ def _validate_control_payload(command: str, payload: dict[str, Any]) -> None:
                 "invalid_payload", f"{command} does not accept a payload"
             )
         return
-    if set(payload) != {"frame"}:
-        raise PreviewProtocolError("invalid_payload", "seek requires only payload.frame")
+    if "frame" not in payload or set(payload) - {"frame", "unit_id"}:
+        raise PreviewProtocolError("invalid_payload", "seek requires payload.frame and optional unit_id")
+    if "unit_id" in payload and (not isinstance(payload["unit_id"], str) or not payload["unit_id"].strip()):
+        raise PreviewProtocolError("invalid_payload", "seek unit_id must be non-empty text")
     frame = payload["frame"]
     if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
         raise PreviewProtocolError(
@@ -198,7 +200,7 @@ def _validate_event_payload(event: str, payload: dict[str, Any]) -> None:
                 )
             if item.get("kind") != "metrics":
                 continue
-            if set(item) != {"kind", "frame", "emitted", "live", "lasers"}:
+            if set(item) - {"kind", "frame", "emitted", "live", "lasers", "stage_id", "unit_id"} or not {"kind", "frame", "emitted", "live", "lasers"} <= set(item):
                 raise PreviewProtocolError(
                     "invalid_payload", "metrics trace has unknown or missing fields"
                 )

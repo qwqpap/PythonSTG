@@ -282,10 +282,12 @@ class TemplateRegistry:
 def expand_nodes(
     nodes: Sequence[Node],
     registry: TemplateRegistry,
+    *,
+    expansions: dict[str, list[Node]] | None = None,
 ) -> list[Node]:
     """Return a build-only deep expansion without modifying source calls."""
 
-    return _expand_nodes(nodes, registry, (), None)
+    return _expand_nodes(nodes, registry, (), None, expansions)
 
 
 def _expand_nodes(
@@ -293,15 +295,19 @@ def _expand_nodes(
     registry: TemplateRegistry,
     stack: tuple[str, ...],
     source_call_uid: str | None,
+    expansions: dict[str, list[Node]] | None,
 ) -> list[Node]:
     result: list[Node] = []
     for node in nodes:
         if node.kind == "TemplateCall":
-            result.extend(_expand_call(node, registry, stack, source_call_uid))
+            expanded = _expand_call(node, registry, stack, source_call_uid, expansions)
+            if expansions is not None:
+                expansions[node.uid] = expanded
+            result.extend(expanded)
             continue
         clone = copy.deepcopy(node)
         clone.children = {
-            slot: _expand_nodes(children, registry, stack, source_call_uid)
+            slot: _expand_nodes(children, registry, stack, source_call_uid, expansions)
             for slot, children in clone.children.items()
         }
         result.append(clone)
@@ -313,6 +319,7 @@ def _expand_call(
     registry: TemplateRegistry,
     stack: tuple[str, ...],
     source_call_uid: str | None,
+    expansions: dict[str, list[Node]] | None,
 ) -> list[Node]:
     author_call_uid = source_call_uid or call.uid
     if call.template is None:
@@ -464,6 +471,7 @@ def _expand_call(
         registry,
         (*stack, definition.identity),
         author_call_uid,
+        expansions,
     )
 
 

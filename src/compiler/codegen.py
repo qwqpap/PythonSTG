@@ -35,7 +35,7 @@ from src.core.project_context import ProjectContext, ProjectContextError
 from .diagnostics import CompilerError
 
 
-GENERATOR_VERSION = "pystg-codegen-v2-cd3"
+GENERATOR_VERSION = "pystg-codegen-v3-source-bindings"
 _SUBPACKAGES = ("waves", "enemies", "bosses", "spells", "tasks", "functions")
 
 
@@ -107,7 +107,10 @@ class CodeGenerator:
         source_root: str | Path | None = None,
         template_registry: TemplateRegistry | None = None,
     ) -> None:
-        self.program = program
+        # Freeze one build input.  Template execution and later UI edits must
+        # not change the model used by closure, validation, and generation.
+        self.program = program.clone()
+        program = self.program
         errors = tuple(item for item in program.validate() if item.severity == "error")
         if errors:
             code = errors[0].code if all(item.code == errors[0].code for item in errors) else "invalid_program"
@@ -132,12 +135,16 @@ class CodeGenerator:
         self.source_root = Path(source_root).resolve() if source_root is not None else None
         self.template_registry = template_registry or TemplateRegistry.with_builtins()
         self._helper_index = 0
+        self._loop_bindings: tuple[str, ...] = ()
+        self._expanded_templates: dict[str, list[Node]] = {}
         self._register_template_targets()
         self._expanded_bodies = self._expand_and_validate_templates()
+        self._template_sources = self._snapshot_template_sources()
         self._validate_runtime_reference_boundaries()
 
     def generate(self) -> CodeGeneratorResult:
         self._helper_index = 0
+        self._loop_bindings = ()
         modules: dict[str, str] = {
             "__init__.py": '"""Generated PySTG content package; do not edit."""\n',
             "stages/__init__.py": '"""Generated Stage packages."""\n',
@@ -400,7 +407,11 @@ class CodeGenerator:
         cloned_units: list[LogicalUnit] = []
         try:
             for unit in self.program.logical_units():
-                body = expand_nodes(unit.body, self.template_registry)
+                body = expand_nodes(
+                    unit.body,
+                    self.template_registry,
+                    expansions=self._expanded_templates,
+                )
                 expanded[unit.id] = body
                 clone = copy.deepcopy(unit)
                 clone.body = copy.deepcopy(body)
@@ -573,6 +584,7 @@ class CodeGenerator:
         writer.line(text='"""Generated from declarative PySTG authoring source."""')
         writer.line()
         writer.line(text="from __future__ import annotations")
+        self._render_source_imports(writer, unit)
         writer.line()
         writer.line(text=f"from {base_module} import {base_class}")
         support_prefix = "." if "/" not in local_path else ".."
@@ -600,6 +612,7 @@ class CodeGenerator:
             "_pystg_set_background",
             "_pystg_set_position",
             "_pystg_spawn",
+            "_pystg_time",
             "_pystg_trace",
         ):
             writer.line(1, f"{name},")
@@ -651,6 +664,7 @@ class CodeGenerator:
         writer.line(text='"""Generated callable authoring unit."""')
         writer.line()
         writer.line(text="from __future__ import annotations")
+        self._render_source_imports(writer, unit)
         writer.line()
         writer.line(text="from .._support import (")
         for name in (
@@ -671,6 +685,7 @@ class CodeGenerator:
             "_pystg_set_background",
             "_pystg_set_position",
             "_pystg_spawn",
+            "_pystg_time",
             "_pystg_trace",
         ):
             writer.line(1, f"{name},")
@@ -701,6 +716,7 @@ class CodeGenerator:
         writer = _Writer(relative_path, self._author_file(unit))
         writer.line(text='"""Generated BossDef."""')
         writer.line()
+        self._render_source_imports(writer, unit)
         writer.line(text="from src.game.stage.boss_base import nonspell, spellcard")
         writer.line(text="from src.game.stage.stage_base import BossDef")
         imports, symbols = self._reference_imports(unit, f"bosses/{unit.id}.py")
@@ -753,12 +769,9 @@ class CodeGenerator:
             if node.kind == "TemplateCall":
                 def render_template() -> None:
                     before = len(writer.lines)
-                    try:
-                        expanded = expand_nodes([node], self.template_registry)
-                    except TemplateExpansionError as exc:
-                        raise self._template_error(unit, exc) from exc
+                    expanded = self._expanded_templates[node.uid]
                     if record:
-                        writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start')")
+                        writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start', {unit.id!r})")
                         writer.line(indent, "try:")
                         self._render_nodes(
                             writer,
@@ -771,10 +784,11 @@ class CodeGenerator:
                         )
                         if len(writer.lines) == before + 2:
                             writer.line(indent + 1, "pass")
+                        self._render_node_exception(writer, indent, node)
                         writer.line(indent, "finally:")
                         writer.line(
                             indent + 1,
-                            f"_pystg_trace({context}, {node.uid!r}, 'end')",
+                            f"_pystg_trace({context}, {node.uid!r}, 'end', {unit.id!r})",
                         )
                     else:
                         self._render_nodes(
@@ -796,7 +810,7 @@ class CodeGenerator:
 
             def callback(node=node) -> None:
                 if record:
-                    writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start')")
+                    writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start', {unit.id!r})")
                     writer.line(indent, "try:")
                     self._render_node(
                         writer,
@@ -807,10 +821,11 @@ class CodeGenerator:
                         context,
                         record=record,
                     )
+                    self._render_node_exception(writer, indent, node)
                     writer.line(indent, "finally:")
                     writer.line(
                         indent + 1,
-                        f"_pystg_trace({context}, {node.uid!r}, 'end')",
+                        f"_pystg_trace({context}, {node.uid!r}, 'end', {unit.id!r})",
                     )
                 else:
                     self._render_node(
@@ -843,7 +858,7 @@ class CodeGenerator:
             frame = value("frame")
             writer.line(
                 indent,
-                f"await _pystg_await({context}, {context}.wait(max(0, int({frame}) - {context}.time)))",
+                f"await _pystg_await({context}, {context}.wait(max(0, int({frame}) - _pystg_time({context}, {unit.id!r}))))",
             )
             self._render_nodes(writer, node.children["body"], indent, unit, symbols, context, record=record)
             return
@@ -856,10 +871,17 @@ class CodeGenerator:
                 header = f"for {args['target']} in {value('iterable')}:"
             writer.line(indent, header)
             children = node.children["body"]
-            if children:
-                self._render_nodes(writer, children, indent + 1, unit, symbols, context, record=record)
-            else:
-                writer.line(indent + 1, "pass")
+            previous_bindings = self._loop_bindings
+            if kind != "While":
+                binding = args["target"] if kind == "ForEach" else "_pystg_repeat"
+                self._loop_bindings = tuple(dict.fromkeys((*previous_bindings, binding)))
+            try:
+                if children:
+                    self._render_nodes(writer, children, indent + 1, unit, symbols, context, record=record)
+                else:
+                    writer.line(indent + 1, "pass")
+            finally:
+                self._loop_bindings = previous_bindings
             return
         if kind == "If":
             writer.line(indent, f"if {value('condition')}:")
@@ -885,7 +907,7 @@ class CodeGenerator:
             for branch in node.children["branches"]:
                 helper = self._next_helper("branch")
                 helpers.append(helper)
-                writer.line(indent, f"async def {helper}():")
+                writer.line(indent, self._helper_definition(helper))
                 body = branch.children["body"]
                 if body:
                     self._render_nodes(writer, body, indent + 1, unit, symbols, context, record=record)
@@ -906,7 +928,7 @@ class CodeGenerator:
                 writer.line(indent, f"_pystg_spawn({context}, {call})")
             else:
                 helper = self._next_helper("spawn")
-                writer.line(indent, f"async def {helper}():")
+                writer.line(indent, self._helper_definition(helper))
                 body = node.children["body"]
                 if body:
                     self._render_nodes(writer, body, indent + 1, unit, symbols, context, record=record)
@@ -936,7 +958,9 @@ class CodeGenerator:
                 symbols,
                 first=context,
             )
-            writer.line(indent, f"await _pystg_await({context}, {call})")
+            assign = args.get("assign")
+            prefix = f"{assign} = " if assign else ""
+            writer.line(indent, f"{prefix}await _pystg_await({context}, {call})")
             return
         if kind == "RawPython":
             source = args["source"]
@@ -945,8 +969,7 @@ class CodeGenerator:
             source_lines = source.splitlines() or ["pass"]
             for line in source_lines:
                 writer.line(indent + 1, line)
-            writer.line(indent, "except Exception as _pystg_exc:")
-            writer.line(indent + 1, f"raise _pystg_runtime_error({node.uid!r}, _pystg_exc) from _pystg_exc")
+            self._render_node_exception(writer, indent, node)
             return
 
         if kind == "RunWave":
@@ -1042,6 +1065,25 @@ class CodeGenerator:
             self._render_nodes(writer, node.children["body"], indent, unit, symbols, context, record=record)
             return
         raise CompilerError("unsupported_node", f"cannot generate node kind {kind!r}")
+
+    def _render_source_imports(self, writer: _Writer, unit: LogicalUnit) -> None:
+        # Future statements must precede the generated infrastructure imports;
+        # ordinary imports retain author order, aliases, and repeated bindings.
+        futures = [value for value in unit.source_imports if value.startswith("from __future__ import ")]
+        ordinary = [value for value in unit.source_imports if value not in futures]
+        for statement in (*futures, *ordinary):
+            writer.line(text=statement)
+
+    def _helper_definition(self, name: str) -> str:
+        captured = ", ".join(f"{binding}={binding}" for binding in self._loop_bindings)
+        return f"async def {name}({captured}):"
+
+    @staticmethod
+    def _render_node_exception(writer: _Writer, indent: int, node: Node) -> None:
+        writer.line(indent, "except Exception as _pystg_exc:")
+        writer.line(indent + 1, "if getattr(_pystg_exc, 'authoring_uid', None):")
+        writer.line(indent + 2, "raise")
+        writer.line(indent + 1, f"raise _pystg_runtime_error({_source_uid(node.uid)!r}, _pystg_exc) from _pystg_exc")
 
     def _reference_imports(
         self,
@@ -1221,6 +1263,16 @@ class CodeGenerator:
         )
         return "\n".join(lines) + "\n"
 
+    def _snapshot_template_sources(self) -> tuple[tuple[str, str], ...]:
+        sources: list[tuple[str, str]] = []
+        for identity, definition in sorted(self.template_registry._definitions.items()):
+            try:
+                source = inspect.getsource(definition.function)
+            except (OSError, TypeError):
+                source = repr(definition.signature)
+            sources.append((identity, source.replace("\r\n", "\n")))
+        return tuple(sources)
+
     def _build_hash(self, modules: Mapping[str, str]) -> str:
         hasher = hashlib.sha256()
         hasher.update(GENERATOR_VERSION.encode("utf-8"))
@@ -1236,14 +1288,10 @@ class CodeGenerator:
             json.dumps(semantic, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         )
         hasher.update(b"\0")
-        for identity, definition in sorted(self.template_registry._definitions.items()):
+        for identity, source in self._template_sources:
             hasher.update(identity.encode("utf-8"))
             hasher.update(b"\0")
-            try:
-                source = inspect.getsource(definition.function)
-            except (OSError, TypeError):
-                source = repr(definition.signature)
-            hasher.update(source.replace("\r\n", "\n").encode("utf-8"))
+            hasher.update(source.encode("utf-8"))
             hasher.update(b"\0")
         for path in sorted(modules):
             hasher.update(path.encode("utf-8"))
@@ -1294,11 +1342,21 @@ def _pystg_context(owner):
     return context
 
 
-def _pystg_trace(owner, uid, phase):
+def _pystg_time(owner, unit_id):
+    clock = max(0, int(getattr(owner, "time", 0)))
+    origins = getattr(owner, "_pystg_trace_origins", None)
+    if origins is None:
+        origins = {}
+        owner._pystg_trace_origins = origins
+    return max(0, clock - origins.setdefault(unit_id, clock))
+
+
+def _pystg_trace(owner, uid, phase, unit_id):
+    _pystg_time(owner, unit_id)
     context = getattr(owner, "ctx", owner)
     emitter = getattr(context, "emit_authoring_trace", None)
     if emitter is not None:
-        emitter(uid, phase)
+        emitter(uid, phase, owner=owner, unit_id=unit_id)
 
 
 def _pystg_bind_stage_resources(owner):
@@ -1490,6 +1548,17 @@ def _pystg_pump(owner):
     if getattr(owner, "_pystg_pumping", False):
         return
     tasks = list(getattr(owner, "_pystg_tasks", ()))
+    if not tasks:
+        # A hit hook can await before run() spawns its first background task.
+        # An empty pump must not consume that task's first tick.
+        return
+    clock = getattr(owner, "time", None)
+    if clock is not None:
+        if getattr(owner, "_pystg_pump_time", None) == clock:
+            return
+        # run() and asynchronous hooks share one actor and one frame clock.
+        # Their awaits must not advance the same background task twice.
+        owner._pystg_pump_time = clock
     owner._pystg_tasks = []
     pending = []
     owner._pystg_pumping = True
@@ -1566,6 +1635,7 @@ async def _pystg_parallel(owner, coroutines):
 def _pystg_close_tasks(owner):
     tasks = list(getattr(owner, "_pystg_tasks", ()))
     owner._pystg_tasks = []
+    owner._pystg_pump_time = None
     for coroutine in tasks:
         coroutine.close()
 
@@ -1594,7 +1664,9 @@ def _pystg_clear_lasers(owner):
 
 
 def _pystg_runtime_error(uid, error):
-    return RuntimeError(f"authoring node {uid}: {type(error).__name__}: {error}")
+    failure = RuntimeError(f"authoring node {uid}: {type(error).__name__}: {error}")
+    failure.authoring_uid = uid
+    return failure
 '''
 
 

@@ -1,7 +1,7 @@
 # pystg 弹幕脚本开发指南 (v2)
 
-> 本文档以**当前仓库实际可运行的 API** 为准。  
-> 最近更新：2026-04-12，弹幕系统 v2 大改造后。
+> 本文是手写 Runtime 脚本参考，按所用基类或 API 查阅；参数与行为以对应实现和测试为准。
+> v2 基础整理于 2026-04-12。声明式编辑器工程使用不同的作者语法，入口见[快速开始](getting-started.md)。
 
 ---
 
@@ -29,7 +29,7 @@
 
 ## 1. 当前工作流
 
-当前仓库使用的是**程序化关卡脚本**流程：
+本文介绍的**手写关卡脚本**流程如下；它与声明式作者工程共用 Runtime，不互相反向转换：
 
 - 整面关卡：继承 `StageScript`
 - 道中一段：继承 `Wave`
@@ -520,7 +520,7 @@ self.fire(angle=angle, speed=2.5, color="red")
 
 ## 13. v2 新机制详解
 
-### 11.1 摩擦力 / 阻尼 (friction)
+### 13.1 摩擦力 / 阻尼 (friction)
 
 ```python
 self.fire(angle=-90, speed=5.0, friction=2.0, bullet_type="ball_m", color="red")
@@ -537,7 +537,7 @@ self.fire(angle=-90, speed=5.0, friction=2.0, bullet_type="ball_m", color="red")
 
 **用途**：减速 → 停顿 → 配合 `on_death` 做散花、制造"粘滞感"弹幕。
 
-### 11.2 反弹 (bounce_x / bounce_y)
+### 13.2 反弹 (bounce_x / bounce_y)
 
 ```python
 self.fire(angle=30, speed=2.5, bounce_x=True, bounce_y=True,
@@ -549,7 +549,7 @@ self.fire(angle=30, speed=2.5, bounce_x=True, bounce_y=True,
 
 **用途**：弹球弹幕、墙壁反射。
 
-### 11.3 自转 (spin / render_angle)
+### 13.3 自转 (spin / render_angle)
 
 ```python
 # 弹边飞边自转
@@ -564,7 +564,7 @@ self.fire(angle=-90, speed=2.0, render_angle=0, bullet_type="knife", color="red"
 
 **用途**：旋转星弹、固定朝向刀弹。
 
-### 11.4 标签 (tag) + 按组操作
+### 13.4 标签 (tag) + 按组操作
 
 ```python
 # 发弹时打标签
@@ -579,7 +579,7 @@ self.ctx.set_time_scale(0.0, tag=1)      # 冻结蓝弹
 
 **用途**：解谜弹幕（打中开关消特定弹）、分色管理、选择性时停。
 
-### 11.5 时间缩放 (time_scale)
+### 13.5 时间缩放 (time_scale)
 
 每颗子弹拥有独立的 time_scale 乘数，影响：
 - 位置更新速度
@@ -598,7 +598,7 @@ await self.wait(120)
 self.ctx.set_time_scale(1.0)
 ```
 
-### 11.6 内置数学曲线 (curve_type + curve_params)
+### 13.6 内置数学曲线 (curve_type + curve_params)
 
 在 JIT 内核内执行的高性能参数化运动。
 
@@ -644,7 +644,7 @@ self.fire(
 )
 ```
 
-### 11.7 发射器节点 (Emitter)
+### 13.7 发射器节点 (Emitter)
 
 隐形、不碰撞的移动节点，每帧执行回调函数发射子弹。
 
@@ -671,7 +671,7 @@ self.ctx.create_emitter(
 
 ## 14. 高级模式示例
 
-### 12.1 急停→散花弹
+### 14.1 急停→散花弹
 
 ```python
 import math
@@ -700,7 +700,7 @@ async def run(self):
         await self.wait(60)
 ```
 
-### 12.2 弹球弹幕
+### 14.2 弹球弹幕
 
 ```python
 async def run(self):
@@ -716,7 +716,7 @@ async def run(self):
         await self.wait(30)
 ```
 
-### 12.3 咲夜时停
+### 14.3 咲夜时停
 
 ```python
 async def run(self):
@@ -737,7 +737,7 @@ async def run(self):
         await self.wait(60)
 ```
 
-### 12.4 旋转星弹
+### 14.4 旋转星弹
 
 ```python
 async def run(self):
@@ -753,7 +753,7 @@ async def run(self):
         await self.wait(10)
 ```
 
-### 12.5 流星雨发射器（魔理沙风格）
+### 14.5 流星雨发射器（魔理沙风格）
 
 ```python
 import math, random
@@ -776,7 +776,7 @@ async def run(self):
         await self.wait(180)
 ```
 
-### 12.6 正弦蛇行弹
+### 14.6 正弦蛇行弹
 
 ```python
 from src.game.bullet import CURVE_SIN_ANGLE
@@ -793,7 +793,7 @@ async def run(self):
         await self.wait(20)
 ```
 
-### 12.7 极坐标莲花弹（扩散→收缩→散开）
+### 14.7 极坐标莲花弹（扩散→收缩→散开）
 
 ```python
 async def run(self):
@@ -917,18 +917,17 @@ pool.spawn_bullet(x, y,
 
 ### Q: 如何让子弹出生后中途变色/变型？
 
-直接修改底层数据：
-
-```python
-idx = self.fire(...)
-self.ctx.bullet_pool.data['sprite_id'][idx] = "ball_mid5"  # 旧版池
-# 或
-self.ctx.bullet_pool.data['sprite_idx'][idx] = new_idx     # 优化版池
-```
+先确认是否已有符合需求的公共 Runtime API。直接写池数组依赖槽位生命周期、精灵索引和
+渲染同步，不作为内容脚本的推荐接口，也不能把旧池字段复制到现有优化池。
+需要新能力时在授权范围内扩展引擎公共 API 并补验证；编辑器公开该能力还须同步 DSL 与生成器。
 
 ### Q: 我新增了 Stage，怎么切过去？
 
-在 `main.py` 里改为加载你的新 Stage 类。
+手写关卡在 `game_content/entry.py` 导入新类并加入 `STAGES`；其 `id` 必须唯一，
+`START_STAGE` 必须属于 `STAGES`。随后运行 `python main.py --stage=<id>`。
+也可用 `--content-entry <module>` 加载符合相同接口的独立入口，无需改主循环。
+
+声明式工程则在 `Project.stages` / `start_stage` 引用 Stage，通过编辑器构建并 Run；不要手改生成入口。
 
 ---
 

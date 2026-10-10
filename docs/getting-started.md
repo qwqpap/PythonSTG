@@ -29,9 +29,26 @@ pip install -r requirements-dev.txt
 pip install -e .
 ```
 
-关卡编辑器正在按[代码驱动编辑器实施 TODO](EDITOR_IMPLEMENTATION_TODO.md)重建。
-它以声明式 Python 为唯一真源，不再打开旧 Scene/Pattern JSON。纹理、自机、敌人、
+关卡编辑器以声明式 Python 为唯一真源，不再打开旧 Scene/Pattern JSON。
+阶段进度和仍待完成的验收见[代码驱动编辑器实施 TODO](EDITOR_IMPLEMENTATION_TODO.md)。纹理、自机、敌人、
 背景、对话和 UI 等独立工具参见[编辑器工具指南](EDITOR_TOOLS_GUIDE.md)。
+
+## 打开关卡编辑器
+
+安装开发依赖和项目后，在仓库根目录运行：
+
+```bash
+pystg-editor game_content/authoring/code_editor_demo
+```
+
+`code_editor_demo` 是可编辑的作者工程。试用时可先在 `game_content/authoring/` 下复制一份，
+再把命令参数换成副本目录。编辑器不会反向解析 `game_content/stages/` 下的手写关卡。
+
+从开始 Stage 查看引用的 Wave、Enemy 和 Boss；在程序流中选择节点，用 Inspector 修改参数。
+显式点击 Run 才会保存、构建并启动真实游戏预览。运行期间修改内容会标记预览过期，需再次 Run。
+保存后重开、Undo/Redo 和完整创作流程的验收要求见 TODO；启动成功本身不代表这些验收通过。
+
+生成文件位于 `game_content/generated/<project_id>/`，可重新构建，不应手改或提交。
 
 ## 运行游戏
 
@@ -52,19 +69,19 @@ flowchart TB
     root["PythonSTG"]
     main["main.py<br/>游戏入口"]
     src["src/<br/>引擎代码"]
-    gameContent["game_content/stages/<br/>关卡内容"]
+    gameContent["game_content/stages/<br/>手写关卡内容"]
+    authoring["game_content/authoring/<br/>声明式编辑器工程"]
     assets["assets/<br/>全局资源"]
-    tools["tools/<br/>PyQt5 编辑器"]
+    tools["tools/<br/>PySide6 独立资产工具"]
     docs["docs/<br/>文档"]
-    tests["tests/<br/>pytest 测试"]
 
     root --> main
     root --> src
     root --> gameContent
+    root --> authoring
     root --> assets
     root --> tools
     root --> docs
-    root --> tests
 
     src --> core["core：配置、碰撞、窗口、输入"]
     src --> game["game：子弹、关卡、玩家、Boss、激光、道具、音频"]
@@ -84,7 +101,7 @@ PySTG 把**引擎**和**内容**彻底分开：
 - `src/` 是引擎，提供子弹池、渲染、碰撞、激光、音频等底层能力
 - `game_content/` 是内容，只描述「发生什么」——弹幕怎么飞、敌人怎么动、Boss 出什么招
 
-写弹幕脚本时，你只需要 import 几个基类：
+手写运行时脚本使用以下基类；声明式编辑器工程使用 `src.authoring.dsl`，两者目录和语法不同：
 
 ```python
 from src.game.stage.spellcard import SpellCard, NonSpell   # 符卡 / 非符
@@ -96,7 +113,7 @@ from src.game.stage.boss_base import nonspell, spellcard    # Boss 阶段组合
 
 所有这些类都通过 `self.fire()` / `self.wait(N)` / `self.ctx.xxx` 调用引擎，不直接 import 引擎内部模块。
 
-## 第一份脚本
+## 第一份手写脚本
 
 ```python
 class MySpell(SpellCard):
@@ -116,7 +133,7 @@ class MySpell(SpellCard):
 
 完整 API 见 [弹幕脚本开发指南](STAGE_SCRIPTING_GUIDE.md)。
 
-## 一个关卡长什么样
+## 一个手写关卡长什么样
 
 | 路径 | 作用 |
 |------|------|

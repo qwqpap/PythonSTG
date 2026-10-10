@@ -31,6 +31,8 @@ class StageManager:
         self._audio_manager = None
         self._authoring_trace = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
         self._authoring_trace_dropped = 0
+        self._last_timeline_frame = 0
+        self.timeline_stage_id = None
 
     # ==================== 引擎绑定 ====================
 
@@ -142,6 +144,11 @@ class StageManager:
 
         # 将 ctx 保存到 stage_manager，供渲染器访问
         self.current_context = ctx
+        ctx.set_timeline_origin(self.frame_count)
+        ctx.set_runtime_frame(self.frame_count)
+        self._last_timeline_frame = 0
+        self.timeline_stage_id = getattr(stage_class, 'id', None)
+        ctx.authoring_stage_id = self.timeline_stage_id
 
         # 使用程序化关卡脚本
         stage = stage_class()
@@ -225,11 +232,8 @@ class StageManager:
         添加一个协程到管理器
         :param coro_func: 协程函数，应该返回一个生成器对象
         """
-        try:
-            coro = coro_func()
-            self.coroutines.append(coro)
-        except Exception as e:
-            print(f"Error in coroutine: {e}")
+        coro = coro_func()
+        self.coroutines.append(coro)
 
     def update(self, dt, bullet_pool, player):
         """
@@ -243,6 +247,7 @@ class StageManager:
 
         if self.current_context is not None:
             self.current_context.set_runtime_frame(self.frame_count)
+            self._last_timeline_frame = self.current_context.timeline_frame
 
         # 更新Boss
         if self.boss_manager:
@@ -262,8 +267,9 @@ class StageManager:
             except StopIteration:
                 # 协程结束
                 pass
-            except Exception as e:
-                print(f"Error in coroutine: {e}")
+            except Exception:
+                self.is_finished = False
+                raise
 
         self.coroutines = new_coroutines
         if self.current_context is not None:
@@ -291,6 +297,14 @@ class StageManager:
         self._authoring_trace_dropped = 0
         return tuple(values), dropped
 
+    def get_timeline_frame(self, unit_id=None):
+        """Stage/unit local time; loading and inter-stage cleanup are excluded."""
+        if self.current_context is not None:
+            if unit_id is not None:
+                return self.current_context.get_unit_timeline_frame(unit_id)
+            return self.current_context.timeline_frame
+        return None if unit_id is not None else self._last_timeline_frame
+
     def get_frame_count(self):
         """
         获取当前帧计数
@@ -316,6 +330,8 @@ class StageManager:
         """
         self.coroutines.clear()
         self.frame_count = 0
+        self._last_timeline_frame = 0
+        self.timeline_stage_id = None
         self.is_finished = False
         if self.boss_manager:
             self.boss_manager.clear()

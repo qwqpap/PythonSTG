@@ -124,10 +124,9 @@ class StageScript:
             self._play_bgm(self.bgm)
         try:
             await self.run()
-        except Exception as e:
-            import traceback
-            print(f"[StageScript] 关卡脚本异常: {e}")
-            traceback.print_exc()
+        except Exception:
+            self._active = False
+            raise
         self._on_stage_complete()
 
     def update(self):

@@ -13,7 +13,7 @@ import sys
 import tempfile
 import tokenize
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -338,8 +338,35 @@ def load_project(root: str | Path) -> AuthoringSourceProject:
 def render_python_source(document: SourceDocument) -> str:
     if document.read_only or document.unit is None:
         raise SourceSaveError("read_only", "unsupported Python cannot be formatted")
-    _validate_template_imports(document)
     prefix = _normalize_block(document.prefix_text).rstrip()
+    retained_imports = tuple(
+        _render_runtime_import(spec)
+        for spec in document.imports
+        if spec.module != "src.authoring.dsl"
+    )
+    if not retained_imports and document.unit.source_imports:
+        # Duplicating a unit creates a fresh source document.  Its imports
+        # belong to the copied unit even though there is no original prefix.
+        prefix = "\n".join(part for part in (prefix, *document.unit.source_imports) if part)
+    binding_document = document
+    if not document.imports and document.unit.source_imports:
+        parser = _SourceParser(document.path, prefix, document.module_name)
+        for statement in parser.tree.body:
+            if isinstance(statement, ast.Import):
+                parser._record_import(statement)
+            elif isinstance(statement, ast.ImportFrom):
+                parser._record_from_import(statement)
+        binding_document = replace(
+            document,
+            imports=tuple(parser.imports),
+            active_dsl_bindings=tuple(sorted(parser.dsl_aliases.items())),
+            active_module_bindings=tuple(sorted(parser.module_aliases.items())),
+            active_external_bindings=tuple(
+                (local, module, symbol)
+                for local, (module, symbol) in sorted(parser.external_aliases.items())
+            ),
+        )
+    _validate_template_imports(binding_document)
     required_names = _required_dsl_names(document.unit)
     bare_imports = {
         local
@@ -622,6 +649,11 @@ class _SourceParser:
         unit.assignment_name = assignment.targets[0].id
         unit.source_path = self.path
         unit.source_span = _span(assignment.value)
+        unit.source_imports = tuple(
+            _render_runtime_import(spec)
+            for spec in self.imports
+            if spec.module != "src.authoring.dsl"
+        )
         start_offset = _line_offset(self.text, assignment.lineno)
         end_offset = _line_offset(self.text, assignment.end_lineno + 1 if assignment.end_lineno else assignment.lineno + 1)
         prefix = self.text[:start_offset]
@@ -1020,6 +1052,13 @@ class _SourceParser:
                 trailing = comment
                 break
         return NodeComments(tuple(leading), trailing)
+
+
+def _render_runtime_import(spec: ImportSpec) -> str:
+    suffix = f" as {spec.alias}" if spec.alias else ""
+    if spec.name is None:
+        return f"import {spec.module}{suffix}"
+    return f"from {spec.module} import {spec.name}{suffix}"
 
 
 def _is_docstring(statement: ast.AST) -> bool:

@@ -5,13 +5,14 @@ from __future__ import annotations
 import ctypes
 import locale
 import re
+import shutil
 import sys
 import uuid
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.compiler.package_builder import PackageBuilder
+from src.compiler.package_builder import PackageBuilder, PreparedBuild, PublishedBuild
 from src.compiler.practice import PRACTICE_STAGE_ID, practice_program
 from src.core.preview_protocol import (
     MAX_PREVIEW_LINE_BYTES,
@@ -81,6 +82,9 @@ class _LaunchSpec:
     project_root: Path
     build_hash: str
     target: PreviewTarget
+    python_executable: str = ""
+    source_root: Path | None = None
+    seek_units: frozenset[str] = frozenset()
 
 
 class PreviewHost(QWidget):
@@ -316,9 +320,32 @@ class PreviewOwner(QObject):
         self._stderr_truncated = False
         self._stopping = False
         self._building = False
-        self._stale = False
         self._launch_spec: _LaunchSpec | None = None
+        self._build_process: QProcess | None = None
+        self._build_stdout = bytearray()
+        self._build_stderr = bytearray()
+        self._build_staging: Path | None = None
+        self._build_builder: PackageBuilder | None = None
+        self._build_target: PreviewTarget | None = None
+        self._build_stage_id: str | None = None
+        self._build_cancelled = False
+        self._previous_spec: _LaunchSpec | None = None
+        self._previous_stale = False
+        self._previous_state = "stopped"
+        self._restore_pause_pending = False
+        self._published_transaction: PublishedBuild | None = None
+        self._build_timer = QTimer(self)
+        self._build_timer.setSingleShot(True)
+        self._build_timer.timeout.connect(self._build_timeout)
+        self._startup_timer = QTimer(self)
+        self._startup_timer.setSingleShot(True)
+        self._startup_timer.timeout.connect(self._startup_timeout)
+        self.host.attached.connect(self._host_attachment_changed)
         self.session.program_changed.connect(self.mark_stale)
+
+    @property
+    def is_building(self) -> bool:
+        return self._build_process is not None
 
     @property
     def is_running(self) -> bool:
@@ -330,6 +357,24 @@ class PreviewOwner(QObject):
     @property
     def run_id(self) -> str | None:
         return self._launch_spec.run_id if self._launch_spec is not None else None
+
+    @property
+    def is_stale(self) -> bool:
+        return self.session.preview_stale
+
+    def seek_unavailable_reason(self, unit_id: str | None) -> str:
+        """Explain whether this scope belongs to the actual running build."""
+
+        if not self.is_running or self._launch_spec is None:
+            return "请先运行预览，再定位播放时间。"
+        if unit_id is not None and unit_id not in self._launch_spec.seek_units:
+            return "当前时间范围不在正在预览的构建中；请先运行此内容或关卡。"
+        if self.session.preview_state not in {"running", "paused"}:
+            return "预览正在启动或快进，请稍后再定位。"
+        return ""
+
+    def can_seek_unit(self, unit_id: str | None) -> bool:
+        return not self.seek_unavailable_reason(unit_id)
 
     def current_target(self) -> PreviewTarget:
         unit = self.session.current_unit
@@ -350,9 +395,10 @@ class PreviewOwner(QObject):
             self.session.append_run_log("[Preview] 请先打开声明式 Python 工程")
             self.session.set_preview_error("请先打开声明式 Python 工程")
             return False
-        self.session.set_preview_target(target.kind, target.unit_id)
+        if self.is_building or self._published_transaction is not None:
+            self.session.append_run_log("[Preview] 构建正在进行；可点击停止取消")
+            return False
         self.session.set_preview_error("")
-        old_spec = self._launch_spec if self.is_running else None
         self._building = True
         self.session.set_build_state("building")
         try:
@@ -385,7 +431,7 @@ class PreviewOwner(QObject):
                 source_root=self.session.source_project.root,
                 python_executable=self.python_executable,
             )
-            prepared = builder.prepare(program)
+            request, staging = builder.worker_request(program)
         except Exception as exc:
             self.session.set_build_state("error")
             if not self.session.preview_error:
@@ -395,20 +441,131 @@ class PreviewOwner(QObject):
             )
             self._building = False
             return False
+        process = QProcess(self)
+        process.setProgram(builder.worker_command()[0])
+        process.setArguments(builder.worker_command()[1:])
+        process.setWorkingDirectory(str(builder.project_root))
+        environment = QProcessEnvironment.systemEnvironment()
+        for name, value in builder.worker_environment().items():
+            environment.insert(name, value)
+        process.setProcessEnvironment(environment)
+        self._build_process = process
+        self._build_builder = builder
+        self._build_staging = staging
+        self._build_target = target
+        self._build_stage_id = stage_id
+        self._build_stdout.clear()
+        self._build_stderr.clear()
+        self._build_cancelled = False
+        process.started.connect(lambda: (process.write(request), process.closeWriteChannel()))
+        process.readyReadStandardOutput.connect(self._read_build_output)
+        process.readyReadStandardError.connect(self._read_build_output)
+        process.finished.connect(self._build_finished)
+        process.errorOccurred.connect(self._build_process_error)
+        self._build_timer.start(int(builder.BUILD_TIMEOUT_SECONDS * 1000))
+        process.start()
+        return True
 
+    def _read_build_output(self) -> None:
+        process = self._build_process
+        if process is None:
+            return
+        self._build_stdout.extend(bytes(process.readAllStandardOutput()))
+        raw = bytes(process.readAllStandardError())
+        self._build_stderr.extend(raw[:max(0, self.MAX_STDERR_BYTES - len(self._build_stderr))])
+        if len(self._build_stdout) > 16 * 1024 * 1024:
+            self.cancel_build("构建结果超过 16 MiB 上限", failed=True)
+
+    def _build_process_error(self, error) -> None:
+        if error == QProcess.ProcessError.FailedToStart and self._build_process is not None:
+            detail = self._build_process.errorString()
+            self._build_failed(detail)
+            self._dispose_build()
+
+    def _build_timeout(self) -> None:
+        self.cancel_build("构建超时（60 秒）；旧预览保持运行", failed=True)
+
+    def cancel_build(self, reason: str = "构建已取消", *, failed: bool = False) -> None:
+        process = self._build_process
+        if process is None:
+            return
+        self._build_cancelled = True
+        self._build_timer.stop()
+        if failed:
+            self._build_failed(reason)
+        else:
+            self._building = False
+            self.session.set_build_state("idle")
+            self.session.append_run_log(f"[Preview] {reason}")
+        process.kill()
+
+    def _build_failed(self, detail: str, uid: str | None = None) -> None:
+        self._building = False
+        self.session.set_build_state("error")
+        self.session.set_preview_error(detail, uid)
+        self.session.append_run_log(f"[Preview:BUILD_ERROR] {detail}")
+        if uid:
+            try:
+                self.session.select_node(uid)
+            except Exception as exc:
+                self.session.append_run_log(f"[Preview] 无法定位错误节点 {uid}: {exc}")
+
+    def _dispose_build(self, *, preserve_staging: bool = False) -> None:
+        self._build_timer.stop()
+        process = self._build_process
+        self._build_process = None
+        if process is not None:
+            process.deleteLater()
+        if not preserve_staging and self._build_staging is not None:
+            if self._build_staging.exists():
+                shutil.rmtree(self._build_staging, ignore_errors=True)
+        self._build_staging = None
+
+    def _build_finished(self, exit_code: int, _status) -> None:
+        self._read_build_output()
+        if self._build_cancelled:
+            self._dispose_build()
+            return
+        builder = self._build_builder
+        target = self._build_target
+        if builder is None or target is None:
+            self._dispose_build()
+            return
+        try:
+            prepared = builder.decode_worker_result(bytes(self._build_stdout), exit_code, bytes(self._build_stderr))
+        except Exception as exc:
+            diagnostics = getattr(exc, "diagnostics", ())
+            uid = diagnostics[0].uid if diagnostics else None
+            self._build_failed(str(exc), uid)
+            self._dispose_build()
+            return
+        self._dispose_build(preserve_staging=True)
+        self._publish_and_launch(builder, prepared, target, self._build_stage_id)
+
+    def _publish_and_launch(self, builder: PackageBuilder, prepared: PreparedBuild, target: PreviewTarget, stage_id: str | None) -> None:
+        seek_units = _prepared_seek_units(prepared, stage_id)
+        old_spec = self._launch_spec if self.is_running else None
+        self._previous_spec = old_spec
+        self._previous_stale = self.is_stale
+        self._previous_state = self.session.preview_state
         try:
             if self.is_running:
                 self._stop_process(set_stopped=False)
-            published = builder.publish(prepared)
+            self._published_transaction = builder.begin_publish(prepared)
         except Exception as exc:
             self.session.set_build_state("error")
             self.session.set_preview_error(str(exc))
             self.session.append_run_log(
                 f"[Preview:PUBLISH_ERROR] {type(exc).__name__}: {exc}"
             )
-            self._building = False
             if old_spec is not None:
+                self.session.set_preview_stale(self._previous_stale)
+                self._restore_pause_pending = self._previous_state == "paused"
+                self.session.set_preview_target(old_spec.target.kind, old_spec.target.unit_id)
+                self.session.last_build_identity = old_spec.build_hash
+                self.session.reset_trace(old_spec.run_id)
                 self._launch(old_spec)
+            self._building = False
             return False
 
         spec = _LaunchSpec(
@@ -419,13 +576,77 @@ class PreviewOwner(QObject):
             project_root=self.session.project_context.root,
             build_hash=prepared.build_hash,
             target=target,
+            python_executable=self.python_executable,
+            source_root=self.session.source_project.root,
+            seek_units=seek_units,
         )
-        self.session.set_build_state("ready", prepared.build_hash)
+        self.session.set_preview_target(target.kind, target.unit_id)
         self.session.reset_trace(spec.run_id)
-        self._stale = False
+        self.session.set_preview_stale(False)
+        self._restore_pause_pending = False
         self._building = False
-        self.build_published.emit(str(published))
-        return self._launch(spec)
+        if not self._launch(spec):
+            self._restore_previous_build()
+
+    def _restore_previous_build(self) -> None:
+        self._startup_timer.stop()
+        transaction = self._published_transaction
+        old_spec = self._previous_spec
+        old_stale = self._previous_stale
+        old_state = self._previous_state
+        self._published_transaction = None
+        self._previous_spec = None
+        self._previous_stale = False
+        self._previous_state = "stopped"
+        original_error = self.session.preview_error or "新预览启动失败"
+        self._stop_process(set_stopped=False)
+        self._launch_spec = None
+        try:
+            if transaction is not None:
+                transaction.rollback()
+        except Exception as exc:
+            self._build_failed(f"{original_error}；恢复上次生成包失败：{exc}")
+            self.session.set_preview_state("error")
+            return
+        self._build_failed(original_error)
+        if old_spec is not None:
+            self.session.set_preview_stale(old_stale)
+            self._restore_pause_pending = old_state == "paused"
+            self.session.set_preview_target(old_spec.target.kind, old_spec.target.unit_id)
+            self.session.last_build_identity = old_spec.build_hash
+            self.session.reset_trace(old_spec.run_id)
+            self._launch(old_spec)
+        else:
+            self.session.set_preview_state("error")
+
+    def _host_attachment_changed(self, attached: bool) -> None:
+        if attached and self.session.preview_state in {"running", "paused"}:
+            self._commit_started_build()
+
+    def _commit_started_build(self) -> None:
+        if self._published_transaction is None:
+            return
+        if sys.platform == "win32" and not self.host.is_attached:
+            return
+        transaction = self._published_transaction
+        self._published_transaction = None
+        self._previous_spec = None
+        self._previous_stale = False
+        self._previous_state = "stopped"
+        self._startup_timer.stop()
+        transaction.commit()
+        spec = self._launch_spec
+        if spec is not None:
+            self.session.set_build_state("ready", spec.build_hash)
+        self.build_published.emit(str(transaction.target_dir))
+
+    def _startup_timeout(self) -> None:
+        self.session.set_preview_error("游戏预览启动或原生嵌入超时")
+        if self._published_transaction is not None:
+            self._restore_previous_build()
+        else:
+            self._stop_process(set_stopped=False)
+            self.session.set_preview_state("error")
 
     def _launch(self, spec: _LaunchSpec) -> bool:
         main_script = spec.project_root / "main.py"
@@ -435,7 +656,7 @@ class PreviewOwner(QObject):
             self.session.set_preview_state("error")
             return False
         process = QProcess(self)
-        process.setProgram(self.python_executable)
+        process.setProgram(spec.python_executable or self.python_executable)
         arguments = [
             str(main_script),
             "--content-entry",
@@ -449,6 +670,10 @@ class PreviewOwner(QObject):
         ]
         if spec.stage_id:
             arguments.extend(("--stage", spec.stage_id))
+        if spec.source_root is not None:
+            arguments.extend(("--authoring-root", str(spec.source_root)))
+        if spec.target.kind in {"wave", "enemy", "spell"} and spec.target.unit_id:
+            arguments.extend(("--preview-unit-id", spec.target.unit_id))
         process.setArguments(arguments)
         process.setWorkingDirectory(str(spec.project_root))
         environment = QProcessEnvironment.systemEnvironment()
@@ -458,8 +683,9 @@ class PreviewOwner(QObject):
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self._read_stdout)
         process.readyReadStandardError.connect(self._read_stderr)
-        process.finished.connect(self._finished)
-        process.errorOccurred.connect(self._process_error)
+        process.finished.connect(lambda code, status: self._finished_process(process, code, status))
+        process.errorOccurred.connect(lambda error: self._process_error_for(process, error))
+        process.started.connect(lambda: self._process_started(process))
         self.process = process
         self._launch_spec = spec
         self._stdout.clear()
@@ -467,22 +693,21 @@ class PreviewOwner(QObject):
         self._stderr_truncated = False
         self._stopping = False
         self.session.set_preview_state("starting")
+        self._startup_timer.start(30000)
         process.start()
-        if not process.waitForStarted(self.START_TIMEOUT_MS):
-            self.session.append_run_log(f"[Preview:START_ERROR] {process.errorString()}")
-            self.session.set_preview_error(process.errorString())
-            self.process = None
-            self.session.set_preview_state("error")
-            return False
-        self.host.attach_process(process)
-        self.process_changed.emit()
         return True
 
+    def _process_started(self, process: QProcess) -> None:
+        if process is self.process:
+            self.host.attach_process(process)
+            self.process_changed.emit()
+
     def mark_stale(self) -> None:
-        if self._building or not self.is_running:
+        if self.is_building:
+            self.cancel_build("作者内容在构建期间发生变化；请重新运行")
+        if not self.is_running and self.session.trace_run_id is None:
             return
-        self._stale = True
-        self.session.set_preview_state("stale")
+        self.session.set_preview_stale(True)
 
     def pause(self) -> None:
         self._send("pause")
@@ -493,11 +718,28 @@ class PreviewOwner(QObject):
     def restart(self) -> None:
         self._send("restart")
 
-    def seek(self, frame: int) -> None:
-        self._send("seek", {"frame": frame})
+    def seek(self, frame: int, unit_id: str | None = None) -> None:
+        """Seek in a Stage or selected unit's local timeline, excluding loading."""
+        if unit_id is None and self._launch_spec is not None:
+            target = self._launch_spec.target
+            unit_id = target.unit_id if target.kind in {"wave", "enemy", "spell"} else None
+        reason = self.seek_unavailable_reason(unit_id)
+        if reason:
+            raise RuntimeError(reason)
+        payload = {"frame": frame}
+        if unit_id:
+            payload["unit_id"] = unit_id
+        self._send("seek", payload)
 
     def stop(self) -> None:
+        self._restore_pause_pending = False
+        self.cancel_build()
+        self._startup_timer.stop()
         self._stop_process(set_stopped=True)
+        if self._published_transaction is not None:
+            self._published_transaction.rollback()
+            self._published_transaction = None
+            self._previous_spec = None
 
     def _send(self, command: str, payload=None) -> None:
         if not self.is_running or self.process is None or self._launch_spec is None:
@@ -534,6 +776,7 @@ class PreviewOwner(QObject):
             if set_stopped:
                 self.session.set_preview_state("stopped")
             self.process_changed.emit()
+            process.deleteLater()
 
     def _read_stdout(self) -> None:
         if self.process is None:
@@ -592,8 +835,11 @@ class PreviewOwner(QObject):
                 # deterministic execution; old observations must not be
                 # overlaid onto the new branch or density samples.
                 self.session.reset_trace(message["run_id"])
-            if state in {"starting", "running", "paused", "seeking"} and not self._stale:
+            if state in {"starting", "running", "paused", "seeking"}:
                 self.session.set_preview_state(state)
+            if state == "running" and self._restore_pause_pending:
+                self._restore_pause_pending = False
+                self.pause()
         elif event == "trace":
             self.session.append_trace(
                 payload.get("events", ()),
@@ -605,12 +851,12 @@ class PreviewOwner(QObject):
         elif event == "frame":
             self.session.preview_frame = payload["frame"]
         elif event == "error":
-            message = str(payload.get("message", ""))
-            uid = payload.get("uid") or _uid_from_runtime_error(message)
+            error_message = str(payload.get("message", ""))
+            uid = payload.get("uid") or _uid_from_runtime_error(error_message)
             self.session.append_run_log(
-                f"[Preview:{payload.get('code', 'ERROR')}] {message}"
+                f"[Preview:{payload.get('code', 'ERROR')}] {error_message}"
             )
-            self.session.set_preview_error(message, uid)
+            self.session.set_preview_error(error_message, uid)
             if uid:
                 try:
                     self.session.select_node(str(uid))
@@ -619,9 +865,13 @@ class PreviewOwner(QObject):
                         f"[Preview] 无法定位错误节点 {uid}: {locate_error}"
                     )
             self.session.set_preview_state("error")
-        elif event == "stopped" and not self._stopping:
+        elif event == "stopped" and not self._stopping and self.session.preview_state != "error":
             self.session.set_preview_state("stopped")
         self.event_received.emit(message)
+        if event == "state" and payload.get("state") == "running":
+            self._commit_started_build()
+            if self._published_transaction is None:
+                self._startup_timer.stop()
 
     def _protocol_error(self, code: str, message: str) -> None:
         self.session.append_run_log(f"[Preview:PROTOCOL:{code}] {message}")
@@ -630,21 +880,60 @@ class PreviewOwner(QObject):
         if not self._stopping and self.process is not None:
             message = self.process.errorString()
             self.session.append_run_log(f"[Preview:PROCESS] {message}")
-            self.session.set_preview_error(message)
+            if not self.session.preview_error:
+                self.session.set_preview_error(message)
+
+    def _process_error_for(self, process: QProcess, error) -> None:
+        if process is not self.process:
+            return
+        self._process_error(error)
+        if error == QProcess.ProcessError.FailedToStart:
+            process.deleteLater()
+            self.process = None
+            if self._published_transaction is not None:
+                self._restore_previous_build()
+            else:
+                self._launch_spec = None
+                self.session.set_preview_state("error")
+
+    def _finished_process(self, process: QProcess, exit_code: int, status) -> None:
+        if process is not self.process:
+            return
+        self._finished(exit_code, status)
+        process.deleteLater()
 
     def _finished(self, exit_code: int, _exit_status) -> None:
         self._read_stdout()
         self._read_stderr()
         if not self._stopping and exit_code != 0:
             self.session.append_run_log(f"[Preview] 游戏进程退出码 {exit_code}")
-            self.session.set_preview_error(f"游戏进程退出码 {exit_code}")
+            if not self.session.preview_error:
+                self.session.set_preview_error(f"游戏进程退出码 {exit_code}")
             self.session.set_preview_state("error")
-        elif not self._stopping:
+        elif not self._stopping and self.session.preview_state != "error":
             self.session.set_preview_state("stopped")
+        self._startup_timer.stop()
         self.host.detach()
         self.process = None
         self._launch_spec = None
         self.process_changed.emit()
+        if not self._stopping and self._published_transaction is not None:
+            self._restore_previous_build()
+
+
+def _prepared_seek_units(prepared: PreparedBuild, stage_id: str | None) -> frozenset[str]:
+    """Read executable unit IDs from this validated package before publication."""
+
+    stages = (stage_id,) if stage_id is not None else prepared.manifest.get("stages", ())
+    units: set[str] = set()
+    for stage in stages:
+        folder = prepared.temp_dir / "stages" / stage
+        if not (folder / "stage.py").is_file():
+            continue
+        units.add(stage)
+        for kind in ("waves", "enemies", "spells", "tasks", "functions"):
+            units.update(path.stem for path in (folder / kind).glob("*.py") if path.stem != "__init__")
+    return frozenset(units)
 
 
 def _find_preview_window(pid: int) -> int | None:

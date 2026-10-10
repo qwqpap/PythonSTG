@@ -17,6 +17,8 @@ from src.authoring.program import (
     Parameter,
     ProgramError,
     Ref,
+    find_node,
+    numeric_field_range,
     parse_author_value,
     reference_kinds_for_field,
 )
@@ -26,7 +28,6 @@ from src.qt_compat.QtWidgets import (
     QCheckBox,
     QComboBox,
     QCompleter,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -34,6 +35,7 @@ from src.qt_compat.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -43,15 +45,26 @@ from src.qt_compat.QtWidgets import (
 )
 
 from .session import EditorSession
+from .node_palette import entry_for_kind
 from .sidebars import RESOURCE_MIME
 
 
-_EXPR_TOGGLE_TIP = "把常量改为表达式"
+_EXPR_TOGGLE_TIP = "当前为常量。点击改用表达式，例如 player_x。"
+
+
+@dataclass(frozen=True)
+class _FieldCommit:
+    unit_id: str | None
+    uid: str | None
+    callback: Any
+
+    def __call__(self, value):
+        self.callback(value)
 
 _GROUP_ORDER = (
     "basic",
-    "position",
     "emission",
+    "position",
     "motion",
     "appearance",
     "sound",
@@ -59,6 +72,7 @@ _GROUP_ORDER = (
     "advanced",
 )
 _GROUP_LABELS = {
+    "common": "常用参数",
     "basic": "基础",
     "position": "位置",
     "emission": "发射形状",
@@ -72,7 +86,7 @@ _FIELD_LABELS = {
     "name": "名称", "title": "标题", "subtitle": "副标题",
     "frames": "等待帧数", "frame": "目标帧", "count": "数量",
     "condition": "条件", "iterable": "迭代对象", "target": "目标变量",
-    "value": "值", "assign": "结果变量", "arguments": "位置参数",
+    "value": "值", "arguments": "位置参数",
     "keywords": "关键字参数", "function": "函数", "task": "任务",
     "wave_class": "波次", "boss_def": "Boss", "enemy_class": "敌机",
     "is_midboss": "中途 Boss", "x": "横坐标 X", "y": "纵坐标 Y",
@@ -100,61 +114,45 @@ _FIELD_LABELS = {
     "sample_rate": "采样频率", "clear_bullets_on_death": "死亡时清弹",
     "is_survival": "生存符", "is_timeout": "超时符", "drops": "掉落物",
     "tag": "标签", "source": "Python 代码", "node": "控制目标",
-    "head": "列表头", "to_items": "转换为列表", "wait": "等待完成",
+    "head": "列表头", "to_items": "转换为道具", "wait": "等待完成",
     "practice_unlock": "练习模式解锁", "stages": "关卡顺序",
-    "start_stage": "开始关卡", "phases": "Boss 阶段",
+    "start_stage": "开始关卡", "phases": "Boss 阶段", "assign": "保存返回值到",
 }
 _FIELD_UNITS = {
     "frames": "帧", "frame": "帧", "duration": "帧", "time_limit": "秒",
     "initial_delay_frames": "帧", "min_interval": "帧", "on_time": "帧",
-    "off_time": "帧", "x": "标准化场坐标", "y": "标准化场坐标",
-    "dx": "标准化场坐标", "dy": "标准化场坐标", "angle": "度",
+    "off_time": "帧", "x": "场地坐标", "y": "场地坐标",
+    "dx": "场地坐标", "dy": "场地坐标", "angle": "度",
     "start_angle": "度", "center_angle": "度", "arc_angle": "度",
     "offset_angle": "度", "angle_offset": "度", "theta": "度",
-    "speed": "场单位/帧", "accel": "场单位/帧²", "angle_accel": "度/帧²",
-    "spin": "度/帧", "angular_velocity": "度/帧",
+    "speed": "速度单位", "accel": "速度单位/秒", "angle_accel": "度/秒²",
+    "spin": "度/秒", "angular_velocity": "度/秒",
 }
 _FIRE_KINDS = frozenset(
     {"Fire", "FireCircle", "FireArc", "FireAtPlayer", "FirePolar", "FireOrbit"}
 )
+_COMMON_FIRE_FIELDS = (
+    "count", "speed", "angle", "start_angle", "center_angle", "arc_angle",
+    "offset_angle", "angle_offset", "theta", "bullet_type", "color",
+)
 
-# (owner_kind, field) takes precedence, then the field-name fallback.  The
-# spinboxes enforce these bounds directly so out-of-range input is visible.
-_FIELD_RANGES = {
-    ("Wait", "frames"): (0, 100_000),
-    ("At", "frame"): (0, 100_000),
-    ("Repeat", "count"): (0, 100_000),
-    ("MoveTo", "duration"): (0, 100_000),
-    ("MoveLinear", "duration"): (0, 100_000),
-    ("Spell", "time_limit"): (1, 3600),
-    ("NonSpell", "time_limit"): (1, 3600),
-    ("Spell", "hp"): (1, 1_000_000_000),
-    ("NonSpell", "hp"): (1, 1_000_000_000),
-    ("Enemy", "hp"): (1, 1_000_000_000),
-    ("Enemy", "score"): (0, 1_000_000_000),
-    ("Spell", "bonus"): (0, 1_000_000_000),
-    ("NonSpell", "bonus"): (0, 1_000_000_000),
-    ("Enemy", "hitbox_radius"): (0.0, 0.5),
-    ("CreateLaser", "l1"): (0.0, 2.0),
-    ("CreateLaser", "l2"): (0.0, 2.0),
-    ("CreateLaser", "l3"): (0.0, 2.0),
-    ("CreateLaser", "width"): (0.001, 0.2),
-    ("CreateLaser", "on_time"): (0, 100_000),
-    ("CreateBentLaser", "length"): (1, 100_000),
-    ("CreateBentLaser", "width"): (0.001, 0.2),
-    ("CreateBentLaser", "on_time"): (0, 100_000),
-    ("RemoveLaser", "off_time"): (0, 100_000),
-    ("FirePolar", "orbit_radius"): (0.0, 2.0),
-    ("FireOrbit", "orbit_radius"): (0.0, 2.0),
+# Presentation only: the full constructor-derived fields remain editable below
+# the fold, including values already set in source.  Required inputs are never
+# hidden, regardless of their name.
+_DETAIL_FIELDS = frozenset({
+    "accel", "angle_accel", "friction", "time_scale", "bounce_x", "bounce_y",
+    "spin", "radial_speed", "angular_velocity", "curve_type", "curve_params",
+    "render_angle", "render_scale", "collision_radius", "render_mode",
+    "texture_id", "animations", "l1", "l2", "l3", "tag", "wait", "assign",
+    "arguments", "keywords", "max_lifetime", "hitbox_radius", "score", "bonus",
+    "initial_delay_frames", "min_interval", "sample_rate", "clear_bullets_on_death",
+    "is_survival", "is_timeout", "practice_unlock", "drops",
+})
+_UNIT_LABELS = {
+    "Project": "工程", "Stage": "关卡", "Wave": "波次", "Enemy": "敌人",
+    "Boss": "Boss", "Spell": "符卡", "NonSpell": "非符", "Task": "任务",
+    "Function": "函数",
 }
-_NAME_RANGES = {
-    "x": (-2.0, 2.0), "y": (-2.0, 2.0),
-    "dx": (-2.0, 2.0), "dy": (-2.0, 2.0),
-    "theta": (-360.0, 360.0), "angle": (-360.0, 360.0),
-    "radial_speed": (-2.0, 2.0), "angular_velocity": (-2.0, 2.0),
-    "angle_offset": (-360.0, 360.0),
-}
-
 
 _POINT_NODE_KINDS = frozenset({
     "Fire", "FireCircle", "FireArc", "FireAtPlayer", "SpawnEnemy",
@@ -205,19 +203,24 @@ def _range_tooltip(owner_kind, name, annotation, value) -> str:
         and value is not None
         and not isinstance(value, Expr)
     ):
-        lines.append(f"默认: {value!r}"[:80])
+        default = _runtime_default_label(name) if value is dsl.RUNTIME_DEFAULT else repr(value)
+        lines.append(f"默认: {default}"[:80])
     bounds = _field_range(owner_kind or "", name or "")
     if bounds is not None:
-        lines.append(f"范围: {bounds[0]} ~ {bounds[1]}")
+        minimum, maximum = bounds
+        if maximum is None:
+            lines.append(f"范围: ≥ {minimum}")
+        elif minimum is None:
+            lines.append(f"范围: ≤ {maximum}")
+        else:
+            lines.append(f"范围: {minimum} ~ {maximum}")
     return chr(10).join(lines)
 
 
-def _field_range(owner_kind: str, name: str) -> tuple[float, float] | None:
-    if (owner_kind, name) in _FIELD_RANGES:
-        return _FIELD_RANGES[(owner_kind, name)]
-    if name in _NAME_RANGES:
-        return _NAME_RANGES[name]
-    return None
+def _field_range(
+    owner_kind: str, name: str
+) -> tuple[int | float | None, int | float | None] | None:
+    return numeric_field_range(owner_kind, name)
 
 
 _Y_ASPECT = 384.0 / 448.0  # renderer.py:211 宽高比校正（x 保持 ±1，y × 384/448）
@@ -270,18 +273,30 @@ def _field_group(owner_kind: str, name: str) -> str:
     return "basic"
 
 
-def _field_hint(owner_kind: str, name: str, default: Any) -> str:
+def _field_hint(owner_kind: str, name: str, default: Any, unit_kind: str | None = None) -> str:
     parts: list[str] = []
     unit = _FIELD_UNITS.get(name)
     if unit:
         parts.append(f"单位：{unit}")
     if default is not inspect.Parameter.empty:
-        text = repr(default)
+        text = _runtime_default_label(name, unit_kind) if default is dsl.RUNTIME_DEFAULT else repr(default)
         parts.append(f"默认：{text[:64]}")
     bounds = _field_range(owner_kind, name)
     if bounds is not None:
-        parts.append(f"范围：{bounds[0]} ～ {bounds[1]}")
+        minimum, maximum = bounds
+        if maximum is None:
+            parts.append(f"范围：≥ {minimum}")
+        elif minimum is None:
+            parts.append(f"范围：≤ {maximum}")
+        else:
+            parts.append(f"范围：{minimum} ～ {maximum}")
     return "  ·  ".join(parts)
+
+
+def _runtime_default_label(name: str, unit_kind: str | None = None) -> str:
+    if name in {"x", "y"}:
+        return "必须填写坐标" if unit_kind == "Wave" else "使用发射者位置"
+    return "沿用默认值"
 
 
 @dataclass(frozen=True)
@@ -724,8 +739,17 @@ class ParameterTable(QWidget):
         self.commit_requested.emit(values)
 
 
+class _ScrollSafeSpinBox(QSpinBox):
+    """Let the Inspector scroll without accidentally changing a number."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
 class InspectorPanel(QWidget):
     """Use constructor annotations as the only field schema."""
+
+    reference_open_requested = Signal(str)
 
     def __init__(self, session: EditorSession, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -733,6 +757,11 @@ class InspectorPanel(QWidget):
         self.session = session
         self.form = QFormLayout(self)
         self.form.setContentsMargins(8, 8, 8, 8)
+        self.form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+        self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.form.setHorizontalSpacing(8)
+        self.form.setVerticalSpacing(5)
         self._suggested_widget: QWidget | None = None
         self._coordinate_preview: CoordinatePreview | None = None
         self._emission_preview: EmissionPreview | None = None
@@ -740,8 +769,17 @@ class InspectorPanel(QWidget):
         self._bullet_catalog = BulletAssetCatalog(None)
         self._commit_depth = 0
         self._rebuild_scheduled = False
+        self._display_key = None
+        self._detail_rows: list[int] = []
+        self._detail_selection = None
+        self._details_open = False
+        self._more_button: QToolButton | None = None
+        self._preview_button: QToolButton | None = None
+        self._preview_rows: list[int] = []
+        self._previews_open = False
         self.session.selection_changed.connect(self.refresh)
         self.session.project_changed.connect(self.refresh)
+        self.session.program_changed.connect(self.refresh)
         self.refresh()
 
     def refresh(self) -> None:
@@ -765,8 +803,21 @@ class InspectorPanel(QWidget):
             self._do_refresh()
 
     def _do_refresh(self) -> None:
+        key = self._display_state()
+        if key == self._display_key:
+            return
+        self._display_key = key
+        selection = (self.session.current_unit_id, self.session.current_node_uid)
+        if selection != self._detail_selection:
+            self._detail_selection = selection
+            self._details_open = False
+            self._previews_open = False
         while self.form.rowCount():
             self.form.removeRow(0)
+        self._detail_rows.clear()
+        self._more_button = None
+        self._preview_button = None
+        self._preview_rows.clear()
         self._suggested_widget = None
         self._coordinate_preview = None
         self._emission_preview = None
@@ -777,46 +828,63 @@ class InspectorPanel(QWidget):
             constructor = dsl.NODE_CONSTRUCTORS.get(node.kind)
             annotations = get_type_hints(constructor) if constructor is not None else {}
             defaults = _constructor_defaults(constructor)
-            self.form.addRow("节点类型", QLabel(node.kind))
-            self.form.addRow("UID", QLabel(node.uid))
+            label = (
+                {"Branch": "并行分支", "TemplateCall": "弹幕模板"}[node.kind]
+                if node.kind in {"Branch", "TemplateCall"}
+                else entry_for_kind(node.kind).label
+            )
+            header = QLabel(f"属性 · {label}", self)
+            header.setObjectName("inspector_title")
+            header.setToolTip(f"Python API：{node.kind}\n节点标识：{node.uid}")
+            self.form.addRow(header)
             suggested = self._suggested_field_name(node, constructor)
             fields = _node_fields(node, constructor)
+            details = [(name, value) for name, value in fields if self._is_detail(name, defaults)]
+            common = [
+                (name, value)
+                for name in _COMMON_FIRE_FIELDS
+                for field, value in fields
+                if node.kind in _FIRE_KINDS and field == name
+            ]
+            if common:
+                self._add_section("common")
+                self._add_group_fields(
+                    node.kind, common, annotations, defaults, suggested,
+                    lambda name, value, uid=node.uid: self.session.set_node_argument(uid, name, value),
+                )
+            common_names = {name for name, _value in common}
+            if common:
+                self._add_previews(node)
             for group in _GROUP_ORDER:
                 grouped = [
                     (name, value)
                     for name, value in fields
-                    if _field_group(node.kind, name) == group
+                    if name not in common_names
+                    and _field_group(node.kind, name) == group
+                    and not self._is_detail(name, defaults)
                 ]
-                has_coordinate = group == "position" and _coordinate_spec_kind(node) is not None
-                has_emission = group == "emission" and node.kind in _FIRE_KINDS
-                has_bullet = group == "appearance" and node.kind in _FIRE_KINDS
-                if not grouped and not has_coordinate and not has_emission and not has_bullet:
+                if not grouped:
                     continue
                 self._add_section(group)
-                if has_coordinate:
-                    self._add_coordinate_preview(node)
-                if has_emission:
-                    self._add_emission_preview(node)
-                if has_bullet:
-                    self._add_bullet_preview(node)
-                for name, value in grouped:
-                    self._add_field(
-                        name,
-                        value,
-                        annotations.get(name, Any),
-                        node.kind,
-                        defaults.get(name, inspect.Parameter.empty),
-                        mark_suggested=name == suggested,
-                        commit=lambda new_value, uid=node.uid, key=name: (
-                            self.session.set_node_argument(uid, key, new_value)
-                        ),
-                    )
+                self._add_group_fields(
+                    node.kind, grouped, annotations, defaults, suggested,
+                    lambda name, value, uid=node.uid: self.session.set_node_argument(uid, name, value),
+                )
+            if not common:
+                self._add_previews(node)
+            self._add_details(
+                node.kind, details, annotations, defaults,
+                lambda name, value: self.session.set_node_argument(node.uid, name, value),
+            )
             return
         if unit is not None:
             constructor = dsl.UNIT_CONSTRUCTORS[unit.kind]
             annotations = get_type_hints(constructor)
             defaults = _constructor_defaults(constructor)
-            self.form.addRow("逻辑单元", QLabel(unit.kind))
+            header = QLabel(f"属性 · {_UNIT_LABELS[unit.kind]}", self)
+            header.setObjectName("inspector_title")
+            header.setToolTip(f"Python 类型：{unit.kind}\n内容 ID：{unit.id}")
+            self.form.addRow(header)
             self._add_section("basic")
             self._add_field(
                 "名称",
@@ -833,30 +901,44 @@ class InspectorPanel(QWidget):
             if "parameters" in inspect.signature(constructor).parameters:
                 self._add_parameter_field(unit)
             fields = _unit_fields(unit.metadata, constructor)
+            details = [(name, value) for name, value in fields if self._is_detail(name, defaults)]
             for group in _GROUP_ORDER:
                 grouped = [
                     (name, value)
                     for name, value in fields
-                    if _field_group(unit.kind, name) == group
+                    if _field_group(unit.kind, name) == group and not self._is_detail(name, defaults)
                 ]
                 if not grouped:
                     continue
                 if group != "basic":
                     self._add_section(group)
-                for name, value in grouped:
-                    self._add_field(
-                        name,
-                        value,
-                        annotations.get(name, Any),
-                        unit.kind,
-                        defaults.get(name, inspect.Parameter.empty),
-                        mark_suggested=False,
-                        commit=lambda new_value, unit_id=unit.id, key=name: (
-                            self.session.set_unit_field(unit_id, key, new_value)
-                        ),
-                    )
+                self._add_group_fields(
+                    unit.kind, grouped, annotations, defaults, None,
+                    lambda name, value, unit_id=unit.id: self.session.set_unit_field(unit_id, name, value),
+                )
+            self._add_details(
+                unit.kind, details, annotations, defaults,
+                lambda name, value: self.session.set_unit_field(unit.id, name, value),
+            )
             return
         self.form.addRow(QLabel("当前文件不可视化编辑"))
+
+    def _display_state(self):
+        """Only selected fields and their available choices affect this panel."""
+
+        unit, node = self.session.current_unit, self.session.current_node
+        choices = tuple(
+            (item.id, item.kind)
+            for item in self.session.program.logical_units()
+        ) if self.session.is_open else ()
+        root = self.session.project_context.root if self.session.project_context else None
+        if node is not None:
+            fields = (node.uid, node.kind, node.arguments, node.positional_arguments)
+        elif unit is not None:
+            fields = (unit.id, unit.kind, unit.name, unit.parameters, unit.metadata)
+        else:
+            fields = None
+        return (fields, self.session.can_edit, choices, root)
 
     def _ensure_bullet_catalog(self) -> None:
         context = self.session.project_context
@@ -870,10 +952,118 @@ class InspectorPanel(QWidget):
         header = QLabel(_GROUP_LABELS[group], self)
         header.setObjectName(f"inspector_group_{group}")
         header.setStyleSheet(
-            "color: #58a6e7; font-weight: 600; padding-top: 8px; "
+            "color: #58a6e7; font-weight: 600; padding-top: 4px; "
             "border-bottom: 1px solid #30363d;"
         )
         self.form.addRow(header)
+
+    def _add_group_fields(self, owner_kind, fields, annotations, defaults, suggested, commit) -> None:
+        values = dict(fields)
+        paired_names: set[str] = set()
+        for names in (("x", "y"), ("dx", "dy")):
+            if not all(name in values for name in names):
+                continue
+            pair = QWidget(self)
+            pair.setObjectName(f"coordinate_pair_{names[0]}_{names[1]}")
+            pair_layout = QHBoxLayout(pair)
+            pair_layout.setContentsMargins(0, 0, 0, 0)
+            pair_layout.setSpacing(8)
+            for name in names:
+                label, container = self._add_field(
+                    name, values[name], annotations.get(name, Any), owner_kind,
+                    defaults.get(name, inspect.Parameter.empty),
+                    mark_suggested=name == suggested,
+                    commit=lambda value, key=name: commit(key, value),
+                    add_to_form=False,
+                    label_override=name.upper().replace("D", "Δ"),
+                )
+                coordinate = QWidget(pair)
+                coordinate_layout = QHBoxLayout(coordinate)
+                coordinate_layout.setContentsMargins(0, 0, 0, 0)
+                coordinate_layout.setSpacing(4)
+                coordinate_layout.addWidget(label)
+                coordinate_layout.addWidget(container, 1)
+                pair_layout.addWidget(coordinate, 1)
+            self.form.addRow(pair)
+            paired_names.update(names)
+        for name, value in fields:
+            if name in paired_names:
+                continue
+            self._add_field(
+                name, value, annotations.get(name, Any), owner_kind,
+                defaults.get(name, inspect.Parameter.empty),
+                mark_suggested=name == suggested,
+                commit=lambda value, key=name: commit(key, value),
+            )
+
+    def _add_previews(self, node) -> None:
+        has_coordinate = _coordinate_spec_kind(node) is not None
+        has_emission = node.kind in _FIRE_KINDS
+        if not has_coordinate and not has_emission:
+            return
+        button = QToolButton(self)
+        button.setObjectName("inspector_preview_toggle")
+        button.setCheckable(True)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setToolTip("参数示意图，不是游戏预览。展开或收起不会修改内容。")
+        self._preview_button = button
+        self.form.addRow(button)
+        first_row = self.form.rowCount()
+        if has_emission:
+            self._add_bullet_preview(node)
+            self._add_emission_preview(node)
+        if has_coordinate:
+            self._add_coordinate_preview(node)
+        self._preview_rows = list(range(first_row, self.form.rowCount()))
+        button.toggled.connect(self._set_previews_visible)
+        button.setChecked(self._previews_open)
+        self._set_previews_visible(self._previews_open)
+
+    def _set_previews_visible(self, visible: bool) -> None:
+        self._previews_open = visible
+        for row in self._preview_rows:
+            self.form.setRowVisible(row, visible)
+        if self._preview_button is not None:
+            self._preview_button.setText("收起示意图" if visible else "形状与位置示意")
+            self._preview_button.setArrowType(
+                Qt.ArrowType.DownArrow if visible else Qt.ArrowType.RightArrow
+            )
+
+    @staticmethod
+    def _is_detail(name: str, defaults: dict) -> bool:
+        return name in _DETAIL_FIELDS and name in defaults
+
+    def _add_details(self, owner_kind, fields, annotations, defaults, commit) -> None:
+        if not fields:
+            return
+        button = QToolButton(self)
+        button.setObjectName("inspector_more_parameters")
+        button.setCheckable(True)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setToolTip("展开运动细节、生命周期和其它可选参数。已有参数不会被重置。")
+        self._more_button = button
+        self.form.addRow(button)
+        first_row = self.form.rowCount()
+        for group in _GROUP_ORDER:
+            grouped = [(name, value) for name, value in fields if _field_group(owner_kind, name) == group]
+            if not grouped:
+                continue
+            self._add_section(group)
+            self._add_group_fields(owner_kind, grouped, annotations, defaults, None, commit)
+        self._detail_rows = list(range(first_row, self.form.rowCount()))
+        button.setProperty("parameter_count", len(fields))
+        button.toggled.connect(self._set_details_visible)
+        button.setChecked(self._details_open)
+        self._set_details_visible(self._details_open)
+
+    def _set_details_visible(self, visible: bool) -> None:
+        self._details_open = visible
+        for row in self._detail_rows:
+            self.form.setRowVisible(row, visible)
+        if self._more_button is not None:
+            count = self._more_button.property("parameter_count")
+            self._more_button.setText("收起更多参数" if visible else f"更多参数（{count} 项）")
+            self._more_button.setArrowType(Qt.ArrowType.DownArrow if visible else Qt.ArrowType.RightArrow)
 
     def focus_suggested_field(self) -> None:
         """Focus the field the author most likely wants to change next."""
@@ -903,14 +1093,21 @@ class InspectorPanel(QWidget):
         return current
 
     def _suggested_field_name(self, node, constructor) -> str | None:
-        """The first field still holding its constructor default value."""
+        """Prefer common emission parameters, then a field at its default value."""
 
         if constructor is None:
             return None
+        if node.kind in _FIRE_KINDS:
+            available = {name for name, _value in _node_fields(node, constructor)}
+            for name in ("count", "speed"):
+                if name in available:
+                    return name
         signature = inspect.signature(constructor)
         for name, value in _node_fields(node, constructor):
             parameter = signature.parameters.get(name)
             if parameter is None or parameter.default is inspect.Parameter.empty:
+                continue
+            if name in _DETAIL_FIELDS:
                 continue
             try:
                 if value == parameter.default and type(value) is type(parameter.default):
@@ -932,14 +1129,22 @@ class InspectorPanel(QWidget):
         mark_suggested: bool,
         commit,
         field_name: str | None = None,
-    ) -> None:
+        add_to_form: bool = True,
+        label_override: str | None = None,
+    ) -> tuple[QLabel, QWidget]:
+        commit = _FieldCommit(
+            self.session.current_unit_id, self.session.current_node_uid, commit
+        )
         container = QWidget(self)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         editor = self._editor(value, annotation, owner_kind, name, commit)
+        editor.setMinimumWidth(0)
+        editor.setSizePolicy(QSizePolicy.Policy.Ignored, editor.sizePolicy().verticalPolicy())
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
         row.addWidget(editor, 1)
         if self._supports_expr(value, annotation, field_name or name):
             row.addWidget(
@@ -947,32 +1152,74 @@ class InspectorPanel(QWidget):
             )
         if isinstance(editor, ResourceLineEdit):
             row.addWidget(self._browse_button(editor, name))
+        if isinstance(value, Ref) and isinstance(editor, QComboBox):
+            reference_ids = {
+                editor.itemText(index): str(editor.itemData(index))
+                for index in range(editor.count())
+            }
+            reference_text = [editor.currentText()]
+            editor.currentTextChanged.connect(
+                lambda text: reference_text.__setitem__(0, text)
+            )
+            open_button = QToolButton(container)
+            open_button.setText("打开")
+            open_button.setObjectName(f"open_reference_{field_name or name}")
+            open_button.setToolTip("打开引用内容；返回会保留当前步骤位置")
+            def open_reference(_checked=False) -> None:
+                target = reference_ids.get(reference_text[0], reference_text[0].strip())
+                if target:
+                    QTimer.singleShot(0, lambda unit_id=target: self.reference_open_requested.emit(unit_id))
+            open_button.clicked.connect(open_reference)
+            row.addWidget(open_button)
         layout.addLayout(row)
-        hint = _field_hint(owner_kind, name, default)
+        unit = self.session.current_unit
+        hint = _field_hint(owner_kind, name, default, unit.kind if unit is not None else None)
         if hint:
-            hint_label = QLabel(hint, container)
-            hint_label.setObjectName(f"hint_{field_name or name}")
-            hint_label.setStyleSheet("color: #6e7681; font-size: 11px;")
-            hint_label.setWordWrap(True)
-            layout.addWidget(hint_label)
+            tooltip = editor.toolTip()
+            editor.setToolTip(f"{tooltip}\n{hint}" if tooltip else hint)
         error_label = QLabel("", container)
         error_label.setStyleSheet("color: #f85149;")
         error_label.setWordWrap(True)
         error_label.setObjectName(f"error_{name}")
+        error_label.hide()
         layout.addWidget(error_label)
         editor.setObjectName(f"argument_{field_name or name}")
         editor.setProperty("pystg_annotation", str(annotation))
         editor.setProperty("pystg_field", field_name or name)
-        visible_name = _FIELD_LABELS.get(name, name)
-        label = QLabel(
-            visible_name + ("  ·  建议调整" if mark_suggested else ""),
-            container,
-        )
-        label.setToolTip(_range_tooltip(owner_kind, name, annotation, default))
+        visible_name = label_override or _FIELD_LABELS.get(name, name)
+        label = QLabel(visible_name, container)
+        label.setObjectName(f"label_{field_name or name}")
+        label.setWordWrap(False)
+        label.ensurePolished()
+        text_width = label.sizeHint().width()
+        if add_to_form:
+            # QFormLayout otherwise treats a wrapped Chinese label's one-glyph
+            # width as its minimum and can turn even "数量" into vertical text.
+            short_label = text_width <= 80
+            label.setWordWrap(not short_label)
+            label.setMinimumWidth(max(58, text_width) if short_label else 58)
+            label.setMaximumWidth(80)
+            if short_label:
+                label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        else:
+            label.setFixedWidth(text_width)
+            label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        tooltip = _range_tooltip(owner_kind, name, annotation, default)
+        if hint:
+            tooltip += f"\n{hint}"
+        if mark_suggested:
+            tooltip += "\n建议先调整此项。"
+        label.setToolTip(tooltip)
         if mark_suggested:
             label.setStyleSheet("color: #f0883e;")
             self._suggested_widget = self._focus_proxy(editor)
-        self.form.addRow(label, container)
+        if add_to_form:
+            if isinstance(editor, QPlainTextEdit):
+                self.form.addRow(label)
+                self.form.addRow(container)
+            else:
+                self.form.addRow(label, container)
+        return label, container
 
     def _add_bullet_preview(self, node) -> None:
         bullet_type = str(node.arguments.get("bullet_type", "ball_m"))
@@ -1007,10 +1254,14 @@ class InspectorPanel(QWidget):
         self.form.addRow(QLabel("形状示意", self), preview)
 
     def _emission_spec(self, node):
+        defaults = _constructor_defaults(dsl.NODE_CONSTRUCTORS.get(node.kind))
         def numeric(name: str, default: float) -> float | None:
-            original = node.arguments.get(name, default)
+            original = node.arguments.get(name, defaults.get(name, default))
             editor = self.findChild(QWidget, f"argument_{name}")
-            value = self._current_value(editor, original) if editor is not None else original
+            try:
+                value = self._current_value(editor, original) if editor is not None else original
+            except ValueError:
+                return None
             if isinstance(value, Expr) or isinstance(value, bool) or not isinstance(value, (int, float)):
                 return None
             return float(value)
@@ -1065,18 +1316,20 @@ class InspectorPanel(QWidget):
             if node.kind in {
                 "Fire", "FireCircle", "FireArc", "FireAtPlayer",
             } and "x" not in node.arguments:
-                return ("hint", "未填 x/y = 使用发射者位置")
+                return ("hint", "未填写坐标，使用发射者位置")
             return ("hint", "坐标含表达式，无法预览")
         fields = ("dx", "dy") if kind == "delta" else ("x", "y")
+        defaults = _constructor_defaults(dsl.NODE_CONSTRUCTORS.get(node.kind))
         values = []
         for field in fields:
-            original = node.arguments.get(field)
+            original = node.arguments.get(field, defaults.get(field))
             editor = self.findChild(QWidget, f"argument_{field}")
-            value = (
-                self._current_value(editor, original)
-                if editor is not None
-                else original
-            )
+            try:
+                value = self._current_value(editor, original) if editor is not None else original
+            except ValueError:
+                return ("hint", "请完成坐标输入后再预览位置")
+            if value is None or value is dsl.RUNTIME_DEFAULT:
+                return ("hint", "未填写的坐标使用发射者位置")
             if isinstance(value, Expr) or not isinstance(value, (int, float)) or isinstance(value, bool):
                 return ("hint", "坐标含表达式，无法预览")
             values.append(float(value))
@@ -1102,7 +1355,8 @@ class InspectorPanel(QWidget):
         error.setStyleSheet("color: #f85149;")
         error.setWordWrap(True)
         layout.addWidget(error)
-        self.form.addRow(QLabel("参数表", container), container)
+        self.form.addRow(QLabel("参数表", self))
+        self.form.addRow(container)
 
     def _focus_proxy(self, editor: QWidget) -> QWidget:
         inner = (
@@ -1120,6 +1374,42 @@ class InspectorPanel(QWidget):
         name: str,
         commit,
     ) -> QWidget:
+        if owner_kind in {"FireCircle", "FireArc"} and name in {"x", "y"} and not isinstance(value, Expr):
+            return self._optional_coordinate_editor(value, name, commit)
+        if value is dsl.RUNTIME_DEFAULT:
+            widget = QLineEdit(self)
+            unit = self.session.current_unit
+            widget.setPlaceholderText(_runtime_default_label(name, unit.kind if unit is not None else None))
+            widget.setReadOnly(not self.session.can_edit)
+            widget.setToolTip("留空保持现有设置；输入数值后使用自定义值。")
+            if self.session.can_edit:
+                def submit_default() -> None:
+                    text = widget.text().strip()
+                    if not text:
+                        self._show_field_error(name, "")
+                        return
+                    try:
+                        parsed = _parse_literal(text)
+                    except ValueError as exc:
+                        self._show_field_error(name, str(exc))
+                        return
+                    self._commit_after_event(commit, parsed, name, value)
+                widget.editingFinished.connect(submit_default)
+                widget.textChanged.connect(self._refresh_coordinate_preview)
+            return widget
+        if owner_kind == "Call" and name == "assign":
+            widget = QLineEdit(value or "", self)
+            widget.setPlaceholderText("可选：变量名，留空不保存返回值")
+            widget.setReadOnly(not self.session.can_edit)
+            if self.session.can_edit:
+                widget.editingFinished.connect(
+                    lambda editor=widget, original=value: self._commit_after_event(
+                        commit, editor.text().strip() or None, name, original
+                    )
+                )
+            return widget
+        if owner_kind == "RawPython" and name == "source":
+            return self._source_text_editor(value, name, commit)
         if owner_kind in _FIRE_KINDS and name in {"bullet_type", "color"}:
             return self._bullet_alias_editor(
                 str(value), owner_kind, name, commit
@@ -1145,9 +1435,21 @@ class InspectorPanel(QWidget):
                 )
             return widget
         if field_type is int:
-            low, high = _field_range(owner_kind, name) or (-1_000_000, 1_000_000)
-            widget = QSpinBox(self)
-            widget.setRange(int(low), int(high))
+            # QSpinBox stores a signed 32-bit integer.  Values outside that
+            # widget range stay editable as text so simply opening Inspector
+            # can never replace the source value with a clamped one.
+            if not -(2**31) <= int(value) <= 2**31 - 1:
+                return self._numeric_text_editor(value, name, commit)
+            bounds = _field_range(owner_kind, name) or (None, None)
+            if (
+                (bounds[0] is not None and int(value) < bounds[0])
+                or (bounds[1] is not None and int(value) > bounds[1])
+            ):
+                return self._numeric_text_editor(value, name, commit)
+            widget = _ScrollSafeSpinBox(self)
+            minimum = -(2**31) if bounds[0] is None else max(-(2**31), int(bounds[0]))
+            maximum = 2**31 - 1 if bounds[1] is None else min(2**31 - 1, int(bounds[1]))
+            widget.setRange(minimum, maximum)
             widget.setValue(int(value))
             widget.setReadOnly(not self.session.can_edit)
             widget.setToolTip(_range_tooltip(owner_kind, name, annotation, value))
@@ -1160,20 +1462,10 @@ class InspectorPanel(QWidget):
                 widget.valueChanged.connect(self._refresh_coordinate_preview)
             return widget
         if field_type is float:
-            low, high = _field_range(owner_kind, name) or (-1_000.0, 1_000.0)
-            widget = QDoubleSpinBox(self)
-            widget.setDecimals(6)
-            widget.setRange(float(low), float(high))
-            widget.setValue(float(value))
-            widget.setReadOnly(not self.session.can_edit)
+            # A decimal-limited spinner rounds *new* input even when the old
+            # source value fits.  Parse the complete literal on commit instead.
+            widget = self._numeric_text_editor(value, name, commit)
             widget.setToolTip(_range_tooltip(owner_kind, name, annotation, value))
-            if self.session.can_edit:
-                widget.editingFinished.connect(
-                    lambda editor=widget, original=value: self._commit_after_event(
-                        commit, editor.value(), name, original
-                    )
-                )
-                widget.valueChanged.connect(self._refresh_coordinate_preview)
             return widget
         if isinstance(value, (list, tuple, dict)):
             return self._literal_text_editor(value, name, commit)
@@ -1195,6 +1487,68 @@ class InspectorPanel(QWidget):
                         commit, uri, name, original
                     )
                 )
+        return widget
+
+    def _optional_coordinate_editor(self, value: Any, name: str, commit) -> QWidget:
+        widget = QLineEdit(self)
+        widget.setText("" if value is dsl.RUNTIME_DEFAULT else repr(value))
+        unit = self.session.current_unit
+        widget.setPlaceholderText(_runtime_default_label(name, unit.kind if unit is not None else None))
+        widget.setReadOnly(not self.session.can_edit)
+        widget.setToolTip("输入数值使用自定义坐标；清空后恢复默认。波次中必须明确填写坐标。")
+        edited = [False]
+        widget.textChanged.connect(lambda _text: edited.__setitem__(0, True))
+        if self.session.can_edit:
+            def submit() -> None:
+                if not edited[0]:
+                    return
+                text = widget.text().strip()
+                if not text:
+                    reset = _FieldCommit(
+                        commit.unit_id, commit.uid,
+                        lambda _value: self.session.unset_node_argument(commit.uid, name),
+                    )
+                    self._commit_after_event(reset, dsl.RUNTIME_DEFAULT, name, value)
+                    return
+                try:
+                    parsed = _parse_literal(text)
+                except ValueError as exc:
+                    self._show_field_error(name, str(exc))
+                    return
+                self._commit_after_event(commit, parsed, name, value)
+            widget.editingFinished.connect(submit)
+            widget.textChanged.connect(self._refresh_coordinate_preview)
+        return widget
+
+    def _source_text_editor(self, value: str, name: str, commit) -> QWidget:
+        widget = LiteralTextEdit(self)
+        widget.setPlainText(value)
+        widget.setMinimumHeight(144)
+        widget.setReadOnly(not self.session.can_edit)
+        widget.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        widget.setPlaceholderText("在此编写当前动作中的多行 Python 代码")
+        if self.session.can_edit:
+            widget.commit_requested.connect(
+                lambda editor=widget, original=value: self._commit_after_event(
+                    commit, editor.toPlainText(), name, original
+                )
+            )
+        return widget
+
+    def _numeric_text_editor(self, value: Any, name: str, commit) -> QWidget:
+        """Edit a scalar that cannot be represented by Qt's spinbox range."""
+
+        widget = QLineEdit(self)
+        widget.setText(repr(value))
+        widget.setReadOnly(not self.session.can_edit)
+        widget.setToolTip(_range_tooltip(None, name, type(value), value))
+        if self.session.can_edit:
+            widget.editingFinished.connect(
+                lambda editor=widget, original=value: self._commit_after_event(
+                    commit, _parse_text(editor.text(), original), name, original
+                )
+            )
+            widget.textChanged.connect(self._refresh_coordinate_preview)
         return widget
 
     def _bullet_alias_editor(
@@ -1281,36 +1635,50 @@ class InspectorPanel(QWidget):
         widget = QComboBox(self)
         expected = reference_kinds_for_field(owner_kind, name)
         candidates = [
-            unit.id
+            unit
             for unit in sorted(
-                self.session.program.logical_units(), key=lambda item: (item.kind, item.id)
+                self.session.program.logical_units(), key=lambda item: (item.name, item.id)
             )
             if not expected or unit.kind in expected
         ]
-        if value.id not in candidates:
-            candidates.insert(0, value.id)
-        widget.addItems(candidates)
-        widget.setCurrentText(value.id)
+        names = [unit.name for unit in candidates]
+        for unit in candidates:
+            label = f"{unit.name} · {unit.id}" if names.count(unit.name) > 1 else unit.name
+            widget.addItem(label, unit.id)
+            widget.setItemData(widget.count() - 1, unit.id, Qt.ItemDataRole.ToolTipRole)
+        if widget.findData(value.id) < 0:
+            widget.insertItem(0, f"未找到 · {value.id}", value.id)
+        widget.setCurrentIndex(widget.findData(value.id))
+        label_ids = {widget.itemText(index): str(widget.itemData(index)) for index in range(widget.count())}
         widget.setEditable(True)
         widget.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         widget.setEnabled(self.session.can_edit)
-        widget.setToolTip(f"{name}\n引用 {expected or '逻辑单元'}\n当前: {value.id}")
+        widget.setToolTip(f"选择已有内容，可搜索名称或输入 Python ID\n当前 ID：{value.id}")
+        widget.completer().setFilterMode(Qt.MatchFlag.MatchContains)
         if self.session.can_edit:
             # Dropdown selections commit once; typed identifiers commit on
             # Enter/focus-out so partial ids never hit the model.
             widget.currentIndexChanged.connect(
                 lambda index, original=value: (
                     self._commit_after_event(
-                        commit, Ref(widget.currentText()), name, original
+                        commit, Ref(str(widget.itemData(index))), name, original
                     )
                     if index >= 0
                     else None
                 )
             )
             line_edit = widget.lineEdit()
+            # A combo can delete its child line edit before emitting the last
+            # focus-out signal.  Capture input changes while it is still alive.
+            entered_text = [line_edit.text()]
+            line_edit.textChanged.connect(
+                lambda text: entered_text.__setitem__(0, text)
+            )
             line_edit.editingFinished.connect(
                 lambda original=value: self._commit_after_event(
-                    commit, Ref(line_edit.text()), name, original
+                    commit,
+                    Ref(label_ids.get(entered_text[0], entered_text[0].strip())),
+                    name, original
                 )
             )
         return widget
@@ -1328,11 +1696,20 @@ class InspectorPanel(QWidget):
             completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
             widget.setCompleter(completer)
         if self.session.can_edit:
-            widget.editingFinished.connect(
-                lambda editor=widget, original=value: self._commit_after_event(
-                    commit, Expr(editor.text()), name, original
-                )
-            )
+            node = self.session.current_node
+            optional_coordinate = bool(node and node.kind in {"FireCircle", "FireArc"} and name in {"x", "y"})
+            edited = [False]
+            widget.textChanged.connect(lambda _text: edited.__setitem__(0, True))
+            def submit_expression() -> None:
+                if optional_coordinate and edited[0] and not widget.text().strip():
+                    reset = _FieldCommit(
+                        commit.unit_id, commit.uid,
+                        lambda _value: self.session.unset_node_argument(commit.uid, name),
+                    )
+                    self._commit_after_event(reset, dsl.RUNTIME_DEFAULT, name, value)
+                else:
+                    self._commit_after_event(commit, Expr(widget.text()), name, value)
+            widget.editingFinished.connect(submit_expression)
             widget.textChanged.connect(self._refresh_coordinate_preview)
         return widget
 
@@ -1379,9 +1756,11 @@ class InspectorPanel(QWidget):
     ) -> QWidget:
         button = QToolButton(self)
         button.setObjectName(f"expression_toggle_{name}")
-        button.setText("常" if isinstance(value, Expr) else "ƒ")
+        button.setText("表达式" if isinstance(value, Expr) else "常量")
+        button.setStyleSheet("QToolButton { padding: 2px 4px; margin: 0; }")
         button.setToolTip(
-            "把表达式改回常量" if isinstance(value, Expr) else _EXPR_TOGGLE_TIP
+            "当前为表达式。点击改回常量；表达式须为可转换的固定值。"
+            if isinstance(value, Expr) else _EXPR_TOGGLE_TIP
         )
         button.setEnabled(self.session.can_edit)
 
@@ -1394,14 +1773,18 @@ class InspectorPanel(QWidget):
                     return
                 self._commit_after_event(commit, constant, name, value)
                 return
-            current = self._current_value(editor, value)
+            try:
+                current = self._current_value(editor, value)
+            except ValueError as exc:
+                self._show_field_error(name, str(exc))
+                return
             self._commit_after_event(commit, Expr(_expr_source(current)), name, value)
 
         button.clicked.connect(switch)
         return button
 
     def _supports_expr(self, value: Any, annotation: Any, field_name: str) -> bool:
-        if field_name == "unit_name":
+        if field_name in {"unit_name", "assign", "source"}:
             return False
         if isinstance(value, (list, tuple, dict, Ref, bool)):
             return False
@@ -1412,9 +1795,11 @@ class InspectorPanel(QWidget):
     def _current_value(self, editor: QWidget, original: Any) -> Any:
         if isinstance(editor, QSpinBox):
             return editor.value()
-        if isinstance(editor, QDoubleSpinBox):
-            return editor.value()
         if isinstance(editor, (QLineEdit, ResourceLineEdit)):
+            if isinstance(original, Expr):
+                return Expr(editor.text())
+            if original is dsl.RUNTIME_DEFAULT and not editor.text().strip():
+                return original
             return _parse_text(editor.text(), original)
         if isinstance(editor, QComboBox):
             data = editor.currentData()
@@ -1480,9 +1865,11 @@ class InspectorPanel(QWidget):
     def _commit(
         self, callback, value: Any, name: str, original: Any = _UNSET
     ) -> None:
-        if original is not _UNSET and _values_equal(value, original):
+        current = self._current_field_value(name, callback)
+        if current is not _UNSET and _values_equal(value, current):
             self._show_field_error(name, "")
             return
+        previous_selection = (self.session.current_unit_id, self.session.current_node_uid)
         self._commit_depth += 1
         try:
             callback(value)
@@ -1491,7 +1878,42 @@ class InspectorPanel(QWidget):
             self._show_field_error(name, str(exc))
             return
         self._commit_depth -= 1
+        if (
+            previous_selection == (self.session.current_unit_id, self.session.current_node_uid)
+            and name not in {"bullet_type", "color", "parameters"}
+            and original is not _UNSET
+            and type(value) is type(original)
+        ):
+            # The focused editor already contains the new value.  Preserve it
+            # through a successful same-type commit so Tab and a second edit
+            # keep their focus, instead of deleting and recreating the sender.
+            self._display_key = self._display_state()
+            self._refresh_coordinate_preview()
         self._show_field_error(name, "")
+
+    def _current_field_value(self, name: str, callback):
+        node = self.session.current_node
+        unit = self.session.current_unit
+        if isinstance(callback, _FieldCommit):
+            try:
+                unit = self.session.program.get_unit(callback.unit_id)
+                node = find_node(self.session.program, callback.uid)[1] if callback.uid else None
+            except ProgramError:
+                return _UNSET
+        if node is not None:
+            if name in node.arguments:
+                return node.arguments[name]
+            constructor = dsl.NODE_CONSTRUCTORS.get(node.kind)
+            return _constructor_defaults(constructor).get(name, _UNSET)
+        if unit is None:
+            return _UNSET
+        if name == "名称":
+            return unit.name
+        if name == "parameters":
+            return unit.parameters
+        if name in unit.metadata:
+            return unit.metadata[name]
+        return _constructor_defaults(dsl.UNIT_CONSTRUCTORS[unit.kind]).get(name, _UNSET)
 
     def _refresh_coordinate_preview(self, *_args) -> None:
         if self._coordinate_preview is not None:
@@ -1522,6 +1944,7 @@ class InspectorPanel(QWidget):
                     window.statusBar().showMessage(f"参数未修改：{message}", 5000)
             return
         error_label.setText(message)
+        error_label.setVisible(bool(message))
 
 
 def resource_field_accepts(owner_kind: str, name: str, uri: str) -> bool:

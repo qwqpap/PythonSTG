@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable, Sequence
 
-from src.qt_compat.QtCore import QEvent, QMimeData, Qt, Signal
+from src.qt_compat.QtCore import QEvent, QMimeData, QSize, Qt, Signal
 from src.qt_compat.QtWidgets import (
     QButtonGroup,
     QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QStackedWidget,
@@ -25,6 +27,19 @@ from src.qt_compat.QtWidgets import (
 RESOURCE_MIME = "application/x-pystg-resource"
 UNIT_REFERENCE_MIME = "application/x-pystg-unit-ref"
 _ROLE_URI = int(Qt.ItemDataRole.UserRole)
+_ROLE_RESOURCE_KIND = _ROLE_URI + 1
+_ROLE_RESOURCE_SEARCH = _ROLE_URI + 2
+
+
+def _resource_kind(uri: str) -> str:
+    suffix = PurePosixPath(uri.removeprefix("res://").split("#", 1)[0]).suffix.lower()
+    if suffix in {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}:
+        return "图片"
+    if suffix in {".flac", ".mp3", ".ogg", ".wav"}:
+        return "音频"
+    if suffix in {".otf", ".ttf"}:
+        return "字体"
+    return "数据"
 
 
 class ResourceListWidget(QListWidget):
@@ -34,21 +49,44 @@ class ResourceListWidget(QListWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._resource_signature: tuple[tuple[str, ...], Path] | None = None
         self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.setUniformItemSizes(True)
         self.itemDoubleClicked.connect(
             lambda item: self.resource_activated.emit(str(item.data(_ROLE_URI)))
         )
 
     def set_resources(self, resources: tuple[str, ...], *, project_root: Path) -> None:
+        signature = (resources, project_root.resolve())
+        if signature == self._resource_signature:
+            return
         self.clear()
         for uri in resources:
-            item = QListWidgetItem(uri.removeprefix("res://"))
+            relative = uri.removeprefix("res://")
+            relative_path, _, fragment = relative.partition("#")
+            filename = PurePosixPath(relative_path).name
+            label = f"{filename}#{fragment}" if fragment else filename
+            item = QListWidgetItem(label)
             item.setData(_ROLE_URI, uri)
-            path = project_root / uri.removeprefix("res://").split("#", 1)[0]
+            kind = _resource_kind(uri)
+            item.setData(_ROLE_RESOURCE_KIND, kind)
+            item.setData(_ROLE_RESOURCE_SEARCH, relative.casefold())
+            item.setToolTip(f"{kind}\n位置：{relative_path}\n引用：{uri}")
+            item.setSizeHint(QSize(0, 30))
+            path = project_root / relative_path
             if not path.exists():
-                item.setText(f"{item.text()}  [缺失]")
+                item.setText(f"{item.text()}（缺失）")
+                item.setToolTip(f"文件不存在\n位置：{relative_path}\n引用：{uri}")
                 item.setForeground(Qt.GlobalColor.red)
             self.addItem(item)
+        self._resource_signature = signature
+
+    def clear(self) -> None:
+        self._resource_signature = None
+        super().clear()
 
     def mimeTypes(self) -> list[str]:
         return [RESOURCE_MIME]
@@ -60,15 +98,118 @@ class ResourceListWidget(QListWidget):
         return data
 
 
+class ResourceBrowser(QWidget):
+    """Searchable read-only resource projection; drag keeps the original URI."""
+
+    resource_activated = Signal(str)
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        scope: str = "project",
+    ) -> None:
+        super().__init__(parent)
+        self._scope = scope
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(6)
+        self.hint = QLabel(
+            "本关引用的资源，可拖到参数中"
+            if scope == "stage"
+            else "游戏资源，可拖到参数或步骤中",
+            self,
+        )
+        self.hint.setWordWrap(True)
+        layout.addWidget(self.hint)
+        self.search = QLineEdit(self)
+        self.search.setObjectName("resource_search")
+        self.search.setPlaceholderText("搜索文件名或位置")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._filter_resources)
+        layout.addWidget(self.search)
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        self.category = QComboBox(self)
+        self.category.setObjectName("resource_category")
+        self.category.addItem("全部类型", "")
+        for kind in ("图片", "音频", "字体", "数据"):
+            self.category.addItem(kind, kind)
+        self.category.currentIndexChanged.connect(self._filter_resources)
+        filter_row.addWidget(self.category)
+        filter_row.addStretch(1)
+        self.count_label = QLabel(self)
+        filter_row.addWidget(self.count_label)
+        layout.addLayout(filter_row)
+        self.resource_list = ResourceListWidget(self)
+        self.resource_list.setObjectName("resource_files")
+        self.resource_list.resource_activated.connect(self.resource_activated.emit)
+        self.empty_label = QLabel(self)
+        self.empty_label.setWordWrap(True)
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.content_stack = QStackedWidget(self)
+        self.content_stack.addWidget(self.resource_list)
+        self.content_stack.addWidget(self.empty_label)
+        layout.addWidget(self.content_stack, 1)
+        self._filter_resources()
+
+    def set_resources(self, resources: tuple[str, ...], *, project_root: Path) -> None:
+        self.resource_list.set_resources(resources, project_root=project_root)
+        self._filter_resources()
+
+    def clear(self) -> None:
+        self.resource_list.clear()
+        self._filter_resources()
+
+    def _filter_resources(self, *_args) -> None:
+        query = self.search.text().strip().casefold()
+        kind = self.category.currentData()
+        visible_count = 0
+        total_count = self.resource_list.count()
+        for index in range(total_count):
+            item = self.resource_list.item(index)
+            visible = (
+                (not query or query in str(item.data(_ROLE_RESOURCE_SEARCH)))
+                and (not kind or kind == item.data(_ROLE_RESOURCE_KIND))
+            )
+            item.setHidden(not visible)
+            visible_count += int(visible)
+        self.count_label.setText(
+            f"{visible_count} / {total_count} 项"
+            if query or kind
+            else f"{total_count} 项"
+        )
+        if visible_count:
+            self.content_stack.setCurrentWidget(self.resource_list)
+        else:
+            self.empty_label.setText(
+                "没有匹配的资源，请调整搜索或类型。"
+                if total_count
+                else (
+                    "本关尚未引用资源。\n设置背景、音乐或图片后，会显示在这里。"
+                    if self._scope == "stage"
+                    else "未找到游戏资源。\n将图片、音频、字体或游戏数据放入工程，然后刷新资源。"
+                )
+            )
+            self.content_stack.setCurrentWidget(self.empty_label)
+
+
 class UnitTreeWidget(QTreeWidget):
     """Program-structure tree that can drag only a logical-unit identity."""
 
     unit_activated = Signal(str)
+    drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        # itemClicked is emitted on release, not when a drag begins.  Keeping
+        # navigation off mouse-down preserves the current ProgramFlow while a
+        # different logical unit is being dragged into it.
+        self.itemClicked.connect(
+            lambda item, _column: self._emit_unit(item)
+        )
         self.itemDoubleClicked.connect(
             lambda item, _column: self._emit_unit(item)
         )
@@ -88,6 +229,21 @@ class UnitTreeWidget(QTreeWidget):
         unit_id = item.data(0, _ROLE_URI)
         if unit_id:
             self.unit_activated.emit(str(unit_id))
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            item = self.currentItem()
+            if item is not None:
+                self._emit_unit(item)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+    def startDrag(self, supported_actions) -> None:
+        try:
+            super().startDrag(supported_actions)
+        finally:
+            self.drag_finished.emit()
 
 
 class UnitReferenceListWidget(QListWidget):
@@ -203,7 +359,7 @@ class UnitReferenceListWidget(QListWidget):
 
 
 class ActivitySidebar(QWidget):
-    """Four fixed views selected from a narrow vertical Activity Bar."""
+    """Compact tabs for content, source files, and project resources."""
 
     def __init__(
         self,
@@ -215,19 +371,21 @@ class ActivitySidebar(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("activity_sidebar")
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
         bar = QWidget(self)
         bar.setObjectName("activity_bar")
-        bar_layout = QVBoxLayout(bar)
+        bar_layout = QHBoxLayout(bar)
         bar_layout.setContentsMargins(2, 2, 2, 2)
+        bar_layout.setSpacing(0)
         self.stack = QStackedWidget(self)
         self.stack.setObjectName("activity_stack")
         views = (
-            ("程序", program_view),
-            ("文件", file_view),
-            ("资产", global_assets),
-            ("关卡", stage_assets),
+            ("内容", program_view),
+            ("源码", file_view),
+            ("资源", global_assets),
+            ("本关", stage_assets),
         )
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -236,15 +394,15 @@ class ActivitySidebar(QWidget):
             button = QToolButton(bar)
             button.setText(label)
             button.setCheckable(True)
+            button.setToolTip(("这一关的内容与全部内容", "查看作者 Python 源码（只读）", "游戏资源：图片、音频、字体和数据", "当前关卡引用的资源")[index])
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             button.clicked.connect(
                 lambda _checked=False, value=index: self.stack.setCurrentIndex(value)
             )
             group.addButton(button)
-            bar_layout.addWidget(button)
-            self.stack.addWidget(_titled_view(label, view))
+            bar_layout.addWidget(button, 1)
+            self.stack.addWidget(view)
             self.buttons.append(button)
-        bar_layout.addStretch(1)
         self.buttons[0].setChecked(True)
         layout.addWidget(bar)
         layout.addWidget(self.stack, 1)
@@ -254,20 +412,10 @@ class ActivitySidebar(QWidget):
         self.buttons[index].setChecked(True)
 
 
-def _titled_view(title: str, view: QWidget) -> QWidget:
-    container = QWidget()
-    layout = QVBoxLayout(container)
-    layout.setContentsMargins(4, 4, 4, 4)
-    label = QLabel(title, container)
-    label.setStyleSheet("font-weight: bold;")
-    layout.addWidget(label)
-    layout.addWidget(view, 1)
-    return container
-
-
 __all__ = [
     "ActivitySidebar",
     "RESOURCE_MIME",
+    "ResourceBrowser",
     "ResourceListWidget",
     "UNIT_REFERENCE_MIME",
     "UnitReferenceListWidget",

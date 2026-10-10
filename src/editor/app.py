@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from src.qt_compat.QtWidgets import QApplication
+from src.qt_compat.QtGui import QFont
 
 from .window import EditorWindow
 
@@ -22,6 +23,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(list(argv) if argv is not None else None)
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("PySTG 关卡编辑器")
+    app.setFont(QFont("Microsoft YaHei UI", 9))
     window = EditorWindow()
     if arguments.project is not None:
         window.open_project(arguments.project)
@@ -30,3 +32,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = ["build_parser", "main"]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

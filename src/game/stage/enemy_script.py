@@ -76,6 +76,7 @@ class EnemyScript(ABC):
         self._prev_x: float = 0.0
         self._render_obj: Optional['EnemyRenderObject'] = None
         self._next_danmaku_se_frame: int = 0
+        self._hit_coroutines = []
 
         # 回调
         self.on_death: Optional[Callable] = None
@@ -117,10 +118,9 @@ class EnemyScript(ABC):
             await self.run()
         except EnemyDeath:
             pass
-        except Exception as e:
-            print(f"[EnemyScript] 错误: {e}")
         finally:
             self._active = False
+            self._close_hit_tasks()
     
     def update(self) -> bool:
         """每帧更新（由引擎调用）"""
@@ -128,6 +128,14 @@ class EnemyScript(ABC):
             return False
 
         self._time += 1
+        pending = []
+        for coroutine in self._hit_coroutines:
+            try:
+                coroutine.send(None)
+            except StopIteration:
+                continue
+            pending.append(coroutine)
+        self._hit_coroutines = pending
 
         # 计算X速度并更新贴图对象动画
         vx = self.x - self._prev_x
@@ -146,6 +154,21 @@ class EnemyScript(ABC):
     
     def damage(self, amount: int):
         """受到伤害"""
+        if not self._active:
+            return
+        if type(self).on_hit is not EnemyScript.on_hit:
+            coroutine = self.on_hit(amount)
+            # Advance one actual hit event immediately; delayed actions continue
+            # on this enemy's update loop, never on individual bullets.
+            try:
+                coroutine.send(None)
+            except StopIteration:
+                pass
+            else:
+                if len(self._hit_coroutines) >= 256:
+                    coroutine.close()
+                    raise RuntimeError('enemy hit task limit exceeded (256)')
+                self._hit_coroutines.append(coroutine)
         self.hp -= amount
         if self.hp <= 0:
             self.hp = 0
@@ -159,6 +182,7 @@ class EnemyScript(ABC):
     def _on_death(self):
         """死亡处理"""
         self._active = False
+        self._close_hit_tasks()
 
         if self.clear_bullets_on_death:
             for bullet_idx in self._bullets:
@@ -176,6 +200,11 @@ class EnemyScript(ABC):
 
         if self.on_death:
             self.on_death(self)
+
+    def _close_hit_tasks(self):
+        for coroutine in self._hit_coroutines:
+            coroutine.close()
+        self._hit_coroutines.clear()
     
     # ==================== 贴图对象 ====================
 

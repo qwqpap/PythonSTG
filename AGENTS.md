@@ -2,25 +2,35 @@
 
 This file applies to the whole repository.
 
-## Code-driven editor roadmap
+## Task scope and completion
 
-Before changing the level authoring editor, read
-[`docs/EDITOR_IMPLEMENTATION_TODO.md`](docs/EDITOR_IMPLEMENTATION_TODO.md) and
-[`docs/EDITOR_ARCHITECTURE.md`](docs/EDITOR_ARCHITECTURE.md) completely. The
-roadmap is the only implementation order and status record for the editor.
+- Start repository edits with `git status --short` and preserve unrelated work.
+  Never modify, stage, revert, or commit `.claude/settings.local.json`.
+- Complete authorized implementation, relevant checks, and fixes without pausing
+  for routine local edits or reruns. Honor current read-only/planning requests;
+  a past read-only task is not a permanent implementation ban.
+- Before substantial edits, state the outcome and affected paths. Revise this
+  boundary when needed; ask for material scope/product decisions or missing
+  authorization. Finish after the result and applicable checks, or report the
+  concrete blocker and remaining gates.
 
-The mandatory order is:
+## Editor documentation and roadmap
 
-```text
-CD0 -> CD1 -> CD2 -> CD3 -> CD4
-```
+- For editor changes, read the status table, invariant contract, and affected phase in
+  [`docs/EDITOR_IMPLEMENTATION_TODO.md`](docs/EDITOR_IMPLEMENTATION_TODO.md).
+  It is the only implementation order and status record.
+- For module ownership, source persistence, code generation, preview, or
+  Timeline changes, read the affected sections of
+  [`docs/EDITOR_ARCHITECTURE.md`](docs/EDITOR_ARCHITECTURE.md).
+- Read both documents completely for overall architecture/product-contract changes.
+  Phase completion needs the full applicable Gate and architecture merge checks;
+  wording-only edits need local context.
 
-Do not start a later phase while an earlier phase gate is red. `697d9a5` is the
-implementation baseline for this route; historic CD0-CD7 evidence is available
-through Git history but does not prove the current usability-focused gates. The
-previous Scene/Pattern/Graph editor is archived at tag `archive/editor-v1-f9e0798`;
-it is not a compatibility target and must not be restored through shims, feature
-flags, hidden menus, or retained tests.
+Follow `CD0 -> CD1 -> CD2 -> CD3 -> CD4`; no later phase starts while an earlier
+gate is red. Baseline: `697d9a5`. Historic CD0-CD7 evidence does not prove the
+current usability gates. The Scene/Pattern/Graph editor at
+`archive/editor-v1-f9e0798` is not a compatibility target; do not restore it
+through shims, feature flags, hidden menus, or retained tests.
 
 ## Fixed product contract
 
@@ -56,17 +66,17 @@ editor. Keep the first UI Simplified Chinese while Python APIs and generated
 code stay English.
 
 For each CD task, state one owner, an explicit path allowlist, and a denylist
-before editing. Preserve unrelated changes and always run `git status --short`
-first. The coordinating agent alone updates roadmap status. A verifier who did
-not implement the task performs the final read-only gate.
-
-If work must cross the declared boundary, stop and revise the boundary before
-editing. Never modify, stage, revert, or commit `.claude/settings.local.json`.
+before editing. The coordinating agent alone updates roadmap status. A verifier
+who did not implement the task performs the final read-only phase gate. Routine
+fixes can proceed within the authorized scope without claiming a phase passed.
 
 ## Editing and verification rules
 
 - Use the narrowest relevant tests while iterating and invoke them with
-  `python -m pytest`, never bare `pytest`.
+  `python -m pytest`, never bare `pytest`. If PATH resolves to the Windows Store
+  shim, use `C:/Users/m1573/anaconda3/python.exe -m pytest` when available.
+  Broaden or repeat checks only for new changes, failures, unresolved risks, or
+  a required phase/merge gate; do not run the full engine suite for wording edits.
 - Do not weaken assertions or add `skip`, `xfail`, silent fallback, fake
   preview, synthetic native evidence, or synthetic usability evidence.
 - Validate generated code through an independent Python subprocess using
@@ -75,9 +85,11 @@ editing. Never modify, stage, revert, or commit `.claude/settings.local.json`.
   old running preview.
 - Run native gates with a real PySide6 window and real GLFW/ModernGL child
   window. Offscreen Qt and screenshots are not substitutes for native
-  embedding or interaction.
-- Report Structural, Runtime, Native, Performance, and Usability evidence as
-  separate classes. Unobserved classes must say `not run`.
+  embedding or interaction. For UI interaction fixes, reproduce the actual
+  user input chain; synthetic target events alone can miss source-widget effects.
+- For editor gate or usability reports, distinguish Structural, Runtime, Native,
+  Performance, and Usability evidence. Unobserved classes say `not run`;
+  agent-driven interaction does not count as maintainer/new-user acceptance.
 - After a phase passes, update only its checkbox and single Evidence block in
   `docs/EDITOR_IMPLEMENTATION_TODO.md` with reproducible commands and results.
 - Use project-relative paths and deterministic UTF-8/LF/four-space output.

@@ -13,7 +13,7 @@
 </p>
 
 PySTG 是一个面向**关卡内容创作者**和**引擎二次开发者**的弹幕射击游戏框架。
-引擎层使用 ModernGL 实例化渲染 + Numba JIT 加速的子弹池，可稳定支持 20000+ 颗弹幕同屏 60fps；
+引擎层使用 ModernGL 实例化渲染 + Numba JIT 加速的子弹池，面向高密度弹幕；实际帧率取决于硬件、场景与测量条件。
 内容层通过 `async/await` 协程脚本编写关卡、波次、Boss 符卡，与引擎彻底解耦。
 
 ## 介绍
@@ -85,6 +85,16 @@ pip install -r requirements-dev.txt
 pip install -e .
 ```
 
+安装后，从仓库根目录打开声明式示例工程：
+
+```bash
+pystg-editor game_content/authoring/code_editor_demo
+```
+
+该目录是可编辑源码；试用时可先在 `game_content/authoring/` 下复制一份。编辑器内显式点击 Run
+才会构建并启动预览；后续修改会标记预览过期，再次 Run 才更新。完整入口见
+[快速开始](docs/getting-started.md)，按任务查文档见[文档导航](docs/index.md)。
+
 ---
 
 ## 项目结构
@@ -94,19 +104,19 @@ flowchart TB
     root["PythonSTG"]
     main["main.py<br/>入口、主循环、状态机"]
     src["src/<br/>引擎代码"]
-    content["game_content/stages/<br/>关卡内容"]
+    content["game_content/stages/<br/>手写关卡内容"]
+    authoring["game_content/authoring/<br/>声明式编辑器工程"]
     assets["assets/<br/>纹理、音频、字体、自机配置"]
-    tools["tools/<br/>PyQt5 编辑器工具"]
+    tools["tools/<br/>PySide6 独立资产工具"]
     docs["docs/<br/>VitePress 文档"]
-    tests["tests/<br/>单元测试"]
 
     root --> main
     root --> src
     root --> content
+    root --> authoring
     root --> assets
     root --> tools
     root --> docs
-    root --> tests
 
     src --> core["core：配置 / 碰撞 / 窗口 / 输入"]
     src --> game["game：子弹 / 关卡 / 玩家 / Boss / 激光 / 道具 / 音频"]
@@ -329,6 +339,7 @@ async def _(event: MessageEvent):
 
 ### 进行中 🚧
 
+- 关卡编辑器的创作体验与真人验收（技术阶段记录及剩余验收以 [实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) 为准）
 - 更多敌人行为模式
 - Stage 2 / Stage 3 完整内容
 - 完善的得分与结算系统
@@ -338,7 +349,6 @@ async def _(event: MessageEvent):
 
 - Replay 录像系统
 - 游戏设置界面（按键绑定、画质）
-- 完成声明式 Python 驱动的轻量关卡编辑器
 - 更多可选自机
 
 ---
@@ -347,16 +357,25 @@ async def _(event: MessageEvent):
 
 欢迎 PR / Issue。建议在动手前：
 
-1. 阅读 [`CLAUDE.md`](CLAUDE.md) 了解仓库约定
-2. 阅读对应的开发文档（脚本指南 / 架构概览）
-3. 写关卡内容请放 `game_content/stages/stageN/`，不要修改 `src/`
+1. 阅读 [`AGENTS.md`](AGENTS.md) 了解共享仓库约定；Claude Code 的导航入口为 [`CLAUDE.md`](CLAUDE.md)
+2. 根据[文档导航](docs/index.md)查阅本次任务相关章节
+3. 声明式作者工程放在 `game_content/authoring/<project_id>/`；手写关卡放在 `game_content/stages/stageN/`。生成目录 `game_content/generated/` 不提交；内容任务通过公开 Runtime API 使用引擎
 4. 引擎层修改请保持 Numba 兼容（子弹池里不能用 Python 对象）
 
-跑测试：
+迭代时验证受影响行为。仓库测试套件与原生验证脚本已按维护者要求删除（见
+[实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) 开头的修复约定），当前采用即时检查：
 
 ```bash
-python -m pytest -q             # 全量
+python -m compileall -q main.py src game_content tools
+git diff --check
 ```
+
+编辑器改动另需真实方式验证实际行为：headless 作者/编译器路径用临时脚本走真实 Runtime；
+界面交互在真实 Windows PySide6 窗口和 GLFW 子窗口中复现实际输入链。汇总结果时分别说明
+Structural、Runtime、Native、Performance、Usability，未观察的类别写 `not run`。
+
+阶段完成按 TODO 和架构执行完整门禁。仅改文档时检查链接并运行 `npm run docs:build`
+（首次运行先 `npm ci`）。文档构建不证明游戏运行或编辑器易用性。
 
 ---
 

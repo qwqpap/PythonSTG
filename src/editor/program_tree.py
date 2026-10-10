@@ -60,8 +60,8 @@ _AUTOSCROLL_STEP_PX = 10
 _MIN_COLUMN_WIDTH = 230
 _MARGIN = 12
 _CARD_HEIGHT = 34
-_CARD_GAP = 8
-_INSERT_HIT_HEIGHT = 12
+_CARD_GAP = 24
+_INSERT_HIT_HEIGHT = 22
 # Full-height handles need a forgiving physical target on 960 px windows.
 _HANDLE_WIDTH = 36
 _INDENT = 24
@@ -122,6 +122,8 @@ def node_label(node: Node) -> str:
     if node.kind == "TemplateCall":
         template = node.template
         name = (template.display_name or template.symbol) if template else "模板"
+        if template and template.symbol == "ring_burst":
+            name = "连续环形弹幕"
         return f"模板 · {name}"
     try:
         return entry_for_kind(node.kind).label
@@ -143,6 +145,15 @@ def node_summary(node: Node) -> str:
     if isinstance(value, float):
         return f"{value:g}"
     return repr(value)
+
+
+def _reference_target(node: Node) -> str | None:
+    field_name = {
+        "RunWave": "wave_class", "RunBoss": "boss_def", "SpawnEnemy": "enemy_class",
+        "Call": "function", "SpawnTask": "task",
+    }.get(node.kind)
+    value = node.arguments.get(field_name) if field_name else None
+    return value.id if isinstance(value, Ref) else None
 
 
 def node_is_dynamic(node: Node) -> bool:
@@ -189,6 +200,8 @@ class _Layout:
     elements: list[_Element] = field(default_factory=list)
     cards: dict[str, _Element] = field(default_factory=dict)
     root_landing: _Element | None = None
+    insertions: list[tuple[QRect, tuple[str | None, DropPlacement, str | None]]] = field(default_factory=list)
+    insertion_rects: dict[tuple[str, DropPlacement], QRect] = field(default_factory=dict)
 
 
 class _FlowCanvas(QWidget):
@@ -201,6 +214,8 @@ class _FlowCanvas(QWidget):
     unit_reference_requested = Signal(str, object, str, object)
     resource_action_requested = Signal(str, str, str, object)
     drop_feedback = Signal(str)
+    insert_requested = Signal(object, object)
+    reference_open_requested = Signal(str)
 
     def __init__(self, flow: "ProgramFlow", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -219,6 +234,8 @@ class _FlowCanvas(QWidget):
         self._press_card: str | None = None
         self._press_drag_handle = False
         self._press_pos = QPoint()
+        self._press_insert = None
+        self._press_reference = None
         self._hover_uid: str | None = None
         self._hover_since = QElapsedTimer()
         self._autoscroll_direction = 0
@@ -232,25 +249,53 @@ class _FlowCanvas(QWidget):
 
     # -- public state ---------------------------------------------------------
 
-    def set_unit(self, unit: LogicalUnit | None, selected_uid: str | None) -> None:
-        previous_unit_id = self._unit.id if self._unit is not None else None
+    def set_unit(
+        self,
+        unit: LogicalUnit | None,
+        selected_uid: str | None,
+        selected_uids: tuple[str, ...] = (),
+    ) -> None:
+        if unit is self._unit:
+            self.update_selection(selected_uid, selected_uids)
+            return
+        same_selection = (
+            self._unit is not None
+            and unit is not None
+            and self._unit.id == unit.id
+            and self._flow.selected_uid == selected_uid
+        )
+        scroll_position = self._flow.verticalScrollBar().value()
         self._unit = unit
+        self._flow.selected_uid = selected_uid
         self._layout = _Layout()
         self._end_drop()
         if unit is not None:
             known = self._unit_uids(unit)
             self._collapsed &= known
-            if previous_unit_id == unit.id:
-                self._flow.selected_uids &= known
-            else:
-                self._flow.selected_uids.clear()
+            self._flow.selected_uids = set(selected_uids) & known
         else:
             self._flow.selected_uids.clear()
         if selected_uid:
             self._flow.selected_uids.add(selected_uid)
         self.relayout()
-        if selected_uid:
+        if same_selection:
+            # A parameter edit replaces the immutable unit, but is not a
+            # navigation request. Keep the author's current viewing position.
+            self._flow.verticalScrollBar().setValue(scroll_position)
+        elif selected_uid:
             self.reveal(selected_uid)
+        self.update()
+
+    def update_selection(
+        self, selected_uid: str | None, selected_uids: tuple[str, ...] = ()
+    ) -> None:
+        selection_changed = self._flow.selected_uid != selected_uid
+        self._flow.selected_uid = selected_uid
+        self._flow.selected_uids = set(selected_uids)
+        if selected_uid is not None:
+            self._flow.selected_uids.add(selected_uid)
+            if selection_changed or selected_uid not in self._layout.cards:
+                self.reveal(selected_uid)
         self.update()
 
     def set_diagnostics(self, diagnostics: dict[str, tuple[str, ...]]) -> None:
@@ -283,10 +328,32 @@ class _FlowCanvas(QWidget):
 
     def reveal(self, uid: str) -> None:
         element = self._layout.cards.get(uid)
+        if element is None and self._unit is not None:
+            # Timeline selection may address a child hidden by collapsed
+            # containers. Expand only its ancestor path, not every container.
+            pending = [(node, ()) for node in self._unit.body]
+            while pending:
+                node, ancestors = pending.pop()
+                if node.uid == uid:
+                    if self._collapsed.intersection(ancestors):
+                        self._collapsed.difference_update(ancestors)
+                        self.relayout()
+                        element = self._layout.cards.get(uid)
+                    break
+                pending.extend(
+                    (child, (*ancestors, node.uid))
+                    for children in node.children.values()
+                    for child in children
+                )
         if element is None:
             return
         bar = self._flow.verticalScrollBar()
         visible = self._flow.viewport().height()
+        if (
+            element.rect.top() >= bar.value()
+            and element.rect.bottom() < bar.value() + visible
+        ):
+            return
         target = element.rect.center().y() - visible // 2
         bar.setValue(max(0, min(bar.maximum(), target)))
 
@@ -304,6 +371,12 @@ class _FlowCanvas(QWidget):
         if placement not in {DropPlacement.BEFORE, DropPlacement.AFTER}:
             return None
         return self._insertion_rect(element, placement)
+
+    def reference_open_rect_for_uid(self, uid: str) -> QRect | None:
+        element = self._layout.cards.get(uid)
+        if element is None or element.node is None or _reference_target(element.node) is None:
+            return None
+        return self._reference_open_rect(element)
 
     def drag_handle_rect_for_uid(self, uid: str) -> QRect | None:
         element = self._layout.cards.get(uid)
@@ -345,27 +418,38 @@ class _FlowCanvas(QWidget):
             else:
                 if self._unit.body:
                     y = self._layout_nodes(self._unit.body, _MARGIN, y, width, 0)
-                    y += _CARD_GAP
-                landing_height = max(120, visible - y - _MARGIN)
-                landing = _Element(
-                    "landing",
-                    QRect(_MARGIN, y, width, landing_height),
-                    label=(
-                        "拖到这里添加第一个节点"
-                        if not self._unit.body
-                        else "拖到这里追加节点"
-                    ),
-                )
-                self._layout.elements.append(landing)
-                self._layout.root_landing = landing
-                y += landing_height
+                    last = self._unit.body[-1]
+                    self._layout.root_landing = _Element(
+                        "landing",
+                        QRect(self._layout.insertion_rects[last.uid, DropPlacement.AFTER]),
+                        label="在末尾添加步骤",
+                    )
+                else:
+                    landing_height = min(128, max(96, visible // 3))
+                    landing = _Element(
+                        "landing",
+                        QRect(_MARGIN, y, width, landing_height),
+                        label="＋ 添加第一个步骤",
+                    )
+                    self._layout.elements.append(landing)
+                    self._layout.root_landing = landing
+                    y += landing_height
         self.setMinimumHeight(y + _MARGIN)
 
     def _layout_nodes(
         self, nodes: list[Node], x: int, y: int, width: int, depth: int
     ) -> int:
-        for node in nodes:
+        if nodes:
+            y += _CARD_GAP
+        for index, node in enumerate(nodes):
+            before = QRect(x, y - _CARD_GAP, width, _INSERT_HIT_HEIGHT)
+            self._layout.insertion_rects[node.uid, DropPlacement.BEFORE] = before
+            if index == 0:
+                self._layout.insertions.append((before, (node.uid, DropPlacement.BEFORE, None)))
             y = self._layout_node(node, x, y, width, depth)
+            after = QRect(x, y - _CARD_GAP, width, _INSERT_HIT_HEIGHT)
+            self._layout.insertion_rects[node.uid, DropPlacement.AFTER] = after
+            self._layout.insertions.append((after, (node.uid, DropPlacement.AFTER, None)))
         return y
 
     def _layout_node(self, node: Node, x: int, y: int, width: int, depth: int) -> int:
@@ -400,31 +484,32 @@ class _FlowCanvas(QWidget):
         inner_width = width - _INDENT
         for slot, label in slots:
             children = node.children.get(slot, [])
-            header = _Element(
-                "head",
-                QRect(inner_x, y, inner_width, _HEAD_HEIGHT),
-                node=node,
-                uid=node.uid,
-                slot=slot,
-                label=label,
-                depth=depth + 1,
-            )
-            self._layout.elements.append(header)
-            y += _HEAD_HEIGHT
+            if label != "内容":
+                header_height = max(_HEAD_HEIGHT, self.fontMetrics().height() + 6)
+                header = _Element(
+                    "head",
+                    QRect(inner_x, y, inner_width, header_height),
+                    node=node,
+                    uid=node.uid,
+                    slot=slot,
+                    label=label,
+                    depth=depth + 1,
+                )
+                self._layout.elements.append(header)
+                y += header_height
+            else:
+                y -= _CARD_GAP
             if node.kind == "Parallel" and slot == "branches":
                 y = self._layout_parallel(node, inner_x, y, inner_width, depth + 1)
             else:
                 if children:
                     y = self._layout_nodes(children, inner_x, y, inner_width, depth + 1)
-                    y += _CARD_GAP
-                landing_label = (
-                    f"{label} · 拖到这里添加内容"
-                    if not children
-                    else f"＋ 添加到{label}末尾"
-                )
-                y = self._layout_landing(
-                    node, slot, landing_label, inner_x, y, inner_width, depth + 1
-                )
+                else:
+                    if label == "内容":
+                        y += _CARD_GAP
+                    y = self._layout_landing(
+                        node, slot, f"＋ 添加{label}", inner_x, y, inner_width, depth + 1
+                    )
         return y + _CARD_GAP
 
     def _layout_parallel(
@@ -468,7 +553,7 @@ class _FlowCanvas(QWidget):
     ) -> int:
         head = _Element(
             "head",
-            QRect(x, y, width, _HEAD_HEIGHT),
+            QRect(x, y, width, max(_HEAD_HEIGHT, self.fontMetrics().height() + 6)),
             node=branch,
             uid=branch.uid,
             slot="body",
@@ -477,23 +562,13 @@ class _FlowCanvas(QWidget):
         )
         self._layout.elements.append(head)
         children = branch.children.get("body", [])
-        y += _HEAD_HEIGHT
+        y += head.rect.height()
         if children:
             y = self._layout_nodes(children, x, y, width, depth)
-            y += _CARD_GAP
-        y = self._layout_landing(
-            branch,
-            "body",
-            (
-                "分支内容 · 拖到这里添加内容"
-                if not children
-                else "＋ 添加到分支末尾"
-            ),
-            x,
-            y,
-            width,
-            depth,
-        )
+        else:
+            y = self._layout_landing(
+                branch, "body", "＋ 添加分支内容", x, y, width, depth
+            )
         return y
 
     def _layout_landing(
@@ -552,9 +627,14 @@ class _FlowCanvas(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#171a20"))
-        painter.translate(0, -self._flow.verticalScrollBar().value())
+        exposed = event.rect().adjusted(-4, -4, 4, 4)
+        painter.fillRect(event.rect(), QColor("#171a20"))
+        # QScrollArea already moves this widget.  Paint and input must both
+        # use its content coordinates; translating a second time hides the
+        # cards which are still hit-testable after scrolling.
         for element in self._layout.elements:
+            if not element.rect.intersects(exposed):
+                continue
             if element.kind == "card":
                 self._paint_card(painter, element)
             elif element.kind == "head":
@@ -567,7 +647,7 @@ class _FlowCanvas(QWidget):
                 self._paint_summary(painter, element)
             elif element.kind == "folded":
                 self._paint_folded(painter, element)
-        self._paint_insertion_guides(painter)
+        self._paint_insertion_guides(painter, exposed)
         self._paint_drop_overlay(painter)
         self._paint_flash(painter)
         painter.end()
@@ -602,16 +682,22 @@ class _FlowCanvas(QWidget):
         painter.setPen(QPen(QColor("#d0d7de"), 1))
         painter.setFont(self._base_font(bold=True))
         label = element.label
-        summary = node_summary(node)
+        target = _reference_target(node)
+        summary = (
+            f"→ {self._flow.unit_labels.get(target, target)}"
+            if target else node_summary(node)
+        )
         text = f"{label}  {summary}" if summary else label
         badges = self._badges(node)
+        reference_width = 72 if _reference_target(node) else 0
         available = (
             element.rect.width()
             - (x - element.rect.left())
             - (_HANDLE_WIDTH * 2)
+            - reference_width
             - 12
         )
-        badge_right = element.rect.right() - (_HANDLE_WIDTH * 2)
+        badge_right = element.rect.right() - (_HANDLE_WIDTH * 2) - reference_width
         for chip, color in reversed(badges):
             used = self._draw_chip(
                 painter, element.rect, chip, color, right_edge=badge_right
@@ -626,15 +712,25 @@ class _FlowCanvas(QWidget):
             metrics.elidedText(text, Qt.TextElideMode.ElideRight, max(10, available)),
         )
         self._paint_card_handles(painter, element)
+        if reference_width:
+            rect = self._reference_open_rect(element)
+            painter.setPen(QPen(QColor("#58a6e7"), 1))
+            painter.setBrush(QColor("#1c3248"))
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.setFont(self._base_font(bold=False))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "打开内容")
 
     def _paint_card_handles(self, painter: QPainter, element: _Element) -> None:
         drag_rect = self._drag_handle_rect(element)
         wrap_rect = self._wrap_handle_rect(element)
         painter.setFont(self._base_font(bold=False))
-        painter.setPen(QPen(QColor("#8b949e"), 1))
-        painter.drawText(drag_rect, Qt.AlignmentFlag.AlignCenter, "⠿")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#8b949e"))
+        for offset_x in (-3, 3):
+            for offset_y in (-5, 0, 5):
+                painter.drawEllipse(drag_rect.center() + QPoint(offset_x, offset_y), 1, 1)
         painter.setPen(QPen(QColor("#a371f7"), 1))
-        painter.drawText(wrap_rect, Qt.AlignmentFlag.AlignCenter, "⌁")
+        painter.drawText(wrap_rect, Qt.AlignmentFlag.AlignCenter, "包裹")
 
     def _badges(self, node: Node) -> tuple[tuple[str, str], ...]:
         badges: list[tuple[str, str]] = []
@@ -672,7 +768,7 @@ class _FlowCanvas(QWidget):
         painter.drawText(
             element.rect.adjusted(2, 0, 0, 0),
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            element.label,
+            painter.fontMetrics().elidedText(element.label, Qt.TextElideMode.ElideRight, element.rect.width() - 4),
         )
 
     def _paint_landing(self, painter: QPainter, element: _Element, *, dashed: bool) -> None:
@@ -693,7 +789,10 @@ class _FlowCanvas(QWidget):
         painter.drawRoundedRect(element.rect, 6, 6)
         painter.setPen(QPen(QColor("#8b949e"), 1))
         painter.setFont(self._base_font(bold=False))
-        painter.drawText(element.rect, Qt.AlignmentFlag.AlignCenter, element.label)
+        painter.drawText(
+            element.rect.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignCenter,
+            painter.fontMetrics().elidedText(element.label, Qt.TextElideMode.ElideRight, max(1, element.rect.width() - 16)),
+        )
 
     def _paint_summary(self, painter: QPainter, element: _Element) -> None:
         painter.setPen(QPen(QColor("#3a414e"), 1))
@@ -716,29 +815,27 @@ class _FlowCanvas(QWidget):
             f"… {element.label}",
         )
 
-    def _paint_insertion_guides(self, painter: QPainter) -> None:
+    def _paint_insertion_guides(self, painter: QPainter, exposed: QRect) -> None:
         """Render the concrete before/after targets used by hit testing."""
 
-        for element in self._layout.cards.values():
-            for placement in (DropPlacement.BEFORE, DropPlacement.AFTER):
-                rect = self._insertion_rect(element, placement)
-                active = (
-                    self._drop_candidate is not None
-                    and self._drop_candidate[0] == element.uid
-                    and self._drop_candidate[1] == placement
-                )
-                if active:
-                    color = QColor("#2ea043" if self._drop_check.allowed else "#f85149")
-                    width = 3
-                elif self._drop_active:
-                    color = QColor("#58a6e7")
-                    width = 1
-                else:
-                    color = QColor("#30363d")
-                    width = 1
-                painter.setPen(QPen(color, width))
-                y = rect.center().y()
-                painter.drawLine(rect.left() + 10, y, rect.right() - 10, y)
+        for rect, location in self._layout.insertions:
+            if not rect.intersects(exposed):
+                continue
+            active = self._drop_candidate == location
+            color = QColor(
+                "#2ea043" if active and self._drop_check.allowed
+                else "#f85149" if active
+                else "#58a6e7" if self._drop_active
+                else "#3a536b"
+            )
+            painter.setPen(QPen(color, 2 if active else 1))
+            painter.drawLine(rect.left() + 10, rect.center().y(), rect.right() - 10, rect.center().y())
+            button = QRect(rect.center().x() - 28, rect.top(), 56, rect.height())
+            painter.setBrush(QColor("#1c2733"))
+            painter.drawRoundedRect(button, 4, 4)
+            painter.setPen(QColor("#8dc5f1"))
+            painter.setFont(self._base_font(bold=False))
+            painter.drawText(button, Qt.AlignmentFlag.AlignCenter, "＋ 添加")
 
     def _paint_drop_overlay(self, painter: QPainter) -> None:
         if not self._drop_active or self._drop_candidate is None:
@@ -806,9 +903,15 @@ class _FlowCanvas(QWidget):
             element.rect.height(),
         )
 
+    def _reference_open_rect(self, element: _Element) -> QRect:
+        return QRect(element.rect.right() - _HANDLE_WIDTH * 2 - 72, element.rect.top() + 3, 68, element.rect.height() - 6)
+
     def _insertion_rect(
         self, element: _Element, placement: DropPlacement
     ) -> QRect:
+        known = self._layout.insertion_rects.get((element.uid, placement))
+        if known is not None:
+            return QRect(known)
         center_y = (
             element.rect.top() - (_CARD_GAP // 2)
             if placement == DropPlacement.BEFORE
@@ -845,10 +948,9 @@ class _FlowCanvas(QWidget):
         surface and deliberately has no drop meaning.
         """
 
-        for card in reversed(tuple(self._layout.cards.values())):
-            for placement in (DropPlacement.BEFORE, DropPlacement.AFTER):
-                if self._insertion_rect(card, placement).contains(position):
-                    return card.uid, placement, None
+        for rect, location in reversed(self._layout.insertions):
+            if rect.contains(position):
+                return location
         landing = self._landing_at(position)
         if landing is not None:
             if landing.kind == "new_branch":
@@ -863,6 +965,17 @@ class _FlowCanvas(QWidget):
             return None, DropPlacement.AFTER, None
         return None
 
+    def _insert_at(self, position: QPoint):
+        for rect, location in reversed(self._layout.insertions):
+            if rect.contains(position):
+                return location
+        landing = self._landing_at(position)
+        if landing is not None:
+            if landing.uid is None:
+                return None, DropPlacement.AFTER, None
+            return landing.uid, DropPlacement.CHILD, landing.slot
+        return None
+
     # -- mouse and keyboard ---------------------------------------------------
 
     def mousePressEvent(self, event) -> None:
@@ -870,18 +983,28 @@ class _FlowCanvas(QWidget):
             super().mousePressEvent(event)
             return
         position = event.position().toPoint()
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        self._press_insert = self._insert_at(position)
+        self._press_reference = None
+        if self._press_insert is not None:
+            self._press_card = None
+            self._press_drag_handle = False
+            event.accept()
+            return
         card = self._card_at(position)
         if card is None:
             self._press_card = None
             self._press_drag_handle = False
             return
-        if self._chevron_rect(card).contains(position):
+        if card.node is not None and self._child_slots(card.node) and self._chevron_rect(card).contains(position):
             self._toggle_collapse(card.uid)
             self._press_card = None
             return
         self._press_card = card.uid
         self._press_drag_handle = self._drag_handle_rect(card).contains(position)
         self._press_pos = position
+        if card.node is not None and _reference_target(card.node) and self._reference_open_rect(card).contains(position):
+            self._press_reference = card.uid
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if card.uid in self._flow.selected_uids:
                 self._flow.selected_uids.discard(card.uid)
@@ -911,10 +1034,21 @@ class _FlowCanvas(QWidget):
                 self._start_node_drag(card)
                 return
         else:
+            insertion = self._insert_at(position)
+            if insertion is not None:
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.setToolTip("在这里添加步骤；也可从动作库拖入。")
+                super().mouseMoveEvent(event)
+                return
             hovered = self._card_at(position)
             if hovered is not None and hovered.node is not None:
-                tooltip = f"{hovered.node.kind}\nUID: {hovered.uid}"
-                if self._drag_handle_rect(hovered).contains(position):
+                target = _reference_target(hovered.node)
+                summary = self._flow.unit_labels.get(target, target) if target else node_summary(hovered.node)
+                tooltip = f"{hovered.label}\n{summary}".rstrip()
+                if _reference_target(hovered.node) and self._reference_open_rect(hovered).contains(position):
+                    tooltip = "打开此步骤引用的内容\n" + tooltip
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)
+                elif self._drag_handle_rect(hovered).contains(position):
                     tooltip = "拖动以移动节点\n" + tooltip
                     self.setCursor(Qt.CursorShape.OpenHandCursor)
                 elif self._wrap_handle_rect(hovered).contains(position):
@@ -931,20 +1065,53 @@ class _FlowCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
+        position = event.position().toPoint()
+        insertion = self._press_insert
+        reference_uid = self._press_reference
+        self._press_insert = None
+        self._press_reference = None
         self._press_card = None
         self._press_drag_handle = False
+        if event.button() == Qt.MouseButton.LeftButton:
+            if insertion is not None and self._insert_at(position) == insertion:
+                self.insert_requested.emit(insertion, self.mapToGlobal(position))
+                event.accept()
+                return
+            card = self._layout.cards.get(reference_uid) if reference_uid else None
+            if card and card.node and self._reference_open_rect(card).contains(position):
+                target = _reference_target(card.node)
+                if target:
+                    self.reference_open_requested.emit(target)
+                    event.accept()
+                    return
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
         card = self._card_at(event.position().toPoint())
         if card is not None:
-            self.node_activated.emit(card.uid)
+            target = _reference_target(card.node) if card.node is not None else None
+            self._press_reference = None
+            if target:
+                self.reference_open_requested.emit(target)
+            else:
+                self.node_activated.emit(card.uid)
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
+        if key in {Qt.Key.Key_Space, Qt.Key.Key_Insert} and self._unit and unit_accepts_statements(self._unit.kind):
+            element = self._layout.cards.get(self._flow.selected_uid)
+            if element:
+                location = (element.uid, DropPlacement.AFTER, None)
+                position = self._insertion_rect(element, DropPlacement.AFTER).center()
+            else:
+                location = (None, DropPlacement.AFTER, None)
+                position = self._layout.root_landing.rect.center()
+            self.insert_requested.emit(location, self.mapToGlobal(position))
+            event.accept()
+            return
         if key == Qt.Key.Key_Escape and self._drop_candidate is not None:
             self._end_drop()
             event.accept()
@@ -954,7 +1121,12 @@ class _FlowCanvas(QWidget):
             event.accept()
             return
         if key in {Qt.Key.Key_Return, Qt.Key.Key_Enter} and self._flow.selected_uid:
-            self.node_activated.emit(self._flow.selected_uid)
+            card = self._layout.cards.get(self._flow.selected_uid)
+            target = _reference_target(card.node) if card and card.node else None
+            if target:
+                self.reference_open_requested.emit(target)
+            else:
+                self.node_activated.emit(self._flow.selected_uid)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -1154,6 +1326,8 @@ class ProgramFlow(QScrollArea):
     unit_reference_requested = Signal(str, object, str, object)
     resource_action_requested = Signal(str, str, str, object)
     drop_feedback = Signal(str)
+    insert_requested = Signal(object, object)
+    reference_open_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1170,6 +1344,7 @@ class ProgramFlow(QScrollArea):
         )
         self.selected_uid: str | None = None
         self.selected_uids: set[str] = set()
+        self.unit_labels: dict[str, str] = {}
         self._validator = None
         self.canvas = _FlowCanvas(self)
         self.setWidget(self.canvas)
@@ -1180,18 +1355,37 @@ class ProgramFlow(QScrollArea):
         self.canvas.unit_reference_requested.connect(self.unit_reference_requested)
         self.canvas.resource_action_requested.connect(self.resource_action_requested)
         self.canvas.drop_feedback.connect(self.drop_feedback)
+        self.canvas.insert_requested.connect(self.insert_requested)
+        self.canvas.reference_open_requested.connect(self.reference_open_requested)
 
     def set_drop_validator(self, callback) -> None:
         self._validator = callback
+
+    def set_unit_labels(self, labels: dict[str, str]) -> None:
+        if labels != self.unit_labels:
+            self.unit_labels = dict(labels)
+            self.canvas.update()
+
+    def reference_open_rect_for_uid(self, uid: str) -> QRect | None:
+        return self.canvas.reference_open_rect_for_uid(uid)
 
     def validate(self, mime, uid, placement, slot) -> DropCheck:
         if self._validator is None:
             return DropCheck(True)
         return self._validator(mime, uid, placement, slot)
 
-    def set_unit(self, unit: LogicalUnit | None, selected_uid: str | None = None) -> None:
-        self.selected_uid = selected_uid
-        self.canvas.set_unit(unit, selected_uid)
+    def set_unit(
+        self,
+        unit: LogicalUnit | None,
+        selected_uid: str | None = None,
+        selected_uids: tuple[str, ...] = (),
+    ) -> None:
+        self.canvas.set_unit(unit, selected_uid, selected_uids)
+
+    def update_selection(
+        self, selected_uid: str | None, selected_uids: tuple[str, ...] = ()
+    ) -> None:
+        self.canvas.update_selection(selected_uid, selected_uids)
 
     def selected_node_uids(self) -> tuple[str, ...]:
         """Return visual selection in source order, not click order."""

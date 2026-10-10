@@ -5,6 +5,144 @@
 > [EDITOR_ARCHITECTURE.md](EDITOR_ARCHITECTURE.md)。旧 Scene/Pattern/Graph 编辑器只保留在
 > Git tag archive/editor-v1-f9e0798，不是兼容目标。
 
+> 2026-10-08 当前修复约定：按维护者要求删除仓库测试套件、原生验证脚本及测试依赖。
+> 下文旧 pytest/验证脚本命令只保留为历史证据，已不能作为当前工作树的执行入口或验收结论。
+> 本轮通过即时源码编译、真实 Runtime、Qt 输入链和原生预览检查修复具体缺陷；不据此勾选
+> 新阶段，也不替代维护者或新用户验收。
+
+**当前维护 Evidence（2026-10-08；不更新阶段勾选）**：
+
+- Structural：删除旧测试及测试入口；新手示例仍由普通 DSL 构成，欢迎页和引导不保存另一份
+  作者数据。受影响 Python 模块的 `compileall` 与 `git diff --check` 通过。
+- Runtime：独立构建并用真实 StageManager 运行示例关卡及敌人练习场，各生成 288 发／12 轮；
+  同时修复导入、模板重建、任务捕获、返回值、局部时钟及受击任务重复推进。
+- Native：真实 Windows 欢迎页 → 默认示例 → 数量 24 改 32 → F5 敌人练习场 → 返回关卡 →
+  运行整关；两种运行目标均嵌入真实 GLFW 窗口并观察到每轮 32 发的 Trace。960×640 与
+  1280×800 保持实际尺寸，引导无堆叠；坐标填写、清空、撤销和重做正常。末轮补验确认数量
+  在首屏并直接获得焦点，正常取消构建回到空闲、无错误且日志栏不自动打开。
+- Performance：已有局部交互测量不代表全编辑器性能验收；本次末轮新手布局不另作性能通过
+  结论。预览替换时停止旧进程仍可能等待约 3 秒，尚非完全异步。
+- Usability：维护者／真人新手验收 not run。上述 Agent 操作只证明指定功能链可执行。
+
+人工复查入口：在仓库目录运行 `C:/Users/m1573/anaconda3/python.exe -m src.editor.app`，
+从欢迎页按上面的 Native 操作链复查；不再使用下文历史测试脚本。
+
+### 当前维护任务：步骤主导 UI（2026-10-10）
+
+维护者明确选择步骤主导；本任务是 CD1–CD4 的交互维护，不新增阶段、不改历史勾选。
+作者格式、Runtime、单一 Session/Undo 和显式 Run 契约保持不变。
+
+| Owner | 允许编辑 | 必须完成 |
+| --- | --- | --- |
+| 协调 Agent | `src/editor/{window,onboarding,sidebars}.py`，本文、架构、产品愿景 | 步骤默认占主空间；引用打开/返回保留位置；新建并就地放置；按宽度切换预览；统一操作和文案 |
+| Inspector Agent | `src/editor/inspector.py` | 常用发射参数首屏；紧凑表单；坐标与示意按需；保留所有参数和 Undo |
+| 插入 Agent | `src/editor/{program_tree,node_palette}.py` | 步骤间 +、就地搜索和键盘选择；引用卡片打开；保留原拖放规则 |
+| 预览/时间线 Agent | `src/editor/{preview,timeline}.py`、`session.py` 的预览状态字段 | 暂停与源码过期独立；预计/实际来源可见；不兼容目标禁止 seek；紧凑时间线 |
+| 独立验证 Agent | 只读 | 复核下面输入链和边界；报告未观察类别，不更改实现 |
+
+末轮集成修复由协调 Agent 接手 `inspector.py` 与 `timeline.py`，限于引用目标解析、
+浮点输入、时长手柄命中及循环范围重置；原 owner 交接后不再并行写入这些文件。
+
+共同禁止：`.claude/settings.local.json`、`.zcode/`、用户作者工程、生成产物、
+authoring/compiler/runtime 语义、删除记录、测试/验证脚本重建、Graph/第二作者模型。
+协调 Agent 独占本文状态与 Evidence。
+
+实施顺序：导航/就地添加 → 参数/运行反馈 → 自适应布局 → 视觉统一 → 独立只读复验。
+局部修复可以并行，集成前各 owner 必须交代公开接口；不得用旧历史 Gate 证明新 UI。
+
+验收输入链：
+
+1. 欢迎页创建普通 DSL 示例 → 步骤首屏修改数量/速度 → 坐标填写/清空 → Undo/Redo。
+2. 关卡引用卡片打开波次/敌人 → 返回，原选择和滚动位置仍在；新建并放置可一次撤销。
+3. 步骤之间点 + → 搜索 → 上下/Enter 插入 → Esc 取消；实际插在所点位置，空容器同样有效。
+4. F5 启动真实 GLFW 预览 → 暂停 → 编辑 → 仍显示暂停且源码已改 → 返回步骤，预览不自动重建。
+5. 960×640、1280×800、1480×920：默认步骤宽度可用，运行不会长期产生四个窄列，
+   常用参数不被示意图挤出首屏；时间线区分当前预计/旧构建实际，不兼容范围不可 seek。
+6. 保存重开仍是同一作者源码；单一 UndoStack、明确 Run、无用户内容或遗留进程被修改。
+
+检查方式：即时 Python 编译、Qt 真实输入链、原生 PySide6/GLFW 检查和 diff check；
+不添加测试脚本、不运行已删除的 pytest 套件。结果分别记为 Structural、Runtime、Native、
+Performance、Usability；真人验收未发生时仍为 not run。
+
+**本任务 Evidence（2026-10-10；交互维护完成，不更新阶段勾选）**：
+
+- Structural：受影响的八个编辑器模块 `compileall`、`pyflakes` 通过；
+  `git diff --check` 与 cached check 通过；`npm run docs:build` 成功（19.44s，保留大 chunk
+  警告，不据此声明编辑器性能）。未参与实现的验证 Agent 以即时 Qt 输入链复验
+  960/1280/1480 三尺寸、常用参数首屏、完整浮点精度保存重解析、引用打开/返回与滚动恢复、
+  Before/After/Child 插入、新建定义和引用的一次 Undo/Redo、Task 两种动作与 Boss 阶段。
+  同选择参数编辑不跳视口；相邻时间块右缘正确命中，正文拖动不改时长；循环范围只在换内容
+  时重置。裸 ID 与重复中文名引用均正确保存 ID 和打开目标。该组检查为 offscreen Qt，
+  不冒充 Native。未恢复测试套件或新增验证脚本。
+- Runtime：临时普通 DSL 示例由现有构建流程验证后启动真实 Runtime。敌人练习场的
+  Trace 观察每轮 `emitted=32`；暂停后改为 40，再明确运行整关观察 `emitted=40`，
+  整关正常结束且无错误。生成包保留在临时备份目录，不留在仓库生成目录。
+- Native：真实 Windows PySide6 与 GLFW 子窗口操作：1280×800 修改数量、输入
+  `1.234567890123`、F5、暂停、返回步骤、修改数量；源码精确保存，暂停/旧构建状态保持，
+  子窗口未因编辑被替换。实际 960×640 首屏与插入搜索链也已观察；1480×920 仅 Qt 布局
+  检查，不声明该尺寸原生验收。最新补丁的真实相邻 Wait 手柄链 `240 -> 291 -> Undo 240`
+  通过。复现入口为下方启动命令及上述六条输入链；Agent 操作不是真人验收。
+- Performance：not run（本轮未重新测量整体预算）。已有大型程序刷新与停止旧预览可能
+  阻塞的问题仍未纳入本次修复，不声明性能通过。
+- Usability：维护者／真人新手验收 not run。现在可交由维护者试用，但不宣称新手已认可。
+
+本轮启动：`C:/Users/m1573/anaconda3/python.exe -m src.editor.app`。
+编译／静态检查：分别运行 `python -m compileall -q`、`python -m pyflakes`，参数为
+`src/editor/{window,sidebars,inspector,program_tree,node_palette,preview,timeline,session}.py`
+展开后的八个路径（PowerShell 不使用花括号展开）。
+
+阅读入口：判断进度先看第 2 节及对应 Evidence；修复具体问题时再读第 3 节、相关阶段的
+任务与 Gate。第 1 节描述路线建立时的基线，第 9 节用于阶段/路线最终验收。
+整体产品或架构调整仍需完整阅读本文及架构文档。
+
+### 当前维护任务：截图暴露的显示混乱（2026-10-10）
+
+维护者截图证明，上一轮可执行输入链不代表信息含义与绘制已经清晰。此次仅修显示与浏览入口。
+
+| Owner | 路径 allowlist | 必须完成 |
+| --- | --- | --- |
+| 协调 Agent | `window.py`、`program_tree.py`、`sidebars.py` 的活动页标签及文档 | 源码页说明用途与显示中文内容名称；去重复空槽/无意义标题；保留精确插入与 Undo |
+| 资源 Agent | `session.py` 的资源扫描、`sidebars.py` 的资源控件 | 排除开发配置与隐藏缓存；分类/搜索/短名称；不改变 res:// 拖拽及本关显式引用 |
+| 时间线 Agent | `timeline.py` | 短块文字不挤入区间；层级分开；初次适应视口；不改真实时间与 seek/编辑语义 |
+| 独立验证 Agent | 只读 | 复验实际布局和输入链；不沿用上一轮通过结论 |
+
+denylist：用户工程（包括 `my_game`、`my_game_2`）、`.claude/settings.local.json`、`.zcode/`、
+作者/compiler/runtime 语义、生成产物及测试/验证脚本。协调 Agent 独占本文 Evidence。
+
+验收：资源页无截图中的 package/config/隐藏缓存，搜索与分类后 URI 拖拽不变；源码页名称与
+文件 tooltip 对应，单击显示只读源码；非空容器不画重复尾槽，空 If/Parallel 分支仍有正确
+CHILD 落点；根/容器前后插入与一次 Undo 有效；短等待、同帧动作、父容器与叶节点不再叠字。
+Native 必须查看真实 Windows 窗并执行点击/搜索/插入，Qt/offscreen 几何检查独立记录。
+
+**本任务 Evidence（2026-10-10；截图对应修复完成，不更新阶段勾选）**：
+
+- Structural：`window.py`、`program_tree.py`、`sidebars.py`、`session.py`、`timeline.py`
+  的 `compileall`、`pyflakes` 通过，diff/cached check 通过。未参与实现的验证 Agent
+  独立复验资源扫描、搜索/分类和原始 URI MIME、中文文件名/路径提示/只读导航、根与空
+  分支的 Before/After/Child 插入及一次 Undo/Redo。非空容器没有重复尾槽或无意义标题。
+  时间线父子独立行，1 帧在 0.25px/帧时仍只绘制 0.25px；Unknown 在非时间区。
+  Qt/offscreen 下复验横纵滚动、固定表头命中、Wait/duration/At 拖动及 Undo、同内容
+  手动缩放保留；960/1280/1480 三尺寸通过。复核中实际发现 viewport70px、scroll92px
+  所有名称消失，修复后同条件可显示完整文字，100×3px 局部重绘也保留正确文字布局。
+  这些是 Structural/Qt 证据，不冒充 Native。未恢复测试或新增验证脚本。
+- Runtime：临时普通 DSL 示例经现有独立子进程构建验证后启动真实敌人练习场，运行记录
+  实际进入时间线且无预览错误；不更改作者/compiler/runtime 语义。临时生成包在结束后
+  移至系统 Temp 备份，用户工程保持不变。
+- Native：真实 Windows PySide6 960×640 窗口中检查资源页（767 项，`bullet` 搜索
+  为 39 项）、中文源码名称单击打开对应只读代码、编辑步骤按钮返回；就地 + → 输入
+  “等待” → Enter 在循环内部正确插入 → 单次 Undo 恢复。真实等待右缘
+  `30 -> 60 -> Undo 30` 通过。最终补丁重启后，实际滚动到 92px 仍显示完整“等待 30 帧”
+  且标尺常驻；展开 320px 后示例五行完整可读。F5 实际嵌入 GLFW 游戏画面，运行橙线
+  出现，停止后运行记录保留且子进程退出。其它尺寸只有 Qt 几何检查，不声明原生通过。
+- Performance：not run（未重测大型程序刷新、构建、停止预览等预算）。文档构建
+  `npm run docs:build` 成功（18.82s，保留大 chunk 警告），不是编辑器性能证据。
+- Usability：维护者／真人新手验收 not run；Agent 操作只证明上述输入链与显示。
+
+复查入口：`C:/Users/m1573/anaconda3/python.exe -m src.editor.app`，打开入门示例后依次
+检查资源/源码页、循环内 +、等待右缘及 Undo、时间线展开与滚动、F5 和停止。
+即时检查：`python -m compileall -q` 与 `python -m pyflakes`，参数为上面五个完整编辑器
+文件路径；另运行 `git diff --check`、`git diff --cached --check` 与 `npm run docs:build`。
+
 ## 1. 本轮要解决的问题
 
 本轮不再为“有一个节点库、一个时间线或一个预览窗口”而继续堆界面。目标是让第一次打开
@@ -30,12 +168,13 @@ Graph、JSON、静态弹幕描述或第二套作者模型。
 
 任何功能若不能让这条主线更短、更明确或更可靠，就不在本轮加入。
 
-当前起点为提交 697d9a5 之后的工作树：声明式 Python、生成器、真实预览、初版程序流、
-Inspector 和 Timeline 都已存在，但还没有完成本轮 Gate。工作树中的第三方或实验性改动
+本轮建立时的起点为提交 697d9a5 之后的工作树：声明式 Python、生成器、真实预览、初版程序流、
+Inspector 和 Timeline 当时已存在，但尚未完成本轮 Gate。以下问题是基线记录，不能据此判断
+当前工作树仍有同一缺陷；后续进度与验收范围见第 2 节及各阶段 Evidence。第三方或实验性改动
 不能自动视为正确实现；每个阶段的 owner 必须先逐项理解、测试并只保留符合本契约的部分。
 不得为了清理实验改动而覆盖用户已有修改。
 
-已确认的体验问题包括：
+基线评审确认的体验问题包括：
 
 - 合法工程可能先落在无执行体的 Project；Project 或 Boss 的悬停插入与真正提交的规则
   不一致；
@@ -60,12 +199,16 @@ CD0 -> CD1 -> CD2 -> CD3 -> CD4
 | CD3 | Inspector、弹幕设计与预览反馈 | [x] | CD2 |
 | CD4 | Timeline 节奏阅读、复杂弹幕证明与真人验收 | [x] | CD3 |
 
-CD0-CD4 的 focused、Runtime 与真实 Windows 原生门禁均已通过独立只读复验。真人 Usability
+下列结论来自各阶段所记录的提交、日期和命令，不代表任意后续工作树已复验；Evidence 内的
+“当前”“未提交”等措辞均指记录当时。表中勾选保留原有技术验收记录，不代表真人验收完成。
+
+按已有 Evidence，CD0-CD4 的 focused、Runtime 与真实 Windows 原生门禁均已通过独立只读复验。真人 Usability
 验收仍为 not run：维护者按第 1 节主线完成真实操作前，不得把 Usability 标为 PASS，也不得
 宣称本轮路线"无需维护者验收即完全完成"。
 
-只能领取最早未完成任务。当前 Gate 有一项为红，不得以“先做 UI”或“先补一个功能”为由
-开始下一项。协调 Agent 是唯一可以更新本表和 Evidence 的人；未参与实现的验证者执行
+推进新阶段时只能领取最早未完成任务。当前 Gate 有一项为红，不得以“先做 UI”或“先补一个功能”为由
+开始下一项。已实现阶段可以开展边界明确的修复和回归验证；全部技术阶段已勾选也不阻止维护，
+但修复测试不能替代整阶段复验或补记真人 Usability。协调 Agent 是唯一可以更新本表和 Evidence 的人；未参与实现的验证者执行
 最终只读 Gate。
 
 ## 3. 全阶段不变契约
@@ -452,6 +595,9 @@ import、示例工程 crossing_wave 中遗留的机器生成 `Set('i', 0)` 节�
 缩放 p95 小于 33ms。每阶段必须报告产品代码净增、净删、删除的旧交互和实际性能变化；
 不得通过删断言、skip 或 xfail 把红灯变绿。
 
+以下是阶段/路线最终验收门禁，迭代时先运行相关 focused gate。仅修改文档措辞、链接或导航时，
+检查链接、示例入口与文档构建即可；这类检查不改变阶段状态，也不算 Runtime、Native 或 Usability 证据。
+
 最终门禁：
 
 ~~~powershell
@@ -465,11 +611,11 @@ git diff --cached --check
 真实 Windows 门禁必须清除 QT_QPA_PLATFORM 后单独运行；offscreen 和截图不冒充原生嵌入。
 记录命令时必须写明实际 Python 解释器，避免 Windows Store 空别名被误报为测试通过。
 
-最终报告必须逐项写明：
+阶段/路线最终验收报告必须逐项写明：
 
 ~~~text
-Structural: PASS/FAIL + 命令与结果
-Runtime: PASS/FAIL + 手写关卡与生成示例真实路径
+Structural: PASS/FAIL/not run + 命令与结果
+Runtime: PASS/FAIL/not run + 手写关卡与生成示例真实路径
 Native: PASS/FAIL/not run + 窗口、嵌入、焦点、控制与尺寸
 Performance: PASS/FAIL/not run + 时间、交互响应与代码变化
 Usability: PASS/FAIL/not run + 维护者真实工作流；不得合成

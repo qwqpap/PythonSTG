@@ -1,5 +1,9 @@
 # 架构概览
 
+本文是游戏 Runtime 导航。声明式作者工程经 `src.authoring` 解析、`src.compiler` 生成后，
+同样使用这里的运行时；Qt 编辑器位于 `src.editor`。编辑器的持久化、Undo、构建事务、
+预览和 Timeline 边界见[编辑器架构](EDITOR_ARCHITECTURE.md)，实施状态见[TODO](EDITOR_IMPLEMENTATION_TODO.md)。
+
 ## 分层结构
 
 ```mermaid

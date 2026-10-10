@@ -6,19 +6,21 @@ becomes a second authoring model.
 
 from __future__ import annotations
 
-import importlib
+import ast
 import json
+import operator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from . import dsl
 from .program import AuthoringProgram, Expr, LogicalUnit, Node, ProgramError, Ref
+from .python_source import find_python_module_source, load_template_source_definitions
 from .templates import (
     TemplateExpansionError,
     TemplateRegistry,
     TemplateResolutionError,
     expand_nodes,
-    is_template,
 )
 
 
@@ -33,6 +35,184 @@ class Unknown:
 
 
 Frame = int | Unknown
+
+
+class _StaticTemplateUnsupported(Exception):
+    """A source template cannot be proven without executing author code."""
+
+
+@dataclass(frozen=True)
+class _StaticTemplatePlan:
+    signature: Any
+    function: ast.FunctionDef
+    constructors: Mapping[str, Any]
+    module_aliases: frozenset[str]
+
+
+class _StaticTemplateEvaluator:
+    """Interpret a deliberately small, side-effect-free template subset."""
+
+    _BINARY_OPERATORS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+    }
+    _UNARY_OPERATORS = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+        ast.Not: operator.not_,
+    }
+
+    def __init__(
+        self,
+        values: Mapping[str, Any],
+        constructors: Mapping[str, Any],
+        module_aliases: frozenset[str],
+    ) -> None:
+        self.values = dict(values)
+        self.constructors = constructors
+        self.module_aliases = module_aliases
+
+    def nodes(self, function: ast.FunctionDef) -> list[Node]:
+        returned, value = self._block(function.body)
+        if not returned:
+            raise _StaticTemplateUnsupported("template has no static return")
+        if isinstance(value, Node):
+            nodes = [value]
+        elif isinstance(value, (list, tuple)) and all(
+            isinstance(item, Node) for item in value
+        ):
+            nodes = list(value)
+        else:
+            raise _StaticTemplateUnsupported("template return is not a node sequence")
+        if len(nodes) > 4096:
+            raise _StaticTemplateUnsupported("template result is too large for static analysis")
+        return nodes
+
+    def _block(self, statements: Sequence[ast.stmt]) -> tuple[bool, Any]:
+        for statement in statements:
+            if isinstance(statement, ast.Return):
+                return True, self._value(statement.value)
+            if isinstance(statement, ast.Assign):
+                if len(statement.targets) != 1 or not isinstance(
+                    statement.targets[0], ast.Name
+                ):
+                    raise _StaticTemplateUnsupported("unsupported template assignment")
+                self.values[statement.targets[0].id] = self._value(statement.value)
+                continue
+            if isinstance(statement, ast.AnnAssign):
+                if not isinstance(statement.target, ast.Name) or statement.value is None:
+                    raise _StaticTemplateUnsupported("unsupported template assignment")
+                self.values[statement.target.id] = self._value(statement.value)
+                continue
+            if isinstance(statement, ast.If):
+                condition = self._value(statement.test)
+                if isinstance(condition, Expr):
+                    raise _StaticTemplateUnsupported("dynamic template branch")
+                returned, value = self._block(
+                    statement.body if bool(condition) else statement.orelse
+                )
+                if returned:
+                    return True, value
+                continue
+            if isinstance(statement, ast.Pass):
+                continue
+            if (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Constant)
+                and isinstance(statement.value.value, str)
+            ):
+                continue
+            raise _StaticTemplateUnsupported(
+                f"unsupported template statement: {type(statement).__name__}"
+            )
+        return False, None
+
+    def _value(self, value: ast.AST | None) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, ast.Constant):
+            return value.value
+        if isinstance(value, ast.Name):
+            try:
+                return self.values[value.id]
+            except KeyError as exc:
+                raise _StaticTemplateUnsupported(
+                    f"unknown template name: {value.id}"
+                ) from exc
+        if isinstance(value, ast.List):
+            return [self._value(item) for item in value.elts]
+        if isinstance(value, ast.Tuple):
+            return tuple(self._value(item) for item in value.elts)
+        if isinstance(value, ast.Dict):
+            if any(key is None for key in value.keys):
+                raise _StaticTemplateUnsupported("template dict unpacking is unsupported")
+            return {
+                self._value(key): self._value(item)
+                for key, item in zip(value.keys, value.values)
+            }
+        if isinstance(value, ast.UnaryOp):
+            operation = self._UNARY_OPERATORS.get(type(value.op))
+            operand = self._value(value.operand)
+            if operation is None or not isinstance(operand, (bool, int, float)):
+                raise _StaticTemplateUnsupported("unsupported template unary expression")
+            return operation(operand)
+        if isinstance(value, ast.BinOp):
+            operation = self._BINARY_OPERATORS.get(type(value.op))
+            left = self._value(value.left)
+            right = self._value(value.right)
+            if operation is None or any(
+                isinstance(item, bool) or not isinstance(item, (int, float))
+                for item in (left, right)
+            ):
+                raise _StaticTemplateUnsupported("unsupported template arithmetic")
+            try:
+                result = operation(left, right)
+            except (ArithmeticError, OverflowError) as exc:
+                raise _StaticTemplateUnsupported("invalid template arithmetic") from exc
+            if not isinstance(result, (int, float)) or abs(result) > 1_000_000_000:
+                raise _StaticTemplateUnsupported("template arithmetic is out of bounds")
+            return result
+        if isinstance(value, ast.IfExp):
+            condition = self._value(value.test)
+            if isinstance(condition, Expr):
+                raise _StaticTemplateUnsupported("dynamic template expression")
+            return self._value(value.body if bool(condition) else value.orelse)
+        if isinstance(value, ast.Call):
+            constructor = self._constructor(value.func)
+            if constructor is None or any(isinstance(item, ast.Starred) for item in value.args):
+                raise _StaticTemplateUnsupported("template call is not a DSL constructor")
+            if any(keyword.arg is None for keyword in value.keywords):
+                raise _StaticTemplateUnsupported("template keyword expansion is unsupported")
+            arguments = [self._value(item) for item in value.args]
+            keywords = {
+                str(keyword.arg): self._value(keyword.value)
+                for keyword in value.keywords
+            }
+            try:
+                return constructor(*arguments, **keywords)
+            except (TypeError, ValueError, ProgramError) as exc:
+                raise _StaticTemplateUnsupported("invalid static DSL call") from exc
+        raise _StaticTemplateUnsupported(
+            f"unsupported template expression: {type(value).__name__}"
+        )
+
+    def _constructor(self, value: ast.AST) -> Any | None:
+        if isinstance(value, ast.Name):
+            if value.id in self.values:
+                return None
+            return self.constructors.get(value.id)
+        if (
+            isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id not in self.values
+            and value.value.id in self.module_aliases
+        ):
+            return dsl.PUBLIC_CONSTRUCTORS.get(value.attr)
+        return None
 
 
 @dataclass(frozen=True)
@@ -142,6 +322,7 @@ class TimelineAnalyzer:
         self.program = program
         self.project_root = Path(project_root).resolve() if project_root is not None else None
         self.template_registry = template_registry or TemplateRegistry.with_builtins()
+        self._static_template_plans: dict[str, _StaticTemplatePlan | None] = {}
 
     def project(self, unit: str | LogicalUnit) -> TimelineProjection:
         selected = self.program.get_unit(unit) if isinstance(unit, str) else unit
@@ -479,8 +660,7 @@ class TimelineAnalyzer:
 
         if kind == "TemplateCall":
             try:
-                self._register_template_target(node)
-                expanded = expand_nodes([node], self.template_registry)
+                expanded = self._expand_template_call(node)
                 _, end = self._sequence(
                     expanded,
                     start,
@@ -515,32 +695,88 @@ class TimelineAnalyzer:
 
         return TimelineInterval(node.uid, start, start, lane, "static", label=label)
 
-    def _register_template_target(self, node: Node) -> None:
-        """Load exactly the retained call target, never scan template packages."""
+    def _expand_template_call(self, node: Node) -> list[Node]:
+        """Expand trusted built-ins or statically interpret source-only templates."""
 
         target = node.template
         if target is None:
             raise TemplateResolutionError("", "template call has no target")
         try:
             self.template_registry.resolve(target.identity)
-            return
         except TemplateResolutionError:
-            pass
-        if not target.module:
-            raise TemplateResolutionError(target.identity, "template has no module")
-        try:
-            value: Any = importlib.import_module(target.module)
-            for part in target.symbol.split("."):
-                value = getattr(value, part)
-            if not is_template(value):
-                raise TypeError("resolved symbol is not decorated with @template")
-            definition = self.template_registry.register(value)
-            self.template_registry.register_alias(target.identity, definition.identity)
-        except Exception as exc:
+            return self._expand_source_template(node)
+        return expand_nodes([node], self.template_registry)
+
+    def _expand_source_template(self, node: Node) -> list[Node]:
+        """Interpret a restricted template AST without importing its module."""
+
+        target = node.template
+        if target is None:
+            raise TemplateResolutionError("", "template call has no target")
+        plan = self._static_template_plan(target.identity, target.module, target.symbol, target.definition_path)
+        if plan is None:
             raise TemplateResolutionError(
                 target.identity,
-                f"{type(exc).__name__}: {exc}",
-            ) from exc
+                "template source cannot be proven without executing author code",
+            )
+        try:
+            bound = plan.signature.bind(
+                *node.positional_arguments,
+                **node.arguments,
+            )
+            bound.apply_defaults()
+            return _StaticTemplateEvaluator(
+                bound.arguments,
+                plan.constructors,
+                plan.module_aliases,
+            ).nodes(plan.function)
+        except (TypeError, _StaticTemplateUnsupported) as exc:
+            raise TemplateResolutionError(target.identity, str(exc)) from exc
+
+    def _static_template_plan(
+        self,
+        identity: str,
+        module: str | None,
+        symbol: str,
+        definition_path: str | None,
+    ) -> _StaticTemplatePlan | None:
+        if identity in self._static_template_plans:
+            return self._static_template_plans[identity]
+        path = Path(definition_path) if definition_path else None
+        if path is None or not path.is_file():
+            path = find_python_module_source(module) if module else None
+        if path is None:
+            self._static_template_plans[identity] = None
+            return None
+        definitions = load_template_source_definitions(path, module_name=module or "")
+        definition = next(
+            (
+                item
+                for item in definitions
+                if item.identity == identity or item.symbol == symbol
+            ),
+            None,
+        )
+        if definition is None or definition.signature is None:
+            self._static_template_plans[identity] = None
+            return None
+        try:
+            tree = ast.parse(definition.source, filename=str(path), mode="exec")
+            function = next(
+                item for item in tree.body if isinstance(item, ast.FunctionDef)
+            )
+            constructors, module_aliases = _static_dsl_bindings(path, definition.symbol)
+        except (OSError, UnicodeDecodeError, SyntaxError, StopIteration):
+            self._static_template_plans[identity] = None
+            return None
+        plan = _StaticTemplatePlan(
+            definition.signature,
+            function,
+            constructors,
+            module_aliases,
+        )
+        self._static_template_plans[identity] = plan
+        return plan
 
     def _referenced_body(
         self,
@@ -761,6 +997,62 @@ def project_timeline(
         project_root=project_root,
         template_registry=template_registry,
     ).project(unit)
+
+
+def _static_dsl_bindings(
+    source_path: Path,
+    function_name: str,
+) -> tuple[dict[str, Any], frozenset[str]]:
+    """Return only unshadowed, explicit DSL imports visible to a template."""
+
+    text = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(text, filename=str(source_path), mode="exec")
+    constructors: dict[str, Any] = {}
+    module_aliases: set[str] = set()
+
+    def unbind(name: str) -> None:
+        constructors.pop(name, None)
+        module_aliases.discard(name)
+
+    for statement in tree.body:
+        if isinstance(statement, ast.ImportFrom):
+            if statement.module == "src.authoring.dsl":
+                for alias in statement.names:
+                    if alias.name == "*":
+                        continue
+                    local = alias.asname or alias.name
+                    constructor = dsl.PUBLIC_CONSTRUCTORS.get(alias.name)
+                    if constructor is not None:
+                        unbind(local)
+                        constructors[local] = constructor
+                continue
+            if statement.module == "src.authoring":
+                for alias in statement.names:
+                    if alias.name == "dsl":
+                        local = alias.asname or alias.name
+                        unbind(local)
+                        module_aliases.add(local)
+                continue
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                if alias.name == "src.authoring.dsl" and alias.asname:
+                    unbind(alias.asname)
+                    module_aliases.add(alias.asname)
+            continue
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(statement, ast.FunctionDef) and statement.name == function_name:
+                continue
+            unbind(statement.name)
+            continue
+        targets: list[ast.AST] = []
+        if isinstance(statement, ast.Assign):
+            targets.extend(statement.targets)
+        elif isinstance(statement, (ast.AnnAssign, ast.AugAssign)):
+            targets.append(statement.target)
+        for target in targets:
+            if isinstance(target, ast.Name):
+                unbind(target.id)
+    return constructors, frozenset(module_aliases)
 
 
 def _bind_parameters(unit: LogicalUnit, arguments: Mapping[str, Any]) -> dict[str, Any]:

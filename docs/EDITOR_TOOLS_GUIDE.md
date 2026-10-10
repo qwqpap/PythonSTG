@@ -1,7 +1,7 @@
 # pystg 编辑器工具指南
 
 > 本文档只介绍关卡编辑器之外的独立资产工具。代码驱动关卡编辑器见
-> [产品愿景](EDITOR_PRODUCT_VISION.md)。
+> [快速开始](getting-started.md)；按所用资产工具阅读对应章节即可。
 
 ---
 
@@ -47,10 +47,11 @@ pystg 提供多套可视化工具，用于管理游戏资产配置：
 
 ## 2. 依赖安装
 
-所有编辑器都需要 **PyQt5**：
+这些工具经 `src.qt_compat` 统一使用 **PySide6**。从仓库根目录安装开发依赖和项目：
 
 ```bash
-pip install PyQt5
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
 ```
 
 纹理资产编辑器还依赖引擎模块（`src/resource/unified_texture.py`），无需额外安装但需要确保项目目录完整。
@@ -434,12 +435,13 @@ save_bullet_aliases(mapping)
 
 ## 8. 常见问题
 
-### 启动报错 ModuleNotFoundError: No module named 'PyQt5'
+### 启动报错缺少 PySide6 或 src
 
-安装 PyQt5：
+确认安装依赖和运行工具使用同一个 Python 环境，并在仓库根目录执行：
 
 ```bash
-pip install PyQt5
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
 ```
 
 ### 弹幕别名管理器打开后网格是空的
@@ -455,7 +457,7 @@ pip install PyQt5
 引擎在 `StageContext` 首次实例化时加载别名表。确认：
 
 1. 关卡脚本里使用的 `bullet_type` 和 `color` 名称与 JSON 中一致
-2. 重新启动游戏（别名表在进程启动时加载，不会热重载）
+2. 重新启动游戏；若使用 `python main.py --debug --hot-reload`，可按[开发工具链](DEVTOOLS_PHASE1.md)检查重载日志
 
 ### 纹理编辑器加载失败
 

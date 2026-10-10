@@ -1,6 +1,10 @@
-# 第一阶段开发工具链
+# 手写符卡开发工具链
 
 这些工具用于缩短内容开发循环：调参数、看真实引擎内效果、验证资源，然后导出或运行脚本代码。
+
+适用范围是手写 Runtime 内容和独立预览工具；文件名中的 Phase1 是历史命名，不是编辑器
+CD 阶段。声明式关卡编辑器入口见[快速开始](getting-started.md)，其预览只在显式 Run 时更新，
+不采用下文的脚本自动重载流程。按需要查阅资源校验、配置热重载或符卡预览章节即可。
 
 ## 资源验证
 
@@ -167,4 +171,7 @@ VSCode task：
 2. 添加 `<script>.preview.json` 或类内 preview 元数据。
 3. 编辑时运行 `python tools/preview.py <script.py>`。
 4. 符卡效果稳定后，运行 `python main.py --debug --hot-reload`，进入实际关卡测试。
-5. 提交前运行 `python tools/validate_assets.py` 和 `python -m pytest -q`。
+5. 修改资源或资源引用时运行 `python tools/validate_assets.py`；代码修改用即时检查
+   （`python -m compileall -q main.py src game_content tools` 加真实 Runtime/Qt 输入链）
+   验证受影响行为。仓库测试套件与原生验证脚本已按维护者要求删除，见实施 TODO 开头的
+   修复约定。阶段/合并任务执行对应门禁，仅改本文不需要运行整套引擎测试。

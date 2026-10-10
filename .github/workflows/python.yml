@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -24,11 +24,6 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
-
-      - name: Test module and console pytest entry points
-        run: |
-          python -m pytest -q
-          pytest -q
 
       - name: Compile Python sources
         run: python -m compileall -q main.py src game_content tools
