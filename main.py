@@ -969,11 +969,21 @@ def main():
     """游戏主函数"""
     global _PREVIEW_CHANNEL
     if "--help" in sys.argv or "-h" in sys.argv:
-        print(
-            "usage: python main.py [--content-entry MODULE] [--stage ID] "
-            "[--project PATH] [--debug] [--profile] [--hot-reload] "
-            "[--editor-preview RUN_ID] [--preview-seed INTEGER]"
-        )
+        print("usage: python main.py [options]")
+        print()
+        print("选项（--key=value 与 --key value 两种写法都支持）:")
+        print("  --content-entry=MODULE   手写关卡入口模块，默认 game_content.entry")
+        print("  --stage=ID               起始关卡 ID，或 asset_preview 进入资产预览")
+        print("  --project=PATH           项目根目录，用于解析 res:// 资源引用，默认当前目录")
+        print("  --debug                  启用调试模式，菜单可跳转到任意波次、Boss 或符卡")
+        print(f"  --profile                输出前 {PROFILE_REPORT_FRAMES} 帧的逐帧耗时")
+        print("  --hot-reload             监视弹幕别名、HUD 布局和激光配置并自动重新加载")
+        print("  --replay=PATH            直接回放指定的录像文件")
+        print("  --editor-preview=RUN_ID  编辑器预览模式，按 NDJSON 协议输出运行事件")
+        print("  --preview-seed=INTEGER   编辑器预览的随机种子，默认 1337")
+        print("  --preview-unit-id=ID     编辑器预览定位到指定 Timeline 单元")
+        print("  --authoring-root=PATH    追加到 sys.path 的作者工程根目录")
+        print()
         print(f"content entry: {CONTENT_ENTRY_MODULE}")
         print("stages: " + ", ".join(STAGE_BY_ID))
         return

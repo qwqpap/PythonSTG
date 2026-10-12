@@ -23,7 +23,10 @@
 python main.py --debug
 pystg-editor game_content/authoring/code_editor_demo
 python tools/editor_launcher.py
-python -m pytest -q tests/test_authoring_program.py
+python tools/validate_assets.py
 ```
 
-最后一条只是聚焦测试示例，应按修改涉及的行为选择测试。阶段和最终合并门禁见 TODO，文档修改检查链接与文档构建。
+仓库当前不含可运行的 pytest 套件（`tests/` 为空）；提交前至少运行
+`python -m compileall -q main.py src game_content tools`、`python tools/validate_assets.py`
+和 `git diff --check`，并按修改涉及的行为补充真实运行时检查。阶段和最终合并门禁见 TODO，
+文档修改检查链接与文档构建。

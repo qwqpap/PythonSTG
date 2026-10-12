@@ -199,7 +199,7 @@ class My{preset_id.title().replace('_', '')}(PresetEnemy):
 
         self.fire_circle(
             count=8,
-            speed=self.defaults['move_speed'],
+            speed=self._default_bullet_speed(),
             bullet_type=self.defaults['bullet_type'],
             color=self.defaults['bullet_color']
         )

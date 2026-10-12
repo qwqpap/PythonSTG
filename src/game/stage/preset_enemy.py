@@ -10,25 +10,26 @@
 
     # 方式1: 使用预设ID直接创建
     class SimpleRedFairy(PresetEnemy):
-        preset_id = "fairy_red"
+        preset_id = "enemy1"
 
         async def run(self):
             await self.move_to(self.x, 0.3, duration=60)
-            self.fire_circle(count=8, speed=self.defaults['move_speed'])
+            self.fire_circle(count=8, speed=self._default_bullet_speed())
             await self.wait(20)
             await self.move_to(self.x, -0.2, duration=60)
 
     # 方式2: 使用行为预设
     class AutoRedFairy(PresetEnemy):
-        preset_id = "fairy_red"
+        preset_id = "enemy1"
         behavior_preset = "rush_in_shoot_leave"  # 自动应用预设行为
 
     # 方式3: 动态创建（适合编辑器）
-    enemy = create_preset_enemy(
-        preset_id="fairy_blue",
+    EnemyClass = create_preset_enemy(
+        preset_id="enemy_orb",
         behavior="side_pass_shoot",
         overrides={"hp": 50, "score": 200}
     )
+    enemy = EnemyClass()
 """
 
 import json
@@ -123,12 +124,36 @@ class PresetEnemy(EnemyScript, ABC):
         preset_id: 预设ID（必须设置）
         behavior_preset: 行为预设ID（可选，如果设置则自动执行）
         attack_preset: 攻击预设ID（可选）
+        hp / sprite / score / hitbox_radius: 可选，覆盖预设中的同名属性
     """
 
     # 子类需要覆盖的属性
     preset_id: Optional[str] = None
     behavior_preset: Optional[str] = None
     attack_preset: Optional[str] = None
+
+    # 预设中可以被类属性覆盖的字段
+    OVERRIDABLE_FIELDS = ('hp', 'sprite', 'score', 'hitbox_radius')
+
+    @classmethod
+    def _collect_class_overrides(cls) -> Dict[str, Any]:
+        """收集子类和 create_preset_enemy(overrides=...) 显式设置的可覆盖属性。
+
+        只检查 PresetEnemy 之前的 MRO 层级，避免误用 EnemyScript 的默认值。
+        越接近子类的定义优先级越高。
+        """
+        chain = []
+        for klass in cls.__mro__:
+            if klass is PresetEnemy:
+                break
+            chain.append(klass)
+
+        overrides: Dict[str, Any] = {}
+        for klass in reversed(chain):
+            for field in cls.OVERRIDABLE_FIELDS:
+                if field in klass.__dict__:
+                    overrides[field] = klass.__dict__[field]
+        return overrides
 
     def __init__(self):
         super().__init__()
@@ -143,11 +168,12 @@ class PresetEnemy(EnemyScript, ABC):
         if preset is None:
             raise ValueError(f"未找到预设: {self.preset_id}")
 
-        # 应用预设配置到实例
-        self.hp = preset.get('hp', 30)
-        self.sprite = preset.get('sprite', 'enemy_fairy')
-        self.score = preset.get('score', 100)
-        self.hitbox_radius = preset.get('hitbox_radius', 0.02)
+        # 应用预设配置到实例；类属性（含 overrides）优先于预设值
+        overrides = self._collect_class_overrides()
+        self.hp = overrides.get('hp', preset.get('hp', 30))
+        self.sprite = overrides.get('sprite', preset.get('sprite', 'enemy_fairy'))
+        self.score = overrides.get('score', preset.get('score', 100))
+        self.hitbox_radius = overrides.get('hitbox_radius', preset.get('hitbox_radius', 0.02))
 
         # 存储默认值（子类可以使用）
         self.defaults = preset.get('defaults', {})
@@ -163,6 +189,14 @@ class PresetEnemy(EnemyScript, ABC):
         self._attack_data = None
         if self.attack_preset:
             self._attack_data = manager.get_attack_preset(self.attack_preset)
+
+    def _default_bullet_speed(self) -> float:
+        """预设射击动作使用的子弹速度。
+
+        优先使用 defaults['bullet_speed']；未定义时回退到 defaults['move_speed']，
+        以保持既有预设的行为不变。
+        """
+        return float(self.defaults.get('bullet_speed', self.defaults.get('move_speed', 2.0)))
 
     async def run(self):
         """
@@ -202,21 +236,37 @@ class PresetEnemy(EnemyScript, ABC):
                 await self._execute_move_linear(params)
 
     async def _execute_move_to(self, params: Dict[str, Any]):
-        """执行移动到目标位置"""
+        """移动到目标位置
+
+        参数：
+            target: "y=0.3"、"x=0.5"、"x=-x"（镜像到另一侧）或 [x, y]
+            duration: 移动帧数，默认 60；提供时忽略 speed
+            speed: 未提供 duration 时按速度计算帧数（归一化坐标/秒）
+        """
         target = params.get('target', 'y=0.3')
-        duration = params.get('duration', 60)
+        target_x, target_y = self.x, self.y
 
         # 解析目标位置
         if isinstance(target, str):
             if target.startswith('y='):
-                y = float(target.split('=')[1])
-                await self.move_to(self.x, y, duration=duration)
+                target_y = float(target.split('=')[1])
             elif target.startswith('x='):
                 x_expr = target.split('=')[1]
-                x = -self.x if x_expr == '-x' else float(x_expr)
-                await self.move_to(x, self.y, duration=duration)
+                target_x = -self.x if x_expr == '-x' else float(x_expr)
+            else:
+                return
         elif isinstance(target, (list, tuple)) and len(target) == 2:
-            await self.move_to(target[0], target[1], duration=duration)
+            target_x, target_y = float(target[0]), float(target[1])
+        else:
+            return
+
+        duration = params.get('duration')
+        if duration is None:
+            speed = max(float(params.get('speed', 2.0)), 0.001)
+            distance = math.hypot(target_x - self.x, target_y - self.y)
+            duration = max(1, int(distance / speed * 60))
+
+        await self.move_to(target_x, target_y, duration=int(duration))
 
     async def _execute_shoot_burst(self, params: Dict[str, Any]):
         """执行连射"""
@@ -229,7 +279,7 @@ class PresetEnemy(EnemyScript, ABC):
         for _ in range(count):
             self.fire_circle(
                 count=8,
-                speed=self.defaults.get('move_speed', 2.0),
+                speed=self._default_bullet_speed(),
                 bullet_type=bullet_type,
                 color=bullet_color
             )
@@ -245,7 +295,7 @@ class PresetEnemy(EnemyScript, ABC):
 
         for _ in range(count):
             self.fire_at_player(
-                speed=self.defaults.get('move_speed', 2.0),
+                speed=self._default_bullet_speed(),
                 bullet_type=bullet_type,
                 color=bullet_color
             )
@@ -258,7 +308,7 @@ class PresetEnemy(EnemyScript, ABC):
 
         bullet_type = self.defaults.get('bullet_type', 'ball_s')
         bullet_color = self.defaults.get('bullet_color', 'red')
-        speed = self.defaults.get('move_speed', 2.0)
+        speed = self._default_bullet_speed()
 
         if pattern == 'circle':
             self.fire_circle(
@@ -278,20 +328,57 @@ class PresetEnemy(EnemyScript, ABC):
             )
 
     async def _execute_move_circle(self, params: Dict[str, Any]):
-        """执行圆形移动（简化版）"""
-        duration = params.get('duration', 180)
-        # 这里是简化实现，实际可能需要更复杂的圆形路径
-        for _ in range(duration // 10):
-            await self.wait(10)
+        """沿圆形路径绕行一圈
+
+        参数：
+            center: 圆心 (x, y) 或 {"x": ..., "y": ...}，默认 (0.0, 0.5)
+            radius: 半径（归一化坐标），默认 0.25
+            duration: 绕行一圈的帧数，默认 180
+            start_angle: 起始角度（度），默认 0
+            clockwise: 顺时针绕行时为 True，默认 False
+        """
+        center = params.get('center', (0.0, 0.5))
+        if isinstance(center, dict):
+            center_x = float(center.get('x', 0.0))
+            center_y = float(center.get('y', 0.5))
+        elif isinstance(center, (list, tuple)) and len(center) == 2:
+            center_x = float(center[0])
+            center_y = float(center[1])
+        else:
+            center_x, center_y = 0.0, 0.5
+
+        radius = float(params.get('radius', 0.25))
+        duration = max(1, int(params.get('duration', 180)))
+        start_angle = math.radians(float(params.get('start_angle', 0)))
+        direction = -1.0 if params.get('clockwise', False) else 1.0
+
+        for step in range(1, duration + 1):
+            angle = start_angle + direction * 2 * math.pi * (step / duration)
+            self.set_position(
+                center_x + radius * math.cos(angle),
+                center_y + radius * math.sin(angle),
+            )
+            await self.wait(1)
 
     async def _execute_move_linear(self, params: Dict[str, Any]):
-        """执行线性移动"""
-        direction = params.get('direction', -90)
-        speed = params.get('speed', 2.0)
-        duration = params.get('duration', 60)
+        """沿直线匀速移动
 
-        dx = math.cos(math.radians(direction)) * speed / 60
-        dy = math.sin(math.radians(direction)) * speed / 60
+        参数：
+            dx, dy: 总位移（归一化坐标）。提供任意一个时，按总位移处理。
+            direction: 移动方向（度，0=右，-90=下），未提供 dx/dy 时使用
+            speed: 移动速度（归一化坐标/秒），未提供 dx/dy 时使用
+            duration: 移动帧数，默认 60
+        """
+        duration = max(1, int(params.get('duration', 60)))
+
+        if 'dx' in params or 'dy' in params:
+            dx = float(params.get('dx', 0.0))
+            dy = float(params.get('dy', 0.0))
+        else:
+            direction = math.radians(float(params.get('direction', -90)))
+            distance = float(params.get('speed', 2.0)) * duration / 60.0
+            dx = math.cos(direction) * distance
+            dy = math.sin(direction) * distance
 
         await self.move_linear(dx, dy, duration=duration)
 
@@ -321,7 +408,7 @@ def create_preset_enemy(
         动态创建的敌人类
 
     示例：
-        RedFairyClass = create_preset_enemy("fairy_red", behavior="rush_in_shoot_leave")
+        RedFairyClass = create_preset_enemy("enemy1", behavior="rush_in_shoot_leave")
         enemy_instance = RedFairyClass()
     """
 

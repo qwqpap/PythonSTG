@@ -1,224 +1,247 @@
 # PySTG
 
-**Python + OpenGL 实现的东方 Project 风格弹幕射击游戏引擎。**
+PySTG 是一个使用 Python 和 OpenGL 编写的弹幕射击（STG）游戏运行时与关卡创作工具集。运行时使用 ModernGL 实例化渲染和 Numba 加速的子弹池；内容层使用 `async`/`await` 协程描述关卡流程、波次和 Boss 符卡，与引擎内部实现解耦。
+
+本存储库对应东方 Project 同人活动「九州拾遗」展出的游戏。
 
 <p align="center">
-  <img src="docs/logo.png" alt="PySTG Logo" width="200">
+  <img src="docs/logo.png" alt="PySTG 徽标" width="200">
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg" alt="Platform">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10 或更高版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT 许可证"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg" alt="支持的平台：Windows、Linux">
 </p>
 
-PySTG 是一个面向**关卡内容创作者**和**引擎二次开发者**的弹幕射击游戏框架。
-引擎层使用 ModernGL 实例化渲染 + Numba JIT 加速的子弹池，面向高密度弹幕；实际帧率取决于硬件、场景与测量条件。
-内容层通过 `async/await` 协程脚本编写关卡、波次、Boss 符卡，与引擎彻底解耦。
+## 功能
 
-## 介绍
-    这个项目是九州拾遗东方例会出现的游戏所在的仓库。
-    
----
+| 功能 | 说明 |
+| --- | --- |
+| 弹幕运行时 | `OptimizedBulletPool` 使用 NumPy 结构化数组和 Numba 编译的更新逻辑，渲染使用 ModernGL 实例化绘制。 |
+| 协程关卡脚本 | 用 `async`/`await` 描述弹幕时序，不需要回调。 |
+| STG 玩法 | 判定点、擦弹、Power、符卡、Bomb、道具掉落、练习模式和 Debug 跳转。 |
+| 激光 | 直线激光（展开、持续、收缩三个阶段）和曲线激光。 |
+| 数据驱动资产 | 纹理图集、精灵动画、弹幕别名和敌人预设都使用 JSON 配置。 |
+| 独立资产工具 | 弹幕别名、纹理资产、自机、敌人、对话立绘和背景编辑器。 |
+| 代码驱动关卡编辑器 | 以声明式 Python 为唯一真源，提供程序树、Inspector、真实游戏预览和代码投影 Timeline。 |
+| 音频 | 全局音频库和关卡私有音频库；关卡音效可以覆盖同名的全局音效。 |
+| 数据驱动背景 | 3D 透视投影、雾效和程序化生成。 |
+| Replay | 自动录制输入并保存到 `userdata/replays/`，可以从主菜单或使用 `--replay` 回放。 |
+| QQ 群弹幕互动 | 内置 UDP 监听器，通过 NoneBot 等外部机器人把群消息转换为攻击玩家的弹幕。 |
 
-## 主要特性
+## 环境要求
 
-- 🚀 **高性能弹幕** — `OptimizedBulletPool` 基于 NumPy 结构化数组 + Numba JIT，OpenGL 实例化渲染
-- 🎮 **协程化关卡脚本** — 用 `async/await` 描述弹幕时序，无回调地狱
-- 🎯 **完整 STG 玩法** — 判定点 / 擦弹 / Power / 符卡 / Bomb / 道具掉落 / 练习模式
-- 🌟 **激光系统** — 直线激光（三段式：展开→持续→收缩）+ 曲线激光
-- 📦 **数据驱动资产** — 纹理图集、精灵动画、弹幕别名表全部 JSON 配置
-- 🎨 **可视化编辑器** — 弹幕别名管理器、纹理资产编辑器、自机编辑器、对话立绘编辑器
-- 🧩 **代码驱动关卡编辑器** — 声明式 Python、程序树、Inspector、真实游戏预览与代码投影 Timeline
-- 🔊 **双层音频** — 全局 bank + 关卡私有 bank，关卡音效可覆盖全局同名音效
-- 🌅 **3D 背景** — 透视投影 + 雾效 + 程序化生成（如湖面反射）
-- 🛠 **Debug 模式** — 一键跳转任意 Wave / Boss / 符卡，加速开发迭代
-- 💬 **QQ 群弹幕互动** — 内置 UDP 监听器，接 NoneBot/Mirai 把直播间表情转化为攻击玩家的 emoji 弹
+- Python 3.10 或更高版本。当前验证的版本是 Python 3.12。
+- 支持 OpenGL 3.3 或更高版本的显卡。
+- Windows 或 Linux。macOS 未验证。
 
----
+## 安装
 
-## 快速开始
-
-### 环境要求
-
-- Python **3.10+**（推荐 3.12）
-- 支持 OpenGL **3.3+** 的显卡
-
-### 安装
+### 安装运行时依赖项
 
 ```bash
 git clone https://github.com/qwqpap/PythonSTG.git
 cd PythonSTG
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 运行
+`requirements.txt` 锁定一组互相兼容的版本，其中 `numpy==1.26.4` 和 `numba==0.60.0` 必须成对升级。只升级其中一个时，Numba 会报告 NumPy 版本不受支持。
+
+### 安装开发依赖项
+
+关卡编辑器、独立资产工具和开发脚本需要额外的依赖项：
 
 ```bash
-# 默认从 Stage 1 开始
-python main.py
-
-# 资产预览模式（浏览所有弹型/敌人）
-python main.py --stage=asset_preview
-
-# Debug 模式（菜单可跳转任意 Wave / Boss / 符卡）
-python main.py --debug
-
-# 性能分析
-python main.py --profile
-
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
 ```
 
-关卡编辑器正在按 [代码驱动编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md)
-继续打磨创作工作流。唯一作者真源是声明式 Python；旧 Scene/Pattern JSON 编辑器不再提供兼容入口。
-纹理、自机、敌人、背景、对话和 UI 等独立资产工具继续由各自脚本启动。
+安装后可以使用两个命令：`pystg` 等同于 `python main.py`，`pystg-editor` 用于打开关卡编辑器。
 
-### 开发依赖（编辑器与测试）
+## 运行游戏
 
-```bash
-pip install -r requirements-dev.txt
-```
+在存储库根目录运行 `python main.py`。下表列出常用选项。
 
-安装项目本身：
+| 命令 | 用途 |
+| --- | --- |
+| `python main.py` | 从 Stage 1 开始游戏。 |
+| `python main.py --stage=stage2` | 从指定关卡开始，可取 `stage1`、`stage2`、`stage3`。 |
+| `python main.py --stage=asset_preview` | 进入资产预览模式，浏览所有弹型和敌人。 |
+| `python main.py --debug` | 启用调试模式，在菜单中跳转到任意波次、Boss 或符卡。 |
+| `python main.py --profile` | 输出前 120 帧的逐帧耗时统计。 |
+| `python main.py --hot-reload` | 监视弹幕别名、HUD 布局和激光配置，文件变化后自动重新加载。 |
+| `python main.py --replay=<文件>` | 直接回放指定的录像文件。 |
+| `python main.py --project=<目录>` | 指定项目根目录，用于解析 `res://` 资源引用。默认使用当前目录。 |
 
-```bash
-pip install -e .
-```
+主菜单提供开始游戏、测试关卡、查看重放、设置和退出选项。设置菜单可以调整音效音量、BGM 音量和全屏模式，并选择默认自机。
 
-安装后，从仓库根目录打开声明式示例工程：
+标记 `DEBUG_BOOKMARK = True` 的波次和符卡会出现在 `--debug` 的跳转菜单中，可以跳过重复的道中流程。
+
+## 打开关卡编辑器
+
+1. 安装开发依赖项，见[安装](#安装)。
+2. 在存储库根目录运行以下命令：
 
 ```bash
 pystg-editor game_content/authoring/code_editor_demo
 ```
 
-该目录是可编辑源码；试用时可先在 `game_content/authoring/` 下复制一份。编辑器内显式点击 Run
-才会构建并启动预览；后续修改会标记预览过期，再次 Run 才更新。完整入口见
-[快速开始](docs/getting-started.md)，按任务查文档见[文档导航](docs/index.md)。
+`game_content/authoring/<project_id>/` 下的声明式 Python 是唯一作者真源。编辑器不会解析 `game_content/stages/` 下的手写关卡。试用时，先复制 `code_editor_demo` 目录，再把命令参数换成副本路径。
 
----
+编辑器的行为：
 
-## 项目结构
+- 打开工程后，从开始 Stage 查看引用的波次、敌人和 Boss。在程序流中选择节点，然后在 Inspector 中修改参数。
+- 只有在 **运行** 菜单中选择 **运行当前单元**（F5）、**运行整个工程** 或 **运行当前关卡** 时，编辑器才会保存、构建并启动真实游戏预览。
+- 预览运行期间修改源码后，状态栏显示“源码已改，需重新运行”。再次运行才会更新预览。
+- 生成的文件位于 `game_content/generated/<project_id>/`。这些文件是构建输出，可以删除，不要手工修改或提交。
 
-```mermaid
-flowchart TB
-    root["PythonSTG"]
-    main["main.py<br/>入口、主循环、状态机"]
-    src["src/<br/>引擎代码"]
-    content["game_content/stages/<br/>手写关卡内容"]
-    authoring["game_content/authoring/<br/>声明式编辑器工程"]
-    assets["assets/<br/>纹理、音频、字体、自机配置"]
-    tools["tools/<br/>PySide6 独立资产工具"]
-    docs["docs/<br/>VitePress 文档"]
+编辑器各阶段的实施状态和剩余验收见[代码驱动关卡编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md)。
 
-    root --> main
-    root --> src
-    root --> content
-    root --> authoring
-    root --> assets
-    root --> tools
-    root --> docs
-
-    src --> core["core：配置 / 碰撞 / 窗口 / 输入"]
-    src --> game["game：子弹 / 关卡 / 玩家 / Boss / 激光 / 道具 / 音频"]
-    src --> render["render：OpenGL 渲染管线"]
-    src --> resource["resource：纹理图集 / 精灵管理"]
-    src --> ui["ui：HUD / 对话框 / 菜单"]
-```
-
----
-
-## 文档
-
-完整文档位于 [`docs/`](docs/) 目录，按受众分两条线：
-
-### 给内容开发者（写关卡 / 弹幕 / Boss）
-
-| 文档 | 内容 |
-|------|------|
-| [快速开始](docs/getting-started.md) | 环境搭建、第一份脚本、目录约定 |
-| [弹幕脚本开发指南](docs/STAGE_SCRIPTING_GUIDE.md) | 完整 API 参考、符卡/波次/敌人/Boss 编写方法 |
-| [敌人预设系统](docs/ENEMY_PRESET_SYSTEM.md) | 用 JSON 预设快速创建杂兵 |
-| [编辑器工具](docs/EDITOR_TOOLS_GUIDE.md) | 独立资产和开发工具 |
-| [代码驱动编辑器产品愿景](docs/EDITOR_PRODUCT_VISION.md) | 声明式 Python、程序树、真实预览和 Timeline 的产品契约 |
-
-### 给引擎开发者（修引擎 / 加新模块）
-
-| 文档 | 内容 |
-|------|------|
-| [架构概览](docs/architecture.md) | 引擎分层、模块依赖、数据流 |
-| [纹理资产系统](docs/TEXTURE_ASSET_SYSTEM.md) | 图集加载、精灵定义、动画配置 |
-| [开发工具链](docs/DEVTOOLS_PHASE1.md) | 资源校验、热重载和独立预览工具 |
-| [编辑器架构边界](docs/EDITOR_ARCHITECTURE.md) | Python 作者核心、生成器、Qt、预览和 Timeline 的依赖约束 |
-| [编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) | CD0-CD4 创作工作流、弹幕设计、Timeline 与验收 Gate |
-
-也可以本地启动 VitePress 文档站点：
+## 运行独立资产工具
 
 ```bash
-npm install
-npm run docs:dev
+python tools/editor_launcher.py
 ```
 
----
+启动器以卡片形式列出弹幕别名、纹理资产、自机、敌人、对话立绘和背景编辑器。也可以直接运行单个工具：
 
-## 一段最简符卡示例
+```bash
+python tools/asset/asset_manager_qt.py        # 纹理资产编辑器
+python tools/bullet/bullet_alias_manager.py   # 弹幕别名管理器
+python tools/player/player_editor.py          # 自机编辑器
+```
+
+工具用途、操作方式和常见问题见[编辑器工具指南](docs/EDITOR_TOOLS_GUIDE.md)。
+
+要单独检查一个手写符卡，可以在真实渲染器中预览它：
+
+```bash
+python tools/preview_spell.py <脚本路径> [符卡类名]
+```
+
+详细用法见[开发工具链](docs/DEVTOOLS_PHASE1.md)。
+
+## 编写第一份弹幕脚本
 
 ```python
 from src.game.stage.spellcard import SpellCard
 
 class MySpell(SpellCard):
-    name = "火符「Example」"
+    name = "火符「示例」"
     hp = 1000
     time_limit = 45
-
-    async def setup(self):
-        await self.boss.move_to(0, 0.6, duration=30)
 
     async def run(self):
         angle = 0
         while True:
-            self.fire_circle(
-                count=12, speed=2.0,
-                start_angle=angle,
-                bullet_type="ball_m", color="red",
-            )
+            self.fire_circle(count=12, speed=2.0, start_angle=angle, color="red")
             angle += 10
-            await self.wait(15)
+            await self.wait(15)  # 等待 15 帧，约 0.25 秒
 ```
 
-挂到 Boss 上：
+`await self.wait(N)` 让协程暂停 N 帧，引擎每帧推进一步。这是 PySTG 弹幕脚本的核心模式。
+
+手写脚本使用 `StageScript`、`Wave`、`EnemyScript` 和 `SpellCard` 等基类，通过 `self.ctx` 调用引擎，不直接导入引擎内部模块：
 
 ```python
+from src.game.stage.spellcard import SpellCard, NonSpell
+from src.game.stage.wave_base import Wave
+from src.game.stage.enemy_script import EnemyScript
 from src.game.stage.stage_base import StageScript, BossDef
 from src.game.stage.boss_base import nonspell, spellcard
-
-class Stage1(StageScript):
-    boss = BossDef(
-        id="my_boss", name="Boss", texture="enemy_boss",
-        phases=[
-            nonspell(NonSpell1, hp=800, time=30, bonus=100000),
-            spellcard(MySpell, "火符「Example」", hp=1000, time=45),
-        ],
-    )
-
-    async def run(self):
-        await self.run_boss(self.boss)
 ```
 
-更多见 [弹幕脚本开发指南](docs/STAGE_SCRIPTING_GUIDE.md)。
+完整 API 见[弹幕脚本开发指南](docs/STAGE_SCRIPTING_GUIDE.md)，仓库内的内容约定见 [`game_content/SCRIPTING.md`](game_content/SCRIPTING.md)。
 
----
+## 项目结构
 
-## QQ 群弹幕互动（UDP 协议）
+```mermaid
+flowchart TB
+    root["PySTG"]
+    main["main.py<br/>游戏入口、主循环与状态机"]
+    src["src/<br/>引擎与编辑器代码"]
+    content["game_content/<br/>手写关卡、作者工程与生成产物"]
+    assets["assets/<br/>纹理、音频、字体与配置"]
+    tools["tools/<br/>独立资产工具与校验脚本"]
+    docs["docs/<br/>VitePress 文档站点"]
 
-PySTG 内置一个 UDP 监听器（`src/game/emoji_danmaku/udp_receiver.py`），默认监听 `127.0.0.1:9999`。
-任何外部程序（NoneBot 插件、Mirai HTTP API、自写脚本……）只要往这个端口发 JSON UDP 包，
-群成员发的 emoji 就会变成飘落+攻击玩家的弹幕。
+    root --> main
+    root --> src
+    root --> content
+    root --> assets
+    root --> tools
+    root --> docs
+
+    src --> authoring["authoring：声明式作者 API"]
+    src --> compiler["compiler：内容编译器"]
+    src --> content_api["content_api：内容脚本的稳定导入接口"]
+    src --> core["core：配置、碰撞、窗口、输入"]
+    src --> devtools["devtools：资产校验与符卡预览"]
+    src --> editor["editor：关卡编辑器界面"]
+    src --> game["game：子弹、关卡、玩家、Boss、激光、道具、音频"]
+    src --> qt_compat["qt_compat：Qt 绑定桥接"]
+    src --> render["render：OpenGL 渲染管线"]
+    src --> resource["resource：纹理图集与精灵管理"]
+    src --> ui["ui：HUD、菜单与对话框"]
+
+    content --> stages["stages/：手写关卡"]
+    content --> authoring_dir["authoring/：声明式作者工程"]
+    content --> generated["generated/：生成产物，不提交"]
+```
+
+| 路径 | 说明 |
+| --- | --- |
+| `main.py` | 游戏入口。 |
+| `src/` | 引擎、作者核心和编辑器代码。 |
+| `game_content/stages/` | 手写关卡内容。Stage 1 是最完整的参考实现。 |
+| `game_content/authoring/` | 声明式作者工程。`code_editor_demo` 是示例工程。 |
+| `assets/` | 纹理、音频、字体、自机配置和 JSON 配置。 |
+| `tools/` | 独立资产工具、符卡预览和资产校验脚本。 |
+| `docs/` | VitePress 文档站点源文件。 |
+
+## 文档
+
+完整文档位于 [`docs/`](docs/)，任务导航见[文档导航](docs/index.md)。
+
+### 编写关卡内容
+
+| 文档 | 内容 |
+| --- | --- |
+| [快速开始](docs/getting-started.md) | 环境搭建、运行游戏、第一份脚本和目录约定。 |
+| [弹幕脚本开发指南](docs/STAGE_SCRIPTING_GUIDE.md) | 波次、符卡、敌人和 Boss 的完整 API 参考。 |
+| [敌人预设系统](docs/ENEMY_PRESET_SYSTEM.md) | 用 JSON 预设创建杂兵。 |
+| [编辑器工具指南](docs/EDITOR_TOOLS_GUIDE.md) | 独立资产工具的用法。 |
+
+### 开发引擎和编辑器
+
+| 文档 | 内容 |
+| --- | --- |
+| [架构概览](docs/architecture.md) | 引擎分层、模块依赖和数据流。 |
+| [纹理资产系统](docs/TEXTURE_ASSET_SYSTEM.md) | 图集加载、精灵定义和动画配置。 |
+| [开发工具链](docs/DEVTOOLS_PHASE1.md) | 资产校验、符卡预览和热重载。 |
+| [编辑器产品愿景](docs/EDITOR_PRODUCT_VISION.md) | 声明式 Python、程序树、真实预览和 Timeline 的产品契约。 |
+| [编辑器架构边界](docs/EDITOR_ARCHITECTURE.md) | 作者核心、编译器、Qt、预览和 Timeline 之间的依赖约束。 |
+| [编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) | CD0-CD4 阶段的实施顺序、状态和验收 Gate。 |
+
+在本地启动文档站点：
+
+```bash
+npm ci
+npm run docs:dev
+```
+
+站点构建使用 `npm run docs:build`，预览构建结果使用 `npm run docs:preview`。
+
+## QQ 群弹幕互动
+
+PySTG 内置一个 UDP 监听器（`src/game/emoji_danmaku/udp_receiver.py`），默认监听 `127.0.0.1:9999`。外部程序（NoneBot 插件、Mirai HTTP API 或自写脚本）向该端口发送一行 UTF-8 编码的 JSON 数据包后，群成员发送的表情会变成下落并攻击玩家的弹幕。
 
 ### 消息格式
 
-UDP 包必须是一行 **UTF-8 编码的 JSON**，支持两种 `cmd`：
+`cmd` 字段决定消息类型：`"emoji"` 表示直接发送表情，`"stg"` 表示转发 `/stg` 指令的参数。
 
-#### 1. 直接发 emoji（`cmd: "emoji"`）
+直接发送表情：
 
 ```json
 {
@@ -229,7 +252,7 @@ UDP 包必须是一行 **UTF-8 编码的 JSON**，支持两种 `cmd`：
 }
 ```
 
-#### 2. 通过 `/stg` 指令转发（`cmd: "stg"`）
+转发 `/stg` 指令：
 
 ```json
 {
@@ -240,32 +263,32 @@ UDP 包必须是一行 **UTF-8 编码的 JSON**，支持两种 `cmd`：
 }
 ```
 
-### 字段说明
+### 字段
 
 | 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `cmd` | string | ✓ | 必须是 `"emoji"` 或 `"stg"` |
-| `emoji` | string | `cmd=emoji` 时必填 | 单个 emoji 字符 |
-| `args` | string | `cmd=stg` 时必填 | 单个 emoji 字符（`/stg <emoji>` 的参数） |
-| `nickname` | string | 否 | 发送者昵称，预留给后续显示用 |
-| `user_id` | int | 否 | 发送者 QQ 号，预留 |
+| --- | --- | --- | --- |
+| `cmd` | 字符串 | 是 | 取值为 `"emoji"` 或 `"stg"`。 |
+| `emoji` | 字符串 | `cmd` 为 `"emoji"` 时必填 | 单个表情字符。 |
+| `args` | 字符串 | `cmd` 为 `"stg"` 时必填 | `/stg` 指令的参数，即单个表情字符。 |
+| `nickname` | 字符串 | 否 | 发送者昵称。默认值为空字符串。 |
+| `user_id` | 整数 | 否 | 发送者 QQ 号。默认值为 0。 |
 
-### 当前支持的 emoji
+### 支持的表情
 
-只有这 4 个 emoji 会被引擎识别（其他会被静默丢弃）：
+引擎只识别下表中的 4 个表情。其他表情会被丢弃，并且不输出日志。
 
-| Emoji | 含义 |
-|-------|------|
+| 表情 | 含义 |
+| --- | --- |
 | 😂 | 笑死 |
 | 😡 | 怒 |
 | 💩 | 大便 |
 | 😅 | 苦笑 |
 
-如要扩展，编辑 [src/game/emoji_danmaku/udp_receiver.py](src/game/emoji_danmaku/udp_receiver.py) 顶部的 `EMOJI_SET` 即可。
+要增加表情，编辑 `src/game/emoji_danmaku/udp_receiver.py` 顶部的 `EMOJI_SET`。
 
-### 端口与地址
+### 监听地址
 
-默认值在 [src/game/emoji_danmaku/__init__.py](src/game/emoji_danmaku/__init__.py) 里写死为 `127.0.0.1:9999`（即只接受本机），如需暴露到局域网，初始化时传入参数：
+默认地址 `127.0.0.1:9999` 只接受本机数据包。要让其他计算机上的机器人发送数据，在创建 `EmojiDanmakuSystem` 时传入 `udp_host` 和 `udp_port`：
 
 ```python
 EmojiDanmakuSystem(
@@ -276,13 +299,15 @@ EmojiDanmakuSystem(
 )
 ```
 
-> ⚠️ **安全提醒**：`0.0.0.0` 会接收任何来源的 UDP 包，在公网环境下可能被滥用。
-> 如果直播主机和 Bot 不在同一台机器上，建议用 SSH 隧道或专用内网回环。
+> **注意**
+>
+> `0.0.0.0` 会接受任意来源的 UDP 数据包，在公网环境中可能被滥用。如果直播主机和机器人不在同一台计算机上，使用 SSH 隧道或专用的内网回环地址。
 
-### 最小发送端示例（Python）
+### 最小发送端示例
 
 ```python
-import json, socket
+import json
+import socket
 
 def send_emoji(emoji: str, nickname="anon", user_id=0):
     payload = {
@@ -301,8 +326,10 @@ send_emoji("😂", "测试群友", 10086)
 
 ```python
 # nonebot_plugin/__init__.py（节选）
-import json, socket
-from nonebot import on_command, on_message
+import json
+import socket
+
+from nonebot import on_command
 from nonebot.adapters.onebot.v11 import MessageEvent
 
 EMOJI_SET = {"😂", "😡", "💩", "😅"}
@@ -323,85 +350,75 @@ async def _(event: MessageEvent):
         }).encode("utf-8"), TARGET)
 ```
 
----
+## 项目状态
 
-## 路线图
+### 已实现
 
-### 已完成 ✅
+- 核心引擎：子弹池、激光、碰撞、道具、音频和渲染管线。
+- 玩家系统：桃、燐、天子三名自机，包含移动、射击、Option、动画状态机和判定点。
+- 关卡系统：`StageScript`、`Wave`、`SpellCard`、Boss、对话、练习模式和 Staff Roll。
+- 三关内容：Stage 1 至 Stage 3，包含道中波次、Boss 符卡和对白。
+- 数据驱动背景：3D 透视、雾效和程序化生成。
+- 独立资产工具：弹幕别名、纹理资产、自机、敌人、背景、对话立绘和 UI 布局。
+- Replay：自动录制、主菜单回放和 `--replay` 命令行回放。
+- 设置菜单：音效音量、BGM 音量、全屏模式和默认自机。
 
-- 核心引擎（子弹池、激光、碰撞、道具、音频、渲染管线）
-- 玩家系统（移动、射击、Option、动画状态机、判定点）
-- 关卡系统（StageScript / Wave / SpellCard / Boss / 对话 / 练习模式）
-- 数据驱动背景（3D 透视 + 雾效 + 程序化湖面）
-- 编辑器工具（弹幕别名、纹理资产、自机、对话立绘、UI 布局）
-- 示例自机：十六夜咲夜
-- 完整 Stage 1 内容
+### 进行中
 
-### 进行中 🚧
+- 关卡编辑器的创作体验和真人易用性验收。技术阶段状态和剩余验收见[编辑器实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md)。
+- 更多敌人行为模式。
+- 得分与结算系统的完善。
 
-- 关卡编辑器的创作体验与真人验收（技术阶段记录及剩余验收以 [实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) 为准）
-- 更多敌人行为模式
-- Stage 2 / Stage 3 完整内容
-- 完善的得分与结算系统
-- 更多 Boss 符卡模板
+### 计划
 
-### 待开发 📋
+- 按键绑定和画质选项。
+- 更多可选自机和 Boss 符卡模板。
 
-- Replay 录像系统
-- 游戏设置界面（按键绑定、画质）
-- 更多可选自机
+## 参与贡献
 
----
+提交拉取请求或问题之前，先阅读 [`AGENTS.md`](AGENTS.md) 中的仓库约定，再按[文档导航](docs/index.md)查阅与本次改动相关的章节。
 
-## 贡献
+内容约定：
 
-欢迎 PR / Issue。建议在动手前：
+- 声明式作者工程放在 `game_content/authoring/<project_id>/`，手写关卡放在 `game_content/stages/stageN/`。
+- `game_content/generated/` 是生成目录，不要提交。
+- 内容脚本通过公开运行时 API 使用引擎。
+- 修改引擎时保持 Numba 兼容：子弹池中不能使用 Python 对象。
 
-1. 阅读 [`AGENTS.md`](AGENTS.md) 了解共享仓库约定；Claude Code 的导航入口为 [`CLAUDE.md`](CLAUDE.md)
-2. 根据[文档导航](docs/index.md)查阅本次任务相关章节
-3. 声明式作者工程放在 `game_content/authoring/<project_id>/`；手写关卡放在 `game_content/stages/stageN/`。生成目录 `game_content/generated/` 不提交；内容任务通过公开 Runtime API 使用引擎
-4. 引擎层修改请保持 Numba 兼容（子弹池里不能用 Python 对象）
-
-迭代时验证受影响行为。仓库测试套件与原生验证脚本已按维护者要求删除（见
-[实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) 开头的修复约定），当前采用即时检查：
+提交前运行与 CI 相同的检查：
 
 ```bash
 python -m compileall -q main.py src game_content tools
+python tools/validate_assets.py
 git diff --check
 ```
 
-编辑器改动另需真实方式验证实际行为：headless 作者/编译器路径用临时脚本走真实 Runtime；
-界面交互在真实 Windows PySide6 窗口和 GLFW 子窗口中复现实际输入链。汇总结果时分别说明
-Structural、Runtime、Native、Performance、Usability，未观察的类别写 `not run`。
+仓库当前不包含可运行的 pytest 测试套件（`tests/` 为空），因此以上检查是主要的自动化验证手段。
 
-阶段完成按 TODO 和架构执行完整门禁。仅改文档时检查链接并运行 `npm run docs:build`
-（首次运行先 `npm ci`）。文档构建不证明游戏运行或编辑器易用性。
+编辑器改动还需要真实环境验证：无界面路径使用真实运行时，界面交互在 Windows 的 PySide6 窗口和 GLFW 子窗口中复现实际输入。汇总验证结果时，分别说明 Structural、Runtime、Native、Performance 和 Usability 证据，未观察的类别写 `not run`。
 
----
+只修改文档时，检查链接并构建文档站点：
 
-## 协议
+```bash
+npm ci
+npm run docs:build
+```
 
-代码以 [MIT License](LICENSE) 开源。
+文档构建通过不代表游戏可以运行，也不代表编辑器易于使用。
 
-### 资源版权
+## 许可与资源版权
 
-`assets/` 中部分纹理与音频资源来自 **Thlib** 等社区资源库，版权归原作者所有。
-**商用前请自行确认资源来源与授权**——本仓库仅用于学习、研究和非商业再创作。
+代码以 [MIT 许可证](LICENSE) 开源，版权归 qwqpap 所有。
 
-如发现侵权资源，请提 Issue，作者会及时替换。
+`assets/` 中的部分纹理和音频来自 Thlib 等社区资源库，版权归原作者所有。商用前自行确认资源来源和授权。本存储库仅用于学习、研究和非商业再创作。其余立绘和音乐资源不可转载、不可商用。
 
-其余立绘资源与音乐资源均不可转载不可商用，务必注意
+如果发现侵权资源，可以提交问题（Issue），维护者会替换相关资源。
 
----
+## 相关链接
 
-## 关于 AI
+- [GitHub 存储库](https://github.com/qwqpap/PythonSTG)
+- [在线文档](https://qwqpap.github.io/PythonSTG/)
 
-本仓库在开发过程中大量使用 AI 辅助。代码质量……能跑就行 :)
-欢迎 PR 把那些"能跑但不优雅"的部分变得更好。
+## 关于 AI 辅助
 
----
-
-## 链接
-
-- GitHub: <https://github.com/qwqpap/PythonSTG>
-- 在线文档: <https://qwqpap.github.io/PythonSTG/>
+本存储库在开发过程中使用了 AI 辅助。欢迎通过拉取请求改进实现中不够完善的部分。
