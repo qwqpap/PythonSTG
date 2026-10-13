@@ -184,7 +184,7 @@ class PlayerBulletPool:
         count = 0
         for i, e in enumerate(enemy_list):
             alive = getattr(e, '_active', getattr(e, 'alive', True))
-            if not alive:
+            if not alive or not getattr(e, 'interactable', True) or not getattr(e, 'collidable', True):
                 continue
             # EnemyScript 用 .x/.y，Boss/Entity 用 .pos
             pos = getattr(e, 'pos', None)
@@ -245,7 +245,7 @@ class PlayerBulletPool:
             
             for e_idx, enemy in enumerate(enemies):
                 alive = getattr(enemy, 'alive', getattr(enemy, '_active', True))
-                if not alive:
+                if not alive or not getattr(enemy, 'interactable', True) or not getattr(enemy, 'collidable', True):
                     continue
                 
                 pos = getattr(enemy, 'pos', None)

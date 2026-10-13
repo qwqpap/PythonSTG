@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from abc import abstractmethod
 import types
 
+from ..tasks import FrameTaskOwner, cancel_tasks, pump_tasks
+
 if TYPE_CHECKING:
     from .boss_base import BossBase
     from .spellcard import SpellCardContext
@@ -49,7 +51,7 @@ class _ImageOverlayRenderer:
         return self._active
 
 
-class StageScript:
+class StageScript(FrameTaskOwner):
     """
     程序化关卡脚本基类
 
@@ -98,6 +100,7 @@ class StageScript:
         # ===== 关卡链式跳转 =====
         # 在 run() 末尾赋值，StageManager 会在清场后自动加载
         self._next_stage_class = None
+        self._init_tasks()
 
     @property
     def time(self) -> int:
@@ -110,6 +113,7 @@ class StageScript:
 
     def start(self):
         """开始关卡"""
+        self._reset_tasks()
         self._active = True
         self._time = 0
         self._coroutine = self._run_wrapper()
@@ -127,6 +131,8 @@ class StageScript:
         except Exception:
             self._active = False
             raise
+        finally:
+            cancel_tasks(self)
         self._on_stage_complete()
 
     def update(self):
@@ -136,15 +142,26 @@ class StageScript:
 
         self._time += 1
 
-        # 更新所有敌人脚本
-        if self.ctx and hasattr(self.ctx, 'update_enemy_scripts'):
-            self.ctx.update_enemy_scripts()
+        try:
+            # Keep the existing enemy-before-stage update order.
+            if self.ctx and hasattr(self.ctx, 'update_enemy_scripts'):
+                self.ctx.update_enemy_scripts()
+            pump_tasks(self)
+            if self._active and not self._step_main():
+                self.dispose()
+            pump_tasks(self)
+        except BaseException:
+            self.dispose()
+            raise
 
-        if self._coroutine:
-            try:
-                self._coroutine.send(None)
-            except StopIteration:
-                self._active = False
+    def dispose(self):
+        """Dispose the current Boss and the whole stage coroutine tree."""
+        try:
+            if self._current_boss is not None:
+                self._current_boss.dispose()
+                self._current_boss = None
+        finally:
+            super().dispose()
 
     # ==================== 子类实现 ====================
 

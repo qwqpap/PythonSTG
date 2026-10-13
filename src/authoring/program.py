@@ -70,6 +70,12 @@ CONTROL_NODE_KINDS = frozenset(
         "ForEach",
         "Parallel",
         "SpawnTask",
+        "JoinTask",
+        "CancelTask",
+        "WaitEvent",
+        "EmitEvent",
+        "OnHit",
+        "OnDeath",
         "Break",
         "Continue",
         "Return",
@@ -103,6 +109,11 @@ ACTION_NODE_KINDS = frozenset(
         "CreateBentLaser",
         "RemoveLaser",
         "ClearLasers",
+        "SelectBullets",
+        "TransformBullets",
+        "SetBulletBehavior",
+        "SplitBulletsOnEnd",
+        "ClearBulletGroup",
     }
 )
 
@@ -120,6 +131,8 @@ _CHILD_SLOTS: dict[str, tuple[str, ...]] = {
     "Parallel": ("branches",),
     "Branch": ("body",),
     "SpawnTask": ("body",),
+    "OnHit": ("body",),
+    "OnDeath": ("body",),
 }
 
 _LITERAL_MINIMUMS: dict[tuple[str, str], int] = {
@@ -130,6 +143,10 @@ _LITERAL_MINIMUMS: dict[tuple[str, str], int] = {
     ("MoveLinear", "duration"): 0,
     ("FireCircle", "count"): 1,
     ("FireArc", "count"): 1,
+    ("Fire", "delay"): 0,
+    ("WaitEvent", "timeout"): 0,
+    ("TransformBullets", "cooldown"): 0,
+    ("SplitBulletsOnEnd", "count"): 1,
 }
 
 
@@ -281,16 +298,17 @@ _SPELL_MOVE_ACTIONS = _MOVE_ACTIONS - {"MoveLinear"}
 _LASER_ACTIONS = frozenset(
     {"CreateLaser", "CreateBentLaser", "RemoveLaser", "ClearLasers"}
 )
+_BULLET_BATCH_ACTIONS = frozenset({"SelectBullets", "TransformBullets", "SetBulletBehavior", "SplitBulletsOnEnd", "ClearBulletGroup"})
 _UNIT_ACTIONS: dict[str, frozenset[str]] = {
     "Project": frozenset(),
-    "Stage": _STAGE_ACTIONS,
-    "Wave": _WAVE_FIRE_ACTIONS | {"SpawnEnemy", "PlaySE"},
-    "Enemy": _FIRE_ACTIONS | _MOVE_ACTIONS | _LASER_ACTIONS | {"Kill", "PlaySE"},
+    "Stage": _STAGE_ACTIONS | _BULLET_BATCH_ACTIONS,
+    "Wave": _WAVE_FIRE_ACTIONS | _BULLET_BATCH_ACTIONS | {"SpawnEnemy", "PlaySE"},
+    "Enemy": _FIRE_ACTIONS | _MOVE_ACTIONS | _LASER_ACTIONS | _BULLET_BATCH_ACTIONS | {"Kill", "PlaySE", "SetBackground", "PlayBGM"},
     "Boss": frozenset(),
-    "Spell": _FIRE_ACTIONS | _SPELL_MOVE_ACTIONS | _LASER_ACTIONS | {"PlaySE"},
-    "NonSpell": _FIRE_ACTIONS | _SPELL_MOVE_ACTIONS | _LASER_ACTIONS | {"PlaySE"},
-    # A Task or Function runs in the caller's trusted generation context.  It
-    # may therefore contain any public action, while references remain typed.
+    "Spell": _FIRE_ACTIONS | _SPELL_MOVE_ACTIONS | _LASER_ACTIONS | _BULLET_BATCH_ACTIONS | {"PlaySE"},
+    "NonSpell": _FIRE_ACTIONS | _SPELL_MOVE_ACTIONS | _LASER_ACTIONS | _BULLET_BATCH_ACTIONS | {"PlaySE"},
+    # A Task or Function may declare any action, but every known invocation
+    # chain must satisfy its concrete caller's Runtime API and position needs.
     "Task": ACTION_NODE_KINDS,
     "Function": ACTION_NODE_KINDS,
 }
@@ -305,6 +323,8 @@ def node_kind_allowed_in_unit(kind: str, unit_kind: str) -> bool:
 
     if not unit_accepts_statements(unit_kind):
         return False
+    if kind in {"OnHit", "OnDeath"}:
+        return unit_kind == "Enemy"
     return kind in CONTROL_NODE_KINDS or kind == "TemplateCall" or kind in _UNIT_ACTIONS[unit_kind]
 
 
@@ -767,6 +787,7 @@ class AuthoringProgram:
         }
         for unit in self.units.values():
             diagnostics.extend(_validate_unit(unit, unit_index))
+        diagnostics.extend(_validate_callable_contexts(unit_index))
         return tuple(diagnostics)
 
     def assert_valid(self) -> None:
@@ -1493,6 +1514,12 @@ def node_from_palette(
         "ForEach": lambda: dsl.ForEach("item", [], []),
         "Parallel": lambda: dsl.Parallel([[]]),
         "SpawnTask": lambda: dsl.SpawnTask(ref),
+        "JoinTask": lambda: dsl.JoinTask(Expr("task")),
+        "CancelTask": lambda: dsl.CancelTask(Expr("task")),
+        "WaitEvent": lambda: dsl.WaitEvent("enemy.defeated"),
+        "EmitEvent": lambda: dsl.EmitEvent("enemy.defeated"),
+        "OnHit": dsl.OnHit,
+        "OnDeath": dsl.OnDeath,
         "Break": dsl.Break,
         "Continue": dsl.Continue,
         "Return": dsl.Return,
@@ -1521,6 +1548,11 @@ def node_from_palette(
         "CreateBentLaser": lambda: dsl.CreateBentLaser(0.0, 0.0, 180, 0.02),
         "RemoveLaser": lambda: dsl.RemoveLaser(Expr("laser")),
         "ClearLasers": dsl.ClearLasers,
+        "SelectBullets": dsl.SelectBullets,
+        "TransformBullets": lambda: dsl.TransformBullets(tag=1, speed=2.0),
+        "SetBulletBehavior": lambda: dsl.SetBulletBehavior([{'frames': 60}, {'frames': 30, 'speed': 0.0}, {'aim': 'player', 'speed': 2.0, 'accel': 1.0}], tag=1),
+        "SplitBulletsOnEnd": lambda: dsl.SplitBulletsOnEnd(1),
+        "ClearBulletGroup": lambda: dsl.ClearBulletGroup(tag=1),
     }
     try:
         return factories[kind]()
@@ -2336,6 +2368,16 @@ def _progress_node(
             fallthrough=frozenset({_UNKNOWN_YIELD}), may_suspend=True
         )
 
+    if kind in {"OnHit", "OnDeath"}:
+        _progress_sequence(unit, node.children.get('body', ()), None, diagnostics)
+        return _progress_normal()
+
+    if kind == "WaitEvent":
+        return _ProgressFlow(fallthrough=frozenset({_YIELDS}), may_suspend=True)
+
+    if kind == "JoinTask":
+        return _ProgressFlow(fallthrough=frozenset({_UNKNOWN_YIELD}), may_suspend=True)
+
     if kind == "Break":
         return _ProgressFlow(breaks=frozenset({_NO_YIELD}))
     if kind == "Continue":
@@ -2592,6 +2634,59 @@ def _contains_progress_sensitive_node(node: Node, unit: LogicalUnit) -> bool:
     )
 
 
+def _validate_callable_contexts(
+    unit_index: Mapping[str, LogicalUnit],
+) -> list[Diagnostic]:
+    """Callable actions inherit the actor API, not every possible Runtime API."""
+    diagnostics: list[Diagnostic] = []
+    for caller in unit_index.values():
+        if caller.kind not in {"Stage", "Wave", "Enemy", "Spell", "NonSpell"}:
+            continue
+        visited: set[str] = set()
+        pending = [(caller, (caller.id,))]
+        while pending:
+            unit, chain = pending.pop()
+            for node in unit.walk_nodes():
+                if unit is not caller and node.kind in ACTION_NODE_KINDS:
+                    if node.kind not in _UNIT_ACTIONS[caller.kind]:
+                        diagnostics.append(
+                            _node_diag(
+                                unit,
+                                node,
+                                "call_context",
+                                f"{' -> '.join(chain)}: {node.kind} is not available "
+                                f"in the {caller.kind} caller Runtime",
+                            )
+                        )
+                    else:
+                        for name in _CONTEXT_REQUIRED_ARGUMENTS.get(
+                            (caller.kind, node.kind), ()
+                        ):
+                            if node.arguments.get(name) is None:
+                                diagnostics.append(
+                                    _node_diag(
+                                        unit,
+                                        node,
+                                        "call_context",
+                                        f"{' -> '.join(chain)}: {node.kind}.{name} "
+                                        f"is required in the {caller.kind} caller Runtime",
+                                    )
+                                )
+                field = {"Call": "function", "SpawnTask": "task"}.get(node.kind)
+                if field is None:
+                    continue
+                reference = node.arguments.get(field)
+                if not isinstance(reference, Ref):
+                    continue
+                target = unit_index.get(reference.id)
+                if target is None or target.kind not in {"Task", "Function"}:
+                    continue
+                if target.id not in visited:
+                    visited.add(target.id)
+                    pending.append((target, (*chain, target.id)))
+    return diagnostics
+
+
 def _validate_unit(
     unit: LogicalUnit,
     unit_index: Mapping[str, LogicalUnit],
@@ -2791,6 +2886,11 @@ def _validate_node(
                     "inline SpawnTask body cannot receive arguments",
                 )
             )
+    if node.kind in {"OnHit", "OnDeath"}:
+        if unit.kind != "Enemy" or ancestors:
+            diagnostics.append(_node_diag(unit, node, "illegal_parent", f"{node.kind} is only valid at an Enemy root"))
+        if sum(item.kind == node.kind for item in unit.body) > 1:
+            diagnostics.append(_node_diag(unit, node, "duplicate_hook", f"Enemy accepts only one {node.kind} block"))
     if node.kind == "Parallel" and not node.children.get("branches"):
         diagnostics.append(_node_diag(unit, node, "invalid_parallel", "Parallel requires at least one branch"))
     if node.kind in {"Set", "ForEach"}:
@@ -2798,7 +2898,7 @@ def _validate_node(
         target_name = node.arguments.get(field_name)
         if not _is_python_identifier(target_name):
             diagnostics.append(_node_diag(unit, node, "invalid_target", f"{node.kind}.{field_name} must be an identifier"))
-    if node.kind in {"CreateLaser", "CreateBentLaser", "Call"} and "assign" in node.arguments:
+    if "assign" in node.arguments:
         target_name = node.arguments["assign"]
         if not _is_python_identifier(target_name):
             diagnostics.append(
@@ -2809,6 +2909,8 @@ def _validate_node(
                     f"{node.kind}.assign must be a non-keyword identifier",
                 )
             )
+    if node.kind == "Fire" and "assign" in node.arguments and node.arguments.get("delay", 0) != 0:
+        diagnostics.append(_node_diag(unit, node, "delayed_group", "Use Wait before a captured Fire; queued delayed bullets do not yet have a fixed group"))
     if node.kind == "RawPython":
         source = node.arguments.get("source")
         if not isinstance(source, str) or not source.strip():

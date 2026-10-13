@@ -4,12 +4,24 @@ import math
 
 # 导入优化版本（新代码应使用这个）
 from .optimized_pool import OptimizedBulletPool
+from .behavior import BulletGroup
+from .batch import BulletSnapshot
 # 导入 flags / curve 常量（统一使用）
 from .optimized_pool import (
     FLAG_BOUNCE_X, FLAG_BOUNCE_Y, FLAG_IS_EMITTER, FLAG_RENDER_ANGLE_LOCKED, FLAG_IS_POLAR,
     CURVE_NONE, CURVE_SIN_SPEED, CURVE_SIN_ANGLE, CURVE_COS_SPEED, CURVE_LINEAR_SPEED,
+    CURVE_DELAYED_TURN,
 )
 from .tags import BOMB_PROTECTED_TAGS
+
+__all__ = [
+    'OptimizedBulletPool', 'BulletGroup', 'BulletSnapshot', 'BulletPool', 'SpawnRequest',
+    'DeathEvent', 'PolarMotion', 'BOMB_PROTECTED_TAGS',
+    'FLAG_BOUNCE_X', 'FLAG_BOUNCE_Y', 'FLAG_IS_EMITTER',
+    'FLAG_RENDER_ANGLE_LOCKED', 'FLAG_IS_POLAR', 'CURVE_NONE',
+    'CURVE_SIN_SPEED', 'CURVE_SIN_ANGLE', 'CURVE_COS_SPEED', 'CURVE_LINEAR_SPEED',
+    'CURVE_DELAYED_TURN',
+]
 
 class SpawnRequest:
     """生成请求"""

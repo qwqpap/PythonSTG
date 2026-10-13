@@ -83,6 +83,12 @@ _GROUP_LABELS = {
     "advanced": "高级",
 }
 _FIELD_LABELS = {
+    "group": "固定弹群", "region": "作用区域",
+    "aim": "重新瞄准", "turn_rate": "转向速度（度/秒）", "reasons": "触发原因",
+    "child_tag": "子弹标签", "reason": "清除原因", "cooldown": "重复作用间隔（帧）",
+    "cooldown_key": "区域规则名称",
+    "event_type": "事件名称", "owner": "事件对象", "timeout": "等待上限（帧）",
+    "data": "事件数据", "delay": "延迟发射（帧）",
     "name": "名称", "title": "标题", "subtitle": "副标题",
     "frames": "等待帧数", "frame": "目标帧", "count": "数量",
     "condition": "条件", "iterable": "迭代对象", "target": "目标变量",
@@ -1186,7 +1192,10 @@ class InspectorPanel(QWidget):
         editor.setObjectName(f"argument_{field_name or name}")
         editor.setProperty("pystg_annotation", str(annotation))
         editor.setProperty("pystg_field", field_name or name)
-        visible_name = label_override or _FIELD_LABELS.get(name, name)
+        visible_name = label_override or (
+            "子弹运动阶段" if owner_kind == "SetBulletBehavior" and name == "stages"
+            else _FIELD_LABELS.get(name, name)
+        )
         label = QLabel(visible_name, container)
         label.setObjectName(f"label_{field_name or name}")
         label.setWordWrap(False)
@@ -1785,6 +1794,8 @@ class InspectorPanel(QWidget):
 
     def _supports_expr(self, value: Any, annotation: Any, field_name: str) -> bool:
         if field_name in {"unit_name", "assign", "source"}:
+            return False
+        if annotation is not Any and annotation is not Expr and Expr not in get_args(annotation):
             return False
         if isinstance(value, (list, tuple, dict, Ref, bool)):
             return False

@@ -76,6 +76,17 @@ class ItemConfig:
     despawn_y: float = -1.1
     life_chip_max: int = 5
     bomb_chip_max: int = 5
+    auto_collect_requires_full_power: bool = False
+
+
+@dataclass(frozen=True)
+class ItemCollection:
+    """Detached scalar fact for a sparse collection rule, never a live pool slot."""
+
+    item_type: ItemType
+    x: float
+    y: float
+    attracting: bool
 
 
 @dataclass
@@ -96,6 +107,13 @@ class GameStats:
     point_rate: int = 10000
 
     items_collected: int = 0
+    power_scale: float = 100.0  # raw power units per 1.00 of player shot power
+    hit_score: int = 10
+    respawn_bombs: int = 3
+    on_score: Optional[Callable] = field(default=None, repr=False)
+    on_graze: Optional[Callable] = field(default=None, repr=False)
+    on_miss: Optional[Callable] = field(default=None, repr=False)
+    on_continue: Optional[Callable] = field(default=None, repr=False)
 
     # 收集 bonus 倍率系统
     _collect_count: int = 0       # 当前连续收集计数
@@ -110,11 +128,38 @@ class GameStats:
     ]
 
     def get_power_float(self) -> float:
-        return self.power / 100.0
+        return self.power / self.power_scale
+
+    def add_score(self, amount: int):
+        self.score += int(amount)
+        if self.on_score is not None:
+            self.on_score(self, int(amount))
+        self.hiscore = max(self.hiscore, self.score)
+
+    def add_graze(self, count: int):
+        self.graze += count
+        if self.on_graze is not None:
+            self.on_graze(self, count)
+        else:
+            self.update_point_rate()
+
+    def player_missed(self, player):
+        self.lives = player.lives
+        self.power = min(self.max_power, max(0, round(player.power * self.power_scale)))
+        self.bombs = self.respawn_bombs
+        if self.on_miss is not None:
+            self.on_miss(self, player)
+
+    def continued(self, player):
+        self.power = round(self.power_scale)
+        self.lives = 2
+        self.bombs = self.respawn_bombs
+        if self.on_continue is not None:
+            self.on_continue(self, player)
 
     def add_power(self, amount: int) -> int:
         if self.power >= self.max_power:
-            self.score += amount * 100
+            self.add_score(amount * 100)
             return 0
         old = self.power
         self.power = min(self.max_power, self.power + amount)
@@ -258,11 +303,13 @@ def _update_items_numba(
 class ItemPool:
     """物品池 - SoA (Structure of Arrays) 布局，零拷贝 Numba 加速"""
 
-    def __init__(self, max_items: int = 1000, config: ItemConfig = None, use_numba: bool = True):
+    def __init__(self, max_items: int = 1000, config: ItemConfig = None, use_numba: bool = True,
+                 collection_handler: Optional[Callable] = None):
         self.max_items = max_items
         self.config = config or ItemConfig()
         self.use_numba = use_numba
         self.stats = GameStats()
+        self.collection_handler = collection_handler
 
         # SoA preallocated arrays
         self.x = np.zeros(max_items, dtype=np.float32)
@@ -394,7 +441,7 @@ class ItemPool:
 
         scatter_radius_x = math.sqrt(count) * 0.008  # Reduced horizontal scatter
         scatter_radius_y = math.sqrt(count) * 0.02
-        
+
         r_x = np.random.uniform(0, scatter_radius_x, n) * np.sqrt(np.random.random(n))
         r_y = np.random.uniform(0, scatter_radius_y, n) * np.sqrt(np.random.random(n))
         a = np.random.uniform(0, 2 * math.pi, n)
@@ -457,21 +504,24 @@ class ItemPool:
         py = float(player_y)
         dt_scale = float(dt * 60)
         n = self._count
+        collect_line = (float('inf') if cfg.auto_collect_requires_full_power
+                        and self.stats.power < self.stats.max_power else float(cfg.collect_line_y))
 
         if self.use_numba:
             collected = _update_items_numba(
                 self.x[:n], self.y[:n], self.vx[:n], self.vy[:n],
                 self.timer[:n], self.alive[:n], self.attracting[:n],
                 px, py, dt_scale,
-                cfg.collect_line_y, cfg.attract_radius,
+                collect_line, cfg.attract_radius,
                 cfg.attract_speed, cfg.max_attract_speed,
                 cfg.max_fall_speed, cfg.collect_radius,
                 cfg.despawn_y
             )
 
-            for i in range(n):
-                if collected[i] == 1:
-                    self._collect_item_at(i)
+            # Rules are sparse collection events, not a Python scan of every
+            # live item. flatnonzero preserves slot order for scoring policies.
+            for i in np.flatnonzero(collected):
+                self._collect_item_at(int(i))
         else:
             self._update_python(player_x, player_y, dt_scale)
 
@@ -480,6 +530,8 @@ class ItemPool:
     def _update_python(self, player_x: float, player_y: float, dt_scale: float):
         """Python fallback update (no Numba)"""
         cfg = self.config
+        collect_line = (float('inf') if cfg.auto_collect_requires_full_power
+                        and self.stats.power < self.stats.max_power else cfg.collect_line_y)
         for i in range(self._count):
             if self.alive[i] == 0:
                 continue
@@ -493,7 +545,7 @@ class ItemPool:
                 dy = player_y - self.y[i]
                 dist = math.sqrt(dx * dx + dy * dy)
 
-                above_collect_line = player_y > cfg.collect_line_y
+                above_collect_line = player_y > collect_line
                 in_attract_range = dist < cfg.attract_radius
 
                 if above_collect_line or in_attract_range or self.attracting[i]:
@@ -522,13 +574,46 @@ class ItemPool:
 
     def _compact(self):
         """Shrink _count by trimming dead slots at the tail."""
-        while self._count > 0 and self.alive[self._count - 1] == 0:
-            self._count -= 1
+        if self._count and not self.alive[self._count - 1]:
+            living = np.flatnonzero(self.alive[:self._count])
+            self._count = int(living[-1]) + 1 if len(living) else 0
 
     def _collect_item_at(self, idx: int):
         """收集物品并应用效果"""
         self.stats.items_collected += 1
         t = int(self.item_type[idx])
+        stats = self.stats
+
+        if self.collection_handler is not None:
+            old_power, old_lives, old_bombs = stats.power, stats.lives, stats.bombs
+            self.collection_handler(stats, ItemCollection(
+                ItemType(t), float(self.x[idx]), float(self.y[idx]), bool(self.attracting[idx]),
+            ))
+            if old_power != stats.power and self.on_power_up:
+                self.on_power_up(old_power, stats.power)
+            if old_lives < stats.lives and self.on_extend:
+                self.on_extend()
+            if old_bombs < stats.bombs and self.on_bomb_get:
+                self.on_bomb_get()
+        else:
+            self._apply_default_collection(idx, t)
+
+        if stats.score > stats.hiscore:
+            stats.hiscore = stats.score
+
+        if self.on_collect:
+            item = Item(
+                float(self.x[idx]), float(self.y[idx]),
+                t, float(self.vx[idx]), float(self.vy[idx])
+            )
+            item.timer = int(self.timer[idx])
+            item.attracting = bool(self.attracting[idx])
+            item.collected = True
+            item.alive = False
+            self.on_collect(item, stats)
+
+    def _apply_default_collection(self, idx, t):
+        """Historical rules; a custom handler replaces these, not adds to them."""
         stats = self.stats
 
         if t == ItemType.POWER:
@@ -544,22 +629,22 @@ class ItemPool:
                 self.on_power_up(old_power, stats.power)
 
         elif t == ItemType.POWER_FULL:
-            stats.add_power(400)
+            stats.add_power(stats.max_power)
 
         elif t == ItemType.POINT:
             if self.attracting[idx] and self.y[idx] > self.config.collect_line_y * 0.5:
-                stats.score += stats.point_rate
+                stats.add_score(stats.point_rate)
                 stats.on_item_collected_top()
             else:
-                stats.score += stats.point_rate // 2
+                stats.add_score(stats.point_rate // 2)
 
         elif t == ItemType.FAITH:
             stats.faith += 100
-            stats.score += 10000
+            stats.add_score(10000)
 
         elif t == ItemType.FAITH_MINOR:
             stats.faith += 4
-            stats.score += 500
+            stats.add_score(500)
 
         elif t == ItemType.LIFE_CHIP:
             stats.life_chips += 1
@@ -592,19 +677,6 @@ class ItemPool:
                 self.on_bomb_get()
 
         stats.update_point_rate()
-        if stats.score > stats.hiscore:
-            stats.hiscore = stats.score
-
-        if self.on_collect:
-            item = Item(
-                float(self.x[idx]), float(self.y[idx]),
-                t, float(self.vx[idx]), float(self.vy[idx])
-            )
-            item.timer = int(self.timer[idx])
-            item.attracting = bool(self.attracting[idx])
-            item.collected = True
-            item.alive = False
-            self.on_collect(item, stats)
 
     def collect_all(self, player_x: float, player_y: float):
         """收集所有物品（清屏/Boss击破时）"""

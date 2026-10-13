@@ -23,11 +23,14 @@ from src.core.audio_backend import init_audio_backend
 from src.render import Renderer
 from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.bomb import trigger_player_bomb
+from src.game.state import TIME_DOMAINS
 from src.game.player import load_player
 from src.game.stage import StageManager
+from src.game.tasks import FRAME_DT
 from src.game.boss import BossManager
 from src.game.laser import LaserPool, get_laser_texture_data
 from src.game.item import ItemPool
+from src.game.particle import ParticlePool
 from src.game.audio import GameAudioBank, AudioManager
 from src.game.userdata import (
     get_settings,
@@ -874,7 +877,7 @@ def initialize_sprite_registry_from_assets(sprite_manager: SpriteManager, textur
         texture_sizes[path.replace('\\', '/').lower()] = tex.size
 
     registry = init_sprite_registry(max_sprites=8192)
-    registry.register_from_sprite_manager(sprite_manager, texture_sizes)
+    registry.register_from_sprite_manager(sprite_manager, texture_sizes, flip_y=True)
     print(f"SpriteRegistry 已重建: {registry.count} sprites")
 
 
@@ -889,8 +892,15 @@ def initialize_game_objects(stage_class, audio_manager=None, background_renderer
     print(f"已加载玩家: {player.name}")
     # 使用优化版子弹池（整数 sprite 索引 + 向量化渲染数据准备）
     bullet_pool = OptimizedBulletPool(max_bullets=50000)
+    warmup_timings = bullet_pool.warmup()
+    print("[Runtime] Numba warmup (ms): " + ", ".join(
+        f"{name}={duration:.1f}" for name, duration in warmup_timings.items()
+    ))
     laser_pool = LaserPool(max_lasers=100)
+    print(f"[Runtime] Laser warmup (ms): {laser_pool.warmup()}")
     item_pool = ItemPool(max_items=1000)
+    particle_pool = ParticlePool(sprite_registry=bullet_pool.sprite_registry)
+    print(f"[Runtime] Particle warmup (ms): {particle_pool.warmup()}")
     boss_manager = BossManager()
     stage_manager = StageManager()
 
@@ -902,7 +912,9 @@ def initialize_game_objects(stage_class, audio_manager=None, background_renderer
         player=player,
         audio_manager=audio_manager,
         item_pool=item_pool,
+        particle_pool=particle_pool,
         background_renderer=background_renderer,
+        player_shot=character,
     )
 
     stage_manager.load_stage(stage_class)
@@ -1274,6 +1286,7 @@ def main():
                 background_renderer=background_renderer,
                 character=run_character,
             )
+            stage_manager._engine_refs['seed'] = run_seed
             if _PREVIEW_CHANNEL is not None:
                 _PREVIEW_CHANNEL.reset_metrics()
 
@@ -1304,6 +1317,7 @@ def main():
                 spell_declaration_renderer=spell_declaration_renderer,
                 texture_assets=texture_asset_manager,
                 background_renderer=background_renderer,
+                stage_manager=stage_manager,
             )
 
             # ===== 录制器 =====
@@ -1447,7 +1461,11 @@ def main():
                 profile_frames = 0
 
             while running:
-                dt = 1.0 / 60.0 if preview_fast_forward_target is not None else clock.tick(60)
+                if preview_fast_forward_target is None:
+                    clock.tick(60)
+                # Rendering cadence must not stretch motion relative to frame
+                # waits/lasers/replays. Slow frames slow the whole simulation.
+                dt = FRAME_DT
                 frame_start = time.perf_counter() if PROFILE_MODE else 0.0
                 events_start = time.perf_counter() if PROFILE_MODE else 0.0
 
@@ -1529,19 +1547,17 @@ def main():
                                             player.animation.play_spawn_animation()
                                         except Exception:
                                             pass
-                                    # 资源（先 power 后 stats，避免 setter 副作用拿到旧值）
-                                    player.power = 1.0
-                                    player.lives = 2
-                                    player.bombs = 3
-                                    item_pool.stats.power = 100  # 0..max_power 的整数（100 = 1.00）
-                                    item_pool.stats.lives = 2
-                                    item_pool.stats.bombs = 3
+                                    item_pool.stats.continued(player)
+                                    player.power = item_pool.stats.get_power_float()
+                                    player.lives = item_pool.stats.lives
+                                    player.bombs = item_pool.stats.bombs
                                     player.invincible_timer = 3.0
                                     player.pos = [0.0, -0.8]
                                     # 清场：清掉残余敌弹/激光/表情弹，避免一复活就再死
                                     bullet_pool.clear_all()
                                     laser_pool.clear()
                                     emoji_sys.clear()
+                                    stage_manager.particle_pool.clear()
                                     # 恢复 BGM（asking 进入时被 pause_bgm 暂停）
                                     try:
                                         audio_manager.unpause_bgm()
@@ -1622,9 +1638,7 @@ def main():
                                         renderer.player_bullet_texture.release()
                                         renderer.player_bullet_texture = None
 
-                                    stage_manager._engine_refs['player'] = player
-                                    if stage_manager.current_context:
-                                        stage_manager.current_context.player = player
+                                    stage_manager.bind_player(player, player_shot=new_name)
                 if PROFILE_MODE:
                     profile_acc["events"] += time.perf_counter() - events_start
 
@@ -1704,6 +1718,8 @@ def main():
                     raise RuntimeError("快进因玩家死亡而停止；请缩短目标范围或重新运行")
 
                 update_start = time.perf_counter() if PROFILE_MODE else 0.0
+                time_context = stage_manager.current_context
+                time_mask = time_context.time_control.mask if time_context is not None else 0
                 if not world_frozen:
                     if not dialog_active:
                         # 收集敌人列表用于追踪弹
@@ -1715,11 +1731,18 @@ def main():
                             if _boss._active:
                                 _enemies_for_homing.append(_boss)
 
-                        player.update(dt, keys, enemies=_enemies_for_homing or None)
-                        bullet_pool.update(dt)
-                        laser_pool.update()
-                        item_pool.update(player.pos[0], player.pos[1], dt)
-                        emoji_sys.update(dt, player)
+                        if not time_mask & TIME_DOMAINS['player']:
+                            player.update(dt, keys, enemies=_enemies_for_homing or None)
+                        bullet_pool.set_player_target(player.pos[0], player.pos[1])
+                        if not time_mask & TIME_DOMAINS['bullets']:
+                            bullet_pool.update(dt)
+                        if not time_mask & TIME_DOMAINS['lasers']:
+                            laser_pool.update()
+                        if not time_mask & TIME_DOMAINS['items']:
+                            item_pool.update(player.pos[0], player.pos[1], dt)
+                        if not time_mask & TIME_DOMAINS['effects']:
+                            stage_manager.particle_pool.update()
+                            emoji_sys.update(dt, player)
 
                     stage_manager.update(dt, bullet_pool, player)
                 if PROFILE_MODE:
@@ -1782,7 +1805,8 @@ def main():
                 collision_mgr = get_collision_manager()
 
                 collision_start = time.perf_counter() if PROFILE_MODE else 0.0
-                if not world_frozen and not dialog_active:
+                if (not world_frozen and not dialog_active
+                        and not time_mask & TIME_DOMAINS['player']):
                     hit_x, hit_y = player.get_hit_position()
                     if player.invincible_timer <= 0:
                         bullet_result = collision_mgr.check_player_vs_bullets(
@@ -1791,11 +1815,11 @@ def main():
                         if bullet_result.occurred:
                             if player.take_damage():
                                 print(f"Player hit by bullet! Lives left: {player.lives}")
-                                item_pool.stats.bombs = 3
                                 # 把 player.lives 的减扣同步回 stats，否则下一帧
                                 # `player.lives = item_pool.stats.lives` 又把命数撑回去
-                                item_pool.stats.lives = player.lives
-                                bullet_pool.data['alive'][bullet_result.index] = 0
+                                item_pool.stats.player_missed(player)
+                                stage_manager.notify_player_event('player.missed')
+                                bullet_pool.remove_bullets([bullet_result.index], reason="hit")
                                 # Notify boss scoring system
                                 _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
                                 if _ab and _ab._active:
@@ -1805,8 +1829,12 @@ def main():
                         if emoji_sys.check_player_collision(player):
                             if player.take_damage():
                                 print(f"Player hit by emoji bullet! Lives left: {player.lives}")
-                                item_pool.stats.bombs = 3
-                                item_pool.stats.lives = player.lives
+                                item_pool.stats.player_missed(player)
+
+                                stage_manager.notify_player_event('player.missed')
+                                _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
+                                if _ab and _ab._active:
+                                    _ab.on_player_miss()
 
                     if player.invincible_timer <= 0:
                         laser_result = collision_mgr.check_player_vs_lasers(
@@ -1815,8 +1843,8 @@ def main():
                         if laser_result.occurred:
                             if player.take_damage():
                                 print(f"Player hit by laser! Lives left: {player.lives}")
-                                item_pool.stats.bombs = 3
-                                item_pool.stats.lives = player.lives
+                                item_pool.stats.player_missed(player)
+                                stage_manager.notify_player_event('player.missed')
                                 # Notify boss scoring system
                                 _ab = stage_manager.current_stage._current_boss if stage_manager.current_stage else None
                                 if _ab and _ab._active:
@@ -1842,7 +1870,7 @@ def main():
                                 damage_mul = player.get_bomb_damage_multiplier() if hasattr(player, 'get_bomb_damage_multiplier') else 1.0
                                 target.damage(hit.damage * damage_mul)
                                 # +10 per bullet hit (matches LuaSTG)
-                                item_pool.stats.score += 10
+                                item_pool.stats.add_score(item_pool.stats.hit_score)
                                 if player.script and hasattr(player.script, 'on_bullet_hit_enemy'):
                                     player.script.on_bullet_hit_enemy(
                                         hit.bullet_idx, target, hit.damage)
@@ -1863,7 +1891,8 @@ def main():
 
                                 for target in collision_targets:
                                     alive_f = getattr(target, '_active', getattr(target, 'alive', True))
-                                    if not alive_f:
+                                    if (not alive_f or not getattr(target, 'collidable', True)
+                                            or not getattr(target, 'interactable', True)):
                                         continue
                                     t_pos = getattr(target, 'pos', None)
                                     if t_pos is not None:
@@ -1876,15 +1905,14 @@ def main():
                                     if abs(tx - lx) < beam_hw + hit_r and ty > ly:
                                         damage_mul = player.get_bomb_damage_multiplier() if hasattr(player, 'get_bomb_damage_multiplier') else 1.0
                                         target.damage(laser_dmg * damage_mul)
-                                        item_pool.stats.score += 10
+                                        item_pool.stats.add_score(item_pool.stats.hit_score)
 
                     # === Graze detection ===
                     graze_count = collision_mgr.check_player_graze(
                         hit_x, hit_y, player.graze_radius, bullet_pool
                     )
                     if graze_count > 0:
-                        item_pool.stats.graze += graze_count
-                        item_pool.stats.update_point_rate()
+                        item_pool.stats.add_graze(graze_count)
                         player.add_graze(graze_count)
                 if PROFILE_MODE:
                     profile_acc["collision"] += time.perf_counter() - collision_start
@@ -1919,6 +1947,7 @@ def main():
                     dt=0 if paused else dt,
                     enemy_scripts=enemy_scripts,
                     profile_segments=render_segments,
+                    particle_pool=stage_manager.particle_pool,
                 )
 
                 ctx.viewport = window.viewport

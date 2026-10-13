@@ -316,6 +316,81 @@ Stage 顺序等于 `Project.stages`；`START_STAGE` 等于 `Project.start_stage`
 高密度发射保持现有批量 API；禁止生成每颗子弹的场景节点、闭包或 Python per-frame
 callback。Trace 仅在作者节点边界调用轻量 emitter，并由运行时批量刷新。
 
+2026-10-11 Runtime 维护边界：正式帧任务实现归 `src/game/tasks.py`；生成 `_support`
+只导入并调用它，不再携带自己的任务调度循环。Stage/Wave/Enemy/Spell 持有任务组，
+按自身帧更新推进；结束/取消负责关闭主协程及子任务。受击属于稀疏任务，不逐弹建立任务。
+死亡后需要继续的反应归仍存活的 StageContext，连同引用 Task 的并行子任务、局部时钟和
+Trace 一起接到该帧时钟；仍可从死去的敌人读取发射位置，不依赖其继续 update。
+Task/Function 的引用链在 headless 模型和模板展开后验证实际调用者能力；不得用 Task
+绕过 Stage/Wave 的动作或位置要求。取消时先关闭各任务作用域，再由 StageManager 收集
+finally 产生的 Trace；清理 Context 不得提前丢弃这些结束记录。
+
+大量子弹的行为归 `src/game/bullet/behavior.py` 与现有 `OptimizedBulletPool`：共享阶段表、
+每弹紧凑数值状态、Numba 内核、批量选择/变换/终结生成。固定弹群记录槽位及代数；动态 tag
+选择不冒充固定弹群。终结反应必须在回收前保存全部母弹数据，Trace 的八个样本不是动作输入。
+行为定义仍是声明式 Python 中的普通值，编译成运行时数据；禁止第二弹道作者文件。
+
+2026-10-12 批量数值扩展：`batch.py` 负责独立只读快照、原 N 参数对齐与 Numba 整批公式；
+`motion.py` 是可选穿屏后处理，持续追踪仍在共享阶段扫描内执行。Context 是作者单位转换的
+唯一入口；不把存活/空闲槽管理暴露为作者写入字段。连续规则复用 FrameTask，单组同步
+snapshot→数组计算→generation 校验写回，不创建逐弹 Task 或规则调度器。
+`termination.py` 保存回收前完整终结批次和 token 作用域队列；Pool 不导入 Enemy/Qt/renderer。
+StageManager 在关卡推进后消费为普通 EnemyScript，新生敌人从下一次更新推进。
+清场、取消、关卡结束丢弃尚未消费的批次；Trace 样本不是转换数据。数值与实体成本分别测量，
+不能拿数值数组容量宣称支持同数量的 Python 敌人。新增批量字段同步现有 DSL；数值规则与
+转换保持高级 Runtime/RawPython 入口，不新增图系统或另一份作者源。
+
+2026-10-13 控制与规则扩展仍归既有 Runtime：
+
+- `src/game/stage/motion.py` 由 EnemyScript/BossBase 共用，处理位置边界、插值和持续速度；
+  collidable、damageable、interactable、visible 分别接正式碰撞、追踪和绘制。受击反应
+  属于有限 actor 的任务作用域，不给池内子弹建立 Python 对象或回调。
+- `src/game/laser.py` 在同一 Laser 上维护移动段、显示生命周期和独立碰撞窗口；取样、
+  renderer 与碰撞使用当前段几何。Pool.clear 使旧句柄失效；不另建激光模拟器。
+- `src/game/state.py` 的 RunState 由 StageManager 持有，跨关复用；替换玩家由 bind_player
+  同步引擎引用、Context 代理和内容 shot 标识。TimeControl 只保存分系统暂停租约与缓存
+  mask，不调度任务。Context 释放作用域时清掉租约；Boss elapsed timer 与单调控制帧
+  时钟分开，暂停/重置计时不能重绕 Wait/Trace。
+  effects 域接粒子池和 emoji 更新，不是全装饰动画暂停；PlayerProxy.is_bombing 读取玩家
+  Bomb 激活/增伤窗口，不承诺等于角色视觉 Bomb 生命周期。
+- ItemPool 继续用 SoA/Numba 更新移动与吸附，只对实际收集项按槽位顺序调用不可变
+  ItemCollection 规则。GameStats 的收集/得分/擦弹/miss/continue 和 RunState 的 Bomb
+  规则是稀疏内容入口，默认未配置时保留原玩法，不在 Pool 内硬编码 TH06 内容策略。
+- BossPhase 的 bonus_rule 在符卡 update 后读取最终计时/HP；finish_rule 收到不可变
+  SpellResult。自定义结束规则运行前不提前擦掉结算所需弹幕；规则负责得分、清场和掉落。
+  异步结束反应由仍存活的 Context 推进，停止关卡时取消，不跨关泄漏。
+
+2026-10-13 粒子补充仍归同一 Runtime：`src/game/particle.py` 是独立有限 SoA 池，
+共享 ParticleEffect 视觉帧表；Numba 更新/紧凑存活索引/实例打包，不导入 Qt、renderer 或
+actor。寿命/动画/速度不靠每粒子 Task，清弹、碰撞和擦弹不扫描粒子。
+StageManager 持有池，StageContext 提供 emit/read/transform/count/clear，作用域 dispose
+清理；read 返回脱离池的只读快照，transform 按出生代和原始行对齐批量写回。
+特殊投影/数值规则由一个普通 Task 的整批 NumPy/Numba 公式表达，不新增粒子调度器。
+粒子速度/加速度分别为单位/秒、单位/秒²，明确区别于历史敌弹加速度约定。
+`src/render/particle_renderer.py` 只拥有自己的 GL 缓冲/程序，纹理由现有资源管理器持有；
+Renderer.cleanup 释放粒子绘制资源。back/front 层分别在敌人之后/道具之前和激光之后/
+判定点之前；同层保持出生顺序，按相邻纹理/混合段实例绘制，保留半透明重叠含义。
+正式循环和独立预览先更新已有粒子，再推进脚本；effects mask 停模拟，不停绘制。
+continue 清空装饰；候选预览独立持有新池，失败不污染旧池/RNG，成功才替换。
+不新增纯 GUI 节点或 ANM VM；原作贴图/动画、附属 actor 动画和深度表现分别待移植。
+
+上述高级控制不自动成为 GUI 节点，也不改变 restricted Python 作者协议。已有 MoveTo
+的 easing 经 DSL/生成器映射到共用移动实现，其余普通内容规则可通过既有 RawPython
+入口使用；具体覆盖与未移植的原作策略见 `TH06_API_COVERAGE.md`。
+
+游戏逻辑统一按 60 Hz 仿真步执行；真实帧耗时只影响呈现/帧率统计。本轮保持原有
+“子弹池更新 → 关卡任务 → 碰撞”的顺序，控制流程新弹从下一仿真步运动/碰撞。
+更新中二级出生也从下一步更新/碰撞，不能取决于空闲槽位编号。清场与自然终结原因分别处理；
+`clear_all` 是整个弹幕作用域的取消，不再生，并取消反应注册、未出生队列、阶段定义和冷却规则。
+
+渲染继续复用现有实例缓冲、ModernGL 和混合顺序。加速优先减少 Python 热循环、临时数组和
+重复复制/提交；JIT 编译时间与稳态帧耗时分别测量。Rust 不进入本轮依赖；以后只在测量
+证明必要时替换整批数组数值内核，不把关卡/API/编辑器迁入 Rust，也不跨语言逐弹调用。
+
+图集上传方向与 SpriteRegistry UV 必须一致：main 和独立符卡工具上传使用 flip_y=True，
+注册也显式传 flip_y=True。注册默认 False 保留未翻转调用；此接线不改变 shader、排序、
+混合或资源格式。JIT、CPU 提交/呈现、实际 GPU query 分别测量，不用池层耗时代替整帧。
+
 ### 8.3 Source map
 
 代码生成器在写出每个节点前后记录生成行号。`source_map.json` 按稳定顺序保存：
@@ -483,6 +558,15 @@ Project/Stage 直接使用生成入口。Wave、Enemy、Spell 由一个标准生
 每次 run 记录 seed、目标和构建 hash。seek 必须以相同 identity 重启，从帧 0 快进到目标
 帧；快进期间关闭音频和中间帧呈现，但不跳过游戏逻辑。动态外部输入使 seek 明确标记为
 不可复现。
+
+普通手写符卡工具 `tools/preview_spell.py` 使用 `src/devtools/spell_preview.py` 包装同一
+Boss/Context/EventBus/Pool，而不是另一套玩法 Runtime。每步先推进已有子弹/激光/道具/粒子，
+再推进 Context 任务、敌人和符卡；新弹/转换敌人次帧才更新。重启先准备独立候选池与
+RNG，失败保留旧实例，成功才替换全部池；外部 renderer 必须读取当前池，不缓存最初引用。
+结束时只等待明确的 end_reaction 及其 awaited 子任务，不等待无关无限后台任务；关闭和
+异常取消作用域并执行 finally。该工具只显示转换敌人的位置标记，没有完整玩家射击、
+受伤、Bomb 或整关结算。文件监视只服务该手写开发工具，不改变 GUI 显式 Run/stale 契约。
+其 GLFW 呈现也不能冒充 PySide6 嵌入或真人编辑器验收。
 
 ## 15. Timeline 分析
 

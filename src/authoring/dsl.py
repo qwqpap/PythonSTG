@@ -365,6 +365,7 @@ def SpawnTask(
     *,
     arguments: Mapping[str, AuthorValue] | None = None,
     body: Sequence[Node] | None = None,
+    assign: str | None = None,
     uid: str | None = None,
 ) -> Node:
     values: dict[str, Any] = {}
@@ -372,8 +373,43 @@ def SpawnTask(
         values["task"] = task
     if arguments:
         values["arguments"] = dict(arguments)
+    if assign is not None:
+        values["assign"] = assign
     children = {"body": list(body)} if body is not None else {}
     return _node("SpawnTask", arguments=values, children=children, uid=uid)
+
+
+def JoinTask(task: Expr, *, uid: str | None = None) -> Node:
+    return _node("JoinTask", arguments={"task": task}, uid=uid)
+
+
+def CancelTask(task: Expr, *, uid: str | None = None) -> Node:
+    return _node("CancelTask", arguments={"task": task}, uid=uid)
+
+
+def WaitEvent(event_type: str, *, owner: str | None = None,
+              timeout: int | None = None, assign: str | None = None,
+              uid: str | None = None) -> Node:
+    return _node("WaitEvent", arguments=_without_defaults(
+        {"event_type": event_type, "owner": owner, "timeout": timeout, "assign": assign},
+        {"owner": None, "timeout": None, "assign": None}), uid=uid)
+
+
+def EmitEvent(event_type: str, data: AuthorValue = None, *, owner: str | None = None,
+              uid: str | None = None) -> Node:
+    return _node("EmitEvent", arguments=_without_defaults(
+        {"event_type": event_type, "data": data, "owner": owner},
+        {"data": None, "owner": None}), uid=uid)
+
+
+def OnHit(body: Sequence[Node] = (), *, uid: str | None = None) -> Node:
+    """Enemy root hook; damage is available inside its body."""
+    return _node("OnHit", children={"body": body}, uid=uid)
+
+
+def OnDeath(body: Sequence[Node] = (), *, uid: str | None = None) -> Node:
+    """Enemy root hook; its task belongs to the surviving stage context."""
+    return _node("OnDeath", children={"body": body}, uid=uid)
 
 
 def Break(*, uid: str | None = None) -> Node:
@@ -457,6 +493,7 @@ def SpawnEnemy(
     x: float | Expr = 0.0,
     y: float | Expr = 1.0,
     *,
+    assign: str | None = None,
     uid: str | None = None,
 ) -> Node:
     values: dict[str, Any] = {"enemy_class": enemy_class}
@@ -464,6 +501,8 @@ def SpawnEnemy(
         values["x"] = x
     if y != 1.0:
         values["y"] = y
+    if assign is not None:
+        values["assign"] = assign
     return _node("SpawnEnemy", arguments=values, uid=uid)
 
 
@@ -472,11 +511,14 @@ def MoveTo(
     y: float | Expr,
     duration: int | Expr = 60,
     *,
+    easing: str | Expr = 'smoothstep',
     uid: str | None = None,
 ) -> Node:
     values: dict[str, Any] = {"x": x, "y": y}
     if duration != 60:
         values["duration"] = duration
+    if easing != 'smoothstep':
+        values['easing'] = easing
     return _node("MoveTo", arguments=values, uid=uid)
 
 
@@ -503,6 +545,10 @@ def _runtime_value(arguments: dict[str, Any], name: str, value: Any) -> None:
 
 
 _CurveParams = tuple[float | Expr, float | Expr, float | Expr, float | Expr] | Expr
+_VectorArgument = tuple[float | Expr, float | Expr] | Sequence[float | Expr] | Expr
+_ScalarBatch = float | Sequence[float | Expr] | Expr
+_VectorBatch = _VectorArgument | Sequence[Sequence[float | Expr]]
+_IndexBatch = int | Sequence[int | Expr] | Expr
 
 
 def _fire_runtime_arguments(
@@ -525,6 +571,7 @@ def _fire_runtime_arguments(
     curve_params: _CurveParams,
     play_sound: bool,
     play_sound_default: bool,
+    vector_accel: _VectorArgument | None = None,
 ) -> dict[str, Any]:
     """Return the explicit straight-projectile options shared by Fire nodes.
 
@@ -539,6 +586,7 @@ def _fire_runtime_arguments(
             "color": color,
             "accel": accel,
             "angle_accel": angle_accel,
+            "vector_accel": vector_accel,
             "tag": tag,
             "friction": friction,
             "time_scale": time_scale,
@@ -558,6 +606,7 @@ def _fire_runtime_arguments(
             "color": "red",
             "accel": 0.0,
             "angle_accel": 0.0,
+            "vector_accel": None,
             "tag": 0,
             "friction": 0.0,
             "time_scale": 1.0,
@@ -587,6 +636,7 @@ def Fire(
     play_sound: bool = False,
     *,
     tag: int | Expr = 0,
+    vector_accel: _VectorArgument | None = None,
     friction: float | Expr = 0.0,
     time_scale: float | Expr = 1.0,
     bounce_x: bool | Expr = False,
@@ -598,6 +648,8 @@ def Fire(
     collision_radius: float | Expr = 0.0,
     curve_type: int | Expr = 0,
     curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
+    delay: int | Expr = 0,
+    assign: str | None = None,
     uid: str | None = None,
 ) -> Node:
     arguments: dict[str, Any] = {}
@@ -625,8 +677,13 @@ def Fire(
             curve_params=curve_params,
             play_sound=play_sound,
             play_sound_default=False,
+            vector_accel=vector_accel,
         )
     )
+    if delay:
+        arguments["delay"] = delay
+    if assign is not None:
+        arguments["assign"] = assign
     return _node("Fire", arguments=arguments, uid=uid)
 
 
@@ -643,6 +700,7 @@ def FireCircle(
     accel: float | Expr = 0.0,
     angle_accel: float | Expr = 0.0,
     tag: int | Expr = 0,
+    vector_accel: _VectorArgument | None = None,
     friction: float | Expr = 0.0,
     time_scale: float | Expr = 1.0,
     bounce_x: bool | Expr = False,
@@ -654,6 +712,7 @@ def FireCircle(
     collision_radius: float | Expr = 0.0,
     curve_type: int | Expr = 0,
     curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
+    assign: str | None = None,
     uid: str | None = None,
 ) -> Node:
     arguments: dict[str, Any] = {}
@@ -681,8 +740,11 @@ def FireCircle(
             curve_params=curve_params,
             play_sound=play_sound,
             play_sound_default=True,
+            vector_accel=vector_accel,
         )
     )
+    if assign is not None:
+        arguments["assign"] = assign
     return _node("FireCircle", arguments=arguments, uid=uid)
 
 
@@ -700,6 +762,7 @@ def FireArc(
     accel: float | Expr = 0.0,
     angle_accel: float | Expr = 0.0,
     tag: int | Expr = 0,
+    vector_accel: _VectorArgument | None = None,
     friction: float | Expr = 0.0,
     time_scale: float | Expr = 1.0,
     bounce_x: bool | Expr = False,
@@ -711,6 +774,7 @@ def FireArc(
     collision_radius: float | Expr = 0.0,
     curve_type: int | Expr = 0,
     curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
+    assign: str | None = None,
     uid: str | None = None,
 ) -> Node:
     arguments: dict[str, Any] = {}
@@ -747,8 +811,11 @@ def FireArc(
             curve_params=curve_params,
             play_sound=play_sound,
             play_sound_default=True,
+            vector_accel=vector_accel,
         )
     )
+    if assign is not None:
+        arguments["assign"] = assign
     return _node("FireArc", arguments=arguments, uid=uid)
 
 
@@ -764,6 +831,7 @@ def FireAtPlayer(
     accel: float | Expr = 0.0,
     angle_accel: float | Expr = 0.0,
     tag: int | Expr = 0,
+    vector_accel: _VectorArgument | None = None,
     friction: float | Expr = 0.0,
     time_scale: float | Expr = 1.0,
     bounce_x: bool | Expr = False,
@@ -775,6 +843,7 @@ def FireAtPlayer(
     collision_radius: float | Expr = 0.0,
     curve_type: int | Expr = 0,
     curve_params: _CurveParams = (0.0, 0.0, 0.0, 0.0),
+    assign: str | None = None,
     uid: str | None = None,
 ) -> Node:
     arguments: dict[str, Any] = {}
@@ -806,8 +875,11 @@ def FireAtPlayer(
             curve_params=curve_params,
             play_sound=play_sound,
             play_sound_default=True,
+            vector_accel=vector_accel,
         )
     )
+    if assign is not None:
+        arguments["assign"] = assign
     return _node("FireAtPlayer", arguments=arguments, uid=uid)
 
 
@@ -1010,6 +1082,64 @@ def ClearLasers(*, uid: str | None = None) -> Node:
     return _node("ClearLasers", uid=uid)
 
 
+def SelectBullets(assign: str = "bullets", *, tag: int | Expr | None = None,
+                  region: Mapping[str, AuthorValue] | None = None,
+                  uid: str | None = None) -> Node:
+    return _node("SelectBullets", arguments=_without_defaults(
+        {"assign": assign, "tag": tag, "region": None if region is None else dict(region)},
+        {"tag": None, "region": None}), uid=uid)
+
+
+def TransformBullets(group: Expr | None = None, *, tag: int | Expr | None = None,
+                     region: Mapping[str, AuthorValue] | None = None,
+                     speed: _ScalarBatch | None = None, angle: _ScalarBatch | None = None,
+                     aim: str | Sequence[float | Expr] | None = None,
+                     accel: _ScalarBatch | None = None, time_scale: _ScalarBatch | None = None,
+                     bullet_type: str | None = None, color: str = "red",
+                     render_scale: _ScalarBatch | None = None, cooldown: int = 0,
+                     positions: _VectorBatch | None = None,
+                     velocities: _VectorBatch | None = None,
+                     vector_accel: _VectorBatch | None = None,
+                     sprite_indices: _IndexBatch | None = None,
+                     angle_accel: _ScalarBatch | None = None,
+                     cooldown_key: str | int | None = None, uid: str | None = None) -> Node:
+    values = {"group": group, "tag": tag, "region": None if region is None else dict(region),
+              "speed": speed, "angle": angle, "aim": aim, "accel": accel,
+              "time_scale": time_scale, "bullet_type": bullet_type, "color": color,
+              "render_scale": render_scale, "cooldown": cooldown, "cooldown_key": cooldown_key,
+              "positions": positions, "velocities": velocities, "vector_accel": vector_accel,
+              "sprite_indices": sprite_indices, "angle_accel": angle_accel}
+    defaults = {key: None for key in values}
+    defaults.update(color="red", cooldown=0)
+    return _node("TransformBullets", arguments=_without_defaults(values, defaults), uid=uid)
+
+
+def SetBulletBehavior(stages: Sequence[Mapping[str, AuthorValue]] = (), *,
+                      group: Expr | None = None, tag: int | Expr | None = None,
+                      uid: str | None = None) -> Node:
+    return _node("SetBulletBehavior", arguments=_without_defaults(
+        {"stages": [dict(stage) for stage in stages], "group": group, "tag": tag},
+        {"group": None, "tag": None}), uid=uid)
+
+
+def SplitBulletsOnEnd(tag: int | Expr, *, count: int = 8, speed: float | Expr = 2.0,
+                      bullet_type: str = "ball_m", color: str = "red",
+                      reasons: Sequence[str] = ("expired",), child_tag: int | Expr = 0,
+                      uid: str | None = None) -> Node:
+    return _node("SplitBulletsOnEnd", arguments=_without_defaults(
+        {"tag": tag, "count": count, "speed": speed, "bullet_type": bullet_type,
+         "color": color, "reasons": list(reasons), "child_tag": child_tag},
+        {"count": 8, "speed": 2.0, "bullet_type": "ball_m", "color": "red",
+         "reasons": ["expired"], "child_tag": 0}), uid=uid)
+
+
+def ClearBulletGroup(group: Expr | None = None, *, tag: int | Expr | None = None,
+                      reason: str = "phase_cleared", uid: str | None = None) -> Node:
+    return _node("ClearBulletGroup", arguments=_without_defaults(
+        {"group": group, "tag": tag, "reason": reason},
+        {"group": None, "tag": None, "reason": "phase_cleared"}), uid=uid)
+
+
 UNIT_CONSTRUCTORS = {
     item.__name__: item
     for item in (Project, Stage, Wave, Enemy, Boss, Spell, NonSpell, Task, Function)
@@ -1026,6 +1156,12 @@ NODE_CONSTRUCTORS = {
         ForEach,
         Parallel,
         SpawnTask,
+        JoinTask,
+        CancelTask,
+        WaitEvent,
+        EmitEvent,
+        OnHit,
+        OnDeath,
         Break,
         Continue,
         Return,
@@ -1054,6 +1190,11 @@ NODE_CONSTRUCTORS = {
         CreateBentLaser,
         RemoveLaser,
         ClearLasers,
+        SelectBullets,
+        TransformBullets,
+        SetBulletBehavior,
+        SplitBulletsOnEnd,
+        ClearBulletGroup,
     )
 }
 VALUE_CONSTRUCTORS = {"Ref": Ref, "Expr": Expr, "Parameter": Parameter}
@@ -1079,6 +1220,17 @@ BUILTIN_TEMPLATES = (ring_burst,)
 
 
 __all__ = [
+    "SelectBullets",
+    "TransformBullets",
+    "SetBulletBehavior",
+    "SplitBulletsOnEnd",
+    "ClearBulletGroup",
+    "JoinTask",
+    "CancelTask",
+    "WaitEvent",
+    "EmitEvent",
+    "OnHit",
+    "OnDeath",
     "At",
     "Boss",
     "BUILTIN_TEMPLATES",

@@ -31,6 +31,7 @@ class EngineSession:
     spell_declaration_renderer: Any
     texture_assets: Any
     background_renderer: Any = None
+    stage_manager: Any = None
     _closed: bool = field(default=False, init=False, repr=False)
     _cleanup_errors: list[str] = field(default_factory=list, init=False, repr=False)
 
@@ -52,6 +53,9 @@ class EngineSession:
         if self._closed:
             return self.cleanup_errors
         self._closed = True
+
+        if self.stage_manager is not None:
+            self._call("stage.clear", self.stage_manager.clear)
 
         self._call("emoji.stop", self.emoji_system.stop)
         self._call("audio.stop_bgm", lambda: self.audio_manager.stop_bgm(fade_ms=0))

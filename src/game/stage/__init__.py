@@ -1,8 +1,9 @@
-import sys
 import os
 import inspect
-import numpy as np
 from collections import deque
+
+from ..events import EventBus
+from ..state import RunState
 
 
 class StageManager:
@@ -33,6 +34,9 @@ class StageManager:
         self._authoring_trace_dropped = 0
         self._last_timeline_frame = 0
         self.timeline_stage_id = None
+        self.event_bus = EventBus()
+        self.run_state = RunState()
+        self.particle_pool = None
 
     # ==================== 引擎绑定 ====================
 
@@ -55,6 +59,31 @@ class StageManager:
             **kwargs
         }
         self._audio_manager = audio_manager
+        from ..particle import ParticlePool
+        self.particle_pool = kwargs.get('particle_pool')
+        if self.particle_pool is None:
+            self.particle_pool = ParticlePool(sprite_registry=getattr(bullet_pool, 'sprite_registry', None))
+        self.run_state = kwargs.get('run_state') or RunState(
+            difficulty=kwargs.get('difficulty', 'normal'),
+            player_shot=kwargs.get('player_shot', 'default'),
+        )
+
+    def bind_player(self, player, *, player_shot: str | None = None):
+        """Replace the live player and its author-visible shot identity together."""
+        self._engine_refs['player'] = player
+        if player_shot is not None:
+            self.run_state.player_shot = player_shot
+        if self.current_context is not None:
+            self.current_context.bind_player(player)
+
+    def notify_player_event(self, event: str):
+        """One real miss/Bomb notification, shared by rank and script events."""
+        self.run_state.notify(event)
+        if self.current_context is not None:
+            self.current_context.emit_event(event, {
+                'misses': self.run_state.misses,
+                'bombs_used': self.run_state.bombs_used,
+            })
 
     # ==================== 关卡加载 ====================
 
@@ -140,7 +169,11 @@ class StageManager:
             audio_manager=self._audio_manager,
             item_pool=self._engine_refs.get('item_pool'),
             background_renderer=self._engine_refs.get('background_renderer'),
+            event_bus=self.event_bus,
+            run_state=self.run_state,
+            particle_pool=self.particle_pool,
         )
+        ctx.seed = int(self._engine_refs.get('seed', 0))
 
         # 将 ctx 保存到 stage_manager，供渲染器访问
         self.current_context = ctx
@@ -168,16 +201,24 @@ class StageManager:
         stage_name = getattr(stage_class, 'name', stage_class.__name__)
         print(f"=== {stage_name} 开始 ===")
 
-        while stage._active:
-            stage.update()
-            yield
+        try:
+            while stage._active:
+                stage.update()
+                yield
+        finally:
+            try:
+                stage.dispose()
+            finally:
+                try:
+                    ctx.dispose()
+                finally:
+                    self._collect_authoring_trace(ctx)
+                    self.current_stage = None
+                    self.current_context = None
 
         print(f"=== {stage_name} 结束 ===")
 
         # ===== 阶段 3：清理 =====
-        self._collect_authoring_trace(ctx)
-        self.current_stage = None
-        self.current_context = None
 
         if self._audio_manager:
             self._audio_manager.stop_bgm(fade_ms=500)
@@ -245,9 +286,25 @@ class StageManager:
         if self.is_paused:
             return
 
+        try:
+            self._update_frame(dt, bullet_pool, player)
+        except BaseException:
+            # Event handlers, context tasks and managers share the same
+            # cancellation path as the stage coroutine itself.
+            self.clear()
+            raise
+
+    def _update_frame(self, dt, bullet_pool, player):
         if self.current_context is not None:
             self.current_context.set_runtime_frame(self.frame_count)
             self._last_timeline_frame = self.current_context.timeline_frame
+            self.current_context.flush_lifecycle_events()
+        self.event_bus.dispatch_frame()
+        if self.event_bus.errors:
+            event, error = self.event_bus.errors.pop(0)
+            raise RuntimeError(f"runtime event handler failed for {event.type!r}") from error
+        if self.current_context is not None:
+            self.current_context.update_tasks()
 
         # 更新Boss
         if self.boss_manager:
@@ -267,13 +324,12 @@ class StageManager:
             except StopIteration:
                 # 协程结束
                 pass
-            except Exception:
-                self.is_finished = False
-                raise
 
         self.coroutines = new_coroutines
         if self.current_context is not None:
+            self.current_context.flush_bullet_conversions()
             self._collect_authoring_trace(self.current_context)
+            self.current_context.flush_lifecycle_events()
         self.frame_count += 1
 
     def _collect_authoring_trace(self, context) -> None:
@@ -328,7 +384,22 @@ class StageManager:
         """
         清除所有协程
         """
-        self.coroutines.clear()
+        coroutines, self.coroutines = self.coroutines, []
+        for coroutine in coroutines:
+            coroutine.close()
+        if self.current_stage is not None:
+            self.current_stage.dispose()
+            self.current_stage = None
+        if self.current_context is not None:
+            context = self.current_context
+            try:
+                context.dispose()
+            finally:
+                self._collect_authoring_trace(context)
+                self.current_context = None
+        self.event_bus.close()
+        self.event_bus = EventBus()
+        self.loading_info = None
         self.frame_count = 0
         self._last_timeline_frame = 0
         self.timeline_stage_id = None
@@ -337,6 +408,8 @@ class StageManager:
             self.boss_manager.clear()
         if self.enemy_manager:
             self.enemy_manager.clear()
+        if self.particle_pool is not None:
+            self.particle_pool.clear()
 
     def add_boss(self, boss):
         """

@@ -12,7 +12,9 @@ import numpy as np
 import math
 import json
 import os
-from typing import Tuple, Optional, List, Dict, Any
+import operator
+import time
+from typing import Tuple, Optional, List, Dict
 
 try:
     from numba import jit
@@ -28,14 +30,14 @@ except ImportError:
 
 # ============= Numba JIT 优化的碰撞检测 =============
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def _check_laser_collision_jit(px: float, py: float, radius: float,
                                x: float, y: float, angle: float,
                                l1: float, l2: float, l3: float,
                                width: float) -> bool:
     """
     JIT优化的激光碰撞检测 (三段式)
-    
+
     Args:
         px, py: 玩家位置
         radius: 玩家碰撞半径
@@ -47,24 +49,24 @@ def _check_laser_collision_jit(px: float, py: float, radius: float,
     # 转换到激光局部坐标系
     cos_a = math.cos(angle)
     sin_a = math.sin(angle)
-    
+
     dx = px - x
     dy = py - y
-    
+
     # 旋转到激光坐标系 (激光沿正X方向)
     local_x = dx * cos_a + dy * sin_a
     local_y = -dx * sin_a + dy * cos_a
     local_y = abs(local_y)
-    
+
     if local_x < 0:
         return False
-    
+
     half_width = width * 0.5 + radius
     total_length = l1 + l2 + l3
-    
+
     if local_x > total_length:
         return False
-    
+
     # 头部（锥形，从0到half_width）
     if local_x < l1:
         if l1 > 0:
@@ -72,11 +74,11 @@ def _check_laser_collision_jit(px: float, py: float, radius: float,
         else:
             segment_width = half_width
         return local_y < segment_width
-    
+
     # 身体（矩形）
     if local_x < l1 + l2:
         return local_y < half_width
-    
+
     # 尾部（锥形，从half_width到0）
     remaining = total_length - local_x
     if l3 > 0:
@@ -86,21 +88,21 @@ def _check_laser_collision_jit(px: float, py: float, radius: float,
     return local_y < segment_width
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def _check_bent_laser_collision_jit(px: float, py: float, radius: float,
                                     path_x: np.ndarray, path_y: np.ndarray,
                                     width: float, path_len: int) -> bool:
     """JIT优化的曲线激光碰撞检测"""
     collision_dist_sq = (width * 0.5 + radius) ** 2
-    
+
     for i in range(path_len - 1):
         x1, y1 = path_x[i], path_y[i]
         x2, y2 = path_x[i + 1], path_y[i + 1]
-        
+
         dx = x2 - x1
         dy = y2 - y1
         length_sq = dx * dx + dy * dy
-        
+
         if length_sq < 1e-6:
             dist_sq = (px - x1) ** 2 + (py - y1) ** 2
         else:
@@ -108,10 +110,10 @@ def _check_bent_laser_collision_jit(px: float, py: float, radius: float,
             nearest_x = x1 + t * dx
             nearest_y = y1 + t * dy
             dist_sq = (px - nearest_x) ** 2 + (py - nearest_y) ** 2
-        
+
         if dist_sq < collision_dist_sq:
             return True
-    
+
     return False
 
 
@@ -119,36 +121,36 @@ def _check_bent_laser_collision_jit(px: float, py: float, radius: float,
 
 class LaserTextureData:
     """激光纹理数据（单例，管理所有激光纹理信息）"""
-    
+
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
-        
+
         self._initialized = True
         self.textures: Dict[str, Dict] = {}
         self.bent_laser_data: Dict = {}
         self.loaded = False
-    
+
     def load_config(self, config_path: str):
         """从JSON加载激光纹理配置"""
         if not os.path.exists(config_path):
             print(f"激光配置文件不存在: {config_path}")
             return False
-        
+
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            
+
             base_dir = os.path.dirname(config_path)
-            
+
             # 加载直线激光纹理配置
             for name, data in config.get('laser_textures', {}).items():
                 self.textures[name] = {
@@ -160,7 +162,7 @@ class LaserTextureData:
                     'margin': data.get('margin', 1),
                     'colors': data.get('colors', 16),
                 }
-            
+
             # 加载曲线激光配置
             if 'bent_laser' in config:
                 bent = config['bent_laser']
@@ -170,40 +172,40 @@ class LaserTextureData:
                     'row_height': bent['row_height'],
                     'colors': bent.get('colors', 16),
                 }
-            
+
             self.loaded = True
             print(f"已加载激光纹理配置: {len(self.textures)} 种直线激光")
             return True
-            
+
         except Exception as e:
             print(f"加载激光配置失败: {e}")
             return False
-    
+
     def get_texture_rects(self, texture_id: str, color_index: int) -> Optional[Dict]:
         """
         获取指定激光纹理和颜色的三段rect
-        
+
         Args:
             texture_id: 纹理ID (如 'laser1')
             color_index: 颜色索引 (1-16)
-            
+
         Returns:
             包含 head_rect, body_rect, tail_rect 的字典
         """
         if texture_id not in self.textures:
             return None
-        
+
         tex = self.textures[texture_id]
         color_index = max(1, min(tex['colors'], int(color_index)))
-        
+
         row = color_index - 1
         y = row * tex['row_height']
         h = tex['row_height']
-        
+
         head_x = 0
         body_x = tex['head_width']
         tail_x = tex['head_width'] + tex['body_width']
-        
+
         return {
             'texture_file': tex['file'],
             'head_rect': (head_x, y, tex['head_width'], h),
@@ -215,18 +217,18 @@ class LaserTextureData:
             'row_height': h,
             'margin': tex['margin'],
         }
-    
+
     def get_bent_laser_rect(self, color_index: int) -> Optional[Dict]:
         """获取曲线激光纹理rect"""
         if not self.bent_laser_data:
             return None
-        
+
         data = self.bent_laser_data
         color_index = max(1, min(data['colors'], int(color_index)))
-        
+
         row = color_index - 1
         y = row * data['row_height']
-        
+
         return {
             'texture_file': data['file'],
             'rect': (0, y, data['segment_width'], data['row_height']),
@@ -251,7 +253,7 @@ class Laser:
     直线激光类
     三段式（头部、身体、尾部），支持展开/持续/收缩动画
     """
-    
+
     def __init__(self, x: float, y: float, angle: float,
                  l1: float, l2: float, l3: float,
                  width: float,
@@ -260,7 +262,7 @@ class Laser:
                  node: float = 0, head: float = 0):
         """
         初始化激光
-        
+
         Args:
             x, y: 激光起点坐标
             angle: 激光角度（度）
@@ -271,27 +273,27 @@ class Laser:
             node: 起点装饰节点大小 (0表示不显示)
             head: 终点装饰节点大小 (0表示不显示)
         """
-        self.x = x
-        self.y = y
-        self.angle = angle
-        
+        self.x = float(x)
+        self.y = float(y)
+        self.angle = float(angle)
+
         # 三段长度
-        self.l1 = l1  # 头部
-        self.l2 = l2  # 身体
-        self.l3 = l3  # 尾部
-        
+        self.l1 = float(l1)  # 头部
+        self.l2 = float(l2)  # 身体
+        self.l3 = float(l3)  # 尾部
+
         # 宽度
-        self.max_width = width
+        self.max_width = float(width)
         self.current_width = 0.0
-        
+
         # 纹理
         self.texture_id = texture_id
         self.color_index = max(1, min(16, int(color_index)))
-        
+
         # 装饰
         self.node = node
         self.head_node = head
-        
+
         # 状态
         self.alpha = 0.0
         self.phase = 'off'  # off, expanding, on, shrinking, dead
@@ -299,60 +301,180 @@ class Laser:
         self.counter = 0
         self.dw = 0.0
         self.da = 0.0
-        
+
         # 属性
         self.alive = True
         self.visible = True
         self.collidable = False
-        
+
         # 缓存的纹理rect
         self._texture_rects = None
-    
+        self._lifecycle = None
+        self._moving_segment = False
+        self.start_offset = 0.0
+        self.end_offset = self.l1 + self.l2 + self.l3
+        self.length_limit = self.end_offset
+        self.speed = 0.0
+        self.collision_enabled = True
+
     @property
     def total_length(self) -> float:
+        if self._moving_segment:
+            return max(0.0, self.end_offset - self.start_offset)
         return self.l1 + self.l2 + self.l3
-    
+
+    def set_position(self, x: float, y: float):
+        """Move the ray's origin, preserving the moving segment offsets."""
+        self.x, self.y = float(x), float(y)
+
+    def configure_motion(self, *, speed=0.0, start_offset=0.0,
+                         end_offset=None, length=None):
+        """Move a finite segment along its ray, in normalized units/second."""
+        initial_length = self.l1 + self.l2 + self.l3
+        self.length_limit = initial_length if length is None else float(length)
+        self.start_offset = float(start_offset)
+        self.end_offset = self.start_offset + initial_length if end_offset is None else float(end_offset)
+        if self.length_limit < 0 or self.end_offset < self.start_offset:
+            raise ValueError('laser segment length must be non-negative')
+        self.speed = float(speed)
+        self._moving_segment = True
+        self.start_offset = max(0.0, self.start_offset,
+                                self.end_offset - self.length_limit)
+        return self
+
+    def configure_lifecycle(self, *, warning_frames=30, active_frames=90,
+                            fade_frames=16, hitbox_delay=None,
+                            hitbox_fade_frames=0, warning_width=0.0,
+                            transition_hitbox='full'):
+        """Separate visual warning/fade from the collision activation window.
+
+        Frame counts are simulation frames. 'midpoint' is an explicit option
+        for TH06's short hitbox during its warning/fade, not a default bug.
+        turn_on/turn_off return the laser to the existing manual lifecycle.
+        """
+        warning, active, fade = (operator.index(value) for value in
+                                (warning_frames, active_frames, fade_frames))
+        hitbox_delay = warning if hitbox_delay is None else operator.index(hitbox_delay)
+        hitbox_fade_frames = operator.index(hitbox_fade_frames)
+        if min(warning, active, fade, hitbox_delay, hitbox_fade_frames) < 0:
+            raise ValueError('laser lifecycle frame counts must be non-negative')
+        if transition_hitbox not in {'full', 'midpoint'}:
+            raise ValueError('transition_hitbox must be full or midpoint')
+        self._lifecycle = (warning, active, fade, hitbox_delay,
+                           hitbox_fade_frames, float(warning_width), transition_hitbox)
+        self.timer = 0
+        self.counter = 0
+        self._update_lifecycle()
+        return self
+
+    def _update_lifecycle(self):
+        warning, active, fade, hit_delay, hit_fade, warning_width, _ = self._lifecycle
+        t = self.timer
+        if t < warning:
+            self.phase = 'warning'
+            self.alpha = 1.0
+            self.current_width = warning_width + (self.max_width - warning_width) * t / warning
+            self.collidable = t >= hit_delay
+        elif t < warning + active:
+            self.phase = 'on'
+            self.alpha = 1.0
+            self.current_width = self.max_width
+            self.collidable = t >= hit_delay
+        elif t < warning + active + fade:
+            self.phase = 'shrinking'
+            age = t - warning - active
+            fraction = 1.0 - age / fade
+            self.alpha = fraction
+            self.current_width = self.max_width * fraction
+            self.collidable = t >= hit_delay and age < hit_fade
+        else:
+            self.destroy()
+
+    def _segment_geometry(self):
+        angle = math.radians(self.angle)
+        offset = self.start_offset if self._moving_segment else 0.0
+        x, y = self.x + math.cos(angle) * offset, self.y + math.sin(angle) * offset
+        original_length = self.l1 + self.l2 + self.l3
+        if self._moving_segment:
+            ratio = self.total_length / original_length if original_length > 0 else 0.0
+            lengths = (self.l1 * ratio, self.l2 * ratio, self.l3 * ratio)
+        else:
+            lengths = (self.l1, self.l2, self.l3)
+        return x, y, lengths
+
+    def sample_points(self, step: float) -> np.ndarray:
+        """Sample the current segment at start, start+step, ... strictly < end.
+
+        The resulting array can go directly to create_bullets_batch. No Python
+        task/callback is attached to any of the sampled bullets.
+        """
+        if step <= 0:
+            raise ValueError('laser sample step must be positive')
+        if not self.alive:
+            return np.empty((0, 2), dtype=np.float32)
+        start = self.start_offset if self._moving_segment else 0.0
+        offsets = np.arange(start, start + self.total_length, step, dtype=np.float64)
+        offsets = offsets[offsets < start + self.total_length]
+        angle = math.radians(self.angle)
+        return np.column_stack((self.x + np.cos(angle) * offsets,
+                                self.y + np.sin(angle) * offsets)).astype(np.float32)
+
     def turn_on(self, time: int = 30):
         """
         开启激光（渐变展开）
-        
+
         Args:
             time: 展开帧数
         """
         time = max(1, int(time))
+        self._lifecycle = None
         self.phase = 'expanding'
+        self.collidable = False
         self.counter = time
         self.da = (1.0 - self.alpha) / time
         self.dw = (self.max_width - self.current_width) / time
-    
+
     def turn_half_on(self, time: int = 30):
         """半开启（预警状态）"""
         time = max(1, int(time))
+        self._lifecycle = None
+        self.phase = 'warning'
+        self.collidable = False
         self.counter = time
         self.da = (0.5 - self.alpha) / time
         self.dw = (0.5 * self.max_width - self.current_width) / time
-    
+
     def turn_off(self, time: int = 30):
         """关闭激光（渐变收缩）"""
         time = max(1, int(time))
+        self._lifecycle = None
         self.phase = 'shrinking'
         self.counter = time
         self.da = -self.alpha / time
         self.dw = -self.current_width / time
         self.collidable = False
-    
+
     def update(self):
         """每帧更新"""
         if not self.alive:
             return
-        
+
         self.timer += 1
-        
+        if self._moving_segment:
+            delta = self.speed / 60.0
+            self.end_offset = max(0.0, self.end_offset + delta)
+            tail = self.start_offset + min(0.0, delta)
+            self.start_offset = max(0.0, min(tail, self.end_offset),
+                                    self.end_offset - self.length_limit)
+        if self._lifecycle is not None:
+            self._update_lifecycle()
+            return
+
         if self.counter > 0:
             self.counter -= 1
             self.current_width += self.dw
             self.alpha += self.da
-            
+
             # 状态转换
             if self.counter == 0:
                 if self.phase == 'expanding':
@@ -364,24 +486,36 @@ class Laser:
                     self.phase = 'dead'
                     self.alive = False
                     self.visible = False
-        
+
         # 限制值范围
         self.alpha = max(0.0, min(1.0, self.alpha))
         self.current_width = max(0.0, self.current_width)
-    
+
     def check_collision(self, px: float, py: float, radius: float) -> bool:
         """检查碰撞"""
-        if not self.collidable or not self.alive or self.alpha < 0.999:
+        if not self.collidable or not self.alive or not self.collision_enabled:
             return False
-        
+        if self._lifecycle is None and self.alpha < 0.999:
+            return False
+
         angle_rad = math.radians(self.angle)
+        x, y, lengths = self._segment_geometry()
+        width = self.current_width
+        if (self._lifecycle is not None and self.phase in {'warning', 'shrinking'}
+                and self._lifecycle[-1] == 'midpoint'):
+            # TH06 kept the transverse size but accidentally shrank the axial
+            # size at the midpoint. The option expresses that deliberately.
+            offset = (self.total_length - self.current_width) * 0.5
+            x += math.cos(angle_rad) * offset
+            y += math.sin(angle_rad) * offset
+            lengths = (0.0, self.current_width, 0.0)
+            width = self.max_width
         return _check_laser_collision_jit(
-            px, py, radius,
-            self.x, self.y, angle_rad,
-            self.l1, self.l2, self.l3,
-            self.current_width
+            float(px), float(py), float(radius),
+            x, y, angle_rad,
+            *lengths, width
         )
-    
+
     def get_texture_rects(self) -> Optional[Dict]:
         """获取纹理rect数据（带缓存）"""
         if self._texture_rects is None:
@@ -389,21 +523,22 @@ class Laser:
                 self.texture_id, self.color_index
             )
         return self._texture_rects
-    
+
     def get_render_data(self) -> Optional[Dict]:
         """获取渲染数据"""
         if not self.visible or self.current_width <= 0:
             return None
-        
+
         tex_rects = self.get_texture_rects()
-        
+        x, y, lengths = self._segment_geometry()
+
         return {
-            'x': self.x,
-            'y': self.y,
+            'x': x,
+            'y': y,
             'angle': self.angle,
-            'l1': self.l1,
-            'l2': self.l2,
-            'l3': self.l3,
+            'l1': lengths[0],
+            'l2': lengths[1],
+            'l3': lengths[2],
             'width': self.current_width,
             'alpha': self.alpha,
             'color_index': self.color_index,
@@ -413,12 +548,18 @@ class Laser:
             'head_node': self.head_node,
             'timer': self.timer,
         }
-    
+
     def kill(self):
         """销毁激光"""
         if self.alive:
             self.turn_off(30)
-    
+
+    def destroy(self):
+        """Immediately invalidate retained handles as well as pool membership."""
+        self.alive = self.visible = self.collidable = False
+        self.phase = 'dead'
+        self.alpha = self.current_width = 0.0
+
     def change_image(self, texture_id: str, color_index: int = None):
         """更换纹理"""
         self.texture_id = texture_id
@@ -432,14 +573,14 @@ class BentLaser:
     曲线激光类
     沿路径弯曲，支持跟随目标
     """
-    
+
     def __init__(self, x: float, y: float,
                  length: int, width: float,
                  color_index: int = 1,
                  sample_rate: int = 4):
         """
         初始化曲线激光
-        
+
         Args:
             x, y: 起点坐标
             length: 路径长度（采样点数）
@@ -448,11 +589,11 @@ class BentLaser:
             sample_rate: 采样率
         """
         self.length = max(2, int(length))
-        self.max_width = width
+        self.max_width = float(width)
         self.current_width = 0.0
         self.color_index = max(1, min(16, int(color_index)))
         self.sample_rate = max(1, sample_rate)
-        
+
         # 路径数据 (循环缓冲区)
         self.path_x = np.zeros(self.length, dtype=np.float64)
         self.path_y = np.zeros(self.length, dtype=np.float64)
@@ -460,42 +601,42 @@ class BentLaser:
         self.path_y.fill(y)
         self.path_index = 0
         self.path_count = 1
-        
+
         # 头部位置
         self.head_x = x
         self.head_y = y
-        
+
         # 状态
         self.alpha = 0.0
         self.timer = 0
         self.counter = 0
         self.dw = 0.0
         self.da = 0.0
-        
+
         self.alive = True
         self.visible = True
         self.collidable = False
-        
+
         self._bent_rect = None
-    
+
     def update_head(self, x: float, y: float):
         """更新头部位置并记录路径"""
         self.head_x = x
         self.head_y = y
-        
+
         if self.timer % self.sample_rate == 0:
             self.path_index = (self.path_index + 1) % self.length
             self.path_x[self.path_index] = x
             self.path_y[self.path_index] = y
             self.path_count = min(self.path_count + 1, self.length)
-    
+
     def turn_on(self, time: int = 30):
         """开启"""
         time = max(1, int(time))
         self.counter = time
         self.da = (1.0 - self.alpha) / time
         self.dw = (self.max_width - self.current_width) / time
-    
+
     def turn_off(self, time: int = 30):
         """关闭"""
         time = max(1, int(time))
@@ -503,70 +644,70 @@ class BentLaser:
         self.da = -self.alpha / time
         self.dw = -self.current_width / time
         self.collidable = False
-    
+
     def update(self):
         """每帧更新"""
         if not self.alive:
             return
-        
+
         self.timer += 1
-        
+
         if self.counter > 0:
             self.counter -= 1
             self.current_width += self.dw
             self.alpha += self.da
-            
+
             if self.counter == 0:
                 if self.alpha >= 0.99:
                     self.collidable = True
                 elif self.alpha <= 0.01:
                     self.alive = False
                     self.visible = False
-        
+
         self.alpha = max(0.0, min(1.0, self.alpha))
         self.current_width = max(0.0, self.current_width)
-    
+
     def check_collision(self, px: float, py: float, radius: float) -> bool:
         """检查碰撞"""
         if not self.collidable or not self.alive:
             return False
-        
+
         if self.path_count < 2:
             return False
-        
+
         # 构建有效路径数组
         valid_count = min(self.path_count, self.length)
         path_x = np.zeros(valid_count, dtype=np.float64)
         path_y = np.zeros(valid_count, dtype=np.float64)
-        
+
         for i in range(valid_count):
             idx = (self.path_index - valid_count + 1 + i + self.length) % self.length
             path_x[i] = self.path_x[idx]
             path_y[i] = self.path_y[idx]
-        
+
         return _check_bent_laser_collision_jit(
-            px, py, radius,
+            float(px), float(py), float(radius),
             path_x, path_y,
             self.current_width, valid_count
         )
-    
+
     def get_render_data(self) -> Optional[Dict]:
         """获取渲染数据"""
         if not self.visible or self.current_width <= 0 or self.path_count < 2:
             return None
-        
+
         if self._bent_rect is None:
             self._bent_rect = get_laser_texture_data().get_bent_laser_rect(self.color_index)
-        
+
         valid_count = min(self.path_count, self.length)
         path_x = []
         path_y = []
-        
+
         for i in range(valid_count):
             idx = (self.path_index - valid_count + 1 + i + self.length) % self.length
             path_x.append(self.path_x[idx])
             path_y.append(self.path_y[idx])
-        
+
         return {
             'path_x': path_x,
             'path_y': path_y,
@@ -575,7 +716,7 @@ class BentLaser:
             'color_index': self.color_index,
             'texture_rect': self._bent_rect,
         }
-    
+
     def kill(self):
         """销毁"""
         if self.alive:
@@ -586,14 +727,14 @@ class BentLaser:
 
 class LaserPool:
     """激光对象池"""
-    
+
     def __init__(self, max_lasers: int = 100, max_bent: int = 50):
         self.max_lasers = max_lasers
         self.max_bent = max_bent
-        
+
         self.lasers: List[Laser] = []
         self.bent_lasers: List[BentLaser] = []
-    
+
     def create_laser(self, x: float, y: float, angle: float,
                      l1: float, l2: float, l3: float,
                      width: float,
@@ -607,12 +748,12 @@ class LaserPool:
             self.lasers = [l for l in self.lasers if l.alive]
             if len(self.lasers) >= self.max_lasers:
                 return None
-        
+
         laser = Laser(x, y, angle, l1, l2, l3, width, texture_id, color_index, **kwargs)
         laser.turn_on(on_time)
         self.lasers.append(laser)
         return laser
-    
+
     def create_bent_laser(self, x: float, y: float,
                           length: int, width: float,
                           color_index: int = 1,
@@ -623,23 +764,23 @@ class LaserPool:
             self.bent_lasers = [l for l in self.bent_lasers if l.alive]
             if len(self.bent_lasers) >= self.max_bent:
                 return None
-        
+
         laser = BentLaser(x, y, length, width, color_index, **kwargs)
         laser.turn_on(on_time)
         self.bent_lasers.append(laser)
         return laser
-    
+
     def update(self):
         """更新所有激光"""
         for laser in self.lasers:
             laser.update()
         for laser in self.bent_lasers:
             laser.update()
-        
+
         # 清理死亡的激光
         self.lasers = [l for l in self.lasers if l.alive]
         self.bent_lasers = [l for l in self.bent_lasers if l.alive]
-    
+
     def check_collision(self, px: float, py: float, radius: float) -> bool:
         """检查是否与任何激光碰撞"""
         for laser in self.lasers:
@@ -649,20 +790,37 @@ class LaserPool:
             if laser.check_collision(px, py, radius):
                 return True
         return False
-    
+
     def get_all_lasers(self) -> Tuple[List[Laser], List[BentLaser]]:
         """获取所有活跃的激光"""
         return self.lasers, self.bent_lasers
-    
+
     def clear(self):
         """清空所有激光"""
+        for laser in self.lasers:
+            laser.destroy()
+        for laser in self.bent_lasers:
+            laser.alive = laser.visible = laser.collidable = False
         self.lasers.clear()
         self.bent_lasers.clear()
-    
+
+    def warmup(self):
+        """Compile real collision kernels before gameplay, without spawning."""
+        timings = {}
+        start = time.perf_counter()
+        _check_laser_collision_jit(0.0, 0.0, 0.01, 0.0, 0.0, 0.0,
+                                   0.1, 0.2, 0.1, 0.03)
+        timings['straight_collision'] = (time.perf_counter() - start) * 1000.0
+        start = time.perf_counter()
+        samples = np.zeros(2, dtype=np.float64)
+        _check_bent_laser_collision_jit(0.0, 0.0, 0.01, samples, samples, 0.03, 2)
+        timings['bent_collision'] = (time.perf_counter() - start) * 1000.0
+        return timings
+
     @property
     def laser_count(self) -> int:
         return len(self.lasers)
-    
+
     @property
     def bent_laser_count(self) -> int:
         return len(self.bent_lasers)

@@ -13,12 +13,16 @@ import json
 import math
 import os
 import numpy as np
+import inspect
 from collections import deque
 from typing import Optional, Any, Dict, List, Mapping
 
 from .spellcard import SpellCardContext
 from ..audio import AudioManager
 from ..events import EventBus, EventBusError, LifecycleEvent
+from ..bullet.batch import BulletSnapshot, normalize_scalar
+from ..state import RunState, TimeControl
+from ..bullet.tags import BOMB_PROTECTED_TAGS
 from ..bullet import (
     FLAG_BOUNCE_X, FLAG_BOUNCE_Y, FLAG_IS_EMITTER, FLAG_RENDER_ANGLE_LOCKED,
     CURVE_NONE, CURVE_SIN_SPEED, CURVE_SIN_ANGLE, CURVE_COS_SPEED, CURVE_LINEAR_SPEED,
@@ -42,6 +46,13 @@ class PlayerProxy:
     @property
     def y(self) -> float:
         return self._player.pos[1]
+
+    @property
+    def is_bombing(self) -> bool:
+        check = getattr(self._player, 'is_bomb_power_active', None)
+        return bool(check()) if check is not None else bool(
+            getattr(self._player, 'bomb_power_timer', 0.0) > 0,
+        )
 
 
 class StageContext(SpellCardContext):
@@ -109,25 +120,30 @@ class StageContext(SpellCardContext):
                  laser_pool=None, item_pool=None,
                  audio_manager: Optional[AudioManager] = None,
                  background_renderer=None,
-                 event_bus: EventBus | None = None):
+                 event_bus: EventBus | None = None,
+                 run_state: RunState | None = None,
+                 particle_pool=None):
+        self.run_state = run_state if run_state is not None else RunState()
+        self.time_control = TimeControl()
         self.bullet_pool = bullet_pool
         self._player = player
         self._player_proxy = PlayerProxy(player)
         self._enemy_manager = enemy_manager
         self._laser_pool = laser_pool
         self._item_pool = item_pool
+        self._particle_pool = particle_pool
         self._audio_manager = audio_manager
         self._background_renderer = background_renderer
-        self._bullet_indices: List[int] = []
         self._enemy_scripts: List[Any] = []
         # Sparse authored-stage state. These are semantic controller records,
         # never per-bullet callbacks or scene-tree bullet objects.
         self._authored_node_positions: Dict[str, tuple[float, float]] = {}
         self._authored_node_properties: Dict[str, Dict[str, Any]] = {}
-        self._timeline_events: List[Dict[str, Any]] = []
+        self._timeline_events = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
         self._background_transitions: List[Dict[str, Any]] = []
-        self._lifecycle_trace: List[LifecycleEvent] = []
+        self._lifecycle_trace = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
         self._runtime_frame = 0
+        self.seed = 0
         self._timeline_origin = 0
         self._authoring_unit_origins: Dict[str, int] = {}
         self.authoring_stage_id = None
@@ -137,13 +153,241 @@ class StageContext(SpellCardContext):
         self._reaction_actions: Dict[str, Any] = {}
         self._event_bus: EventBus | None = None
         self._event_subscriptions: list[Any] = []
+        self._bullet_conversions = {}
 
         if not StageContext._aliases_loaded:
             StageContext.load_bullet_aliases()
         if event_bus is not None:
             self.bind_event_bus(event_bus)
 
+    @property
+    def difficulty(self):
+        return self.run_state.difficulty
+
+    @difficulty.setter
+    def difficulty(self, value):
+        self.run_state.difficulty = value
+
+    @property
+    def player_shot(self):
+        return self.run_state.player_shot
+
+    @property
+    def rank(self):
+        return self.run_state.rank
+
+    def stop_time(self, *domains):
+        """Pause selected systems; actor tasks continue so they can release it.
+
+        Use ``with ctx.stop_time(): await ctx.wait(60)`` for one scope. The
+        default includes player/projectiles/background/effects/Boss timer, not
+        actor scripts or items. For bullet-only slow motion use set_time_scale.
+        """
+        return self.time_control.stop(*domains)
+
+    def is_time_stopped(self, domain):
+        return self.time_control.is_stopped(domain)
+
+    # ==================== 非碰撞粒子 API ====================
+
+    def emit_particles(self, effect, x, y, **kwargs):
+        """Emit a numeric batch; see ParticleEffect and ParticlePool.emit.
+
+        Velocity is units/second, acceleration units/second squared. Returned
+        ParticleGroup reports actual emission and capacity loss. No collision,
+        graze, bullet clearing or per-particle script task is involved.
+        """
+        if self._particle_pool is None:
+            raise RuntimeError('particle emission requires a bound ParticlePool')
+        return self._particle_pool.emit(effect, x, y, **kwargs)
+
+    def clear_particles(self, group=None):
+        if self._particle_pool is None:
+            raise RuntimeError('particle clearing requires a bound ParticlePool')
+        return self._particle_pool.clear(group)
+
+    def read_particles(self, group=None):
+        if self._particle_pool is None:
+            raise RuntimeError('particle reading requires a bound ParticlePool')
+        return self._particle_pool.read(group)
+
+    def transform_particles(self, group, **kwargs):
+        """One whole-group update for advanced NumPy/Numba content formulas."""
+        if self._particle_pool is None:
+            raise RuntimeError('particle transform requires a bound ParticlePool')
+        return self._particle_pool.transform(group, **kwargs)
+
+    def count_particles(self, group=None):
+        if self._particle_pool is None:
+            return 0
+        return (self._particle_pool.count if group is None
+                else self._particle_pool.count_group(group))
+
     # ==================== 子弹 API ====================
+
+    def capture_bullets(self, indices):
+        return self.bullet_pool.capture_group(indices)
+
+    def select_bullets(self, *, tag: int | None = None, region=None):
+        """Capture the current selection, not future bullets with the same tag."""
+        return self.bullet_pool.select_bullets(tag=tag, region=self._bullet_region(region))
+
+    @staticmethod
+    def _bullet_region(region):
+        if region is None:
+            return None
+        values = dict(region)
+        if 'angle' in values:
+            values['angle'] = math.radians(values['angle'])
+        return values
+
+    def count_bullets(self, group=None, *, tag: int | None = None):
+        return self.bullet_pool.count_bullets(group, tag=tag)
+
+    def read_bullets(self, group=None, *, tag=None, region=None, fields=None):
+        """Detached arrays in author units: degrees and author speed/second.
+
+        Field names follow the numerical pool (pos, vel, acc, angle, speed).
+        Write computed arrays back using snapshot.group, including after wait.
+        """
+        snapshot = self.bullet_pool.read_bullets(
+            group, tag=tag, region=self._bullet_region(region), fields=fields,
+        )
+        values = dict(snapshot.fields)
+        for name in ('vel', 'speed', 'acc', 'speed_accel'):
+            if name in values:
+                values[name] = values[name] * 60.0
+        if 'angle' in values:
+            values['angle'] = np.rad2deg(values['angle'])
+        return BulletSnapshot(snapshot.group, values)
+
+    def run_bullet_rule(self, rule, group=None, *, tag=None, fields=None, frames=None):
+        """One synchronous snapshot -> numerical rule -> write per owner frame.
+
+        Schedule with enemy.spawn_task(...) for enemy lifetime, or ctx.spawn_task
+        for stage lifetime. Fixed empty groups finish; dynamic tags can await
+        future births. The callable returns transform_bullets keyword values.
+        """
+        if not callable(rule):
+            raise TypeError('bullet rule must be a synchronous batch callable')
+        if frames is not None and (isinstance(frames, bool) or not isinstance(frames, int) or frames < 0):
+            raise ValueError('bullet rule frames must be a non-negative integer')
+        scope_generation = self.bullet_pool.scope_generation
+
+        async def run():
+            elapsed = 0
+            while self.bullet_pool.scope_generation == scope_generation and (frames is None or elapsed < frames):
+                snapshot = self.read_bullets(group, tag=tag, fields=fields)
+                if not len(snapshot) and group is not None:
+                    return
+                if len(snapshot):
+                    updates = rule(snapshot)
+                    if not isinstance(updates, Mapping):
+                        raise TypeError('bullet rule must return transform keyword values')
+                    self.transform_bullets(snapshot.group, **updates)
+                elapsed += 1
+                await self.wait(1)
+        return run()
+
+    def bullet_sprite_index(self, bullet_type, color='red'):
+        """Resolve an author-facing bullet name for heterogeneous sprite arrays."""
+        return self.bullet_pool.register_sprite(self._resolve_sprite_id(bullet_type, color))
+
+    def clear_bullet_group(self, group=None, *, tag: int | None = None, reason='phase_cleared'):
+        return self.bullet_pool.remove_bullets(group, tag=tag, reason=reason)
+
+    def transform_bullets(self, group=None, *, tag: int | None = None, region=None,
+                          speed=None, angle=None, aim=None, accel=None,
+                          time_scale=None, bullet_type=None, color='red',
+                          render_scale=None, cooldown: int = 0, cooldown_key=None,
+                          positions=None, velocities=None, vector_accel=None,
+                          sprite_indices=None, angle_accel=None):
+        """Batch action; author angles are degrees, cooldown is game frames."""
+        return self.bullet_pool.transform_bullets(
+            group, tag=tag, region=self._bullet_region(region),
+            speed=None if speed is None else np.asarray(speed) / 60.0,
+            angle=None if angle is None else np.deg2rad(angle),
+            aim=aim, speed_accel=None if accel is None else np.asarray(accel) / 60.0,
+            time_scale=time_scale,
+            sprite_id=None if bullet_type is None else self._resolve_sprite_id(bullet_type, color),
+            render_scale=render_scale, cooldown=cooldown / 60.0, cooldown_key=cooldown_key,
+            positions=positions,
+            velocities=None if velocities is None else np.asarray(velocities) / 60.0,
+            vector_accel=None if vector_accel is None else np.asarray(vector_accel) / 60.0,
+            sprite_indices=sprite_indices,
+            motion_angular_accel=None if angle_accel is None else np.deg2rad(angle_accel),
+        )
+
+    def set_bullet_behavior(self, group=None, *, tag: int | None = None, stages=()):
+        converted = []
+        supported = {'frames', 'speed', 'angle', 'aim', 'accel', 'turn_rate',
+                     'bounce_x', 'bounce_y', 'bullet_type', 'color', 'vector_accel',
+                     'homing', 'max_turn_rate', 'wrap_x', 'wrap_y'}
+        for stage in stages:
+            values = dict(stage)
+            unknown = set(values) - supported
+            if unknown:
+                raise TypeError(f"unsupported bullet stage fields: {', '.join(sorted(unknown))}")
+            frame_count = values.pop('frames', None)
+            values['duration'] = None if frame_count is None else frame_count / 60.0
+            for field in ('speed', 'accel'):
+                if field in values:
+                    values[field] /= 60.0
+            if 'vector_accel' in values:
+                values['vector_accel'] = np.asarray(values['vector_accel']) / 60.0
+            for field in ('angle', 'turn_rate', 'max_turn_rate'):
+                if field in values:
+                    values[field] = math.radians(values[field])
+            color = values.pop('color', 'red')
+            if 'bullet_type' in values:
+                values['sprite_id'] = self._resolve_sprite_id(values.pop('bullet_type'), color)
+            converted.append(values)
+        return self.bullet_pool.set_bullet_behavior(group, tag=tag, stages=converted)
+
+    def convert_bullets_on_end(self, tag, enemy_class, *, reasons=('expired',)):
+        """Convert each complete mother record into one real EnemyScript.
+
+        Returns a cancellation token. Births are consumed after stage update;
+        on_spawn/run first advance on the next stage frame, as ordinary enemies.
+        """
+        from .enemy_script import EnemyScript
+        if not isinstance(enemy_class, type) or not issubclass(enemy_class, EnemyScript):
+            raise TypeError('conversion requires an EnemyScript class')
+        token = self.bullet_pool.terminations.register(tag, reasons)
+        self._bullet_conversions[token] = enemy_class
+        return token
+
+    def cancel_bullet_conversion(self, token):
+        self._bullet_conversions.pop(token, None)
+        return self.bullet_pool.terminations.unregister(token)
+
+    def flush_bullet_conversions(self):
+        count = 0
+        for token, enemy_class in tuple(self._bullet_conversions.items()):
+            if token not in self.bullet_pool.terminations:
+                self._bullet_conversions.pop(token, None)
+                continue
+            for batch in self.bullet_pool.terminations.drain(token):
+                for index, (x, y) in enumerate(batch.positions):
+                    enemy = enemy_class()
+                    enemy.bind(self, x=float(x), y=float(y))
+                    enemy.source_angle = float(np.rad2deg(batch.angles[index]))
+                    enemy.source_velocity = tuple(float(v) * 60.0 for v in batch.velocities[index])
+                    enemy.source_tag = batch.tag
+                    enemy.source_end_reason = batch.reason
+                    enemy.start()
+                    self.add_enemy_script(enemy)
+                    count += 1
+        return count
+
+    def split_bullets_on_end(self, tag: int, *, count: int = 8, speed: float = 2.0,
+                             bullet_type: str = 'ball_m', color: str = 'red',
+                             reasons=('expired',), child_tag: int = 0):
+        self.bullet_pool.register_termination_batch_reaction(tag, {
+            'action': 'split', 'count': count, 'speed': speed / 60.0,
+            'sprite_id': self._resolve_sprite_id(bullet_type, color),
+            'reasons': tuple(reasons), 'child_tag': child_tag,
+        })
 
     def create_bullet(self, x: float, y: float, angle: float, speed: float,
                       bullet_type: str = "ball_m", color: str = "red",
@@ -161,6 +405,8 @@ class StageContext(SpellCardContext):
                       collision_radius: float = 0.0,
                       curve_type: int = CURVE_NONE,
                       curve_params: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+                      delay: int = 0,
+                      vector_accel=None,
                       **kwargs) -> int:
         """
         创建一颗直线运动子弹。
@@ -202,6 +448,10 @@ class StageContext(SpellCardContext):
             flags &= ~FLAG_RENDER_ANGLE_LOCKED
 
         ra = math.radians(render_angle) if render_angle is not None else None
+        if vector_accel is not None:
+            if 'acc' in kwargs:
+                raise ValueError('vector_accel and raw pool acc cannot both be set')
+            kwargs['acc'] = np.asarray(vector_accel) / 60.0
 
         idx = self.bullet_pool.spawn_bullet(
             x=x, y=y,
@@ -221,9 +471,10 @@ class StageContext(SpellCardContext):
             radius=collision_radius,
             curve_type=curve_type,
             curve_param=curve_params,
+            delay=delay,
+            **kwargs,
         )
         if idx >= 0:
-            self._bullet_indices.append(idx)
             self.publish_lifecycle(
                 "bullet.spawned",
                 {"tag": int(tag), "count": 1},
@@ -257,6 +508,7 @@ class StageContext(SpellCardContext):
         collision_radius: float = 0.0,
         curve_type: int = 0,
         curve_params: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        vector_accel=(0.0, 0.0),
     ) -> np.ndarray:
         """Create a heterogeneous formal-runtime burst in one pool operation.
 
@@ -265,98 +517,49 @@ class StageContext(SpellCardContext):
         degrees/second² for every bullet in the burst.
         """
         position_array = np.asarray(positions, dtype=np.float32)
-        angle_array = np.asarray(angles, dtype=np.float32)
-        speed_array = np.asarray(speeds, dtype=np.float32)
         if position_array.size == 0:
             position_array = position_array.reshape((0, 2))
         if position_array.ndim != 2 or position_array.shape[1] != 2:
             raise ValueError("positions must have shape (count, 2)")
-        if angle_array.ndim != 1 or speed_array.ndim != 1:
-            raise ValueError("angles and speeds must be one-dimensional")
-        if not (len(position_array) == len(angle_array) == len(speed_array)):
-            raise ValueError("positions, angles, and speeds must have equal length")
+        count = len(position_array)
+        angle_array = normalize_scalar(angles, count, 'angles')
+        speed_array = normalize_scalar(speeds, count, 'speeds')
 
         resolved_sprite_id = sprite_id or self._resolve_sprite_id(bullet_type, color)
-        flags = FLAG_RENDER_ANGLE_LOCKED
-        if bounce_x:
-            flags |= FLAG_BOUNCE_X
-        if bounce_y:
-            flags |= FLAG_BOUNCE_Y
-        if spin != 0.0 or render_angle is not None:
-            flags &= ~FLAG_RENDER_ANGLE_LOCKED
+        flags = np.full(count, FLAG_RENDER_ANGLE_LOCKED, dtype=np.uint16)
+        flags[normalize_scalar(bounce_x, count, 'bounce_x', dtype=np.uint8) != 0] |= FLAG_BOUNCE_X
+        flags[normalize_scalar(bounce_y, count, 'bounce_y', dtype=np.uint8) != 0] |= FLAG_BOUNCE_Y
+        spinning = normalize_scalar(spin, count, 'spin') != 0
+        if render_angle is not None:
+            spinning[:] = True
+        flags[spinning] &= np.uint16(65535 ^ FLAG_RENDER_ANGLE_LOCKED)
 
         angle_radians = np.deg2rad(angle_array).astype(np.float32, copy=False)
         render_angles = None
         if render_angle is not None:
-            render_angles = np.full(
-                len(angle_array),
-                math.radians(render_angle),
-                dtype=np.float32,
-            )
+            render_angles = np.deg2rad(normalize_scalar(render_angle, count, 'render_angle'))
         speed_per_frame = speed_array / 60.0
-        if hasattr(self.bullet_pool, "spawn_bullets_batch"):
-            indices = self.bullet_pool.spawn_bullets_batch(
-                positions=position_array,
-                angles=angle_radians,
-                speeds=speed_per_frame,
-                speed_accel=accel / 60.0,
-                motion_angular_accel=math.radians(angle_accel),
-                sprite_id=resolved_sprite_id,
-                sprite_idx=sprite_idx,
-                radius=collision_radius,
-                tag=tag,
-                friction=friction,
-                time_scale=time_scale,
-                flags=flags,
-                angular_vel=math.radians(spin),
-                render_angles=render_angles,
-                max_lifetime=max_lifetime,
-                render_scale=render_scale,
-                curve_type=curve_type,
-                curve_param=curve_params,
-            )
-        else:
-            spawned = []
-            for (x, y), angle_rad, speed_value in zip(
-                position_array, angle_radians, speed_per_frame
-            ):
-                idx = self.bullet_pool.spawn_bullet(
-                    x=float(x),
-                    y=float(y),
-                    angle=float(angle_rad),
-                    speed=float(speed_value),
-                    speed_accel=accel / 60.0,
-                    motion_angular_accel=math.radians(angle_accel),
-                    sprite_id=resolved_sprite_id,
-                    sprite_idx=sprite_idx,
-                    radius=collision_radius,
-                    tag=tag,
-                    friction=friction,
-                    time_scale=time_scale,
-                    flags=flags,
-                    angular_vel=math.radians(spin),
-                    render_angle=None if render_angles is None else float(render_angles[len(spawned)]),
-                    max_lifetime=max_lifetime,
-                    render_scale=render_scale,
-                    curve_type=curve_type,
-                    curve_param=curve_params,
-                )
-                if idx >= 0:
-                    spawned.append(idx)
-            indices = np.asarray(spawned, dtype=np.intp)
+        indices = self.bullet_pool.spawn_bullets_batch(
+            positions=position_array, angles=angle_radians, speeds=speed_per_frame,
+            speed_accel=np.asarray(accel) / 60.0, motion_angular_accel=np.deg2rad(angle_accel),
+            acc=np.asarray(vector_accel) / 60.0, sprite_id=resolved_sprite_id, sprite_idx=sprite_idx,
+            radius=collision_radius, tag=tag, friction=friction, time_scale=time_scale, flags=flags,
+            angular_vel=np.deg2rad(spin), render_angles=render_angles, max_lifetime=max_lifetime,
+            render_scale=render_scale, curve_type=curve_type, curve_param=curve_params,
+        )
 
         result = np.asarray(indices, dtype=np.intp)
-        self._bullet_indices.extend(int(index) for index in result)
-        if result.size:
+        for actual_tag in np.unique(self.bullet_pool.data['tag'][result]):
+            tagged = result[self.bullet_pool.data['tag'][result] == actual_tag]
             self.publish_lifecycle(
                 "bullet.spawned",
                 {
-                    "tag": int(tag),
-                    "count": int(result.size),
+                    "tag": int(actual_tag),
+                    "count": int(tagged.size),
                 },
-                owner=None if int(tag) == 0 else str(int(tag)),
-                count=int(result.size),
-                representative_ids=tuple(str(int(index)) for index in result[:8]),
+                owner=None if int(actual_tag) == 0 else str(int(actual_tag)),
+                count=int(tagged.size),
+                representative_ids=tuple(str(int(index)) for index in tagged[:8]),
             )
         return result
 
@@ -385,40 +588,22 @@ class StageContext(SpellCardContext):
             hit_radius=collision_radius,
             **kwargs,
         )
-        if idx >= 0:
-            self._bullet_indices.append(idx)
         return idx
 
     def create_orbit_bullet(self, *args, **kwargs) -> int:
         """`create_polar_bullet` 的语义化别名。"""
         return self.create_polar_bullet(*args, **kwargs)
 
-    def remove_bullet(self, bullet_idx: int):
-        """移除子弹"""
-        if 0 <= bullet_idx < len(self.bullet_pool.data['alive']):
-            self.bullet_pool.data['alive'][bullet_idx] = 0
-            if bullet_idx in self._bullet_indices:
-                self._bullet_indices.remove(bullet_idx)
+    def remove_bullet(self, bullet_idx: int, *, reason: str = "removed"):
+        """Terminate and recycle a bullet; removal is not natural expiry."""
+        return self.bullet_pool.remove_bullets(np.asarray([bullet_idx], dtype=np.intp), reason=reason)
 
-    def remove_bullets(self, bullet_indices):
+    def remove_bullets(self, bullet_indices, *, reason: str = "phase_cleared"):
         """批量移除子弹，避免符卡清屏时逐个 list.remove 造成卡顿。"""
         if bullet_indices is None or len(bullet_indices) == 0:
             return
 
-        alive = self.bullet_pool.data['alive']
-        max_len = len(alive)
-        indices = np.fromiter(
-            (int(idx) for idx in bullet_indices if 0 <= int(idx) < max_len),
-            dtype=np.intp
-        )
-        if indices.size == 0:
-            return
-
-        alive[indices] = 0
-        remove_set = set(indices.tolist())
-        self._bullet_indices = [
-            idx for idx in self._bullet_indices if idx not in remove_set
-        ]
+        return self.bullet_pool.remove_bullets(bullet_indices, reason=reason)
 
     def bullets_to_items(self, bullet_indices):
         """批量将子弹转为 point 道具。"""
@@ -428,21 +613,13 @@ class StageContext(SpellCardContext):
             self.remove_bullets(bullet_indices)
             return
 
-        alive = self.bullet_pool.data['alive']
-        max_len = len(alive)
-        indices = np.fromiter(
-            (int(idx) for idx in bullet_indices
-             if 0 <= int(idx) < max_len and alive[int(idx)] == 1),
-            dtype=np.intp
-        )
+        indices = self.bullet_pool.resolve_indices(bullet_indices)
         if indices.size == 0:
             return
 
         positions = self.bullet_pool.data['pos'][indices].copy()
-        from ..item import ItemType
-        for bx, by in positions:
-            self._item_pool.spawn(float(bx), float(by), ItemType.POINT)
-        self.remove_bullets(indices.tolist())
+        self._item_pool.spawn_points_from_positions(positions, attract=True)
+        self.remove_bullets(indices, reason="converted")
 
     def bullet_to_item(self, bullet_idx: int):
         """子弹转化为道具"""
@@ -450,12 +627,12 @@ class StageContext(SpellCardContext):
             bx, by = self.bullet_pool.data['pos'][bullet_idx]
             from ..item import ItemType
             self._item_pool.spawn(float(bx), float(by), ItemType.POINT)
-        self.remove_bullet(bullet_idx)
+        self.remove_bullet(bullet_idx, reason="converted")
 
     def clear_all_bullets(self):
         """清除所有子弹"""
         self.bullet_pool.clear_all()
-        self._bullet_indices.clear()
+        self._bullet_conversions.clear()
 
     def clear_bullets_by_tag(self, tag: int, *, reason: str = "phase_cleared") -> int:
         """按标签消除所有子弹"""
@@ -474,18 +651,7 @@ class StageContext(SpellCardContext):
         mask = (self.bullet_pool.data['alive'] == 1) & (self.bullet_pool.data['tag'] == tag)
         positions = self.bullet_pool.data['pos'][mask].copy()
         self._item_pool.spawn_points_from_positions(positions, attract=True)
-        owned = {
-            idx
-            for idx in self._bullet_indices
-            if 0 <= idx < len(self.bullet_pool.data['alive'])
-            and self.bullet_pool.data['alive'][idx] == 1
-            and self.bullet_pool.data['tag'][idx] == tag
-        }
-        result = self.bullet_pool.clear_by_tag(tag)
-        self._bullet_indices = [
-            idx for idx in self._bullet_indices if idx not in owned
-        ]
-        return len(owned) if result is None else int(result)
+        return int(self.bullet_pool.clear_by_tag(tag, reason="converted"))
 
     def translate_bullets_by_tag(self, tag: int, dx: float, dy: float) -> int:
         """Translate one owner group without touching other live bullets."""
@@ -596,18 +762,58 @@ class StageContext(SpellCardContext):
         if self._item_pool:
             self._item_pool.spawn_drop(x, y, **kwargs)
 
+    def spawn_item(self, x, y, item_type, *, speed=None, angle=None):
+        """Spawn any ItemType; optional speed is units/second, angle is degrees."""
+        if self._item_pool is None:
+            raise RuntimeError('ItemPool is not bound to current StageContext')
+        return self._item_pool.spawn(
+            x, y, item_type,
+            speed=None if speed is None else speed / 60.0,
+            angle=angle,
+        )
+
     def add_score(self, amount: int):
         """直接增加分数"""
         if self._item_pool:
-            self._item_pool.stats.score += amount
-            if self._item_pool.stats.score > self._item_pool.stats.hiscore:
-                self._item_pool.stats.hiscore = self._item_pool.stats.score
+            self._item_pool.stats.add_score(amount)
+
+    @property
+    def item_stats(self):
+        """Public run-wide scoring/power/life state; no item-pool arrays leak."""
+        if self._item_pool is None:
+            raise RuntimeError('ItemPool is not bound to current StageContext')
+        return self._item_pool.stats
+
+    @property
+    def item_config(self):
+        if self._item_pool is None:
+            raise RuntimeError('ItemPool is not bound to current StageContext')
+        return self._item_pool.config
+
+    def set_item_collection_rule(self, handler):
+        """Replace sparse item collection policy; None restores legacy rules."""
+        if self._item_pool is None:
+            raise RuntimeError('ItemPool is not bound to current StageContext')
+        self._item_pool.collection_handler = handler
+
+    def cancel_bullets_for_bomb(self, *, to_items=True):
+        """Public batch Bomb cancellation, preserving protected tags/reason."""
+        if to_items and self._item_pool is None:
+            raise RuntimeError('Bomb item conversion requires a bound ItemPool')
+        positions = self.bullet_pool.cancel_for_bomb(BOMB_PROTECTED_TAGS)
+        if to_items:
+            self._item_pool.spawn_points_from_positions(positions, attract=True)
+        return len(positions)
 
     # ==================== 玩家 / 敌人 API ====================
 
     def get_player(self) -> PlayerProxy:
         """获取玩家信息（只读代理）"""
         return self._player_proxy
+
+    def bind_player(self, player):
+        self._player = player
+        self._player_proxy = PlayerProxy(player)
 
     def get_enemies(self) -> list:
         """获取当前活跃的敌人列表"""
@@ -632,7 +838,69 @@ class StageContext(SpellCardContext):
         return self._enemy_scripts
 
     def clear_enemy_scripts(self):
+        for enemy in tuple(self._enemy_scripts):
+            enemy.dispose()
         self._enemy_scripts.clear()
+
+    @property
+    def ctx(self):
+        """Allow surviving stage-owned reactions to use the same task API."""
+        return self
+
+    @property
+    def time(self):
+        return self._runtime_frame
+
+    def wait(self, frames: int):
+        from ..tasks import wait_frames
+        return wait_frames(frames)
+
+    def spawn_task(self, coroutine):
+        from ..tasks import spawn_task
+        return spawn_task(self, coroutine)
+
+    async def wait_event(self, event_type: str, *, owner: str | None = None,
+                         timeout: int | None = None):
+        """Wait for a sparse next-frame event and always release subscription."""
+        if self._event_bus is None:
+            raise RuntimeError("event waiting requires a bound EventBus")
+        received = []
+
+        def accept(event):
+            if owner is None or event.owner == owner:
+                received.append(event)
+
+        subscription = self._event_bus.subscribe(event_type, accept)
+        started = self.time
+        try:
+            while not received:
+                if timeout is not None and self.time - started >= timeout:
+                    raise TimeoutError(f"event {event_type!r} was not received within {timeout} frames")
+                await self.wait(1)
+            return received[0]
+        finally:
+            subscription.cancel()
+
+    def update_tasks(self):
+        from ..tasks import pump_tasks
+        pump_tasks(self)
+
+    def dispose(self):
+        self.clear_enemy_scripts()
+        group = getattr(self, '_frame_tasks', None)
+        if group is not None:
+            group.cancel(close=True)
+        for token in tuple(self._bullet_conversions):
+            self.cancel_bullet_conversion(token)
+        self.bind_event_bus(None)
+        self._script_event_handlers.clear()
+        self._reaction_actions.clear()
+        self.time_control.clear()
+        if self._particle_pool is not None:
+            self._particle_pool.clear()
+        # Closing tasks emits their final Trace boundaries.  The manager must
+        # drain these after disposal, before this context becomes unreachable.
+        self.clear_authored_stage_state(preserve_authoring_trace=True)
 
     # ==================== 稀疏事件与生命周期 API ====================
 
@@ -780,6 +1048,7 @@ class StageContext(SpellCardContext):
     def flush_lifecycle_events(self) -> tuple[LifecycleEvent, ...]:
         """Convert pool batches into typed events without per-bullet callbacks."""
 
+        published = []
         drain = getattr(self.bullet_pool, "drain_lifecycle_batches", None)
         if callable(drain):
             for batch in drain():
@@ -790,7 +1059,7 @@ class StageContext(SpellCardContext):
                         [float(x), float(y)]
                         for x, y in batch.representative_positions
                     ]
-                self.publish_lifecycle(
+                published.append(self.publish_lifecycle(
                     batch.event_type,
                     payload,
                     source=batch.source,
@@ -798,8 +1067,8 @@ class StageContext(SpellCardContext):
                     reason=batch.reason,
                     count=int(batch.count),
                     representative_ids=batch.representative_ids,
-                )
-        return tuple(self._lifecycle_trace)
+                ))
+        return tuple(published)
 
     def drain_lifecycle_events(self) -> tuple[LifecycleEvent, ...]:
         """Return local lifecycle trace and clear it after the caller observes it."""
@@ -879,7 +1148,10 @@ class StageContext(SpellCardContext):
         hook = getattr(self.bullet_pool, "register_termination_batch_reaction", None)
         if not callable(hook):
             raise RuntimeError("bullet pool does not support batch termination reactions")
-        hook(int(owner_tag), dict(spec))
+        converted = dict(spec)
+        if converted.get("action") == "split" and "speed" in converted:
+            converted["speed"] = float(converted["speed"]) / 60.0
+        hook(int(owner_tag), converted)
 
     def unregister_pattern_termination_reaction(self, owner_tag: int) -> None:
         hook = getattr(self.bullet_pool, "unregister_termination_batch_reaction", None)
@@ -898,7 +1170,9 @@ class StageContext(SpellCardContext):
             {"kind": "script", "type": name, "data": data, "handled": handled}
         )
         if handled:
-            self._script_event_handlers[name](data)
+            result = self._script_event_handlers[name](data)
+            if inspect.isawaitable(result):
+                self.spawn_task(result)
         return handled
 
     def timeline_events(self) -> tuple[Dict[str, Any], ...]:
@@ -907,14 +1181,15 @@ class StageContext(SpellCardContext):
     def clear_timeline_events(self) -> None:
         self._timeline_events.clear()
 
-    def clear_authored_stage_state(self) -> None:
+    def clear_authored_stage_state(self, *, preserve_authoring_trace: bool = False) -> None:
         self._authored_node_positions.clear()
         self._authored_node_properties.clear()
         self._timeline_events.clear()
         self._background_transitions.clear()
         self._lifecycle_trace.clear()
-        self._authoring_trace.clear()
-        self._authoring_trace_dropped = 0
+        if not preserve_authoring_trace:
+            self._authoring_trace.clear()
+            self._authoring_trace_dropped = 0
 
     # ==================== 音频 API ====================
 

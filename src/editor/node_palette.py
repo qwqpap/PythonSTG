@@ -52,6 +52,8 @@ _ADVANCED_KINDS = frozenset({
     "At", "While", "If", "Else", "ForEach", "Parallel", "SpawnTask", "Break",
     "Continue", "Return", "Set", "Call", "RawPython", "FirePolar", "FireOrbit",
     "CreateBentLaser", "RemoveLaser",
+    "JoinTask", "CancelTask", "WaitEvent", "EmitEvent", "OnHit", "OnDeath",
+    "SelectBullets", "TransformBullets", "SetBulletBehavior", "SplitBulletsOnEnd", "ClearBulletGroup",
 })
 
 
@@ -65,6 +67,12 @@ class PaletteEntry:
 
 
 _LABELS = {
+    "SelectBullets": "选取当前弹群", "TransformBullets": "改变弹群",
+    "SetBulletBehavior": "设置子弹阶段", "SplitBulletsOnEnd": "子弹结束时分裂",
+    "ClearBulletGroup": "清除指定弹群",
+    "JoinTask": "等待任务结束", "CancelTask": "停止任务",
+    "WaitEvent": "等待事件", "EmitEvent": "发送事件",
+    "OnHit": "被击中时", "OnDeath": "被击破时",
     "Wait": "等待", "At": "定时执行", "Repeat": "重复", "While": "条件循环",
     "If": "条件分支", "Else": "否则块", "ForEach": "遍历", "Parallel": "并行",
     "SpawnTask": "启动后台任务", "Break": "跳出循环", "Continue": "继续循环",
@@ -79,6 +87,8 @@ _LABELS = {
     "RemoveLaser": "移除激光", "ClearLasers": "清除激光",
 }
 _CATEGORIES = {
+    **{kind: "弹幕" for kind in ("SelectBullets", "TransformBullets", "SetBulletBehavior", "SplitBulletsOnEnd", "ClearBulletGroup")},
+    **{kind: "时间与控制" for kind in ("JoinTask", "CancelTask", "WaitEvent", "EmitEvent", "OnHit", "OnDeath")},
     **{kind: "时间与控制" for kind in (
         "Wait", "At", "Repeat", "While", "If", "Else", "ForEach", "Parallel",
         "SpawnTask", "Break", "Continue", "Return", "Set", "Call", "RawPython",

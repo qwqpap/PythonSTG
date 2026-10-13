@@ -10,5 +10,10 @@
   "devDependencies": {
     "mermaid": "^11.12.1",
     "vitepress": "^1.6.4"
+  },
+  "overrides": {
+    "vite": {
+      "esbuild": "npm:esbuild-wasm@0.21.5"
+    }
   }
 }

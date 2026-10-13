@@ -24,8 +24,13 @@ from src.devtools.spell_preview import (
     parse_vec2,
 )
 from src.game.bullet.optimized_pool import OptimizedBulletPool
+from src.game.laser import get_laser_texture_data
+from src.game.state import RunState
 from src.game.stage.context import StageContext
+from src.render.laser_renderer import LaserRenderer
+from src.render.item_renderer import ItemRenderer
 from src.render.optimized_bullet_renderer import OptimizedBulletRenderer
+from src.render.particle_renderer import ParticleRenderer
 from src.resource.sprite import SpriteManager
 from src.resource.service import init_resource_service
 from src.ui.ui_renderer import UIRenderer
@@ -66,7 +71,7 @@ def _load_engine_assets(ctx):
         texture_sizes[path.replace("\\", "/").lower()] = tex.size
 
     registry = init_sprite_registry(max_sprites=8192)
-    registry.register_from_sprite_manager(sprite_manager, texture_sizes)
+    registry.register_from_sprite_manager(sprite_manager, texture_sizes, flip_y=True)
     StageContext._aliases_loaded = False
     StageContext.load_bullet_aliases(str(PROJECT_ROOT / "assets" / "bullet_aliases.json"))
     return manager, textures, registry
@@ -197,9 +202,11 @@ def _render_overlay(
     y += 22
     ui.render_ttf_text(f"Bullets: {stats.bullet_count}", PANEL_X + 20, y, size=15, color=(210, 225, 240))
     y += 22
-    ui.render_ttf_text("Lasers: 0    Enemies: 0", PANEL_X + 20, y, size=15, color=(210, 225, 240))
+    ui.render_ttf_text(f"Lasers: {stats.laser_count}    Enemies: {stats.enemy_count}", PANEL_X + 20, y, size=15, color=(210, 225, 240))
     y += 22
     ui.render_ttf_text(f"Pool usage: {stats.bullet_count} / {stats.max_bullets}", PANEL_X + 20, y, size=15, color=(210, 225, 240))
+    y += 22
+    ui.render_ttf_text(f"Items: {stats.item_count}", PANEL_X + 20, y, size=15, color=(210, 225, 240))
     y += 22
     ui.render_ttf_text(f"Update ms: {stats.update_ms:5.2f}", PANEL_X + 20, y, size=15, color=(210, 225, 240))
     y += 22
@@ -261,22 +268,35 @@ def run(args) -> int:
 
     asset_manager = None
     bullet_renderer = None
+    laser_renderer = None
+    item_renderer = None
+    particle_renderer = None
     ui = None
     watchers: list[SpellFileWatcher] = []
     runtime = None
     try:
         asset_manager, textures, _registry = _load_engine_assets(ctx)
         bullet_pool = OptimizedBulletPool(max_bullets=args.max_bullets)
+        print(f"[preview] Numba warmup (ms): {bullet_pool.warmup()}")
         runtime = SpellPreviewRuntime(
             bullet_pool,
             config_path=args.config,
             use_config=not args.no_config,
+            run_state=RunState(difficulty=args.difficulty, player_shot=args.player_shot),
         )
+        print(f"[preview] Laser warmup (ms): {runtime.session.laser_pool.warmup()}")
+        print(f"[preview] Particle warmup (ms): {runtime.session.particle_pool.warmup()}")
         runtime.load(script_path, class_name, config_overrides=_cli_overrides(args))
         if args.start_frame:
             runtime.seek(args.start_frame)
         watchers = _create_watchers(runtime)
         bullet_renderer = OptimizedBulletRenderer(ctx, textures)
+        if not get_laser_texture_data().load_config(str(PROJECT_ROOT / "assets/images/laser/laser_config.json")):
+            raise RuntimeError("failed to load laser texture config")
+        laser_renderer = LaserRenderer(ctx, (384, 448))
+        particle_renderer = ParticleRenderer(ctx, textures)
+        item_renderer = ItemRenderer(ctx)
+        item_renderer.load_texture(str(PROJECT_ROOT / 'assets/images/item/item.png'), asset_manager)
         ui = UIRenderer(ctx, WINDOW_W, WINDOW_H)
         clock = FrameClock()
         print(f"[preview] {runtime.status} from {runtime.target.script_path}")
@@ -344,8 +364,19 @@ def run(args) -> int:
             ctx.viewport = window.viewport
             ctx.clear(0.02, 0.025, 0.04, 1.0)
             ctx.viewport = GAME_VIEWPORT
-            bullet_renderer.render_from_pool(bullet_pool)
+            particle_renderer.render_from_pool(runtime.session.particle_pool, 'back')
+            items = runtime.session.item_pool
+            item_renderer.render_items_soa(items.x, items.y, items.timer,
+                                           items.sprite_index, items.alive, items._count)
+            bullet_renderer.render_from_pool(runtime.bullet_pool)
+            lasers, bent_lasers = runtime.session.laser_pool.get_all_lasers()
+            laser_renderer.render_lasers(lasers)
+            laser_renderer.render_bent_lasers(bent_lasers)
+            particle_renderer.render_from_pool(runtime.session.particle_pool, 'front')
             ctx.viewport = window.viewport
+            for enemy in runtime.session.stage_context.get_enemy_scripts():
+                if enemy.visible:
+                    _render_crosshair(ui, enemy.x, enemy.y, (210, 190, 255), type(enemy).__name__)
             _render_overlay(
                 ui,
                 runtime=runtime,
@@ -360,6 +391,12 @@ def run(args) -> int:
             runtime.close()
         if bullet_renderer is not None:
             bullet_renderer.cleanup()
+        if laser_renderer is not None:
+            laser_renderer.cleanup()
+        if item_renderer is not None:
+            item_renderer.cleanup()
+        if particle_renderer is not None:
+            particle_renderer.cleanup()
         if ui is not None:
             ui.cleanup()
         if asset_manager is not None:
@@ -379,6 +416,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--boss-pos", type=parse_vec2, help="Boss position as x,y.")
     parser.add_argument("--player-pos", type=parse_vec2, help="Player position as x,y.")
     parser.add_argument("--seed", type=int, help="Random seed for deterministic preview.")
+    parser.add_argument("--difficulty", default="normal",
+                        choices=("easy", "normal", "hard", "lunatic", "extra"))
+    parser.add_argument("--player-shot", default="default", help="Author-visible shot identifier.")
     parser.add_argument("--speed", type=float, help="Initial simulation speed.")
     parser.add_argument("--duration", type=int, help="Timeline duration in frames.")
     parser.add_argument("--start-frame", type=int, default=0, help="Seek to this frame after loading.")

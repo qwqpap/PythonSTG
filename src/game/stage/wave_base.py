@@ -16,7 +16,7 @@
 
 2. 类风格（复杂情况，推荐）：
     from src.game.stage.wave_base import Wave
-    
+
     class MyWave(Wave):
         async def run(self):
             for i in range(8):
@@ -27,22 +27,25 @@
 
 import math
 import types
+import operator
+import numpy as np
 from abc import ABC, abstractmethod
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from .danmaku_audio import resolve_fire_sound
+from ..tasks import FrameTaskOwner, pump_tasks
 
 if TYPE_CHECKING:
     from .spellcard import SpellCardContext
 
 
-class Wave(ABC):
+class Wave(FrameTaskOwner, ABC):
     """
     波次基类
-    
+
     提供与 SpellCard 相似的弹幕 API，但不绑定 Boss。
     内容作者只需要实现 run() 方法。
-    
+
     示例：
         class OpeningWave(Wave):
             async def run(self):
@@ -53,52 +56,60 @@ class Wave(ABC):
                                   bullet_type="rice", color="blue")
                     await self.wait(30)
     """
-    
+
     def __init__(self):
         self.ctx: Optional['SpellCardContext'] = None
         self._time: int = 0
         self._next_danmaku_se_frame: int = 0
-    
+        self._coroutine = None
+        self._active = False
+        self._init_tasks()
+
     def bind(self, ctx: 'SpellCardContext'):
         """绑定上下文（由引擎调用）"""
         self.ctx = ctx
-    
+
     @property
     def time(self) -> int:
         """当前帧数"""
         return self._time
-    
+
     @property
     def time_seconds(self) -> float:
         """当前时间（秒）"""
         return self._time / 60.0
-    
+
     def execute(self):
         """
         执行波次，返回一个生成器（由引擎调用）
-        
+
         这个方法将 async def run() 转换为 yield 风格的生成器，
         让 StageScript 可以用 yield from 来驱动。
         """
         self._time = 0
         self._next_danmaku_se_frame = 0
-        coro = self.run()
+        self._reset_tasks()
+        self._active = True
+        self._coroutine = self.run()
         try:
-            while True:
-                coro.send(None)
+            while self._active:
+                pump_tasks(self)
+                if not self._active or not self._step_main():
+                    break
+                pump_tasks(self)
                 self._time += 1
                 yield
-        except StopIteration:
-            pass
-    
+        finally:
+            self.dispose()
+
     # ==================== 弹幕 API ====================
-    
+
     def fire(self, x: float, y: float, angle: float = -90, speed: float = 2.0,
              bullet_type: str = "ball_m", color: str = "red",
              play_sound: bool = False, **kwargs):
         """
         发射子弹
-        
+
         Args:
             x, y: 发射位置
             angle: 角度（度，0=右, 90=上, -90=下）
@@ -113,44 +124,47 @@ class Wave(ABC):
             x=x, y=y, angle=angle, speed=speed,
             bullet_type=bullet_type, color=color, **kwargs
         )
-    
+
     def fire_circle(self, x: float, y: float, count: int = 16,
                     speed: float = 2.0, start_angle: float = 0,
                     play_sound: bool = True, **kwargs):
         """发射圆形弹幕"""
-        bullets = []
+        count = operator.index(count)
+        angles = (
+            start_angle + np.arange(count, dtype=np.float32) * (360.0 / count)
+            if count > 0 else np.empty(0, dtype=np.float32)
+        )
+        return self._fire_angles(angles, speed, x=x, y=y, play_sound=play_sound, **kwargs)
+
+    def _fire_angles(self, angles, speed, *, x, y, play_sound, **options):
         if play_sound:
             self._play_danmaku_se(
-                count=count,
-                speed=speed,
-                bullet_type=kwargs.get("bullet_type", "ball_m"),
+                count=len(angles), speed=speed,
+                bullet_type=options.get("bullet_type", "ball_m"),
             )
-        for i in range(count):
-            angle = start_angle + (360.0 / count) * i
-            b = self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=False, **kwargs)
-            bullets.append(b)
-        return bullets
-    
+        if type(self).fire is not Wave.fire or any(
+            name in options for name in ("delay", "init", "on_death", "owner")
+        ):
+            return [self.fire(x=x, y=y, angle=float(angle), speed=speed,
+                              play_sound=False, **options) for angle in angles]
+        positions = np.empty((len(angles), 2), dtype=np.float32)
+        positions[:, 0], positions[:, 1] = x, y
+        indices = self.ctx.create_bullets_batch(
+            positions=positions, angles=angles,
+            speeds=np.full(len(angles), speed, dtype=np.float32), **options,
+        )
+        return indices.tolist() + [-1] * (len(angles) - len(indices))
+
     def fire_arc(self, x: float, y: float, count: int = 5,
                  speed: float = 2.0, center_angle: float = -90,
                  arc_angle: float = 60, play_sound: bool = True, **kwargs):
         """发射扇形弹幕"""
-        bullets = []
-        if count == 1:
-            return [self.fire(x=x, y=y, angle=center_angle, speed=speed, play_sound=play_sound, **kwargs)]
-        if play_sound:
-            self._play_danmaku_se(
-                count=count,
-                speed=speed,
-                bullet_type=kwargs.get("bullet_type", "ball_m"),
-            )
-        start = center_angle - arc_angle / 2
-        step = arc_angle / (count - 1)
-        for i in range(count):
-            angle = start + step * i
-            b = self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=False, **kwargs)
-            bullets.append(b)
-        return bullets
+        count = operator.index(count)
+        angles = np.asarray([center_angle], dtype=np.float32) if count == 1 else np.linspace(
+            center_angle - arc_angle / 2, center_angle + arc_angle / 2,
+            max(0, count), dtype=np.float32,
+        )
+        return self._fire_angles(angles, speed, x=x, y=y, play_sound=play_sound, **kwargs)
 
     def fire_polar(self, center, orbit_radius: float, theta: float,
                    radial_speed: float = 0.0, angular_velocity: float = 0.0,
@@ -190,7 +204,7 @@ class Wave(ABC):
     def fire_orbit(self, *args, **kwargs):
         """`fire_polar` 的语义化别名。"""
         return self.fire_polar(*args, **kwargs)
-    
+
     def fire_at_player(self, x: float, y: float, speed: float = 2.0,
                        offset_angle: float = 0, play_sound: bool = True, **kwargs):
         """发射自机狙"""
@@ -202,20 +216,20 @@ class Wave(ABC):
         else:
             angle = -90 + offset_angle
         return self.fire(x=x, y=y, angle=angle, speed=speed, play_sound=play_sound, **kwargs)
-    
+
     # ==================== 等待 API ====================
-    
+
     @types.coroutine
     def wait(self, frames: int):
         """等待指定帧数"""
         for _ in range(frames):
             yield
-    
+
     @types.coroutine
     def wait_seconds(self, seconds: float):
         """等待指定秒数"""
         yield from self.wait(int(seconds * 60))
-    
+
     # ==================== 音频 API ====================
 
     def play_se(self, name: str, volume: float = None, min_interval: float = 0.0) -> bool:
@@ -281,12 +295,12 @@ class Wave(ABC):
         return enemy
 
     # ==================== 子类实现 ====================
-    
+
     @abstractmethod
     async def run(self):
         """
         主波次逻辑（必须实现）
-        
+
         使用 await self.wait(frames) 控制节奏
         使用 self.fire(...) 发射子弹
         """

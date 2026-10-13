@@ -35,7 +35,7 @@ from src.core.project_context import ProjectContext, ProjectContextError
 from .diagnostics import CompilerError
 
 
-GENERATOR_VERSION = "pystg-codegen-v3-source-bindings"
+GENERATOR_VERSION = "pystg-codegen-v4-frame-tasks-bullet-behavior"
 _SUBPACKAGES = ("waves", "enemies", "bosses", "spells", "tasks", "functions")
 
 
@@ -136,6 +136,9 @@ class CodeGenerator:
         self.template_registry = template_registry or TemplateRegistry.with_builtins()
         self._helper_index = 0
         self._loop_bindings: tuple[str, ...] = ()
+        self._shared_names: tuple[str, ...] = ()
+        self._expression_context = "self"
+        self._task_context = "self"
         self._expanded_templates: dict[str, list[Node]] = {}
         self._register_template_targets()
         self._expanded_bodies = self._expand_and_validate_templates()
@@ -593,6 +596,8 @@ class CodeGenerator:
         )
         for name in (
             "_pystg_actor",
+            "_pystg_context",
+            "_pystg_capture_bullets",
             "_pystg_await",
             "_pystg_bind_enemy_resources",
             "_pystg_bind_stage_resources",
@@ -641,16 +646,34 @@ class CodeGenerator:
             writer.line(1, "def bind(self, ctx, x=0, y=0):")
             writer.line(2, "super().bind(ctx, x=x, y=y)")
             writer.line(2, "_pystg_bind_enemy_resources(self)")
+            if any(node.kind == "OnDeath" for node in unit.body):
+                writer.line(2, "self.on_death = self._pystg_on_death")
         writer.line()
         writer.line(1, "async def run(self):")
         writer.line(2, "try:")
-        body = unit.body
+        self._expression_context = "self"
+        self._task_context = "self"
+        body = [node for node in unit.body if node.kind not in {"OnHit", "OnDeath"}]
+        self._declare_locals(writer, body, 3)
         if body:
             self._render_nodes(writer, body, 3, unit, symbols, "self", record=True)
         else:
             writer.line(3, "pass")
         writer.line(2, "finally:")
         writer.line(3, "_pystg_close_tasks(self)")
+        for hook in (node for node in unit.body if node.kind in {"OnHit", "OnDeath"}):
+            writer.line()
+            header = "async def on_hit(self, damage):" if hook.kind == "OnHit" else "async def _pystg_on_death(self, enemy):"
+            writer.line(1, header)
+            self._task_context = "self.ctx" if hook.kind == "OnDeath" else "self"
+            writer.line(2, f"_pystg_trace({self._task_context}, {hook.uid!r}, 'start', {unit.id!r})")
+            writer.line(2, "try:")
+            self._declare_locals(writer, hook.children["body"], 3, parameters=("damage", "enemy"))
+            self._render_nodes(writer, hook.children["body"], 3, unit, symbols, "self", record=True)
+            if not hook.children["body"]:
+                writer.line(3, "pass")
+            writer.line(2, "finally:")
+            writer.line(3, f"_pystg_trace({self._task_context}, {hook.uid!r}, 'end', {unit.id!r})")
         return relative_path, writer.finish(), writer.entries
 
     def _generate_function(
@@ -669,6 +692,8 @@ class CodeGenerator:
         writer.line(text="from .._support import (")
         for name in (
             "_pystg_actor",
+            "_pystg_context",
+            "_pystg_capture_bullets",
             "_pystg_await",
             "_pystg_boss_resource",
             "_pystg_clear_lasers",
@@ -696,11 +721,19 @@ class CodeGenerator:
         writer.line()
         parameters = ["_ctx"]
         for parameter in unit.parameters:
+            if parameter.name == "_pystg_task_owner":
+                raise CompilerError("reserved_parameter", "_pystg_task_owner is reserved for generated task scope")
             rendered = parameter.name
             if parameter.has_default:
                 rendered += f"={self._format_value(parameter.default, symbols)}"
             parameters.append(rendered)
+        parameters.extend(("*", "_pystg_task_owner=None"))
         writer.line(text=f"async def {_unit_symbol(unit)}({', '.join(parameters)}):")
+        self._expression_context = "_ctx"
+        self._task_context = "_pystg_task_owner"
+        writer.line(1, "self = _ctx")
+        writer.line(1, "_pystg_task_owner = _ctx if _pystg_task_owner is None else _pystg_task_owner")
+        self._declare_locals(writer, unit.body, 1, parameters=tuple(parameter.name for parameter in unit.parameters))
         if unit.body:
             self._render_nodes(writer, unit.body, 1, unit, symbols, "_ctx", record=True)
         else:
@@ -771,7 +804,7 @@ class CodeGenerator:
                     before = len(writer.lines)
                     expanded = self._expanded_templates[node.uid]
                     if record:
-                        writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start', {unit.id!r})")
+                        writer.line(indent, f"_pystg_trace({self._task_context}, {node.uid!r}, 'start', {unit.id!r})")
                         writer.line(indent, "try:")
                         self._render_nodes(
                             writer,
@@ -788,7 +821,7 @@ class CodeGenerator:
                         writer.line(indent, "finally:")
                         writer.line(
                             indent + 1,
-                            f"_pystg_trace({context}, {node.uid!r}, 'end', {unit.id!r})",
+                            f"_pystg_trace({self._task_context}, {node.uid!r}, 'end', {unit.id!r})",
                         )
                     else:
                         self._render_nodes(
@@ -810,7 +843,7 @@ class CodeGenerator:
 
             def callback(node=node) -> None:
                 if record:
-                    writer.line(indent, f"_pystg_trace({context}, {node.uid!r}, 'start', {unit.id!r})")
+                    writer.line(indent, f"_pystg_trace({self._task_context}, {node.uid!r}, 'start', {unit.id!r})")
                     writer.line(indent, "try:")
                     self._render_node(
                         writer,
@@ -825,7 +858,7 @@ class CodeGenerator:
                     writer.line(indent, "finally:")
                     writer.line(
                         indent + 1,
-                        f"_pystg_trace({context}, {node.uid!r}, 'end', {unit.id!r})",
+                        f"_pystg_trace({self._task_context}, {node.uid!r}, 'end', {unit.id!r})",
                     )
                 else:
                     self._render_node(
@@ -849,6 +882,7 @@ class CodeGenerator:
     ) -> None:
         kind = node.kind
         args = node.arguments
+        task_context = self._task_context
         value = lambda name, default=None: self._format_value(args.get(name, default), symbols)
 
         if kind == "Wait":
@@ -858,7 +892,7 @@ class CodeGenerator:
             frame = value("frame")
             writer.line(
                 indent,
-                f"await _pystg_await({context}, {context}.wait(max(0, int({frame}) - _pystg_time({context}, {unit.id!r}))))",
+                f"await _pystg_await({context}, {context}.wait(max(0, int({frame}) - _pystg_time({task_context}, {unit.id!r}))))",
             )
             self._render_nodes(writer, node.children["body"], indent, unit, symbols, context, record=record)
             return
@@ -908,6 +942,7 @@ class CodeGenerator:
                 helper = self._next_helper("branch")
                 helpers.append(helper)
                 writer.line(indent, self._helper_definition(helper))
+                self._declare_nonlocals(writer, indent + 1)
                 body = branch.children["body"]
                 if body:
                     self._render_nodes(writer, body, indent + 1, unit, symbols, context, record=record)
@@ -915,26 +950,42 @@ class CodeGenerator:
                     writer.line(indent + 1, "pass")
             calls = ", ".join(f"{name}()" for name in helpers)
             if args.get("wait", True):
-                writer.line(indent, f"await _pystg_parallel({context}, ({calls},))")
+                writer.line(indent, f"await _pystg_parallel({task_context}, ({calls},))")
             else:
                 for helper in helpers:
-                    writer.line(indent, f"_pystg_spawn({context}, {helper}())")
+                    writer.line(indent, f"_pystg_spawn({task_context}, {helper}())")
             return
         if kind == "SpawnTask":
+            prefix = f"{args['assign']} = " if args.get("assign") else ""
             if "task" in args:
                 target = symbols[args["task"].id]
-                arguments = args.get("arguments", {})
+                arguments = dict(args.get("arguments", {}))
+                arguments["_pystg_task_owner"] = Expr(task_context)
                 call = self._call_text(target, (), arguments, symbols, first=context)
-                writer.line(indent, f"_pystg_spawn({context}, {call})")
+                writer.line(indent, f"{prefix}_pystg_spawn({task_context}, {call})")
             else:
                 helper = self._next_helper("spawn")
                 writer.line(indent, self._helper_definition(helper))
+                self._declare_nonlocals(writer, indent + 1)
                 body = node.children["body"]
                 if body:
                     self._render_nodes(writer, body, indent + 1, unit, symbols, context, record=record)
                 else:
                     writer.line(indent + 1, "pass")
-                writer.line(indent, f"_pystg_spawn({context}, {helper}())")
+                writer.line(indent, f"{prefix}_pystg_spawn({task_context}, {helper}())")
+            return
+        if kind == "JoinTask":
+            writer.line(indent, f"await _pystg_await({context}, {value('task')}.join())")
+            return
+        if kind == "CancelTask":
+            writer.line(indent, f"{value('task')}.cancel()")
+            return
+        if kind == "WaitEvent":
+            prefix = f"{args['assign']} = " if args.get("assign") else ""
+            writer.line(indent, f"{prefix}await _pystg_await({context}, _pystg_context({context}).wait_event({value('event_type')}, owner={value('owner')}, timeout={value('timeout')}))")
+            return
+        if kind == "EmitEvent":
+            writer.line(indent, f"_pystg_context({context}).emit_event({value('event_type')}, {value('data')}, owner={value('owner')})")
             return
         if kind == "Break":
             writer.line(indent, "break")
@@ -954,7 +1005,7 @@ class CodeGenerator:
             call = self._call_text(
                 target,
                 args.get("arguments", ()),
-                args.get("keywords", {}),
+                {**args.get("keywords", {}), "_pystg_task_owner": Expr(task_context)},
                 symbols,
                 first=context,
             )
@@ -996,15 +1047,16 @@ class CodeGenerator:
             return
         if kind == "SpawnEnemy":
             target = symbols[args["enemy_class"].id]
+            prefix = f"{args['assign']} = " if args.get("assign") else ""
             writer.line(
                 indent,
-                f"{context}.spawn_enemy_class({target}, x={value('x', 0.0)}, y={value('y', 1.0)})",
+                f"{prefix}{context}.spawn_enemy_class({target}, x={value('x', 0.0)}, y={value('y', 1.0)})",
             )
             return
         if kind == "MoveTo":
             writer.line(
                 indent,
-                f"await _pystg_await({context}, _pystg_actor({context}).move_to({value('x')}, {value('y')}, duration={value('duration', 60)}))",
+                f"await _pystg_await({context}, _pystg_actor({context}).move_to({value('x')}, {value('y')}, duration={value('duration', 60)}, easing={value('easing', 'smoothstep')}))",
             )
             return
         if kind == "MoveLinear":
@@ -1016,9 +1068,20 @@ class CodeGenerator:
         if kind == "SetPosition":
             writer.line(indent, f"_pystg_set_position({context}, {value('x')}, {value('y')})")
             return
+        if kind in {"SelectBullets", "TransformBullets", "SetBulletBehavior", "SplitBulletsOnEnd", "ClearBulletGroup"}:
+            method = {'SelectBullets': 'select_bullets', 'TransformBullets': 'transform_bullets',
+                      'SetBulletBehavior': 'set_bullet_behavior', 'SplitBulletsOnEnd': 'split_bullets_on_end',
+                      'ClearBulletGroup': 'clear_bullet_group'}[kind]
+            runtime_args = {key: item for key, item in args.items() if key != "assign"}
+            prefix = f"{args['assign']} = " if args.get('assign') else ''
+            writer.line(indent, f"{prefix}_pystg_context({context}).{method}({self._keyword_text(runtime_args, symbols)})")
+            return
         if kind in {"FireCircle", "FireArc"}:
             helper = "_pystg_fire_circle" if kind == "FireCircle" else "_pystg_fire_arc"
-            writer.line(indent, f"{helper}({context}, {self._keyword_text(args, symbols)})")
+            runtime_args = {key: item for key, item in args.items() if key != "assign"}
+            call = f"{helper}({context}, {self._keyword_text(runtime_args, symbols)})"
+            text = f"{args['assign']} = _pystg_capture_bullets({context}, {call})" if args.get("assign") else call
+            writer.line(indent, text)
             return
         if kind in {"Fire", "FireAtPlayer", "FirePolar", "FireOrbit"}:
             method = {
@@ -1029,7 +1092,10 @@ class CodeGenerator:
                 "FirePolar": "fire_polar",
                 "FireOrbit": "fire_orbit",
             }[kind]
-            writer.line(indent, f"{context}.{method}({self._keyword_text(args, symbols)})")
+            runtime_args = {key: item for key, item in args.items() if key != "assign"}
+            call = f"{context}.{method}({self._keyword_text(runtime_args, symbols)})"
+            text = f"{args['assign']} = _pystg_capture_bullets({context}, {call})" if args.get("assign") else call
+            writer.line(indent, text)
             return
         if kind == "ClearBullets":
             writer.line(indent, f"{context}.clear_bullets(to_items={args.get('to_items', False)!r})")
@@ -1077,6 +1143,18 @@ class CodeGenerator:
     def _helper_definition(self, name: str) -> str:
         captured = ", ".join(f"{binding}={binding}" for binding in self._loop_bindings)
         return f"async def {name}({captured}):"
+
+    def _declare_locals(self, writer, nodes, indent, parameters=()):
+        names = {node.arguments['name'] for node in _walk_nodes(nodes) if node.kind == 'Set'}
+        names.update(node.arguments['assign'] for node in _walk_nodes(nodes) if node.arguments.get('assign'))
+        self._shared_names = tuple(sorted(names | set(parameters)))
+        for name in sorted(names - set(parameters)):
+            writer.line(indent, f"{name} = None")
+
+    def _declare_nonlocals(self, writer, indent):
+        names = tuple(name for name in self._shared_names if name not in self._loop_bindings)
+        if names:
+            writer.line(indent, f"nonlocal {', '.join(names)}")
 
     @staticmethod
     def _render_node_exception(writer: _Writer, indent: int, node: Node) -> None:
@@ -1137,7 +1215,64 @@ class CodeGenerator:
 
     def _format_value(self, value: Any, symbols: Mapping[str, str]) -> str:
         if isinstance(value, Expr):
-            return value.source
+            owner = self._expression_context
+            replacements = {
+                'player_x': f'_pystg_context({owner}).get_player().x',
+                'player_y': f'_pystg_context({owner}).get_player().y',
+                'frame': f'_pystg_context({owner}).timeline_frame',
+                'seed': f'_pystg_context({owner}).seed',
+                'difficulty': f'_pystg_context({owner}).difficulty',
+            }
+            shared_names = self._shared_names
+
+            class RuntimeNames(ast.NodeTransformer):
+                def __init__(self):
+                    self.bound = set(shared_names)
+
+                def visit_Name(self, node):
+                    if isinstance(node.ctx, ast.Load) and node.id in replacements and node.id not in self.bound:
+                        return ast.copy_location(ast.parse(replacements[node.id], mode='eval').body, node)
+                    return node
+
+                def visit_Attribute(self, node):
+                    if isinstance(node.value, ast.Name) and node.value.id == 'self' and 'self' not in self.bound and node.attr in {'x', 'y'}:
+                        return ast.copy_location(ast.parse(f'_pystg_actor({owner}).{node.attr}', mode='eval').body, node)
+                    return self.generic_visit(node)
+
+                def visit_Lambda(self, node):
+                    node.args.defaults = [self.visit(item) for item in node.args.defaults]
+                    node.args.kw_defaults = [self.visit(item) if item is not None else None for item in node.args.kw_defaults]
+                    previous = self.bound
+                    arguments = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
+                    self.bound = previous | {argument.arg for argument in arguments}
+                    if node.args.vararg:
+                        self.bound.add(node.args.vararg.arg)
+                    if node.args.kwarg:
+                        self.bound.add(node.args.kwarg.arg)
+                    node.body = self.visit(node.body)
+                    self.bound = previous
+                    return node
+
+                def _comprehension(self, node):
+                    previous = self.bound
+                    self.bound = set(previous)
+                    for generator in node.generators:
+                        generator.iter = self.visit(generator.iter)
+                        self.bound.update(item.id for item in ast.walk(generator.target) if isinstance(item, ast.Name))
+                        generator.ifs = [self.visit(item) for item in generator.ifs]
+                    if isinstance(node, ast.DictComp):
+                        node.key, node.value = self.visit(node.key), self.visit(node.value)
+                    else:
+                        node.elt = self.visit(node.elt)
+                    self.bound = previous
+                    return node
+
+                visit_ListComp = _comprehension
+                visit_SetComp = _comprehension
+                visit_DictComp = _comprehension
+                visit_GeneratorExp = _comprehension
+
+            return ast.unparse(RuntimeNames().visit(ast.parse(value.source, mode='eval')).body)
         if isinstance(value, Ref):
             try:
                 return symbols[value.id]
@@ -1310,6 +1445,7 @@ import hashlib
 import inspect
 import json
 import operator
+import numpy as np
 from dataclasses import replace
 
 from src.core.project_context import get_project_context
@@ -1340,6 +1476,10 @@ def _pystg_context(owner):
     if context is None:
         raise RuntimeError("authoring action requires a bound Runtime context")
     return context
+
+
+def _pystg_capture_bullets(owner, indices):
+    return _pystg_context(owner).capture_bullets(indices)
 
 
 def _pystg_time(owner, unit_id):
@@ -1468,24 +1608,26 @@ def _pystg_fire_batch(owner, angles, *, x=None, y=None, speed=2.0,
                       play_sound=True, **options):
     context = _pystg_context(owner)
     x, y = _pystg_fire_origin(owner, x, y)
-    angles = list(angles)
+    angles = np.asarray(angles, dtype=np.float32)
+    positions = np.empty((len(angles), 2), dtype=np.float32)
+    positions[:, 0] = x
+    positions[:, 1] = y
     bullet_type = options.pop("bullet_type", "ball_m")
     color = options.pop("color", "red")
     if play_sound and hasattr(owner, "_play_danmaku_se"):
         owner._play_danmaku_se(count=len(angles), speed=speed, bullet_type=bullet_type)
     indices = context.create_bullets_batch(
-        positions=[(x, y)] * len(angles),
+        positions=positions,
         angles=angles,
-        speeds=[speed] * len(angles),
+        speeds=np.full(len(angles), speed, dtype=np.float32),
         bullet_type=bullet_type,
         color=color,
         **options,
     )
-    result = [int(index) for index in indices]
-    bullets = getattr(owner, "_bullets", None)
-    if bullets is not None:
-        bullets.extend(result)
-    return result
+    track = getattr(owner, "track_bullets", None)
+    if track is not None:
+        track(indices)
+    return indices
 
 
 def _pystg_default(owner, method_name, parameter):
@@ -1499,7 +1641,7 @@ def _pystg_fire_circle(owner, *, x=None, y=None, count=None, speed=2.0,
     count = operator.index(count)
     if count < 1:
         raise ValueError("FireCircle.count must be at least 1")
-    angles = (start_angle + (360.0 / count) * index for index in range(count))
+    angles = start_angle + np.arange(count, dtype=np.float32) * (360.0 / count)
     return _pystg_fire_batch(
         owner, angles, x=x, y=y, speed=speed, play_sound=play_sound, **options
     )
@@ -1511,11 +1653,11 @@ def _pystg_fire_arc(owner, *, x=None, y=None, count=5, speed=2.0,
     if count < 1:
         raise ValueError("FireArc.count must be at least 1")
     if count == 1:
-        angles = [center_angle]
+        angles = np.asarray([center_angle], dtype=np.float32)
     else:
         start = center_angle - arc_angle / 2
         step = arc_angle / (count - 1)
-        angles = (start + step * index for index in range(count))
+        angles = start + np.arange(count, dtype=np.float32) * step
     return _pystg_fire_batch(
         owner, angles, x=x, y=y, speed=speed, play_sound=play_sound, **options
     )
@@ -1536,108 +1678,12 @@ def _pystg_set_position(owner, x, y):
         actor.x, actor.y = x, y
 
 
-def _pystg_spawn(owner, coroutine):
-    tasks = getattr(owner, "_pystg_tasks", None)
-    if tasks is None:
-        tasks = []
-        owner._pystg_tasks = tasks
-    tasks.append(coroutine)
-
-
-def _pystg_pump(owner):
-    if getattr(owner, "_pystg_pumping", False):
-        return
-    tasks = list(getattr(owner, "_pystg_tasks", ()))
-    if not tasks:
-        # A hit hook can await before run() spawns its first background task.
-        # An empty pump must not consume that task's first tick.
-        return
-    clock = getattr(owner, "time", None)
-    if clock is not None:
-        if getattr(owner, "_pystg_pump_time", None) == clock:
-            return
-        # run() and asynchronous hooks share one actor and one frame clock.
-        # Their awaits must not advance the same background task twice.
-        owner._pystg_pump_time = clock
-    owner._pystg_tasks = []
-    pending = []
-    owner._pystg_pumping = True
-    try:
-        for index, coroutine in enumerate(tasks):
-            try:
-                coroutine.send(None)
-            except StopIteration:
-                continue
-            except Exception:
-                for pending_coroutine in pending:
-                    pending_coroutine.close()
-                for remaining in tasks[index + 1:]:
-                    remaining.close()
-                for spawned in owner._pystg_tasks:
-                    spawned.close()
-                owner._pystg_tasks = []
-                raise
-            pending.append(coroutine)
-    finally:
-        owner._pystg_pumping = False
-    owner._pystg_tasks = pending + list(owner._pystg_tasks)
-
-
-async def _pystg_await(owner, awaitable):
-    if getattr(owner, "_pystg_pumping", False) or getattr(owner, "_pystg_driving", False):
-        return await awaitable
-    iterator = awaitable.__await__() if hasattr(awaitable, "__await__") else iter(awaitable)
-    completed = False
-    try:
-        while True:
-            owner._pystg_driving = True
-            try:
-                iterator.send(None)
-            except StopIteration as stop:
-                completed = True
-                return stop.value
-            finally:
-                owner._pystg_driving = False
-            _pystg_pump(owner)
-            await owner.wait(1)
-    finally:
-        if not completed:
-            iterator.close()
-
-
-async def _pystg_parallel(owner, coroutines):
-    active = list(coroutines)
-    nested = getattr(owner, "_pystg_pumping", False) or getattr(owner, "_pystg_driving", False)
-    try:
-        while active:
-            pending = []
-            previous = getattr(owner, "_pystg_pumping", False)
-            owner._pystg_pumping = True
-            try:
-                for coroutine in active:
-                    try:
-                        coroutine.send(None)
-                    except StopIteration:
-                        continue
-                    pending.append(coroutine)
-            finally:
-                owner._pystg_pumping = previous
-            active = pending
-            if not nested:
-                _pystg_pump(owner)
-            if active:
-                await owner.wait(1)
-    finally:
-        for coroutine in active:
-            coroutine.close()
-
-
-def _pystg_close_tasks(owner):
-    tasks = list(getattr(owner, "_pystg_tasks", ()))
-    owner._pystg_tasks = []
-    owner._pystg_pump_time = None
-    for coroutine in tasks:
-        coroutine.close()
+from src.game.tasks import (
+    spawn_task as _pystg_spawn,
+    await_task as _pystg_await,
+    parallel_tasks as _pystg_parallel,
+    cancel_tasks as _pystg_close_tasks,
+)
 
 
 def _pystg_laser_context(owner):

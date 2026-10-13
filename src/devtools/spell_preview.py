@@ -6,6 +6,7 @@ import random
 import sys
 import time
 import traceback
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -14,7 +15,15 @@ from typing import Any, Type
 import numpy as np
 
 from src.game.stage.context import StageContext
+from src.game.stage.boss_base import BossBase
 from src.game.stage.spellcard import NonSpell, SpellCard
+from src.game.events import EventBus
+from src.game.laser import LaserPool
+from src.game.bullet.optimized_pool import OptimizedBulletPool
+from src.game.tasks import wait_frames
+from src.game.state import RunState, TIME_DOMAINS
+from src.game.item import ItemPool
+from src.game.particle import ParticlePool
 
 
 FIXED_DT = 1.0 / 60.0
@@ -78,6 +87,9 @@ class PreviewStats:
     update_ms: float
     render_ms: float
     reload_ok: bool
+    laser_count: int = 0
+    enemy_count: int = 0
+    item_count: int = 0
 
 
 class PreviewPlayer:
@@ -97,36 +109,21 @@ class PreviewPlayer:
         self.pos[1] = float(y)
 
 
-class PreviewBoss:
+class PreviewBoss(BossBase):
     def __init__(self, name: str = "preview_boss", x: float = 0.0, y: float = 0.55):
+        super().__init__()
         self.id = name
         self.name = name
         self.max_hp = 999999
         self.hp = self.max_hp
-        self.pos = [float(x), float(y)]
+        self.x, self.y = float(x), float(y)
 
     @property
-    def x(self) -> float:
-        return self.pos[0]
+    def pos(self) -> tuple[float, float]:
+        return self.x, self.y
 
-    @x.setter
-    def x(self, value: float) -> None:
-        self.pos[0] = float(value)
-
-    @property
-    def y(self) -> float:
-        return self.pos[1]
-
-    @y.setter
-    def y(self, value: float) -> None:
-        self.pos[1] = float(value)
-
-    async def move_to(self, x: float, y: float, duration: int = 0) -> None:
-        self.x = x
-        self.y = y
-
-    async def wait(self, frames: int) -> None:
-        return None
+    def wait(self, frames: int):
+        return wait_frames(frames)
 
 
 def parse_vec2(value: str | list[Any] | tuple[Any, ...]) -> tuple[float, float]:
@@ -444,15 +441,36 @@ class SpellPreviewSession:
         boss_name: str = "preview_boss",
         boss_pos: tuple[float, float] = (0.0, 0.55),
         seed: int | None = None,
+        run_state: RunState | None = None,
     ):
         self.bullet_pool = bullet_pool
+        self.laser_pool = LaserPool()
+        self.item_pool = ItemPool()
+        self.particle_pool = ParticlePool(sprite_registry=bullet_pool.sprite_registry)
+        self.event_bus = EventBus()
         self.player = PreviewPlayer(*player_pos)
         self.boss = PreviewBoss(boss_name, *boss_pos)
-        self.stage_context = StageContext(bullet_pool=bullet_pool, player=self.player)
+        self._boss_start_pos = boss_pos
         self.seed = seed
+        self._initial_run_state = deepcopy(run_state if run_state is not None else RunState())
+        self.stage_context = self._create_context(self.player, self.event_bus)
         self.spell: SpellCard | None = None
         self.spell_class: Type[SpellCard] | None = None
         self.frame = 0
+
+    def _create_context(self, player, bus, *, bullet_pool=None, laser_pool=None, item_pool=None,
+                        particle_pool=None):
+        context = StageContext(
+            bullet_pool=self.bullet_pool if bullet_pool is None else bullet_pool,
+            player=player,
+            laser_pool=self.laser_pool if laser_pool is None else laser_pool,
+            event_bus=bus,
+            item_pool=self.item_pool if item_pool is None else item_pool,
+            run_state=deepcopy(self._initial_run_state),
+            particle_pool=self.particle_pool if particle_pool is None else particle_pool,
+        )
+        context.seed = int(self.seed or 0)
+        return context
 
     def configure(
         self,
@@ -466,32 +484,95 @@ class SpellPreviewSession:
         self.boss.id = boss_name
         self.boss.name = boss_name
         self.boss.x, self.boss.y = boss_pos
+        self._boss_start_pos = boss_pos
         self.seed = seed
 
-    def restart(self, spell_class: Type[SpellCard] | None = None) -> None:
+    def restart(self, spell_class: Type[SpellCard] | None = None,
+                *, config: PreviewConfig | None = None) -> None:
         target_class = spell_class or self.spell_class
         if target_class is None:
             raise SpellPreviewError("no SpellCard class loaded")
 
-        if self.seed is not None:
-            random.seed(self.seed)
-            np.random.seed(self.seed % (2 ** 32))
-
-        next_spell = target_class()
-        next_spell.bind(self.boss, self.stage_context)
-        next_spell.start()
+        # Prepare before disposing the current scope. A constructor/bind error
+        # must not cancel the last runnable preview or mutate its configuration.
+        next_seed = self.seed if config is None else config.seed
+        next_boss_pos = self._boss_start_pos if config is None else config.boss_pos
+        next_boss_name = self.boss.name if config is None else config.boss
+        next_player_pos = self.player.pos if config is None else config.player_pos
+        next_player = PreviewPlayer(*next_player_pos)
+        next_boss = PreviewBoss(next_boss_name, *next_boss_pos)
+        next_bus = EventBus()
+        # A custom bind/start can already emit projectiles. Candidate pools
+        # belong to the candidate scope: failure cannot erase the old preview,
+        # and successful publication cannot clear the candidate's first shots.
+        next_pool = OptimizedBulletPool(
+            self.bullet_pool.max_bullets, self.bullet_pool.sprite_registry,
+        )
+        next_lasers = LaserPool(self.laser_pool.max_lasers, self.laser_pool.max_bent)
+        next_items = ItemPool(self.item_pool.max_items)
+        next_particles = ParticlePool(self.particle_pool.max_particles, self.bullet_pool.sprite_registry)
+        next_context = self._create_context(
+            next_player, next_bus, bullet_pool=next_pool, laser_pool=next_lasers, item_pool=next_items,
+            particle_pool=next_particles,
+        )
+        next_context.seed = int(next_seed or 0)
+        next_boss.ctx = next_context
+        next_spell = None
+        random_state, numpy_state = random.getstate(), np.random.get_state()
+        try:
+            if next_seed is not None:
+                random.seed(next_seed)
+                np.random.seed(next_seed % (2 ** 32))
+            next_spell = target_class()
+            next_spell.bind(next_boss, next_context)
+            next_spell.start()
+            next_random_state, next_numpy_state = random.getstate(), np.random.get_state()
+        except BaseException:
+            try:
+                if next_spell is not None:
+                    next_spell.dispose()
+            finally:
+                next_context.dispose()
+                next_bus.close()
+                next_pool.clear_all()
+                next_lasers.clear()
+                next_items.clear()
+                next_particles.clear()
+                random.setstate(random_state)
+                np.random.set_state(numpy_state)
+            raise
 
         self.close()
-        self.clear_bullets()
+        # Preserve RNG already consumed by the candidate's constructor/start.
+        # Old finally blocks must not perturb the restarted sequence.
+        random.setstate(next_random_state)
+        np.random.set_state(next_numpy_state)
+        self.player, self.boss = next_player, next_boss
+        self.bullet_pool, self.laser_pool = next_pool, next_lasers
+        self.item_pool = next_items
+        self.particle_pool = next_particles
+        self.stage_context, self.event_bus = next_context, next_bus
+        self._boss_start_pos = next_boss_pos
+        self.seed = next_seed
         self.spell_class = target_class
         self.spell = next_spell
         self.frame = 0
 
     def close(self) -> None:
-        coroutine = getattr(self.spell, "_coroutine", None)
-        if coroutine is not None and hasattr(coroutine, "close"):
-            coroutine.close()
+        spell = self.spell
         self.spell = None
+        try:
+            if spell is not None:
+                spell.dispose()
+        finally:
+            try:
+                self.stage_context.dispose()
+            finally:
+                self.event_bus.close()
+                self.clear_bullets()
+                self.laser_pool.clear()
+                self.item_pool.clear()
+                self.particle_pool.clear()
 
     def clear_bullets(self) -> None:
         self.bullet_pool.clear_all()
@@ -501,10 +582,48 @@ class SpellPreviewSession:
     def step_one(self) -> bool:
         if self.spell is None:
             return False
-        active = self.spell.update()
-        self.bullet_pool.update(FIXED_DT)
-        self.frame += 1
-        return active
+        reaction = self.spell.end_reaction
+        if not self.spell._active and (reaction is None or reaction.done):
+            return False
+        context = self.stage_context
+        try:
+            # Match the game loop: existing projectiles integrate first; bullets
+            # born in actor/task code do not move until the next simulation step.
+            self.bullet_pool.set_player_target(self.player.x, self.player.y)
+            mask = context.time_control.mask
+            if not mask & TIME_DOMAINS['bullets']:
+                self.bullet_pool.update(FIXED_DT)
+            if not mask & TIME_DOMAINS['lasers']:
+                self.laser_pool.update()
+            if not mask & TIME_DOMAINS['items']:
+                self.item_pool.update(self.player.x, self.player.y, FIXED_DT)
+            if not mask & TIME_DOMAINS['effects']:
+                self.particle_pool.update()
+            context.set_runtime_frame(self.frame)
+            context.flush_lifecycle_events()
+            self.event_bus.dispatch_frame()
+            if self.event_bus.errors:
+                event, error = self.event_bus.errors.pop(0)
+                raise RuntimeError(f"runtime event handler failed for {event.type!r}") from error
+            context.update_tasks()
+            context.update_enemy_scripts()
+            if self.spell._active:
+                self.spell.update()
+            reaction = self.spell.end_reaction
+            # End hooks live on Context, just as they do in a normal stage.
+            # Drain the explicit reaction (including awaited child tasks), not
+            # unrelated infinite background tasks, before closing the scope.
+            active = self.spell._active or (reaction is not None and not reaction.done)
+            context.flush_bullet_conversions()
+            context.flush_lifecycle_events()
+            if not active:
+                context.dispose()
+                self.event_bus.close()
+            self.frame += 1
+            return active
+        except BaseException:
+            self.close()
+            raise
 
     @property
     def bullet_count(self) -> int:
@@ -512,9 +631,9 @@ class SpellPreviewSession:
 
 
 class SpellPreviewRuntime:
-    def __init__(self, bullet_pool, *, config_path: Path | str | None = None, use_config: bool = True):
-        self.bullet_pool = bullet_pool
-        self.session = SpellPreviewSession(bullet_pool)
+    def __init__(self, bullet_pool, *, config_path: Path | str | None = None,
+                 use_config: bool = True, run_state: RunState | None = None):
+        self.session = SpellPreviewSession(bullet_pool, run_state=run_state)
         self.target: SpellPreviewTarget | None = None
         self.config = PreviewConfig()
         self.script_path: Path | None = None
@@ -533,6 +652,11 @@ class SpellPreviewRuntime:
         self.last_update_ms = 0.0
         self.last_render_ms = 0.0
         self._sim_accumulator = 0.0
+
+    @property
+    def bullet_pool(self):
+        """Current owned pool. Restart replaces the complete preview scope."""
+        return self.session.bullet_pool
 
     def load(
         self,
@@ -557,17 +681,19 @@ class SpellPreviewRuntime:
                 exc,
                 script_path=script_path,
                 title="Reload failed" if is_reload else "Load failed",
-                keeps_old_instance=is_reload and self.target is not None,
+                keeps_old_instance=is_reload and self.session.spell is not None,
             )
             raise
 
-        self.session.configure(
-            player_pos=result.config.player_pos,
-            boss_name=result.config.boss,
-            boss_pos=result.config.boss_pos,
-            seed=result.config.seed,
-        )
-        self.session.restart(result.target.spell_class)
+        try:
+            self.session.restart(result.target.spell_class, config=result.config)
+        except Exception as exc:
+            self.error_info = build_preview_error_info(
+                exc, script_path=script_path,
+                title="Reload failed" if is_reload else "Load failed",
+                keeps_old_instance=is_reload and self.session.spell is not None,
+            )
+            raise
         self._sim_accumulator = 0.0
         self.script_path = script_path
         self.requested_spell = spell_name
@@ -696,6 +822,9 @@ class SpellPreviewRuntime:
             update_ms=self.last_update_ms,
             render_ms=self.last_render_ms,
             reload_ok=self.error_info is None,
+            laser_count=self.session.laser_pool.laser_count + self.session.laser_pool.bent_laser_count,
+            enemy_count=len(self.session.stage_context.get_enemy_scripts()),
+            item_count=self.session.item_pool.item_count,
         )
 
     def close(self) -> None:

@@ -353,7 +353,8 @@ class TimelineAnalyzer:
             interval = replace(interval, parent_uid=parent_uid)
             if collect:
                 intervals.append(interval)
-            cursor = interval.end
+            if node.kind not in {"OnHit", "OnDeath"}:
+                cursor = interval.end
         return tuple(intervals), cursor
 
     def _node(
@@ -366,6 +367,18 @@ class TimelineAnalyzer:
     ) -> TimelineInterval:
         kind = node.kind
         label = _label(node)
+
+        if kind in {"OnHit", "OnDeath"}:
+            unknown = Unknown(f"{node.uid}: 事件触发时刻需运行时确定")
+            children, _ = self._sequence(node.children.get("body", ()), unknown,
+                                         f"{lane}/event:{node.uid}", environment,
+                                         unit_stack, parent_uid=node.uid)
+            return TimelineInterval(node.uid, unknown, unknown, lane, "spawned",
+                                    label=label, children=children, display="aggregate")
+
+        if kind in {"WaitEvent", "JoinTask"}:
+            return TimelineInterval(node.uid, start, Unknown(f"{node.uid}: 等待结束时刻需运行时确定"),
+                                    lane, "dynamic", label=label, display="unknown")
 
         if kind == "Wait":
             frames = _integer(node.arguments.get("frames"), environment)

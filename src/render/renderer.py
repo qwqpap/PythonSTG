@@ -22,6 +22,7 @@ import time
 import os
 from .laser_renderer import LaserRenderer
 from .optimized_bullet_renderer import OptimizedBulletRenderer
+from .particle_renderer import ParticleRenderer
 
 
 # 子弹大小分类常量（用于高效分桶排序）
@@ -75,11 +76,11 @@ except ImportError:
 
 class Renderer:
     """OpenGL渲染器，负责子弹、玩家、敌人、Boss的渲染"""
-    
+
     def __init__(self, ctx, base_size, sprite_manager, textures, sprite_uv_map):
         """
         初始化渲染器
-        
+
         Args:
             ctx: ModernGL上下文
             base_size: 基础窗口尺寸 (width, height)
@@ -90,7 +91,7 @@ class Renderer:
         self.ctx = ctx
         self.base_size = base_size
         self.sprite_manager = sprite_manager
-        
+
         # 从配置获取参数（如果可用）
         if HAS_CORE_CONFIG and get_config:
             config = get_config()
@@ -99,14 +100,14 @@ class Renderer:
             self._y_scale_factor = base_size[0] / base_size[1]
         self.textures = textures
         self.sprite_uv_map = sprite_uv_map
-        
+
         # 获取默认精灵
         self.default_sprite_id = 'star_small1' if 'star_small1' in sprite_manager.get_all_sprite_ids() else next(iter(sprite_manager.get_all_sprite_ids()), None)
-        
+
         # 子弹大小分类缓存（避免每帧重新计算）
         self._sprite_size_cache = {}
         self._build_sprite_size_cache()
-        
+
         # 初始化着色器和渲染资源
         self._init_bullet_shader()
         self._init_player_shader()
@@ -117,14 +118,15 @@ class Renderer:
         self.hitbox_texture_path = os.path.join(root_dir, 'assets', 'misc.png')
         self.hitbox_texture = None
         self.hitbox_texture_size = None
-        
+
         # 初始化激光渲染器
         self.laser_renderer = LaserRenderer(ctx, base_size)
-        
+
         # 背景渲染器（可选，延迟初始化）
         self.background_renderer = None
         # 优化版敌弹渲染器（仅当 bullet_pool 支持 prepare_render_data_sorted 时启用）
         self.optimized_bullet_renderer = OptimizedBulletRenderer(ctx, textures)
+        self.particle_renderer = ParticleRenderer(ctx, textures, base_size)
 
         # 全窗口背景图（UI背景，叠在游戏内容下层）
         self._window_bg_texture = None
@@ -132,39 +134,39 @@ class Renderer:
         self._window_bg_vbo = None
         self._window_bg_vao = None
         self._init_window_bg_shader()
-    
+
     def _build_sprite_size_cache(self):
         """构建精灵大小分类缓存"""
         for sprite_id in self.sprite_manager.get_all_sprite_ids():
             self._sprite_size_cache[sprite_id] = self._classify_sprite_size(sprite_id)
-    
+
     def _classify_sprite_size(self, sprite_id: str) -> int:
         """
         根据精灵ID分类其大小等级
-        
+
         Args:
             sprite_id: 精灵ID
-            
+
         Returns:
             BulletSizeCategory 常量
         """
         # 首先检查完整ID匹配
         if sprite_id in DEFAULT_SIZE_CATEGORIES:
             return DEFAULT_SIZE_CATEGORIES[sprite_id]
-        
+
         # 检查前缀匹配
         sprite_id_lower = sprite_id.lower()
         for prefix, category in DEFAULT_SIZE_CATEGORIES.items():
             if sprite_id_lower.startswith(prefix):
                 return category
-        
+
         # 根据精灵实际尺寸推断
         sprite_data = self.sprite_manager.get_sprite(sprite_id)
         if sprite_data and 'rect' in sprite_data:
             width = sprite_data['rect'][2]
             height = sprite_data['rect'][3]
             max_dim = max(width, height)
-            
+
             if max_dim >= 64:
                 return BulletSizeCategory.HUGE
             elif max_dim >= 32:
@@ -175,16 +177,16 @@ class Renderer:
                 return BulletSizeCategory.SMALL
             else:
                 return BulletSizeCategory.TINY
-        
+
         # 默认为中型
         return BulletSizeCategory.MEDIUM
-    
+
     def get_sprite_size_category(self, sprite_id: str) -> int:
         """获取精灵的大小分类（带缓存）"""
         if sprite_id not in self._sprite_size_cache:
             self._sprite_size_cache[sprite_id] = self._classify_sprite_size(sprite_id)
         return self._sprite_size_cache[sprite_id]
-    
+
     def _init_bullet_shader(self):
         """初始化子弹渲染着色器和VAO"""
         # 顶点着色器：接收位置并转换到裁剪空间，支持实例化偏移、角度、UV坐标和尺寸
@@ -196,9 +198,9 @@ class Renderer:
         in float in_angle;
         in vec4 in_uv_offset;
         in vec2 in_scale;  // 每个子弹的独立尺寸
-        
+
         out vec2 v_uv;
-        
+
         void main() {
             // 先应用缩放，再旋转
             vec2 scaled = in_vert * in_scale;
@@ -215,7 +217,7 @@ class Renderer:
             v_uv = in_uv_base * vec2(in_uv_offset.z - in_uv_offset.x, in_uv_offset.w - in_uv_offset.y) + in_uv_offset.xy;
         }
         """
-        
+
         # 片元着色器：使用纹理采样
         fragment_shader = """
         #version 330
@@ -229,15 +231,15 @@ class Renderer:
             f_color = tex_color;
         }
         """
-        
+
         self.bullet_program = self.ctx.program(vertex_shader=vertex_shader, fragment_shader=fragment_shader)
         self.bullet_program['u_texture'].value = 0
         if 'u_alpha' in self.bullet_program:
             self.bullet_program['u_alpha'].value = 1.0
-        
+
         # 保存缩放因子供渲染时使用
         self.bullet_scale_factor = 2.0 / self.base_size[1]
-        
+
         # 准备顶点数据 - 使用单位正方形，实际尺寸由in_scale控制
         # 半尺寸为0.5，缩放后会乘以实际像素尺寸
         vertices = np.array([
@@ -248,15 +250,15 @@ class Renderer:
             -0.5, -0.5, 0.0, 1.0,
              0.5, -0.5, 1.0, 1.0,
         ], dtype='f4')
-        
+
         self.bullet_vbo = self.ctx.buffer(vertices.tobytes())
-        
+
         # 实例化数据VBO
         self.instance_vbo = self.ctx.buffer(reserve=50000 * 2 * 4)
         self.angle_vbo = self.ctx.buffer(reserve=50000 * 1 * 4)
         self.uv_vbo = self.ctx.buffer(reserve=50000 * 4 * 4)
         self.scale_vbo = self.ctx.buffer(reserve=50000 * 2 * 4)  # 每个子弹的尺寸 (width, height)
-        
+
         # 创建VAO
         self.bullet_vao = self.ctx.vertex_array(
             self.bullet_program,
@@ -266,7 +268,7 @@ class Renderer:
              (self.uv_vbo, '4f/i', 'in_uv_offset'),
              (self.scale_vbo, '2f/i', 'in_scale')]
         )
-    
+
     def _init_player_shader(self):
         """初始化玩家/敌人/Boss渲染着色器和VAO"""
         # 纯色渲染shader（用于备用）
@@ -275,9 +277,9 @@ class Renderer:
             #version 330
             in vec2 in_vert;
             in vec3 in_color;
-            
+
             out vec3 v_color;
-            
+
             void main() {
                 vec2 position = in_vert;
                 position.y *= 384.0 / 448.0;
@@ -289,13 +291,13 @@ class Renderer:
             #version 330
             in vec3 v_color;
             out vec4 f_color;
-            
+
             void main() {
                 f_color = vec4(v_color, 1.0);
             }
             """
         )
-        
+
         self.player_vbo = self.ctx.buffer(reserve=6 * 2 * 4)
         player_colors = np.array([
             0.0, 1.0, 1.0,
@@ -311,16 +313,16 @@ class Renderer:
             [(self.player_vbo, '2f', 'in_vert'),
              (self.player_color_vbo, '3f', 'in_color')]
         )
-        
+
         # 纹理渲染shader（用于玩家精灵）
         self.player_tex_program = self.ctx.program(
             vertex_shader="""
             #version 330
             in vec2 in_vert;
             in vec2 in_uv;
-            
+
             out vec2 v_uv;
-            
+
             void main() {
                 vec2 position = in_vert;
                 position.y *= 384.0 / 448.0;
@@ -334,7 +336,7 @@ class Renderer:
             uniform float u_alpha;
             in vec2 v_uv;
             out vec4 f_color;
-            
+
             void main() {
                 f_color = texture(tex, v_uv);
                 f_color.a *= u_alpha;
@@ -344,21 +346,21 @@ class Renderer:
         )
         if 'u_alpha' in self.player_tex_program:
             self.player_tex_program['u_alpha'].value = 1.0
-        
+
         # 玩家纹理渲染缓冲
         self.player_tex_vbo = self.ctx.buffer(reserve=6 * 4 * 4)  # 6 vertices * 4 floats (x,y,u,v)
         self.player_tex_vao = self.ctx.vertex_array(
             self.player_tex_program,
             [(self.player_tex_vbo, '2f 2f', 'in_vert', 'in_uv')]
         )
-        
+
         # 玩家纹理缓存
         self.player_texture = None
         self.player_texture_size = None
         # 玩家子弹纹理（可独立）
         self.player_bullet_texture = None
         self.player_bullet_texture_size = None
-    
+
     def _init_circle_shader(self):
         """初始化判定圆圈渲染着色器和VAO"""
         self.circle_segments = 32
@@ -568,19 +570,19 @@ class Renderer:
         self.border_vbo.write(data.tobytes())
         self.border_program['u_color'].value = (0.3, 0.5, 1.0)  # 蓝色边框
         self.border_vao.render(moderngl.LINE_STRIP, vertices=5)
-    
+
     def set_background_renderer(self, background_renderer):
         """
         设置背景渲染器
-        
+
         Args:
             background_renderer: BackgroundRenderer实例
         """
         self.background_renderer = background_renderer
-    
+
     def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None,
                      item_renderer=None, items=None, dt=0.0, enemy_scripts=None, item_pool=None,
-                     profile_segments=None):
+                     profile_segments=None, particle_pool=None):
         """
         渲染一帧（按正确的图层顺序）
 
@@ -630,7 +632,9 @@ class Renderer:
         # ===== 层级 0: 背景 =====
         seg_start = time.perf_counter() if do_profile else 0.0
         if self.background_renderer:
-            self.background_renderer.update(dt)
+            context = stage_manager.current_context
+            if context is None or not context.is_time_stopped('background'):
+                self.background_renderer.update(dt)
             self.background_renderer.render(target_viewport=viewport_rect)
             # 背景渲染器可能在后处理路径里切换 framebuffer/screen。
             # 这里把 viewport 重新设回游戏视口，保证后续敌人/子弹/激光/玩家
@@ -646,6 +650,13 @@ class Renderer:
         self._render_enemies(stage_manager, enemy_scripts)
         if do_profile:
             profile_segments['render_enemy'] = profile_segments.get('render_enemy', 0.0) + (time.perf_counter() - seg_start)
+
+        # Non-colliding decoration behind items/player/bullets.
+        seg_start = time.perf_counter() if do_profile else 0.0
+        if particle_pool is not None:
+            self.particle_renderer.render_from_pool(particle_pool, 'back')
+        if do_profile:
+            profile_segments['render_particles'] = profile_segments.get('render_particles', 0.0) + (time.perf_counter() - seg_start)
 
         # ===== 层级 2: 道具 =====
         seg_start = time.perf_counter() if do_profile else 0.0
@@ -686,6 +697,13 @@ class Renderer:
         if do_profile:
             profile_segments['render_laser'] = profile_segments.get('render_laser', 0.0) + (time.perf_counter() - seg_start)
 
+        # Foreground particles remain below the hitbox and HUD.
+        seg_start = time.perf_counter() if do_profile else 0.0
+        if particle_pool is not None:
+            self.particle_renderer.render_from_pool(particle_pool, 'front')
+        if do_profile:
+            profile_segments['render_particles'] = profile_segments.get('render_particles', 0.0) + (time.perf_counter() - seg_start)
+
         # ===== 层级 8: 自机判定点（最高优先级） =====
         seg_start = time.perf_counter() if do_profile else 0.0
         if player.is_focused:
@@ -699,11 +717,11 @@ class Renderer:
         # 绘制游戏视口边框（在窗口坐标空间）
         if viewport_rect:
             self._render_viewport_border(viewport_rect, (win_w, win_h))
-    
+
     def _render_bullets_sorted(self, bullet_pool):
         """
         按大小分类渲染子弹（大弹在下，小弹在上）
-        
+
         使用分桶策略实现高效排序：
         - 不进行每帧的完整排序
         - 按大小分类分桶，然后按桶顺序渲染
@@ -717,54 +735,54 @@ class Renderer:
 
         positions, colors, angles, sprite_ids = bullet_pool.get_active_bullets()
         active_count = len(positions)
-        
+
         if active_count == 0:
             return
-        
+
         # 按大小分类分桶
         # buckets[category] = {texture_path: [indices]}
         buckets = {cat: {} for cat in range(6)}  # 6个大小分类
-        
+
         for i in range(active_count):
             sprite_id = sprite_ids[i]
             size_category = self.get_sprite_size_category(sprite_id)
             texture_path = self.sprite_manager.get_sprite_texture_path(sprite_id)
-            
+
             if not texture_path:
                 texture_path = next(iter(self.textures.keys())) if self.textures else None
-            
+
             if texture_path:
                 if texture_path not in buckets[size_category]:
                     buckets[size_category][texture_path] = []
                 buckets[size_category][texture_path].append(i)
-        
+
         # 按大小顺序渲染（从大到小：LASER -> HUGE -> LARGE -> MEDIUM -> SMALL -> TINY）
         for category in range(6):
             for texture_path, bullet_indices in buckets[category].items():
                 if texture_path in self.textures and bullet_indices:
                     self._render_bullet_batch(
-                        positions, angles, sprite_ids, 
+                        positions, angles, sprite_ids,
                         bullet_indices, texture_path
                     )
-    
+
     def _render_bullet_batch(self, positions, angles, sprite_ids, indices, texture_path):
         """渲染一批子弹（同一纹理）"""
         self.textures[texture_path].use(0)
-        
+
         group_size = len(indices)
         indices_array = np.array(indices)
         group_positions = positions[indices_array]
         group_angles = angles[indices_array]
         group_sprite_ids = sprite_ids[indices_array]
-        
+
         self.instance_vbo.write(group_positions.tobytes())
         self.angle_vbo.write(group_angles.tobytes())
-        
+
         # 准备UV数据和尺寸数据
         uv_data = np.zeros((group_size, 4), dtype='f4')
         scale_data = np.zeros((group_size, 2), dtype='f4')
         default_size = 16.0
-        
+
         for j, sprite_id in enumerate(group_sprite_ids):
             # UV数据
             if sprite_id in self.sprite_uv_map:
@@ -773,7 +791,7 @@ class Renderer:
                 uv_data[j] = self.sprite_uv_map[self.default_sprite_id]
             else:
                 uv_data[j] = [0.0, 0.0, 1.0, 1.0]
-            
+
             # 尺寸数据
             sprite_data = self.sprite_manager.get_sprite(sprite_id)
             if sprite_data and 'rect' in sprite_data:
@@ -783,51 +801,51 @@ class Renderer:
             else:
                 scale_data[j] = [default_size * self.bullet_scale_factor,
                                 default_size * self.bullet_scale_factor]
-        
+
         self.uv_vbo.write(uv_data.tobytes())
         self.scale_vbo.write(scale_data.tobytes())
         self.bullet_vao.render(moderngl.TRIANGLES, instances=group_size)
-    
+
     def _render_bullets(self, bullet_pool):
         """渲染所有子弹"""
         positions, colors, angles, sprite_ids = bullet_pool.get_active_bullets()
         active_count = len(positions)
-        
+
         if active_count == 0:
             return
-        
+
         # 按纹理路径分组子弹
         bullets_by_texture = {}
         for i in range(active_count):
             sprite_id = sprite_ids[i]
             texture_path = self.sprite_manager.get_sprite_texture_path(sprite_id)
-            
+
             if not texture_path:
                 texture_path = next(iter(self.textures.keys())) if self.textures else None
-            
+
             if texture_path:
                 if texture_path not in bullets_by_texture:
                     bullets_by_texture[texture_path] = []
                 bullets_by_texture[texture_path].append(i)
-        
+
         # 按纹理组渲染
         for texture_path, bullet_indices in bullets_by_texture.items():
             if texture_path in self.textures:
                 self.textures[texture_path].use(0)
-                
+
                 group_size = len(bullet_indices)
                 group_positions = positions[bullet_indices]
                 group_angles = angles[bullet_indices]
                 group_sprite_ids = sprite_ids[bullet_indices]
-                
+
                 self.instance_vbo.write(group_positions.tobytes())
                 self.angle_vbo.write(group_angles.tobytes())
-                
+
                 # 准备UV数据和尺寸数据
                 uv_data = np.zeros((group_size, 4), dtype='f4')
                 scale_data = np.zeros((group_size, 2), dtype='f4')
                 default_size = 16.0  # 默认尺寸
-                
+
                 for j, sprite_id in enumerate(group_sprite_ids):
                     # UV数据
                     if sprite_id in self.sprite_uv_map:
@@ -836,7 +854,7 @@ class Renderer:
                         uv_data[j] = self.sprite_uv_map[self.default_sprite_id]
                     else:
                         uv_data[j] = [0.0, 0.0, 1.0, 1.0]
-                    
+
                     # 尺寸数据 - 从精灵配置获取实际尺寸
                     sprite_data = self.sprite_manager.get_sprite(sprite_id)
                     if sprite_data and 'rect' in sprite_data:
@@ -844,13 +862,13 @@ class Renderer:
                         height = sprite_data['rect'][3] * self.bullet_scale_factor
                         scale_data[j] = [width, height]
                     else:
-                        scale_data[j] = [default_size * self.bullet_scale_factor, 
+                        scale_data[j] = [default_size * self.bullet_scale_factor,
                                         default_size * self.bullet_scale_factor]
-                
+
                 self.uv_vbo.write(uv_data.tobytes())
                 self.scale_vbo.write(scale_data.tobytes())
                 self.bullet_vao.render(moderngl.TRIANGLES, instances=group_size)
-    
+
     def _render_player(self, player):
         """渲染玩家"""
         # 检查玩家是否有纹理和精灵信息
@@ -858,12 +876,12 @@ class Renderer:
             self._render_player_sprite(player)
         else:
             self._render_player_fallback(player)
-    
+
     def _render_player_sprite(self, player):
         """使用纹理渲染玩家"""
         import os
         from PIL import Image
-        
+
         # 延迟加载玩家纹理（不翻转，与sakuya_test.py一致）
         if self.player_texture is None and hasattr(player, 'texture_path'):
             texture_path = player.texture_path
@@ -875,17 +893,17 @@ class Renderer:
                 self.player_texture_size = img.size
                 self.player_texture_scale = 1.0
                 print(f"已加载玩家纹理: {texture_path} ({img.size[0]}x{img.size[1]})")
-        
+
         if self.player_texture is None:
             self._render_player_fallback(player)
             return
-        
+
         # 获取当前精灵帧
         sprite_info = player.get_current_sprite()
         if sprite_info is None:
             self._render_player_fallback(player)
             return
-        
+
         # 计算UV坐标（v=0在顶部，v=1在底部）
         tex_w, tex_h = self.player_texture_size
         rect = sprite_info.get('rect', [0, 0, 32, 48])
@@ -929,7 +947,7 @@ class Renderer:
         v0 = scaled_rect[1] / tex_h                    # 顶部
         u1 = (scaled_rect[0] + scaled_rect[2]) / tex_w
         v1 = (scaled_rect[1] + scaled_rect[3]) / tex_h        # 底部
-        
+
         # 计算屏幕位置（转换精灵像素大小到归一化坐标）
         if hasattr(player, 'render_size_px') and player.render_size_px:
             base_w = max(1.0, float(rect[2]))
@@ -939,9 +957,9 @@ class Renderer:
         else:
             sprite_w = rect[2] / 192.0  # 192 是半屏宽度的像素数
             sprite_h = rect[3] / 192.0
-        
+
         px, py = player.pos[0], player.pos[1]
-        
+
         # 6个顶点（2个三角形），UV: v0=顶部, v1=底部
         vertices = np.array([
             # 位置x, 位置y, u, v
@@ -952,7 +970,7 @@ class Renderer:
             px + sprite_w/2, py + sprite_h/2, u1, v0,  # 右上
             px - sprite_w/2, py + sprite_h/2, u0, v0,  # 左上
         ], dtype='f4')
-        
+
         # 渲染 Options (在自机之下)
         if hasattr(player, 'get_option_positions'):
             self._render_options(player)
@@ -961,7 +979,7 @@ class Renderer:
         self.player_tex_vbo.write(vertices.tobytes())
         self.player_texture.use(0)
         self.player_tex_vao.render(moderngl.TRIANGLES)
-    
+
     def _render_options(self, player):
         """渲染玩家的 Options（支持 v3 OptionEntity 和 v2 模式）"""
         # v3: 使用 option_manager 的渲染数据
@@ -1093,7 +1111,7 @@ class Renderer:
             self.player_tex_vao.render(moderngl.TRIANGLES)
         if 'u_alpha' in self.player_tex_program:
             self.player_tex_program['u_alpha'].value = 1.0
-    
+
     def _render_player_lasers(self, player):
         """
         渲染玩家激光（连续光柱，从玩家位置延伸到屏幕顶部）
@@ -1290,7 +1308,7 @@ class Renderer:
         self.bullet_vao.render(moderngl.TRIANGLES, instances=count)
         if 'u_alpha' in self.bullet_program:
             self.bullet_program['u_alpha'].value = 1.0
-    
+
     def _render_player_fallback(self, player):
         """备用：纯色渲染玩家"""
         player_size = 0.01 if player.is_focused else 0.02
@@ -1304,7 +1322,7 @@ class Renderer:
         ], dtype='f4')
         self.player_vbo.write(player_vertices.tobytes())
         self.player_vao.render(moderngl.TRIANGLES)
-    
+
     def _render_boss(self, stage_manager):
         """渲染Boss（优先使用精灵动画，fallback 到纯色占位）"""
         # 程序化关卡中 Boss 由 StageScript._current_boss 持有，
@@ -1315,7 +1333,7 @@ class Renderer:
             active_boss = getattr(cur_stage, '_current_boss', None)
         if active_boss is None:
             active_boss = stage_manager.get_active_boss()
-        if not (active_boss and active_boss.alive):
+        if not (active_boss and active_boss.alive and getattr(active_boss, 'visible', True)):
             return
 
         # BossBase 用 x/y，旧 Boss 用 pos；兼容两种
@@ -1361,13 +1379,13 @@ class Renderer:
             ], dtype='f4')
             self.player_vbo.write(boss_vertices.tobytes())
             self.player_vao.render(moderngl.TRIANGLES)
-    
+
     def _render_enemies(self, stage_manager, enemy_scripts=None):
         """渲染敌人"""
         # 新的敌人系统（EnemyScript实例）
         if enemy_scripts:
             for enemy in enemy_scripts:
-                if hasattr(enemy, '_active') and enemy._active:
+                if hasattr(enemy, '_active') and enemy._active and getattr(enemy, 'visible', True):
                     self._render_enemy_sprite(enemy)
 
         # 旧的敌人系统（Enemy对象）- fallback
@@ -1468,7 +1486,7 @@ class Renderer:
         ], dtype='f4')
         self.player_vbo.write(enemy_vertices.tobytes())
         self.player_vao.render(moderngl.TRIANGLES)
-    
+
     def _render_hitbox(self, player):
         """渲染玩家判定点"""
         hx, hy = player.get_hit_position()
@@ -1523,12 +1541,13 @@ class Renderer:
 
         self.player_tex_vbo.write(np.array(vertices, dtype='f4').tobytes())
         self.player_tex_vao.render(moderngl.TRIANGLES)
-    
+
     def cleanup(self):
         """清理渲染资源"""
         # ModernGL的资源会自动释放，但可以显式释放
         if hasattr(self, 'optimized_bullet_renderer') and self.optimized_bullet_renderer:
             self.optimized_bullet_renderer.cleanup()
+        self.particle_renderer.cleanup()
         if self.hitbox_texture is not None:
             self.hitbox_texture.release()
             self.hitbox_texture = None
