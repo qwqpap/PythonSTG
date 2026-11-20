@@ -1,21 +1,19 @@
-# 架构概览
+# 引擎架构概览
 
-本文是游戏 Runtime 导航。声明式作者工程经 `src.authoring` 解析、`src.compiler` 生成后，
-同样使用这里的运行时；Qt 编辑器位于 `src.editor`。编辑器的持久化、Undo、构建事务、
-预览和 Timeline 边界见[编辑器架构](EDITOR_ARCHITECTURE.md)，实施状态见[TODO](EDITOR_IMPLEMENTATION_TODO.md)。
+本文介绍 PySTG 引擎运行时的分层结构、核心模块职责以及单帧数据流。声明式作者工程经 `src.authoring` 解析、`src.compiler` 生成后，也运行在这套引擎之上；关卡编辑器自身架构见 [编辑器架构](EDITOR_ARCHITECTURE.md)。
 
 ## 分层结构
 
 ```mermaid
 flowchart TB
-    main["main.py<br/>入口、主循环、状态机"]
-    core["src.core<br/>配置 / 碰撞 / 输入"]
-    resource["src.resource<br/>纹理 / 精灵 / 图集"]
-    game["src.game<br/>子弹 / 关卡 / 玩家 / Boss"]
-    ui["src.ui<br/>HUD / 菜单 / 对话"]
-    render["src.render<br/>OpenGL 渲染管线"]
-    content["game_content/<br/>关卡内容与弹幕脚本"]
-    ctx["StageContext<br/>内容和引擎之间的边界"]
+    main["main.py<br/>入口、主循环与游戏状态机"]
+    core["src.core<br/>配置 / 碰撞 / 窗口 / 输入 / 音频流"]
+    resource["src.resource<br/>纹理 / 图集 / 精灵服务"]
+    game["src.game<br/>弹幕 / 关卡 / 自机 / Boss / 激光 / 粒子 / 背景"]
+    ui["src.ui<br/>HUD / 菜单 / 对话 / 文字叠加"]
+    render["src.render<br/>OpenGL / ModernGL 渲染管线"]
+    content["game_content/<br/>手写关卡与编译生成的关卡包"]
+    ctx["StageContext<br/>内容脚本与引擎之间的边界"]
 
     main --> core
     main --> resource
@@ -28,203 +26,140 @@ flowchart TB
     content --> ctx --> game
 ```
 
-引擎和内容通过 `StageContext` 桥接——内容脚本只能通过 `ctx` 调用引擎能力，不能直接 import 引擎内部模块。
+内容脚本通过 `StageContext` 和高层基类调用引擎能力，不直接耦合渲染器或底层数组实现。
 
 ## 模块说明
 
-### src/core — 基础设施
+### `src/core` — 基础设施
 
 | 模块 | 职责 |
-|------|------|
-| `config.py` | 游戏配置常量（分辨率、游戏区域、帧率） |
-| `collision.py` | 碰撞检测（Numba JIT 加速，支持判定点和擦弹） |
-| `interfaces.py` | 核心接口定义 |
-| `sprite_registry.py` | 全局精灵注册表 |
+| --- | --- |
+| `config.py` | 全局配置常量（逻辑分辨率 `384×448`、窗口视口、缓冲上限） |
+| `window.py` / `input_manager.py` | GLFW 窗口、固定帧率时钟与键盘输入 |
+| `collision.py` / `collision_shapes.py` | Numba 加速碰撞检测（圆、旋转矩形 SAT、激光与曲线段几何、擦弹） |
+| `audio_backend.py` / `bgm_stream.py` | miniaudio 混音后端与流式 PCM 音乐解码（支持样本级循环点与淡入淡出） |
+| `sprite_registry.py` | 全局精灵 UV 注册表 |
+| `project_context.py` | `res://` 项目相对路径解析 |
+| `preview_protocol.py` | 编辑器与预览子进程的 NDJSON 通信协议 |
 
-### src/resource — 资源管理
-
-| 模块 | 职责 |
-|------|------|
-| `texture_asset.py` | 纹理图集加载、精灵定义、UV 坐标计算 |
-| `unified_texture.py` | 统一纹理管理器（跨图集查找精灵） |
-| `sprite/` | 精灵管理 |
-| `asset_manager.py` | 资产加载和缓存 |
-
-### src/game — 游戏逻辑
+### `src/resource` — 资源管理
 
 | 模块 | 职责 |
-|------|------|
-| `bullet/optimized_pool.py` | 高性能子弹池（结构化 NumPy 数组 + Numba） |
-| `player/` | 玩家系统（移动、射击、动画、子机） |
-| `stage/` | **关卡系统核心**——下面单独说 |
-| `boss/` | Boss 管理器 |
-| `laser.py` | 激光系统（直线 / 曲线，池化管理） |
-| `item.py` | 道具系统 |
-| `audio.py` | 音频系统（双层：全局 + 关卡私有） |
-| `background_render/` | 3D 背景渲染（透视投影、雾效） |
+| --- | --- |
+| `texture_asset.py` | 纹理图集加载、精灵与帧动画定义、UV 计算 |
+| `unified_texture.py` | 跨图集统一纹理管理 |
+| `service.py` / `asset_manager.py` | 资源服务与缓存 |
+| `sprite/` | 精灵兼容层 |
 
-### src/game/stage — 关卡系统（核心）
-
-这是内容开发者最需要理解的部分：
+### `src/game` — 游戏逻辑
 
 | 模块 | 职责 |
-|------|------|
-| `stage_base.py` | `StageScript` 基类——关卡主脚本继承它 |
-| `context.py` | `StageContext`——引擎与内容的桥梁 |
-| `spellcard.py` | `SpellCard` / `NonSpell` 基类 |
-| `wave_base.py` | `Wave` 基类 |
-| `enemy_script.py` | `EnemyScript` 基类 |
-| `boss_base.py` | `BossBase`——管理符卡阶段序列 |
-| `preset_enemy.py` | 预设敌人系统（JSON 配置驱动） |
-| `dialog_manager.py` | 对话管理 |
-| `practice.py` | 练习模式 |
+| --- | --- |
+| `bullet/` | `OptimizedBulletPool`（SoA 结构化数组 + Numba）、多阶段行为（`behavior.py`）、批量快照（`batch.py`）、穿屏后处理（`motion.py`）与终结转换队列（`termination.py`） |
+| `stage/` | 关卡核心：`StageScript`、`Wave`、`EnemyScript`、`SpellCard`、`BossBase`、`StageContext`、`StageManager`、移动曲线（`motion.py`）、预设敌人、对话与练习模式 |
+| `tasks.py` | 固定 60 Hz 帧任务调度与取消/清理作用域 |
+| `state.py` | 跨关 `RunState` 与分系统暂停/慢速控制（`TimeControl`） |
+| `player/` | 自机移动、射击、子机、持续激光/爆炸攻击池（`player_bullet.py`）与受击救援契约（`hit.py`） |
+| `damage.py` | 统一伤害事实（`DamageHit`）与同帧目标伤害分发 |
+| `laser.py` | 直线激光与曲线激光池化管理 |
+| `item.py` | SoA 道具池、吸附逻辑与稀疏收集规则入口 |
+| `particle.py` / `animation.py` / `trail.py` | 独立非碰撞粒子池、角色主/附属动画控制、连续纹理拖尾 |
+| `background.py` / `background_render/` | 无 GL 的 3D 背景状态（静态面片、相机、雾、屏幕层）与 OpenGL 背景渲染器 |
+| `overlay.py` / `screen_effects.py` | 游戏区/HUD 文字叠加、闪屏脉冲与屏幕震动 |
+| `audio.py` | 双层音频库（全局音频 + 关卡私有覆盖） |
+| `userdata/` | 设置、进度与 Replay 录制/回放 |
 
-### src/render — 渲染
-
-| 模块 | 职责 |
-|------|------|
-| `renderer.py` | 主渲染器（协调所有子渲染器） |
-| `optimized_bullet_renderer.py` | 子弹批量实例化渲染 |
-| `laser_renderer.py` | 激光渲染（直线/曲线几何体构建） |
-| `player_renderer.py` | 玩家精灵渲染 |
-| `item_renderer.py` | 道具渲染 |
-
-### src/ui — 界面
+### `src/render` — 渲染管线
 
 | 模块 | 职责 |
-|------|------|
-| `hud.py` | HUD（残机、符卡、分数、Power） |
+| --- | --- |
+| `renderer.py` | 主渲染器，协调各子渲染器、视口裁剪与加载期资源预热 |
+| `optimized_bullet_renderer.py` | 敌弹与自机弹批量实例化绘制 |
+| `particle_renderer.py` | 粒子、角色受控动画与连续拖尾复用实例/网格绘制 |
+| `laser_renderer.py` | 直线与曲线激光几何构建及绘制 |
+| `player_renderer.py` / `item_renderer.py` | 自机、判定点与道具绘制 |
+
+### `src/ui` — 界面
+
+| 模块 | 职责 |
+| --- | --- |
+| `hud.py` / `ui_renderer.py` | HUD 侧栏、LRU 文字缓存与游戏区文字叠加绘制 |
 | `bitmap_font.py` | 位图字体渲染 |
-| `dialog_gl_renderer.py` | 对话框 OpenGL 渲染 |
-| `main_menu_renderer.py` | 主菜单 |
-| `loading_renderer.py` | 加载画面 |
+| `dialog_gl_renderer.py` | 对话框与立绘渲染 |
+| `main_menu_renderer.py` / `pause_menu_renderer.py` / `continue_menu_renderer.py` / `loading_renderer.py` / `staff_roll_renderer.py` | 各游戏界面渲染 |
 
-## 数据流
+### `src/authoring`、`src/compiler`、`src/editor` — 关卡编辑器链路
 
-### 一帧的执行顺序
+| 包 | 职责 |
+| --- | --- |
+| `src/authoring/` | 声明式 DSL、AST/tokenize 源码读写、模板展开、Headless 模型与 Timeline 投影 |
+| `src/compiler/` | 确定性代码生成、Source Map、事务构建与内容入口加载 |
+| `src/editor/` | PySide6 桌面关卡编辑器界面、单一 `EditorSession`、预览进程宿主 |
+
+## 单帧数据流
+
+### 控制更新顺序（60 Hz）
 
 ```mermaid
 flowchart LR
-    input["输入处理"] --> player["玩家更新"]
-    player --> stage["关卡协程推进"]
-    stage --> bullet["子弹更新"]
-    bullet --> laser["激光更新"]
-    laser --> collision["碰撞检测"]
-    collision --> item["道具更新"]
-    item --> render["渲染"]
+    input["输入处理"] --> time["采样分系统时间倍率"]
+    time --> pools["已有弹幕 / 激光 / 粒子 / 道具更新"]
+    pools --> player["自机更新"]
+    player --> stage["关卡协程 / 敌人 / Boss 推进"]
+    stage --> collision["碰撞检测与伤害分发"]
+    collision --> render["渲染输出"]
 ```
 
-### 关卡系统内部
+当前帧中由脚本新发射的子弹或转换生成的新敌人，均从下一仿真步开始运动与碰撞，避免行为受底层槽位编号顺序影响。
+
+### 关卡内部执行流
 
 ```mermaid
 flowchart TB
     stage["StageScript.run()"]
-    wave["run_wave(WaveClass)<br/>实例化 Wave 并执行 run()"]
-    dialogue["play_dialogue([...])<br/>阻塞式对话，完成后继续"]
-    boss["run_boss(BossDef)<br/>进入 Boss 战"]
-    phases["按顺序执行 phases"]
-    nonspell["NonSpell.run()<br/>非符弹幕循环"]
-    spell["SpellCard.run()<br/>符卡弹幕循环"]
+    wave["run_wave(WaveClass)"]
+    dialogue["play_dialogue([...])"]
+    boss["run_boss(BossDef)"]
+    phases["按阶段顺序执行 BossPhase"]
+    nonspell["NonSpell.run()"]
+    spell["SpellCard.run()"]
 
     stage --> wave --> dialogue --> boss --> phases
     phases --> nonspell
     phases --> spell
 ```
 
-每个协程（`run()`）内部通过 `await self.wait(N)` 控制时间，引擎每帧推进一步。
-
 ### 子弹生命周期
 
 ```mermaid
 flowchart LR
-    fire["脚本调用 self.fire()"] --> ctx["StageContext"]
-    ctx --> spawn["BulletPool.spawn()"]
-    spawn --> data["结构化 NumPy 数组<br/>x, y, speed, angle, ..."]
-    data --> jit["每帧 Numba JIT 批量更新位置"]
-    jit --> endstate{"出界或碰撞?"}
-    endstate -- 否 --> data
-    endstate -- 是 --> recycle["标记 dead<br/>回收槽位"]
+    fire["脚本调用 fire / create_bullets_batch"] --> ctx["StageContext 单位转换"]
+    ctx --> spawn["OptimizedBulletPool 写入结构化数组"]
+    spawn --> jit["Numba JIT 批量更新与阶段扫描"]
+    jit --> endstate{"到期 / 出界 / 命中?"}
+    endstate -- 否 --> spawn
+    endstate -- 是 --> recycle["记录终结事件并回收槽位"]
 ```
 
-## StageContext：引擎与内容的桥梁
-
-内容脚本（SpellCard、Wave、EnemyScript）不直接操作 BulletPool 或 Player。
-它们通过 `self.fire()` / `self.fire_circle()` 等方法，最终委托给 `StageContext`，由 Context 调用引擎内部 API。
+### 渲染层级（从后到前）
 
 ```mermaid
 flowchart LR
-    subgraph content["内容脚本"]
-        fire["self.fire(...)"]
-        circle["self.fire_circle(...)"]
-        se["self.play_se(...)"]
-        clear["self.clear_bullets()"]
-        move["self.boss.move_to(...)"]
-    end
-
-    subgraph context["StageContext"]
-        create["ctx.create_bullet(...)"]
-        createMany["ctx.create_bullet() x N"]
-        audio["ctx.audio_manager.play_se()"]
-        clearCtx["ctx.clear_bullets()"]
-        proxy["BossProxy.move_to()"]
-    end
-
-    subgraph engine["引擎"]
-        bullet["BulletPool.spawn()"]
-        bulletMany["BulletPool.spawn() x N"]
-        audioMgr["AudioManager"]
-        clearPool["BulletPool.clear()"]
-        coroutine["协程驱动的平滑移动"]
-    end
-
-    fire --> create --> bullet
-    circle --> createMany --> bulletMany
-    se --> audio --> audioMgr
-    clear --> clearCtx --> clearPool
-    move --> proxy --> coroutine
+    bg["背景与屏幕层"] --> enemy["敌人与 Boss"] --> particleBack["后景粒子"]
+    particleBack --> item["道具"] --> playerShot["自机弹"] --> player["自机"]
+    player --> enemyBullet["敌弹"] --> laser["激光"] --> particleFront["前景粒子"]
+    particleFront --> fx["闪屏 / 判定点"] --> ui["HUD 与文字"] --> dialog["对话框"]
 ```
 
-这样做的好处：
-
-- 内容脚本不依赖引擎实现细节
-- 引擎内部重构不影响已有关卡
-- 可以对 Context 做 mock 进行单元测试
-
-## 渲染管线
-
-渲染按层级从后到前：
-
-```mermaid
-flowchart LR
-    bg["背景层"] --> enemy["敌人层"] --> enemyBullet["敌弹层"] --> laser["激光层"]
-    laser --> playerShot["自机弹层"] --> player["自机层"] --> item["道具层"]
-    item --> ui["UI 层"] --> dialog["对话层"]
-```
-
-子弹渲染使用 OpenGL 实例化绘制（instanced rendering），一次 draw call 绘制所有同类型子弹。
-
-## 音频系统
-
-双层查找机制：
+### 音频查找顺序
 
 ```mermaid
 flowchart TB
-    play["play_se('shoot')"] --> stageBank{"StageAudioBank<br/>有同名音效?"}
+    play["play_se('shoot')"] --> stageBank{"关卡私有音频库存在?"}
     stageBank -- 是 --> stagePath["game_content/stages/stageN/audio/se/"]
-    stageBank -- 否 --> gameBank{"GameAudioBank<br/>有同名音效?"}
+    stageBank -- 否 --> gameBank{"全局音频库存在?"}
     gameBank -- 是 --> globalPath["assets/audio/se/"]
-    gameBank -- 否 --> warn["记录缺失并跳过播放"]
+    gameBank -- 否 --> warn["记录缺失并跳过"]
 ```
 
-关卡私有音效可以覆盖全局同名音效。BGM 同理。
-
-## 激光系统
-
-两种激光类型：
-
-| 类型 | 说明 |
-|------|------|
-| 直线激光 `Laser` | 三段式（头/身/尾），支持展开→持续→收缩动画 |
-| 曲线激光 `BentLaser` | 沿路径弯曲，记录历史位置形成轨迹 |
-
-通过 `LaserPool` 统一管理，渲染由 `LaserRenderer` 处理，支持 16 种预设颜色。
+关卡私有音效和 BGM 可直接覆盖全局同名音频。

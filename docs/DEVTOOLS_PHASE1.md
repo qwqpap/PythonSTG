@@ -1,70 +1,62 @@
-# 手写符卡开发工具链
+# 开发与预览工具链
 
-这些工具用于缩短内容开发循环：调参数、看真实引擎内效果、验证资源，然后导出或运行脚本代码。
+本页介绍用于加速日常手写内容开发的三个工具：资源校验、配置热重载以及独立手写符卡预览器。
 
-适用范围是手写 Runtime 内容和独立预览工具；文件名中的 Phase1 是历史命名，不是编辑器
-CD 阶段。声明式关卡编辑器入口见[快速开始](getting-started.md)，其预览只在显式 Run 时更新，
-不采用下文的脚本自动重载流程。按需要查阅资源校验、配置热重载或符卡预览章节即可。
+> 这些工具服务于手写运行时脚本与资产配置。代码驱动关卡编辑器使用独立的显式 Run 预览流程，见 [快速开始](getting-started.md)。
 
-## 资源验证
+## 1. 资源校验
 
 ```bash
 python tools/validate_assets.py
 python tools/validate_assets.py --format json
 ```
 
-验证器会检查：
+校验器会自动扫描 `assets/` 与 `game_content/`，检查以下项目：
 
-- `assets/` 和 `game_content/` 下的 JSON 语法。
-- 精灵图集 JSON 引用的纹理文件。
-- 精灵 `rect` 是否越过图片边界。
-- 动画帧引用是否有效。
-- `assets/bullet_aliases.json` 是否能解析到已加载精灵。
-- 敌人预设中的精灵和默认弹幕别名。
-- 玩家、背景、激光相关纹理引用。
+- JSON 语法合法性
+- 图集 JSON 引用的纹理图片是否存在
+- 精灵 `rect` 是否越出图片边界
+- 动画帧引用是否有效
+- `assets/bullet_aliases.json` 中的映射能否解析到已加载精灵
+- 敌人预设、玩家、背景与激光配置中的贴图引用
 
-当前仓库状态允许 warning 存在；error 会返回非零退出码，适合接入 CI。
+出现 `error` 时返回非零退出码，适合在提交前或 CI 中运行。
 
-## 热重载
+## 2. 运行时配置热重载
 
 ```bash
 python main.py --debug --hot-reload
 ```
 
-运行时热重载目前覆盖这些低风险配置：
+开启 `--hot-reload` 后，主循环会轮询监视以下配置文件，保存后自动刷新：
 
 - `assets/bullet_aliases.json`
 - `assets/ui/hud_layout.json`
 - `assets/images/laser/laser_config.json`
 
-监听器使用轮询方式，并在主游戏循环中运行。重载失败时会保留旧状态，并打印 `[HotReload:ERROR]`。
+如果保存的 JSON 有语法错误，引擎会保留旧配置并在控制台打印 `[HotReload:ERROR]`。
 
-## 符卡预览
+## 3. 独立手写符卡预览器
+
+无需启动整面关卡，可以直接在真实 OpenGL 渲染器中预览单张手写 `SpellCard`：
 
 ```bash
-python tools/preview_spell.py game_content/stages/stage1/spellcards/spell_2.py SunnySpell1
-python tools/preview.py game_content/stages/stage1/spellcards/spell_2.py --spell SunnySpell1 --boss test_boss --player-pos 0,-0.8 --seed 114514
 python tools/preview.py game_content/stages/stage1/spellcards/spell_2.py
+python tools/preview.py game_content/stages/stage1/spellcards/spell_2.py --spell SunnySpell1 --boss test_boss --player-pos 0,-0.8 --seed 114514
+python tools/preview_spell.py game_content/stages/stage1/spellcards/spell_2.py SunnySpell1
 ```
 
-`tools/preview.py` 是 `tools/preview_spell.py` 的短入口。预览器会通过真实 `SpellCard` 运行链路渲染：
+`tools/preview.py` 是 `tools/preview_spell.py` 的快捷入口。预览器复用引擎真实的 `StageContext`、`OptimizedBulletPool`、`LaserPool`、`ItemPool`、`ParticlePool` 和渲染器（不含完整自机射击与整关结算流程）。
 
-- `GameWindow`
-- `ModernGL`
-- `TextureAssetManager`
-- `SpriteRegistry`
-- `OptimizedBulletPool`
-- `StageContext`
-- `OptimizedBulletRenderer`
+### 自动重载与错误恢复
 
-默认会监听脚本文件。保存文件后，预览器会清空弹幕、重新加载模块、实例化选中的 `SpellCard`，并从第 0 帧重启。安装了 `watchdog` 时优先使用 `watchdog`，否则退回轮询。重载失败时，右侧面板会显示文件、行号和错误信息，同时保留上一版可运行实例。
+默认监视目标脚本文件（安装 `watchdog` 时优先使用事件监视，否则自动退回轮询）。保存文件后会清空弹幕并从第 0 帧重启预览；若重载时存在语法或运行错误，侧栏会显示报错位置，同时保留上一版可运行的画面。
 
-同目录预览配置会自动加载：
+### 预览配置
 
-```text
-spell_2.py
-spell_2.preview.json
-```
+支持三种配置方式，优先级为 **命令行参数 > 同目录 `.preview.json` > 类内配置 > 默认值**：
+
+1. 同目录放置 `<脚本名>.preview.json`：
 
 ```json
 {
@@ -79,99 +71,55 @@ spell_2.preview.json
 }
 ```
 
-预览配置也可以写在符卡类里：
-
-```python
-class SunnySpell1(SpellCard):
-    preview = {
-        "boss": "test_boss",
-        "player_pos": (0, -0.8),
-        "seed": 114514,
-        "duration": 1800,
-    }
-```
-
-也可以使用辅助装饰器：
+2. 在符卡类中声明 `preview` 字典或使用装饰器：
 
 ```python
 from src.devtools.spell_preview import preview
+
 
 @preview(boss="test_boss", player_pos=(0, -0.8), seed=114514, duration=1800)
 class SunnySpell1(SpellCard):
     ...
 ```
 
-配置优先级为：显式命令行参数 > 同目录 `.preview.json` > 类内元数据 > 默认值。
+### 快捷键
 
-快捷键：
+| 按键 | 功能 |
+| --- | --- |
+| `R` | 重新加载脚本并从第 0 帧重启 |
+| `Space` / `X` | 暂停 / 继续 |
+| `.` | 单帧步进 |
+| `1` / `2` / `3` | 切换模拟速度为 `0.5x` / `1x` / `2x` |
+| `[` / `]` | 向后 / 向前跳转 60 帧 |
+| `PageUp` / `PageDown` | 向后 / 向前跳转 300 帧 |
+| `Home` / `End` | 跳至开头或配置的结束帧 |
+| `H` | 开关 Boss 与玩家判定盒及参考准星 |
+| `Z` | 仅清屏，不重启符卡 |
+| `Esc` | 退出预览 |
 
-- R：重载并从第 0 帧重启。
-- Space 或 X：暂停 / 继续。
-- `.`：推进一帧模拟。
-- 1 / 2 / 3：设置模拟速度为 0.5x / 1x / 2x。
-- `[` / `]`：向前或向后 seek 60 帧。实现方式是 reset 后快速模拟，不渲染中间帧。
-- PageDown / PageUp：向前或向后 seek 300 帧。
-- Home / End：跳到开头或配置的结束帧。
-- H：显示 boss 和 player 的 hitbox / crosshair。
-- Z：只清空弹幕，不重启符卡。
-- Esc：退出。
+### 编程调用与 VS Code Task
 
-信息面板在 gameplay viewport 外侧，不会覆盖弹幕。运行时错误会暂停预览，并在你修复脚本、再次保存之前保留当前画面。统计面板会显示 FPS、当前帧、弹幕数量、弹幕池占用、seed、重载状态、update 耗时和 render 耗时。
+底层封装在 `src/devtools/spell_preview.py`，提供 `load`、`reload`、`reset`、`pause`、`step`、`seek`、`set_speed`、`clear_bullets`、`set_player_pos`、`set_seed`、`get_stats` 等方法。
 
-可复用运行时 API 位于 `src/devtools/spell_preview.py`：
-
-```python
-runtime.load(file_path, spell_name=None)
-runtime.reload()
-runtime.reset()
-runtime.pause(True)
-runtime.step()
-runtime.seek(300)
-runtime.set_speed(2.0)
-runtime.clear_bullets()
-runtime.set_player_pos(0, -0.8)
-runtime.set_seed(114514)
-stats = runtime.get_stats()
-```
-
-VSCode task：
+也可在 `.vscode/tasks.json` 中配置快捷任务，一键预览当前打开的符卡文件：
 
 ```json
 {
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "PythonSTG: Preview Current File",
+      "label": "PySTG: Preview Current File",
       "type": "shell",
       "command": "python tools/preview.py ${file}",
       "problemMatcher": []
-    },
-    {
-      "label": "PythonSTG: Preview Current Spell",
-      "type": "shell",
-      "command": "python tools/preview.py ${file} --spell ${input:spellClass}",
-      "problemMatcher": []
-    }
-  ],
-  "inputs": [
-    {
-      "id": "spellClass",
-      "type": "promptString",
-      "description": "SpellCard class name to preview"
     }
   ]
 }
 ```
 
-这个独立预览器只服务现有手写符卡，不承担新关卡编辑器的 Project/Stage/Spell 预览。
+## 推荐开发节奏
 
-## 推荐流程
-
-1. 直接编写现有手写 `SpellCard` 脚本。
-2. 添加 `<script>.preview.json` 或类内 preview 元数据。
-3. 编辑时运行 `python tools/preview.py <script.py>`。
-4. 符卡效果稳定后，运行 `python main.py --debug --hot-reload`，进入实际关卡测试。
-5. 修改资源或资源引用时运行 `python tools/validate_assets.py`；代码修改用即时检查
-   （`python -m compileall -q main.py src game_content tools` 加真实 Runtime/Qt 输入链）
-   验证受影响行为。仓库测试套件与原生验证脚本已按维护者要求删除，见实施 TODO 开头的
-   修复约定。阶段/合并任务执行对应门禁，仅改本文不需要运行整套引擎测试。
+1. 编写手写 `SpellCard` 脚本，并配好预览参数。
+2. 用 `python tools/preview.py <脚本.py>` 边改代码边看弹幕效果。
+3. 弹幕定型后，用 `python main.py --debug --hot-reload` 进入实际关卡联合调试。
+4. 改动资产配置后运行 `python tools/validate_assets.py` 检查引用完整性。

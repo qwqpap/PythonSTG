@@ -24,7 +24,7 @@
 
 ## 运行方式
 
-安装开发依赖项后，在存储库根目录运行：
+安装开发依赖项后，在仓库根目录运行：
 
 ```bash
 python -m pip install -r requirements-dev.txt

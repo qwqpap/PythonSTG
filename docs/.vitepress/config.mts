@@ -36,6 +36,7 @@ export default defineConfig({
       { text: '首页', link: '/' },
       { text: '快速开始', link: '/getting-started' },
       { text: '弹幕脚本', link: '/STAGE_SCRIPTING_GUIDE' },
+      { text: '架构', link: '/architecture' },
       { text: 'GitHub', link: 'https://github.com/qwqpap/PythonSTG' }
     ],
     sidebar: [
@@ -47,24 +48,38 @@ export default defineConfig({
         ]
       },
       {
-        text: '内容开发',
+        text: '内容与工具开发',
         items: [
           { text: '弹幕脚本开发指南', link: '/STAGE_SCRIPTING_GUIDE' },
           { text: '敌人预设系统', link: '/ENEMY_PRESET_SYSTEM' },
-          { text: '代码驱动编辑器', link: '/EDITOR_PRODUCT_VISION' },
-          { text: '编辑器工具', link: '/EDITOR_TOOLS_GUIDE' },
-          { text: '开发工具链', link: '/DEVTOOLS_PHASE1' },
-          { text: '编辑器架构边界', link: '/EDITOR_ARCHITECTURE' },
-          { text: '编辑器实施 TODO', link: '/EDITOR_IMPLEMENTATION_TODO' }
+          { text: '开发与预览工具链', link: '/DEVTOOLS_PHASE1' },
+          { text: '独立资产工具指南', link: '/EDITOR_TOOLS_GUIDE' }
+        ]
+      },
+      {
+        text: '代码驱动关卡编辑器',
+        items: [
+          { text: '编辑器设计概览', link: '/EDITOR_PRODUCT_VISION' },
+          { text: '编辑器架构', link: '/EDITOR_ARCHITECTURE' },
+          { text: '编辑器开发进度', link: '/EDITOR_IMPLEMENTATION_TODO' }
         ]
       },
       {
         text: '引擎开发',
         items: [
-          { text: '架构概览', link: '/architecture' },
+          { text: '引擎架构概览', link: '/architecture' },
           { text: '纹理资产系统', link: '/TEXTURE_ASSET_SYSTEM' }
         ]
       },
+      {
+        text: '东方机制与移植参考',
+        items: [
+          { text: 'TH06 机制覆盖清单', link: '/TH06_API_COVERAGE' },
+          { text: 'TH07 API 调研与补齐', link: '/TH07_PORT_AUDIT' },
+          { text: 'TH07 五面移植说明', link: '/TH07_STAGE5_PORT' },
+          { text: 'TH07 六面移植说明', link: '/TH07_STAGE6_PORT' }
+        ]
+      }
     ],
     socialLinks: [
       { icon: 'github', link: 'https://github.com/qwqpap/PythonSTG' }

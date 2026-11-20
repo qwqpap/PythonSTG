@@ -1,101 +1,46 @@
 # PySTG Agent Instructions
 
-This file applies to the whole repository.
+This file defines repository-wide rules for AI coding agents working on PySTG.
 
-## Task scope and completion
+## Working tree hygiene
 
-- Start repository edits with `git status --short` and preserve unrelated work.
-  Never modify, stage, revert, or commit `.claude/settings.local.json`.
-- Complete authorized implementation, relevant checks, and fixes without pausing
-  for routine local edits or reruns. Honor current read-only/planning requests;
-  a past read-only task is not a permanent implementation ban.
-- Before substantial edits, state the outcome and affected paths. Revise this
-  boundary when needed; ask for material scope/product decisions or missing
-  authorization. Finish after the result and applicable checks, or report the
-  concrete blocker and remaining gates.
+- Check `git status --short` before editing and preserve unrelated local changes.
+- Never modify, stage, revert, or commit `.claude/settings.local.json`.
+- Do not commit generated build output under `game_content/generated/` or copyrighted original game assets.
+- Use UTF-8, LF line endings, 4-space indentation, and project-relative paths. Never hardcode machine-specific absolute paths in code or docs.
 
-## Editor documentation and roadmap
+## Core architecture invariants
 
-- For editor changes, read the status table, invariant contract, and affected phase in
-  [`docs/EDITOR_IMPLEMENTATION_TODO.md`](docs/EDITOR_IMPLEMENTATION_TODO.md).
-  It is the only implementation order and status record.
-- For module ownership, source persistence, code generation, preview, or
-  Timeline changes, read the affected sections of
-  [`docs/EDITOR_ARCHITECTURE.md`](docs/EDITOR_ARCHITECTURE.md).
-- Read both documents completely for overall architecture/product-contract changes.
-  Phase completion needs the full applicable Gate and architecture merge checks;
-  wording-only edits need local context.
+1. **Single authoring source of truth**: declarative projects live under `game_content/authoring/<project_id>/`. Generated output under `game_content/generated/<project_id>/` is disposable.
+2. **Handwritten stages stay independent**: `game_content/stages/stage1..stage3/` remain first-class runtime content via `game_content/entry.py`; the editor does not reverse-engineer them.
+3. **Headless core**: `src/authoring/`, `src/compiler/`, timeline analysis, and preview protocol must not import Qt, editor widgets, or the renderer.
+4. **One runtime, batch hot paths**: generated stages target the existing `StageScript`, `Wave`, `EnemyScript`, `SpellCard`, `StageManager`, pools, lasers, audio, and renderer. Do not introduce a second gameplay runtime, ECL/ANM VM, or per-bullet Python callbacks.
+5. **Timeline is a projection**: it projects source nodes and bounded runtime Trace, never a separately saved document.
+6. **Read-only fallback for unsupported Python**: unsupported authoring syntax opens read-only and is never overwritten or best-effort-rewritten.
+7. **Single undo stack & explicit preview**: every editor edit goes through one `QUndoStack` owned by `EditorSession`. Preview starts only on an explicit Run; subsequent edits mark the preview stale without hot-reloading, and a failed build must preserve the previous valid build and running preview.
+8. **Project-relative assets**: resource references use `res://` resolved via `ProjectContext`; generated packages never copy assets.
+9. **No v1 editor restoration**: the legacy Scene/Pattern/Graph editor (`archive/editor-v1-f9e0798`) is not a compatibility target.
+10. **Language convention**: editor UI text is Simplified Chinese; Python APIs, identifiers, and generated code stay English.
 
-Follow `CD0 -> CD1 -> CD2 -> CD3 -> CD4`; no later phase starts while an earlier
-gate is red. Baseline: `697d9a5`. Historic CD0-CD7 evidence does not prove the
-current usability gates. The Scene/Pattern/Graph editor at
-`archive/editor-v1-f9e0798` is not a compatibility target; do not restore it
-through shims, feature flags, hidden menus, or retained tests.
+## Verification
 
-## Fixed product contract
+The legacy `tests/` suite has been removed by the maintainer. Do not recreate it unless explicitly asked. Validate changes with focused, real checks matching what you modified:
 
-1. The only authoring source of truth is the restricted declarative Python
-   project under `game_content/authoring/<project_id>/`.
-2. Generated Python and metadata live under
-   `game_content/generated/<project_id>/`; they are disposable build output and
-   must not be committed.
-3. Existing handwritten Stage1-Stage3 remain supported runtime content, but the
-   editor does not reverse-engineer them.
-4. The DSL, parser, model, compiler, timeline analysis, and preview protocol are
-   headless and must not import Qt, editor widgets, or the renderer.
-5. Generated stages use the existing `StageScript`, `Wave`, `EnemyScript`,
-   `SpellCard`, `StageManager`, renderer, pools, lasers, audio, and game loop.
-   Do not introduce a second runtime or per-bullet Python callbacks.
-6. The timeline is a projection of source nodes and runtime Trace. It is never
-   a separately saved authoring document.
-7. Unsupported Python opens read-only and is never overwritten or
-   best-effort-rewritten.
-8. Every editor mutation uses one `QUndoStack`. External reload discards the
-   entire stack only after an explicit user decision.
-9. Preview starts only on an explicit Run. Edits mark the running preview
-   stale; they do not hot-reload it.
-10. Resource references remain project-relative `res://` values resolved via
-    `ProjectContext`; generated packages never copy assets.
+```bash
+python -m compileall -q main.py src game_content tools
+python tools/validate_assets.py
+git diff --check
+```
 
-## Scope discipline
+- When changing runtime or compiler behavior, verify through an actual Python run against `StageManager` / `PackageBuilder` instead of relying on syntax checks alone.
+- When changing editor UI or preview embedding, test on a real window/input path when possible; do not mislabel offscreen checks or screenshots as native interactive verification.
+- When changing documentation, run `npm run docs:build` to verify links and site rendering.
+- Be honest about what was actually run and what was not verified.
 
-The new editor is only for level gameplay authoring. Do not add a plugin
-marketplace, behavior/state/render graph, security sandbox, dependency
-installer, legacy importer, arbitrary two-way Python editor, or another asset
-editor. Keep the first UI Simplified Chinese while Python APIs and generated
-code stay English.
+## Documentation discipline
 
-For each CD task, state one owner, an explicit path allowlist, and a denylist
-before editing. The coordinating agent alone updates roadmap status. A verifier
-who did not implement the task performs the final read-only phase gate. Routine
-fixes can proceed within the authorized scope without claiming a phase passed.
+Keep documentation concise, readable, and written for human developers:
 
-## Editing and verification rules
-
-- Use the narrowest relevant tests while iterating and invoke them with
-  `python -m pytest`, never bare `pytest`. If PATH resolves to the Windows Store
-  shim, use `C:/Users/m1573/anaconda3/python.exe -m pytest` when available.
-  Broaden or repeat checks only for new changes, failures, unresolved risks, or
-  a required phase/merge gate; do not run the full engine suite for wording edits.
-- Do not weaken assertions or add `skip`, `xfail`, silent fallback, fake
-  preview, synthetic native evidence, or synthetic usability evidence.
-- Validate generated code through an independent Python subprocess using
-  compile/import/runtime checks before atomically publishing it.
-- A failed build must preserve the last successful generated package and the
-  old running preview.
-- Run native gates with a real PySide6 window and real GLFW/ModernGL child
-  window. Offscreen Qt and screenshots are not substitutes for native
-  embedding or interaction. For UI interaction fixes, reproduce the actual
-  user input chain; synthetic target events alone can miss source-widget effects.
-- For editor gate or usability reports, distinguish Structural, Runtime, Native,
-  Performance, and Usability evidence. Unobserved classes say `not run`;
-  agent-driven interaction does not count as maintainer/new-user acceptance.
-- After a phase passes, update only its checkbox and single Evidence block in
-  `docs/EDITOR_IMPLEMENTATION_TODO.md` with reproducible commands and results.
-- Use project-relative paths and deterministic UTF-8/LF/four-space output.
-
-## Repository baseline checks
-
-Before declaring a phase complete, run its focused gate plus the merge checks
-defined in `docs/EDITOR_ARCHITECTURE.md`. Keep heavyweight full-engine tests
-separate from the fast editor gate when the roadmap says so.
+- Do not dump agent session transcripts, `allowlist`/`denylist` tables, temporary file hashes, one-off local benchmarks, or machine-specific paths into `README.md` or `docs/`.
+- Keep design docs (`EDITOR_ARCHITECTURE.md`, `architecture.md`) focused on current architecture rather than appending dated patch logs.
+- Keep `docs/EDITOR_IMPLEMENTATION_TODO.md` limited to editor roadmap items and real open tasks.

@@ -1,50 +1,26 @@
-# PySTG 代码驱动关卡编辑器产品愿景
+# 代码驱动关卡编辑器设计概览
 
-本文冻结 PySTG 第二代关卡编辑器的产品方向。实施顺序和状态只记录在
-[`EDITOR_IMPLEMENTATION_TODO.md`](EDITOR_IMPLEMENTATION_TODO.md)，工程边界见
-[`EDITOR_ARCHITECTURE.md`](EDITOR_ARCHITECTURE.md)。旧编辑器只保留在 Git 标签
-`archive/editor-v1-f9e0798`，不是兼容目标。
+PySTG 第二代关卡编辑器是一个以**受限声明式 Python 为唯一真源**的轻量关卡创作工具。它通过线性程序流组织代码、通过 Inspector 调整参数、通过真实游戏窗口预览效果、通过 Timeline 解释节奏与弹幕密度。
 
-这里的要求是产品契约，不是已交付功能清单。了解方向可从第 1–4 节开始；实现具体功能时
-按主题查阅，并以 TODO 的 Gate 和 Evidence 判断验收范围。
+旧版 Scene / Pattern / Graph 编辑器仅封存于 Git 标签 `archive/editor-v1-f9e0798`，不再作为兼容目标。工程实现边界见 [编辑器架构](EDITOR_ARCHITECTURE.md)，阶段进度见 [编辑器开发进度](EDITOR_IMPLEMENTATION_TODO.md)。
 
-## 1. 一句话目标
+## 1. 设计目标与受众
 
-建立一个以声明式 Python 为唯一真源、以线性程序流帮助组织代码、以 Inspector
-帮助设计参数、以真实游戏窗口预览结果、以 Timeline 解释时间和弹幕密度的轻量关卡编辑器。
+- **新手作者**：通过“选择逻辑单元 → 插入动作或引用 → 调整参数 → 运行预览”完成关卡，无需先熟悉引擎内部实现。
+- **进阶作者**：可在外部编辑器直接修改受支持的声明式 Python 源码，也可以通过 `RawPython`、`Expr` 与 `@template` 编写自定义逻辑。
+- **引擎维护者**：编辑器生成的关卡直接运行在现有 `StageScript`、`Wave`、`EnemyScript`、`SpellCard` 和 `StageManager` 之上，不引入第二套运行时。
 
-它是 LuaSTG 轻量程序树编辑器的增强版，不是把 Scene、Graph、Preset、Timeline
-分别做成第二套静态数据模型。
+首版界面语言为简体中文；Python API、逻辑单元 ID 和生成代码保持英文。
 
-## 2. 面向谁
+### 降低首次创作门槛
 
-- 新作者通过“选择逻辑单元 → 拖入节点或引用 → 调整参数 → 运行预览”完成关卡，
-  不必先学习引擎内部对象。
-- 熟悉 PySTG 的作者可以查看源码，并用外部编辑器修改受支持的声明式 Python；内置源码视图只读。
-- 高级作者可以在 `RawPython`、`Expr`、项目模板和显式外部模板中写受信任代码。
-- 引擎开发者继续维护现有 `StageScript`、`Wave`、`EnemyScript`、`SpellCard`、
-  `StageManager` 和渲染/资源系统；编辑器不复制这些语义。
+新建工程默认附带一个可运行的环形弹幕示例（也支持取消勾选创建空白工程）。示例由普通的 `Stage`、`Wave`、`Enemy`、`Repeat`、`FireCircle` 和 `Wait` 组成，不存在第二套预设格式。
 
-首版界面只有简体中文。Python API、类名、模块名和生成代码保持英文。
+界面始终清晰标示“当前正在编辑什么”和“按 F5 会运行什么”。常用动作与必填参数默认优先展示，进阶控制和只读源码视图按需展开。
 
-### 2.1 第一次创作不从空场景开始
+## 2. 唯一真源与工程结构
 
-默认路径为：欢迎页新建工程 → 打开示例中的发射步骤 → 修改数量、速度或颜色 → F5
-单独预览敌人 → 返回关卡安排出场顺序。新建对话框默认附带一个可运行的环形弹幕示例，
-也允许取消勾选后创建空白关卡。示例只是普通 Stage、Wave、Enemy、Repeat、FireCircle
-和 Wait 节点，不存在第二种预设文件或运行方式。
-
-界面始终说明“正在编辑什么”与“F5 将运行什么”。关卡提供“修改已有弹幕”和“添加一波弹幕”
-入口；后者创建普通敌人、波次和引用，并以一次 Undo 撤销。作者先改现成内容，再逐步理解
-关卡 → 波次 → 敌人的组合关系，不必先独立建立四层引用才能看到第一颗子弹。
-
-节点库先展示当前内容常用的中文动作；条件、并行和脚本通过“更多动作”或搜索进入。属性
-先展示常用和必填参数，其他参数可展开；非默认值不能丢失。UID、英文 API 和 Trace 标识
-放在详情提示中，源码标签从“视图”打开。展开高级功能仍编辑同一份源码，不是玩具模式。
-
-## 3. 唯一真源
-
-作者工程位于：
+作者工程目录固定为：
 
 ```text
 game_content/authoring/<project_id>/
@@ -58,25 +34,9 @@ game_content/authoring/<project_id>/
 └─ functions/
 ```
 
-一个逻辑单元一个文件。逻辑单元只有：
+每个文件定义一个主逻辑单元，类型闭集为：`Project`、`Stage`、`Wave`、`Enemy`、`Boss`、`Spell`、`NonSpell`、`Task`、`Function`。顶层仅允许模块文档字符串、常规 `import`、`@template` 定义以及一个主逻辑单元赋值。
 
-- `Project`
-- `Stage`
-- `Wave`
-- `Enemy`
-- `Boss`
-- `Spell`
-- `NonSpell`
-- `Task`
-- `Function`
-
-文件使用受限 AST 和 `src.authoring.dsl`。普通 `import` 与 `from ... import ...`
-允许；顶层只允许导入、模板定义和一个主逻辑单元赋值。循环、条件、文件写入或其他
-任意执行语句不能直接放在顶层。
-
-下面分别是两个文件的结构示意；引用的 Wave、Boss 和资源需在完整工程中另行提供。
-
-`project.py`：
+`project.py` 示例：
 
 ```python
 from src.authoring.dsl import Project, Ref
@@ -89,7 +49,7 @@ project = Project(
 )
 ```
 
-`stages/stage_1.py`：
+`stages/stage_1.py` 示例：
 
 ```python
 from src.authoring.dsl import Ref, RunBoss, RunWave, SetBackground, Stage, Wait
@@ -107,64 +67,37 @@ stage = Stage(
 )
 ```
 
-每个节点有稳定 `uid`。手写时可以省略，编辑器加载后在内存生成，并在下一次合法保存时
-补齐。重复 `uid`、重复逻辑单元 ID、未解析引用或非法父子关系阻止保存和构建。
+- 每个节点拥有稳定的 `uid`（手写时可省略，编辑器加载后自动补全并在合法保存时写回）。
+- 节点参数仅接受基础字面量、列表、字典、`Ref(...)`、`Expr("...")`、`res://` 路径以及模板参数。
+- 发射节点的参数名称、默认值和语义直接镜像运行时公共 API，不维护第二套 JSON 参数描述器。
 
-节点参数只接受字面量、列表、字典、`Ref(...)`、`Expr("...")`、`res://` 引用和
-签名已声明的模板参数。参数名称、默认值和含义直接镜像现有 Runtime 公共 API；发射节点的
-弹型、颜色、tag、运动、渲染和生命周期参数必须显式出现在签名中，不得藏在通用 kwargs。
-不维护 Descriptor、Action Catalog、Preset 参数或其他第二套语义。
+## 3. 外部编辑与保真边界
 
-## 4. 外部源码与保真边界
+允许作者同时使用 VS Code 等外部编辑器编辑工程文件：
 
-作者可以用外部编辑器修改受支持的声明式 Python：
+- 当文件无未保存改动且 Undo 栈为空时，合法的外部修改会自动重载。
+- 当内存存在未保存改动或仍有 Undo 历史时，编辑器会冻结保存并提示用户选择「保留内存版本」或「重载磁盘版本」，不做静默合并或自动清空 Undo 历史。
+- 遇到不受支持的 Python 顶层语法时，以**只读诊断模式**打开并完整保留原始文件内容，绝不覆写或“尽力改写”。
+- 任意受信任 Python 代码片段通过 `RawPython("""...""")` 显式包裹，只在生成的目标函数体内部执行。
 
-- 合法、无未保存修改且 Undo 栈为空时可自动重载；
-- 内存有未保存修改或仍有 Undo 历史时冻结保存，由用户选择保留内存版本或重载磁盘版本；
-- 不做自动三方合并；
-- 丢弃现有 Undo 历史须先取得用户明确选择，不能仅因文件已保存就自动清空；
-- 不支持的 Python 结构保留原始文本，以只读诊断模式打开；
-- 只读诊断模式绝不覆盖、格式化或“尽力修复”源文件。
+## 4. 程序流与节点语言
 
-标准 `ast` 负责语义解析，`tokenize` 用于保留节点附近的注释。编辑器写回固定为
-UTF-8、LF、四空格和稳定格式。注释不能改变语义模型。
+中央工作区展示当前逻辑单元的纵向线性程序流（而非场景树或节点连线图）：
 
-任意受信任 Python 语句必须放入 `RawPython("""...""")`。它只在当前生成函数
-内部执行，不把任意顶层 Python 伪装成可视节点。
+- **控制流**：`Wait`、`At`、`Repeat`、`While`、`If`/`Else`、`ForEach`、`Parallel`、`SpawnTask`、`JoinTask`、`CancelTask`、`Break`、`Continue`、`Return`、`Set`、`Call`、`WaitEvent`、`EmitEvent`、`RawPython`
+- **关卡流程**：`RunWave`、`RunBoss`、`SetBackground`、`PlayBGM`、`PlayDialogue`、`SpawnEnemy`
+- **移动与弹幕**：`MoveTo`、`MoveLinear`、`SetPosition`、`Fire`、`FireCircle`、`FireArc`、`FireAtPlayer`、`FirePolar`、`FireOrbit`、`SelectBullets`、`TransformBullets`、`SetBulletBehavior`、`SplitBulletsOnEnd`、`ClearBulletGroup`、`ClearBullets`、`Kill`
+- **音频与激光**：`PlaySE`、`CreateLaser`、`CreateBentLaser`、`RemoveLaser`、`ClearLasers`
 
-## 5. 程序树与节点语言
+所有节点插入、删除、移动、套进容器（「套一层」）、参数编辑、资源拖拽与 Timeline 反向编辑都进入同一个 `QUndoStack`。`Project`（管理关卡顺序）和 `Boss`（管理阶段列表）使用专用引用视图，不伪装成普通语句画布。
 
-中央程序编辑器显示当前逻辑单元的真实线性程序流，而不是 Scene Tree、蓝图或时间片集合。
-首版节点语言为：
+## 5. 模板（`@template`）
 
-- 控制：`Wait`、`At`、`Repeat`、`While`、`If`/`Else`、`ForEach`、`Parallel`、
-  `SpawnTask`、`Break`、`Continue`、`Return`、`Set`、`Call`、`RawPython`；
-- 流程：`RunWave`、`RunBoss`、`SetBackground`、`PlayBGM`、`PlayDialogue`、
-  `SpawnEnemy`；
-- 对象与弹幕：`MoveTo`、`MoveLinear`、`SetPosition`、`Fire`、`FireCircle`、
-  `FireArc`、`FireAtPlayer`、`FirePolar`、`FireOrbit`、`ClearBullets`、`Kill`；
-- 音频和激光：`PlaySE`、`CreateLaser`、`CreateBentLaser`、`RemoveLaser`、
-  `ClearLasers`。
-
-弹幕作者能力优先映射正式 Runtime：发射时可明确配置弹型/颜色、tag、加速与转向、阻尼、
-反弹、自转、渲染方向、缩放、寿命和内置曲线；按 tag 的清除、转道具、平移和时间缩放保持
-批量池路径。Enemy/Boss 的移动以 easing、Bezier 和轨道等普通代码 API 表达，不建设路径图。
-多层环、镜像和交错使用普通 `@template` 组合，复杂算法才使用 `RawPython`。
-
-节点以卡片和缩进容器显示。Before/After 使用节点间插入线，Child 使用容器内容区，Wrap
-使用明确手柄或 Alt 拖放；非法目标在提交前拒绝。已有节点只从拖动手柄移动，卡片主体只
-负责选择。所有插入、删除、移动、包裹、参数编辑、资源赋值和时间线反向编辑都可撤销。
-
-逻辑单元也可直接拖放：Wave、Boss、Enemy、Function 分别生成唯一合法的引用动作；Task
-存在多个合法动作时才显示锚定选择器。Spell/NonSpell 用于 Boss phases，Stage 用于 Project
-关卡顺序；它们不被伪装成普通 statement。
-
-## 6. 模板
-
-模板是普通 Python 函数：
+模板是普通的 Python 函数，用于封装可复用的多层环、镜像或交错弹幕结构：
 
 ```python
 from src.authoring.dsl import FireCircle, Repeat, Wait, template
+
 
 @template
 def ring_burst(count: int = 12, interval: int = 6):
@@ -176,17 +109,11 @@ def ring_burst(count: int = 12, interval: int = 6):
     ]
 ```
 
-源码永久保留 `ring_burst(count=20)` 这一调用，不自动物化为普通节点。构建时只在
-内存展开。Timeline 把模板调用显示为一个聚合区间，不提供内部虚拟节点编辑。
+源码中永久保留模板调用（如 `ring_burst(count=20)`），构建阶段才在内存中展开。外部模板需由源码显式 `import`，不提供插件自动发现或依赖自动安装。
 
-内置模板、项目模板和外部模板共用同一 API。外部模板必须由源码显式 import；编辑器
-不扫描目录、不使用 entry point、不安装依赖。依赖版本只写现有 `pyproject.toml`。
-缺少外部包时保留调用名和原参数，但阻止构建。模板递归、签名错误和执行错误同时定位到
-调用节点与定义位置。所有模板代码均被视为受信任项目代码，不增加沙箱。
+## 6. 确定性构建与游戏入口
 
-## 7. 构建产物
-
-构建目录是：
+构建产物输出到 `game_content/generated/<project_id>/`（不提交 Git）：
 
 ```text
 game_content/generated/<project_id>/
@@ -206,134 +133,38 @@ game_content/generated/<project_id>/
       └─ functions/
 ```
 
-`entry.py` 固定公开 `STAGES`、`START_STAGE`、`STAGE_BY_ID` 和
-`get_stage(stage_id=None)`。生成代码直接继承现有 Runtime 类型，不引入第二套执行器。
+- `entry.py` 暴露标准接口：`STAGES`、`START_STAGE`、`STAGE_BY_ID` 和 `get_stage(stage_id=None)`。
+- 资产全部以 `res://` 引用原路径，构建产物绝不复制图片或音频文件。
+- 构建先在同级临时目录完成，经独立 Python 子进程编译与导入验证后再原子替换正式目录；构建失败时保留上一次有效构建与正在运行的预览。
 
-`manifest.json` 只记录项目 ID、构建哈希、入口模块和 Stage 列表；
-`source_map.json` 只记录 `uid ↔ 作者位置 ↔ 生成行号`。它们是生成元数据，不是
-作者逻辑。资产始终使用 `res://` 项目相对引用，不复制进生成包。
+生成的工程可通过命令行直接脱离编辑器运行：
 
-生成目录可查看、可运行、可删除，但整体不提交 Git。构建必须在同级临时目录完成，
-经独立子进程 compile/import/注册验证后原子发布。失败保留上一次成功构建。
-
-## 8. 游戏入口
-
-`main.py` 支持：
-
-```text
+```bash
 python main.py --content-entry game_content.generated.<project_id>.entry
 ```
 
-不指定时加载 `game_content.entry`。该手写入口只注册现有 Stage1-Stage3，消除
-`main.py` 中的硬编码导入，但不改变三关实现。编辑器不会反向解析这些手写关卡。
+## 7. 工作区布局与真实预览
 
-## 9. 编辑器布局
+- **步骤主导布局**：左侧提供当前关卡调用链、全部单元、只读源码与资源视图；中央默认以程序流步骤为主，支持引用跳转与返回；右侧为可切换的 Inspector；底部为紧凑 Timeline；问题列表与运行日志可折叠展开。
+- **真实游戏预览**：通过独立 `QProcess` 启动真实 `main.py`（Windows 下嵌入真实 GLFW/ModernGL 子窗口）。
+- **显式 Run 机制**：点击运行（`F5`）时自动保存无冲突文件、构建并启动预览；预览运行期间继续编辑源码只标记“预览已过期”，不自动热重载。
+- **支持的目标**：运行整个 `Project`、当前 `Stage`，或由标准练习场包装的单个 `Wave`、`Enemy`、`Spell`。支持暂停、继续、重启、固定种子 `seek` 和停止。
 
-一个窗口只打开一个工程：
+## 8. Timeline 投影
 
-- 左侧导航：默认当前关卡出场/引用关系，另可查看全部内容、只读源码、公共/关卡资源；
-- 步骤之间的 + 弹出就地搜索，支持当前落点过滤、上下/Enter/Esc；完整节点库按需打开；
-- 中央以步骤为主，路径和返回保留选择/位置；引用卡片可直接打开内容；
-- 真实预览按需切换，宽窗口可选择并排，窄窗口共用中央空间，运行不永久挤压步骤；
-- 右侧可切换辅助栏：Inspector；
-- 底部：紧凑 Timeline 概要，可展开细节；
-- 可折叠输出区：Problems 和运行日志，不替代 Timeline；
-- 作者 DSL 与生成 Runtime Python 从“视图 → 显示 Python 源码标签”打开只读中央标签。
+Timeline 只解释源码与本次运行的 Trace，本身不是单独保存的文档：
 
-程序结构侧栏同时提供“全部单元”和“当前 Stage 调用链”：前者管理文件，后者解释引用关系。
-Project 显示关卡顺序和开始关，Boss 显示 phases；两者没有可投放 statement 的空画布。文件
-侧栏反映真实作者工程；“源码”按中文内容名称显示，文件路径放在提示中，单击查看对应
-只读代码。编写玩法从“内容”进入，不让新作者先猜 Python 文件的用途。
-全局资产扫描项目但排除隐藏缓存、开发配置和顶层文档目录，资源页提供名称/位置搜索与
-类型筛选，短文件名便于浏览、完整 URI 用于引用；当前 Stage 资产只汇总 Stage 及传递引用单元中显式出现的 `res://`
-引用。`RawPython` 内的动态字符串不猜测为资产。
+- 顺序节点累加时间，`Wait` 推进游标；常量 `Repeat` 折叠聚合；`Parallel` 独立分泳道；`SpawnTask` 不阻塞主游标。
+- `While`、动态循环、`RawPython` 与未知模板标记为“动态未知”，不凭空猜帧数，后续节点保留源码顺序。
+- 静态预计与本次运行的实际 Trace 并列展示，互不覆盖，同时显示有界的发弹量/活弹数/激光数指标。
+- 允许安全反向编辑的三类字面量参数：`Wait.frames`、字面量 `duration`、`At.frame`；其他节点不在时间线上隐式改写代码结构。
 
-资产拖到兼容 Inspector 字段时赋值；拖到节点插入线时提供少量明确动作选项，不自动猜测
-作者意图。Inspector 根据 DSL 构造函数类型注解生成控件，并以中文分组展示位置、发射形状、
-运动、外观、声音和生命周期。它可以提供弹型缩略图、坐标/几何示意与 Expr 补全，但不保存
-第二份参数语义。
+## 9. 明确边界（非目标）
 
-`EditorSession` 是唯一状态所有者：工程、当前单元、选择、dirty、`QUndoStack`、
-构建状态和预览状态。首版不建立 Coordinator、Service、Port、Intent、Plugin Registry
-或多层 DocumentManager。
+本编辑器专注关卡玩法编排，不包含以下内容：
 
-## 10. 真实预览
-
-预览由一个 `QProcess` 启动真实 `main.py`，Windows 下把真实 GLFW/ModernGL 子窗口
-嵌入编辑器。不存在 formal/legacy 双模式。
-
-Run 的固定行为：
-
-1. 自动保存所有无冲突 dirty 文件；
-2. 构建并验证工程；
-3. 构建成功后停止旧预览并启动新预览；
-4. 构建失败时保留旧生成包和仍在运行的旧预览。
-
-修改源码后，旧预览继续运行但显示“预览已过期”。只有再次点击 Run 才重建和启动。
-
-控制协议只有 `pause`、`resume`、`restart`、`seek`、`stop`；事件只有 `ready`、
-`state`、`frame`、`trace`、`error`、`stopped`。支持运行整个 Project、当前 Stage，
-以及由标准练习场包装的当前 Wave、Enemy、Spell。
-
-预览使用固定 seed。seek 通过相同 seed 重启并在关闭音频和中间帧渲染时快速推进。
-Trace 只在节点边界批量发送，长度有上限，不阻塞游戏帧，也不给每颗子弹安装回调。
-
-## 11. Timeline
-
-Timeline 永久可见，但只解释代码，不拥有代码：
-
-- 章节和父容器显示为背景/括号，叶节点显示为实际区间；父子区间不得挤在同一泳道；
-- 顺序节点累加时间，`Wait` 推进游标；
-- awaited Move、Dialogue、RunWave、RunBoss 使用明确或实际持续时间；
-- 常量 `Repeat` 计算并聚合重复区间；
-- `Parallel` 使用独立泳道，等待型并行取最长分支；
-- `SpawnTask` 不阻塞主游标；
-- `If` 显示分支范围；
-- `While`、动态循环、`RawPython` 和未知外部模板显示“动态未知”，后续节点仍保留代码顺序；
-- 静态预计与本次实际 Trace 并列显示，实际 Trace 不覆盖预计值；
-- 模板调用只显示聚合区间。
-
-名称与时间分离：左列按源步骤顺序显示中文名称与层级，右侧保持真实帧数比例；短区间
-不挤入文字，不用最小块宽冒充时长。名称列和顶部标尺在滚动时保持可见。
-
-节点与区间双向选择。Timeline 还可以显示有界的 emitted/live/laser 聚合指标、适应全部、
-适应选择、居中节点/播放头、缩放、范围循环和当前单元/当前 Stage scope。唯一允许的反向
-编辑是：拖动 `Wait` 修改字面量帧数、缩放带字面量 `duration` 的节点、拖动 `At(frame=...)`
-修改固定帧。其他节点不可拖动；不得隐式插入 Wait、重写条件或循环。
-
-## 12. 完整示例的产品证明
-
-仓库必须提交一个新的声明式示例工程，至少包括一个 Stage、两个 Wave、两种 Enemy、
-一个 Boss、一个 NonSpell、一个 Spell、一个参数化 Task、一个保留调用的模板、一个
-`Parallel`、一个 `RawPython`，以及 BGM、背景、SE、对话资源引用。
-
-示例必须支持 Project、Stage、Spell 三种预览，并同时出现可静态计算与动态未知的
-Timeline 区间。生成结果由测试或用户本地构建，不入库。
-
-## 13. 明确非目标
-
-本轮不建设：
-
-- Recipe、Behavior Graph、State Graph、Render Graph 或独立 Timeline 文档；
-- 插件市场、插件 SDK 或自动发现机制；
-- 安全沙箱、依赖自动安装器或外部模板隔离；
-- 旧 `.pystg.json` importer、兼容层、Legacy 菜单或隐藏开关；
-- 任意 Python 的完整双向可视编辑；
-- 新的资产、HUD、菜单、立绘、对话或背景编辑器；
-- 非 Windows 的原生游戏窗口嵌入实现；
-- 多工程工作区或多人协同编辑。
-
-## 14. 成功标准
-
-最终结果必须分别证明：
-
-- Structural：旧符号、旧模块、旧内容和旧入口为零；新依赖方向成立；
-- Runtime：手写 Stage1-Stage3 与新生成完整示例均走真实引擎运行；
-- Native：真实 PySide6 + GLFW/ModernGL 嵌入、焦点和控制通过；
-- Performance：加载、构建、预览、测试和代码体积符合预算；
-- Usability：只记录维护者真实打开并完成示例流程的结果；没有真人操作就明确未验证。
-
-DSL/生成器快速集目标 15 秒以内，新编辑器完整自动化 60 秒以内，PR 主门禁 5 分钟
-以内。节点库筛选、拖拽落点和 Timeline 平移/缩放也有独立响应预算。产品不设物理总行
-硬上限，但每阶段必须报告产品代码净增、净删、删除的旧交互和性能变化。测试数量不是目标；
-可观察行为和真实运行证据才是目标。
+- 行为图 / 状态图 / 渲染图 / 独立 Timeline 保存格式
+- 插件市场、插件 SDK、安全沙箱或依赖自动安装器
+- 旧版 `.pystg.json` 兼容层或迁移器
+- 任意 Python 代码的完整双向可视编辑
+- 多工程工作区或多人协同编辑

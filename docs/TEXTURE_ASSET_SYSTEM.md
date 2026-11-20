@@ -1,58 +1,55 @@
-# 纹理资产管理系统
+# 纹理资产系统
 
-## 概述
+PySTG 的纹理资产系统（`src/resource/texture_asset.py`）统一管理游戏内的静态图集与帧动画，核心概念分为三层：
 
-本系统提供统一的纹理资产管理，支持：
-- **纹理图集 (TextureAtlas)** - 一张大图包含多个子纹理区域
-- **静态精灵 (Sprite)** - 纹理中的一个静态区域
-- **动画精灵 (AnimatedSprite)** - 连续多帧组成的伪动画
+- **纹理图集（`TextureAtlas`）**：一张包含多个子区域的大图。
+- **静态精灵（`Sprite`）**：图集中的一个矩形裁切区域，附带中心点、碰撞半径和旋转标记。
+- **动画精灵（`AnimatedSprite`）**：按固定帧时长循环或单次播放的精灵帧序列。
 
-## 核心类
+## 核心数据结构
 
-### Sprite - 静态精灵
+### `Sprite`
 
 ```python
 @dataclass
 class Sprite:
-    name: str                           # 精灵名称
-    texture_path: str                   # 所属纹理路径
-    rect: Tuple[int, int, int, int]     # (x, y, width, height)
-    center: Tuple[float, float]         # 中心点
-    radius: float                       # 碰撞半径
-    rotate: bool                        # 是否跟随方向旋转
-    scale: Tuple[float, float]          # 缩放
-    metadata: Dict[str, Any]            # 额外元数据
+    name: str                        # 精灵名称
+    texture_path: str                # 所属纹理路径
+    rect: Tuple[int, int, int, int]  # (x, y, width, height)
+    center: Tuple[float, float]      # 旋转/绘制中心点
+    radius: float                    # 碰撞半径
+    rotate: bool                     # 是否跟随运动方向旋转
+    scale: Tuple[float, float]       # 默认缩放
+    metadata: Dict[str, Any]         # 扩展元数据
 ```
 
-### AnimatedSprite - 动画精灵
+### `AnimatedSprite`
 
 ```python
 @dataclass
 class AnimatedSprite:
-    name: str                           # 动画名称
-    texture_path: str                   # 所属纹理路径
-    frames: List[SpriteFrame]           # 帧列表
-    center: Tuple[float, float]         # 动画中心点
-    radius: float                       # 碰撞半径
-    rotate: bool                        # 是否跟随方向旋转
-    frame_duration: float               # 每帧持续时间（秒）
-    loop: bool                          # 是否循环播放
+    name: str                        # 动画名称
+    texture_path: str                # 所属纹理路径
+    frames: List[SpriteFrame]        # 帧列表
+    center: Tuple[float, float]      # 中心点
+    radius: float                    # 碰撞半径
+    rotate: bool                     # 是否跟随运动方向旋转
+    frame_duration: float            # 每帧时长（秒）
+    loop: bool                       # 是否循环播放
 ```
 
-关键方法：
-- `get_frame_at_time(time)` - 根据时间获取当前帧
-- `get_frame_index_at_time(time)` - 获取当前帧索引
-- `get_frame_uv_at_time(time, texture_size)` - 获取当前帧UV坐标
+常用查询方法：
 
-## JSON配置格式
+- `get_frame_at_time(time)`：返回指定时刻对应的 `SpriteFrame`
+- `get_frame_index_at_time(time)`：返回当前帧索引
+- `get_frame_uv_at_time(time, texture_size)`：返回当前帧的 UV 坐标
 
-### 新格式 (v2.0)
+## JSON 配置格式（v2.0）
 
 ```json
 {
   "version": "2.0",
   "texture": "spritesheet.png",
-  
   "sprites": {
     "bullet_red": {
       "rect": [0, 0, 32, 32],
@@ -64,7 +61,6 @@ class AnimatedSprite:
       }
     }
   },
-  
   "animations": {
     "bullet_spin": {
       "frames": [
@@ -77,7 +73,6 @@ class AnimatedSprite:
       "frame_duration": 0.1,
       "loop": true
     },
-    
     "bullet_pulse": {
       "strip": {
         "x": 0,
@@ -96,150 +91,61 @@ class AnimatedSprite:
 }
 ```
 
-### 动画定义方式
+不规则排布的动画使用 `frames` 显式列出每帧 `rect`；等距排布的动画可直接用 `strip` 自动切分（支持 `horizontal` / `vertical` 与可选 `spacing`）。
 
-#### 方式1: 显式帧列表
-适合不规则排列的帧：
+## 代码用法
 
-```json
-"animation_name": {
-  "frames": [
-    {"rect": [0, 0, 32, 32]},
-    {"rect": [32, 0, 32, 32]},
-    {"rect": [64, 0, 32, 32]}
-  ],
-  "frame_duration": 0.1,
-  "loop": true
-}
-```
-
-#### 方式2: 连续帧带 (Strip)
-适合规则排列的动画帧：
-
-```json
-"animation_name": {
-  "strip": {
-    "x": 0,           // 起始X
-    "y": 0,           // 起始Y
-    "width": 32,      // 帧宽度
-    "height": 32,     // 帧高度
-    "count": 8,       // 帧数量
-    "direction": "horizontal",  // horizontal 或 vertical
-    "spacing": 0      // 帧间距（可选）
-  },
-  "frame_duration": 0.1,
-  "loop": true
-}
-```
-
-## 使用示例
-
-### 基本使用
+### 基本加载与 UV 查询
 
 ```python
 from src.resource.texture_asset import TextureAssetManager
 
-# 创建管理器
 manager = TextureAssetManager("assets")
-
-# 加载配置
 manager.load_atlas_config("images/bullet/bullet_atlas.json")
 
-# 获取精灵
 sprite = manager.get_sprite("bullet_red")
-print(f"精灵大小: {sprite.width}x{sprite.height}")
-
-# 获取精灵Surface
-surface = manager.get_sprite_surface("bullet_red")
-
-# 获取UV坐标（用于GPU渲染）
-uv = manager.get_sprite_uv("bullet_red")
-print(f"UV: {uv}")  # (u_left, v_top, u_right, v_bottom)
+uv = manager.get_sprite_uv("bullet_red")  # (u_left, v_top, u_right, v_bottom)
 ```
 
-### 使用动画
+对于 OpenGL 渲染管线，纹理上传采用 `flip_y=True` 时，向 `SpriteRegistry` 注册 UV 也保持同步翻转，确保采样方向一致。
+
+### 动画帧查询
 
 ```python
-# 获取动画
 anim = manager.get_animation("bullet_spin")
-
-# 游戏循环中
 time_elapsed = 0.0
-while running:
-    dt = clock.tick(60) / 1000.0
-    time_elapsed += dt
-    
-    # 获取当前帧索引
-    frame_idx = anim.get_frame_index_at_time(time_elapsed)
-    
-    # 获取当前帧UV（用于GPU渲染）
-    uv = manager.get_animation_frame_uv("bullet_spin", time_elapsed)
+
+# 在 60 Hz 更新循环中推进
+time_elapsed += 1.0 / 60.0
+frame_idx = anim.get_frame_index_at_time(time_elapsed)
+uv = manager.get_animation_frame_uv("bullet_spin", time_elapsed)
 ```
 
-### 兼容旧格式
+### 全局访问与旧配置兼容
 
 ```python
-# 加载旧格式配置
+from src.resource.texture_asset import init_texture_asset_manager, get_texture_asset_manager
+
+init_texture_asset_manager("assets")
+manager = get_texture_asset_manager()
+
+# 兼容加载旧版图集配置
 manager.load_legacy_config("images/bullet1.json")
 ```
 
-### 全局实例
+## 命名与制作建议
 
-```python
-from src.resource.texture_asset import (
-    init_texture_asset_manager,
-    get_texture_asset_manager
-)
+- **短名与全名**：可用 `manager.get_sprite("bullet_red")` 直接查找，跨图集重名时用 `atlas_name.bullet_red` 消歧。
+- **按类别拆分图集**：子弹、敌人、道具、背景分开打包，便于批处理与按需加载。
+- **保留边缘留白**：相邻精灵之间建议留 1–2 像素透明边距，减少线性采样时的边缘渗色。
 
-# 初始化（通常在游戏启动时）
-init_texture_asset_manager("assets")
-
-# 在其他地方获取
-manager = get_texture_asset_manager()
-```
-
-## 精灵命名规范
-
-- 精灵可以通过短名称访问: `manager.get_sprite("bullet_red")`
-- 也可以通过完整名称访问: `manager.get_sprite("atlas_name.bullet_red")`
-- 当多个图集有同名精灵时，使用完整名称避免冲突
-
-## 性能优化
-
-1. **Surface缓存**: `get_sprite_surface()` 自动缓存裁剪后的Surface
-2. **按需加载**: 只加载实际使用的图集
-3. **卸载功能**: `unload_atlas(name)` 释放不需要的资源
-
-## 与现有系统集成
-
-新的 `TextureAssetManager` 可以与现有的 `SpriteManager` 并行使用：
-
-```python
-# 逐步迁移
-old_manager = SpriteManager()
-new_manager = TextureAssetManager()
-
-# 新资产使用新系统
-new_manager.load_atlas_config("images/new_bullet_atlas.json")
-
-# 旧资产继续使用旧系统或转换
-new_manager.load_legacy_config("images/bullet1.json")
-```
-
-## 图集制作建议
-
-1. **按类型分图集**: 子弹、敌人、道具等分开
-2. **合理的帧尺寸**: 统一尺寸便于批量处理
-3. **留白边距**: 避免渲染时边缘采样问题
-4. **2的幂次尺寸**: GPU优化（可选）
-
-## 文件结构示例
+常见资产目录布局：
 
 | 路径 | 用途 |
-|------|------|
-| `assets/images/bullet/bullet_atlas.png` | 子弹纹理图集 |
-| `assets/images/bullet/bullet_atlas.json` | 子弹精灵和动画配置 |
-| `assets/images/enemy/enemy_atlas.png` | 敌人纹理图集 |
-| `assets/images/enemy/enemy_atlas.json` | 敌人精灵配置 |
-| `assets/images/item/item.png` | 道具纹理 |
-| `assets/images/item/item.json` | 道具精灵配置 |
+| --- | --- |
+| `assets/images/bullet/` | 弹幕纹理图集与 JSON 配置 |
+| `assets/images/enemy/` | 敌人精灵与动画配置 |
+| `assets/images/laser/` | 直线与曲线激光纹理配置 |
+| `assets/images/item/` | 道具图集与配置 |
+| `assets/images/background/` | 关卡背景纹理 |
+| `assets/images/ui/` | HUD、字体与界面元素 |

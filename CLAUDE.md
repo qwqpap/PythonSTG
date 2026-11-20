@@ -1,32 +1,27 @@
 # Claude Code 仓库入口
 
-共享工作约定以 [AGENTS.md](AGENTS.md) 为准；本文件只提供入口，不另设一套流程或完成标准。
+仓库共享约定以 [AGENTS.md](AGENTS.md) 为准。
 
-## 按任务查阅
+## 常用文档
 
-| 任务 | 入口 |
+| 任务 | 参考文档 |
 | --- | --- |
-| 安装、运行游戏或打开编辑器 | [快速开始](docs/getting-started.md) |
-| 编辑器实现或修复 | [实施 TODO](docs/EDITOR_IMPLEMENTATION_TODO.md) 的状态表、不变契约和相关阶段；[架构](docs/EDITOR_ARCHITECTURE.md) 的相关章节 |
-| 编辑器整体产品方向或边界调整 | [产品愿景](docs/EDITOR_PRODUCT_VISION.md)，并完整阅读 TODO 与架构 |
-| 手写 Wave、EnemyScript、SpellCard | [脚本须知](game_content/SCRIPTING.md) 的核心原则及所需 API；[脚本参考](docs/STAGE_SCRIPTING_GUIDE.md) |
-| 纹理、敌人预设、独立资产工具 | [工具指南](docs/EDITOR_TOOLS_GUIDE.md)、对应资产专题 |
-| 引擎内部 | [架构概览](docs/architecture.md) 与实际调用入口 |
+| 安装、运行游戏或启动编辑器 | [docs/getting-started.md](docs/getting-started.md) |
+| 编写手写关卡、波次、敌人、符卡 | [docs/STAGE_SCRIPTING_GUIDE.md](docs/STAGE_SCRIPTING_GUIDE.md)、[game_content/SCRIPTING.md](game_content/SCRIPTING.md) |
+| 关卡编辑器设计与架构 | [docs/EDITOR_PRODUCT_VISION.md](docs/EDITOR_PRODUCT_VISION.md)、[docs/EDITOR_ARCHITECTURE.md](docs/EDITOR_ARCHITECTURE.md)、[docs/EDITOR_IMPLEMENTATION_TODO.md](docs/EDITOR_IMPLEMENTATION_TODO.md) |
+| 独立资产工具与预览工具 | [docs/EDITOR_TOOLS_GUIDE.md](docs/EDITOR_TOOLS_GUIDE.md)、[docs/DEVTOOLS_PHASE1.md](docs/DEVTOOLS_PHASE1.md) |
+| 引擎内部模块与渲染 | [docs/architecture.md](docs/architecture.md)、[docs/TEXTURE_ASSET_SYSTEM.md](docs/TEXTURE_ASSET_SYSTEM.md) |
+| 东方移植机制对照 | [docs/TH06_API_COVERAGE.md](docs/TH06_API_COVERAGE.md)、[docs/TH07_PORT_AUDIT.md](docs/TH07_PORT_AUDIT.md) |
 
-查阅范围随任务展开，不需要为无关修改通读所有手册。文档中的历史测试结果不证明当前工作树通过；阶段完成仍须执行 AGENTS 和 TODO 规定的验收。
-
-## 常用入口
-
-从仓库根目录运行；安装步骤见快速开始。
+## 常用命令
 
 ```bash
 python main.py --debug
 pystg-editor game_content/authoring/code_editor_demo
 python tools/editor_launcher.py
+python -m compileall -q main.py src game_content tools
 python tools/validate_assets.py
+git diff --check
 ```
 
-仓库当前不含可运行的 pytest 套件（`tests/` 为空）；提交前至少运行
-`python -m compileall -q main.py src game_content tools`、`python tools/validate_assets.py`
-和 `git diff --check`，并按修改涉及的行为补充真实运行时检查。阶段和最终合并门禁见 TODO，
-文档修改检查链接与文档构建。
+改动文档后运行 `npm run docs:build` 检查站点构建与链接。
