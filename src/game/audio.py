@@ -47,17 +47,17 @@ class AudioChannel(Enum):
 class AudioBank:
     """
     音频资源池
-    
+
     管理一组 SE 和 BGM。支持按名称加载/播放。
     可以作为全局 GameAudioBank 或关卡私有 StageAudioBank。
-    
+
     用法：
         bank = AudioBank()
         bank.load_se("shoot", "assets/audio/se/se_plst00.wav")
         bank.load_se("graze", "assets/audio/se/se_graze.wav")
         bank.play_se("shoot")
     """
-    
+
     def __init__(self, name: str = "default"):
         self.name = name
         self._se_cache: Dict[str, BackendSound] = {}
@@ -65,9 +65,9 @@ class AudioBank:
         self._se_volume: float = 1.0
         self._bgm_volume: float = 1.0
         self._initialized = False
-        
+
         self._ensure_mixer()
-    
+
     def _ensure_mixer(self):
         """确保音频后端已初始化"""
         backend = get_audio_backend()
@@ -78,27 +78,27 @@ class AudioBank:
                 print(f"[AudioBank:{self.name}] mixer 初始化失败")
                 return
         self._initialized = True
-    
+
     # ==================== 加载 ====================
-    
+
     def load_se(self, name: str, path: str) -> bool:
         """
         加载音效
-        
+
         Args:
             name: 音效名称（用于播放时引用，如 "shoot", "graze"）
             path: 文件路径
-            
+
         Returns:
             是否加载成功
         """
         if not self._initialized:
             return False
-        
+
         if not os.path.exists(path):
             print(f"[AudioBank:{self.name}] SE 文件不存在: {path}")
             return False
-        
+
         try:
             sound = self._load_sound_with_fallback(path)
             if sound is None:
@@ -148,46 +148,46 @@ class AudioBank:
         except Exception as e:
             print(f"[AudioBank:{self.name}] SE ASCII 回退失败: {e}")
             return None
-    
+
     def load_se_directory(self, directory: str, prefix_strip: str = "se_",
                           ext: str = ".wav") -> int:
         """
         批量加载目录下所有音效
-        
+
         文件名自动转为音效名称：se_graze.wav → "graze"
-        
+
         Args:
             directory: 音效目录
             prefix_strip: 要去掉的文件名前缀
             ext: 文件扩展名过滤
-            
+
         Returns:
             成功加载的数量
         """
         if not os.path.isdir(directory):
             print(f"[AudioBank:{self.name}] 目录不存在: {directory}")
             return 0
-        
+
         count = 0
         for filename in sorted(os.listdir(directory)):
             if not filename.endswith(ext):
                 continue
-            
+
             # se_graze.wav → "graze"
             name = filename[:-len(ext)]
             if prefix_strip and name.startswith(prefix_strip):
                 name = name[len(prefix_strip):]
-            
+
             path = os.path.join(directory, filename)
             if self.load_se(name, path):
                 count += 1
-        
+
         return count
-    
+
     def load_bgm(self, name: str, path: str) -> bool:
         """
         注册 BGM（不立即加载到内存，播放时才加载）
-        
+
         Args:
             name: BGM 名称
             path: 文件路径
@@ -195,24 +195,24 @@ class AudioBank:
         if not os.path.exists(path):
             print(f"[AudioBank:{self.name}] BGM 文件不存在: {path}")
             return False
-        
+
         self._bgm_paths[name] = path
         return True
-    
+
     def load_bgm_directory(self, directory: str, exts: tuple = (".ogg", ".mp3", ".wav")) -> int:
         """
         批量注册目录下所有 BGM
-        
+
         Args:
             directory: BGM 目录
             exts: 支持的扩展名
-            
+
         Returns:
             注册数量
         """
         if not os.path.isdir(directory):
             return 0
-        
+
         count = 0
         for filename in sorted(os.listdir(directory)):
             if not any(filename.endswith(e) for e in exts):
@@ -221,146 +221,148 @@ class AudioBank:
             path = os.path.join(directory, filename)
             if self.load_bgm(name, path):
                 count += 1
-        
+
         return count
-    
+
     # ==================== SE 播放 ====================
-    
+
     def play_se(self, name: str, volume: Optional[float] = None, loops: int = 0) -> bool:
         """
         播放音效
-        
+
         Args:
             name: 音效名称
             volume: 音量覆盖（0.0~1.0），None 使用全局 SE 音量
             loops: 循环次数（0=播放1次，-1=无限循环）
-            
+
         Returns:
             是否成功播放
         """
         sound = self._se_cache.get(name)
         if sound is None:
             return False
-        
+
         if volume is not None:
             sound.set_volume(volume)
         else:
             sound.set_volume(self._se_volume)
-        
+
         sound.play(loops=loops)
         return True
-    
+
     def stop_se(self, name: str):
         """停止指定音效"""
         sound = self._se_cache.get(name)
         if sound:
             sound.stop()
-    
+
     def stop_all_se(self):
         """停止所有音效"""
         for sound in self._se_cache.values():
             sound.stop()
-    
+
     # ==================== BGM 播放 ====================
-    
+
     def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0,
-                  start: float = 0.0, announce: bool = True) -> bool:
+                  start: float = 0.0, announce: bool = True, *,
+                  loop_start_frame=None, loop_end_frame=None) -> bool:
         """
         播放 BGM（停止当前 BGM 并切换）
-        
+
         Args:
             name: BGM 名称
             loops: 循环次数（-1=无限循环，0=播放1次）
             fade_ms: 淡入时间（毫秒）
             start: 起始位置（秒）
-            
+
         Returns:
             是否成功播放
         """
         if not self._initialized:
             return False
-        
+
         path = self._bgm_paths.get(name)
         if path is None:
             return False
-        
+
         try:
             backend = get_audio_backend()
             backend.set_bgm_volume(self._bgm_volume)
-            return backend.load_and_play_bgm(path, loops=loops, start=start, fade_ms=fade_ms)
+            return backend.load_and_play_bgm(path, loops=loops, start=start, fade_ms=fade_ms,
+                                             loop_start_frame=loop_start_frame, loop_end_frame=loop_end_frame)
         except Exception as e:
             print(f"[AudioBank:{self.name}] 播放 BGM 失败 '{name}': {e}")
             return False
-    
+
     def pause_bgm(self):
         """暂停 BGM"""
         if self._initialized:
             get_audio_backend().pause_bgm()
-    
+
     def unpause_bgm(self):
         """恢复 BGM"""
         if self._initialized:
             get_audio_backend().unpause_bgm()
-    
+
     def stop_bgm(self, fade_ms: int = 0):
         """
         停止 BGM
-        
+
         Args:
             fade_ms: 淡出时间（毫秒），0=立即停止
         """
         if not self._initialized:
             return
         get_audio_backend().stop_bgm(fade_ms)
-    
+
     def is_bgm_playing(self) -> bool:
         """BGM 是否正在播放"""
         if not self._initialized:
             return False
         return get_audio_backend().is_bgm_playing()
-    
+
     # ==================== 音量控制 ====================
-    
+
     def set_se_volume(self, volume: float):
         """设置全局 SE 音量（0.0 ~ 1.0）"""
         self._se_volume = max(0.0, min(1.0, volume))
         for sound in self._se_cache.values():
             sound.set_volume(self._se_volume)
-    
+
     def set_bgm_volume(self, volume: float):
         """设置 BGM 音量（0.0 ~ 1.0）"""
         self._bgm_volume = max(0.0, min(1.0, volume))
         if self._initialized:
             get_audio_backend().set_bgm_volume(self._bgm_volume)
-    
+
     @property
     def se_volume(self) -> float:
         return self._se_volume
-    
+
     @property
     def bgm_volume(self) -> float:
         return self._bgm_volume
-    
+
     # ==================== 查询 ====================
-    
+
     def has_se(self, name: str) -> bool:
         """是否已加载某个 SE"""
         return name in self._se_cache
-    
+
     def has_bgm(self, name: str) -> bool:
         """是否已注册某个 BGM"""
         return name in self._bgm_paths
-    
+
     def get_se_names(self) -> list:
         """获取所有已加载的 SE 名称"""
         return list(self._se_cache.keys())
-    
+
     def get_bgm_names(self) -> list:
         """获取所有已注册的 BGM 名称"""
         return list(self._bgm_paths.keys())
-    
+
     # ==================== 清理 ====================
-    
+
     def clear(self):
         """释放所有音频资源"""
         self.stop_all_se()
@@ -371,10 +373,10 @@ class AudioBank:
 class GameAudioBank(AudioBank):
     """
     全局游戏音频池
-    
+
     持有整个游戏生命周期内通用的音效和 BGM。
     由 main.py 在启动时初始化。
-    
+
     典型全局 SE：
         - shoot:     自机射击
         - graze:     擦弹
@@ -394,7 +396,7 @@ class GameAudioBank(AudioBank):
         - kira:      星星音效
         - lazer:     激光
     """
-    
+
     # 音效名 → 文件名映射（常用预设）
     DEFAULT_SE_MAP = {
         "shoot":    "se_plst00.wav",
@@ -423,15 +425,15 @@ class GameAudioBank(AudioBank):
         "warning":  "se_hyz_warning.wav",
         "charge":   "se_hyz_charge00.wav",
     }
-    
+
     def __init__(self):
         super().__init__(name="game")
-    
+
     def load_defaults(self, se_dir: str = "assets/audio/se",
                       bgm_dir: str = "assets/audio/music"):
         """
         加载默认的全局音效和 BGM
-        
+
         Args:
             se_dir: 音效目录
             bgm_dir: BGM 目录
@@ -442,9 +444,9 @@ class GameAudioBank(AudioBank):
             path = os.path.join(se_dir, filename)
             if self.load_se(name, path):
                 loaded += 1
-        
+
         print(f"[GameAudioBank] 加载 {loaded}/{len(self.DEFAULT_SE_MAP)} 个全局 SE")
-        
+
         # 注册 BGM 目录
         bgm_count = self.load_bgm_directory(bgm_dir)
         if bgm_count > 0:
@@ -454,66 +456,66 @@ class GameAudioBank(AudioBank):
 class StageAudioBank(AudioBank):
     """
     关卡私有音频池
-    
+
     每个关卡可以有自己的专属音效和 BGM。
     在关卡加载时初始化，关卡结束时释放。
-    
+
     当 Stage 私有 bank 有同名 SE 时，覆盖全局 bank。
-    
+
     典型用途：
         - 关卡专属 BGM（道中/Boss）
         - Boss 专属符卡音效
         - 特殊弹幕音效
     """
-    
+
     def __init__(self, stage_id: str):
         super().__init__(name=f"stage:{stage_id}")
         self.stage_id = stage_id
-    
+
     @classmethod
     def from_directory(cls, stage_id: str, stage_dir: str) -> 'StageAudioBank':
         """
         从关卡目录自动加载音频
-        
+
         目录结构约定：
             game_content/stages/stageN/
                 audio/
                     se/          ← 关卡专属 SE
                     music/       ← 关卡专属 BGM
-        
+
         Args:
             stage_id: 关卡 ID
             stage_dir: 关卡目录路径
         """
         bank = cls(stage_id)
-        
+
         # 加载关卡专属 SE
         se_dir = os.path.join(stage_dir, "audio", "se")
         if os.path.isdir(se_dir):
             count = bank.load_se_directory(se_dir)
             if count > 0:
                 print(f"[StageAudioBank:{stage_id}] 加载 {count} 个关卡 SE")
-        
+
         # 注册关卡专属 BGM
         bgm_dir = os.path.join(stage_dir, "audio", "music")
         if os.path.isdir(bgm_dir):
             count = bank.load_bgm_directory(bgm_dir)
             if count > 0:
                 print(f"[StageAudioBank:{stage_id}] 注册 {count} 个关卡 BGM")
-        
+
         return bank
 
 
 class AudioManager:
     """
     音频管理器 - 统一调度全局和关卡音频
-    
+
     查找优先级：Stage 私有 > Game 全局
-    
+
     这是提供给 StageContext 的音频接口。
     内容脚本通过 ctx.audio 访问。
     """
-    
+
     def __init__(self, game_bank: GameAudioBank):
         self._game_bank = game_bank
         self._stage_bank: Optional[StageAudioBank] = None
@@ -522,35 +524,35 @@ class AudioManager:
         self._current_bgm_name: str = ""
         self._bgm_notification_text: str = ""
         self._bgm_notification_until: float = 0.0
-    
+
     @property
     def game_bank(self) -> GameAudioBank:
         """全局音频池"""
         return self._game_bank
-    
+
     @property
     def stage_bank(self) -> Optional[StageAudioBank]:
         """当前关卡音频池"""
         return self._stage_bank
-    
+
     def set_stage_bank(self, bank: Optional[StageAudioBank]):
         """
         设置当前关卡音频池（关卡切换时调用）
-        
+
         传入 None 表示清除关卡音频。
         """
         # 先清理旧的
         if self._stage_bank is not None:
             self._stage_bank.clear()
         self._stage_bank = bank
-    
+
     # ==================== SE ====================
-    
+
     def play_se(self, name: str, volume: Optional[float] = None, loops: int = 0,
                 min_interval: float = 0.0) -> bool:
         """
         播放音效（Stage 私有优先，fallback 到全局）
-        
+
         Args:
             name: 音效名称
             volume: 音量 (0.0~1.0)
@@ -572,7 +574,7 @@ class AudioManager:
         if played and min_interval > 0.0:
             self._se_last_played_at[name] = time.perf_counter()
         return played
-    
+
     def stop_se(self, name: str):
         """停止音效"""
         if self._stage_bank and self._stage_bank.has_se(name):
@@ -590,20 +592,21 @@ class AudioManager:
         if played:
             self._danmaku_se_next_time = now + max(0.20, min_interval)
         return played
-    
+
     def has_se(self, name: str) -> bool:
         """是否有某个 SE（任一 bank 有即可）"""
         if self._stage_bank and self._stage_bank.has_se(name):
             return True
         return self._game_bank.has_se(name)
-    
+
     # ==================== BGM ====================
-    
+
     def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0,
-                  start: float = 0.0, announce: bool = True) -> bool:
+                  start: float = 0.0, announce: bool = True, *,
+                  loop_start_frame=None, loop_end_frame=None) -> bool:
         """
         播放 BGM（Stage 私有优先）
-        
+
         Args:
             name: BGM 名称
             loops: 循环
@@ -612,9 +615,11 @@ class AudioManager:
         """
         normalized_name = normalize_bgm_name(name)
         if self._stage_bank and self._stage_bank.has_bgm(name):
-            played = self._stage_bank.play_bgm(name, loops, fade_ms, start)
+            played = self._stage_bank.play_bgm(name, loops, fade_ms, start,
+                                               loop_start_frame=loop_start_frame, loop_end_frame=loop_end_frame)
         else:
-            played = self._game_bank.play_bgm(name, loops, fade_ms, start)
+            played = self._game_bank.play_bgm(name, loops, fade_ms, start,
+                                              loop_start_frame=loop_start_frame, loop_end_frame=loop_end_frame)
 
         if played:
             self._current_bgm_name = normalized_name
@@ -624,19 +629,27 @@ class AudioManager:
                 self._bgm_notification_until = time.perf_counter() + 5.0
 
         return played
-    
+
+    def seek_bgm(self, seconds):
+        backend = get_audio_backend()
+        return backend.seek_bgm(seconds) if backend is not None else False
+
+    def get_bgm_position(self):
+        backend = get_audio_backend()
+        return backend.get_bgm_position() if backend is not None else None
+
     def pause_bgm(self):
         """暂停 BGM"""
         self._game_bank.pause_bgm()
-    
+
     def unpause_bgm(self):
         """恢复 BGM"""
         self._game_bank.unpause_bgm()
-    
+
     def stop_bgm(self, fade_ms: int = 0):
         """停止 BGM"""
         self._game_bank.stop_bgm(fade_ms)
-    
+
     def is_bgm_playing(self) -> bool:
         """BGM 是否在播放"""
         return self._game_bank.is_bgm_playing()
@@ -653,23 +666,23 @@ class AudioManager:
             self._bgm_notification_until = 0.0
             return ""
         return self._bgm_notification_text
-    
+
     # ==================== 全局音量 ====================
-    
+
     def set_se_volume(self, volume: float):
         """设置 SE 音量"""
         self._game_bank.set_se_volume(volume)
         if self._stage_bank:
             self._stage_bank.set_se_volume(volume)
-    
+
     def set_bgm_volume(self, volume: float):
         """设置 BGM 音量"""
         self._game_bank.set_bgm_volume(volume)
         if self._stage_bank:
             self._stage_bank.set_bgm_volume(volume)
-    
+
     # ==================== 清理 ====================
-    
+
     def cleanup(self):
         """清理所有音频资源"""
         if self._stage_bank:

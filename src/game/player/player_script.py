@@ -7,6 +7,7 @@ v3: 脚本完全控制发射逻辑、僚机管理和技能
 import importlib.util
 import math
 import os
+from dataclasses import replace
 from typing import TYPE_CHECKING, Optional, Callable, Any, List, Tuple
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ class PlayerScript:
     - on_skill(slot) 技能触发
     - on_bullet_hit_enemy 被动钩子
     """
-    
+
     def __init__(self, player: 'PlayerBase'):
         self.player = player
         self.config = {}
@@ -82,7 +83,7 @@ class PlayerScript:
         if y is None:
             y = self.player.pos[1]
 
-        bullet_type = 1 if homing else 0
+        bullet_type = kwargs.pop('bullet_type', 1 if homing else 0)
 
         anim_id = -1
         if bullet_anim:
@@ -101,6 +102,9 @@ class PlayerScript:
             offsets = [-4.0 + step * i for i in range(multiplier)]
 
         actual_damage = self.scale_damage(damage) if scale_with_power else float(damage)
+        if kwargs.get('impact') is not None and scale_with_power:
+            impact = kwargs['impact']
+            kwargs['impact'] = replace(impact, damage=self.scale_damage(impact.damage))
 
         first_idx = -1
         for offset in offsets:
@@ -115,10 +119,41 @@ class PlayerScript:
                 penetrate=penetrate,
                 scale=scale,
                 anim_id=anim_id,
+                **kwargs,
             )
             if first_idx < 0:
                 first_idx = idx
         return first_idx
+
+    def fire_laser(self, *, owner=None, angle=90.0, length=1.5, width=.03,
+                   start_offset=0.0, offset=(0.0, 0.0), damage=10.0,
+                   hit_interval=6.0, sprite_id='', bullet_anim='', max_lifetime=0.0,
+                   scale_with_power=True, damage_source='shot'):
+        """One anchored oriented rectangle, not a chain of point projectiles.
+
+        Length/width are normalized full dimensions. Damage cadence is per
+        target in simulation frames. Cancel the returned handle on shoot release.
+        """
+        from ...core.collision_shapes import Hitbox
+        owner = self.player if owner is None else owner
+        theta = math.radians(angle)
+        center = start_offset + length * .5
+        anchor_offset = (offset[0] + math.cos(theta)*center,
+                         offset[1] + math.sin(theta)*center)
+        pos = getattr(owner, 'pos', None)
+        if pos is not None:
+            x, y = pos
+        else:
+            x = getattr(owner, 'current_x', getattr(owner, 'x', 0.0))
+            y = getattr(owner, 'current_y', getattr(owner, 'y', 0.0))
+        index = self.bullet_pool.spawn(
+            x+anchor_offset[0], y+anchor_offset[1], theta, 0.0,
+            sprite_id=sprite_id, damage=self.scale_damage(damage) if scale_with_power else float(damage), bullet_type=2,
+            anim_id=self.bullet_pool.anim_registry.get_id(bullet_anim) if bullet_anim else -1,
+            hitbox=Hitbox.box(length, width, angle), hit_interval=hit_interval,
+            render_size=(length, width), anchor=owner, anchor_offset=anchor_offset,
+            max_lifetime=max_lifetime, damage_source=damage_source)
+        return self.bullet_pool.attack_handle(index)
 
     def fire_from_option(self, option_idx: int, bullet_anim: str = "",
                          angle: float = 90.0, speed: float = 0.05,
@@ -185,10 +220,13 @@ class PlayerScript:
 
     def remove_option(self, option: 'OptionEntity'):
         """移除一个僚机"""
+        self.bullet_pool.cancel_anchored(option)
         self.player.option_manager.remove(option)
 
     def clear_options(self):
         """清除所有僚机"""
+        for option in self.options:
+            self.bullet_pool.cancel_anchored(option)
         self.player.option_manager.clear()
 
     # ================================================================
@@ -220,8 +258,13 @@ class PlayerScript:
         return False
 
     def on_hit(self) -> bool:
-        """被弹时调用"""
+        """Legacy hook: True consumes the hit without a miss."""
         return False
+
+    def on_receive_hit(self, hit):
+        """Return HitDecision, or None for the configured default hit policy."""
+        from .hit import HitDecision
+        return HitDecision.handled() if self.on_hit() else None
 
     # ================================================================
     # 被动钩子
@@ -268,35 +311,35 @@ def load_player_script(script_path: str, player: 'PlayerBase') -> Optional[Playe
     """
     if not os.path.exists(script_path):
         return None
-    
+
     try:
         spec = importlib.util.spec_from_file_location("player_script", script_path)
         if spec is None or spec.loader is None:
             print(f"警告: 无法加载脚本 {script_path}")
             return None
-        
+
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        
+
         script_class = None
         for name in dir(module):
             obj = getattr(module, name)
-            if (isinstance(obj, type) and 
-                issubclass(obj, PlayerScript) and 
+            if (isinstance(obj, type) and
+                issubclass(obj, PlayerScript) and
                 obj is not PlayerScript):
                 script_class = obj
                 break
-        
+
         if script_class is None and hasattr(module, 'create_script'):
             return module.create_script(player)
-        
+
         if script_class is None:
             print(f"警告: 脚本 {script_path} 中没有找到 PlayerScript 子类")
             return None
-        
+
         script = script_class(player)
         return script
-        
+
     except Exception as e:
         print(f"加载脚本失败 {script_path}: {e}")
         import traceback

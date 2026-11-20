@@ -19,7 +19,7 @@ import inspect
 import numpy as np
 
 from .danmaku_audio import resolve_fire_sound
-from ..tasks import FrameTaskOwner, cancel_tasks, pump_tasks
+from ..tasks import FrameTaskOwner, cancel_tasks, pump_tasks, wait_frames, simulation_rate, NEXT_FRAME
 from ..bullet.behavior import BulletGroup
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ class SpellCard(FrameTaskOwner, ABC):
         self._init_tasks()
 
     @property
-    def time(self) -> int:
+    def time(self) -> float:
         """当前帧数"""
         return self._time
 
@@ -89,7 +89,7 @@ class SpellCard(FrameTaskOwner, ABC):
         return max(0.0, self.time_limit - self.elapsed_seconds)
 
     @property
-    def timer_frames(self) -> int:
+    def timer_frames(self) -> float:
         """Boss countdown elapsed time, separate from the controller clock."""
         return self._timer_frames
 
@@ -135,12 +135,12 @@ class SpellCard(FrameTaskOwner, ABC):
         if not self._active:
             return False
 
-        self._time += 1
-        if self.ctx is None or not self.ctx.is_time_stopped('boss_timer'):
-            self._timer_frames += 1
+        self._advance_clock()
+        rate = simulation_rate(self, 'boss_timer')
+        self._timer_frames += 1 if rate == 1.0 else rate
 
         # 检查时间限制
-        if self.elapsed_seconds >= self.time_limit:
+        if self._timer_frames + 1e-8 >= self.time_limit * 60.0:
             self.end("timeout")
             return False
 
@@ -456,8 +456,7 @@ class SpellCard(FrameTaskOwner, ABC):
     @types.coroutine
     def wait(self, frames: int) -> Generator:
         """等待指定帧数"""
-        for _ in range(frames):
-            yield
+        yield from wait_frames(frames)
 
     @types.coroutine
     def wait_seconds(self, seconds: float) -> Generator:
@@ -468,7 +467,7 @@ class SpellCard(FrameTaskOwner, ABC):
     def wait_until(self, condition: Callable[[], bool]) -> Generator:
         """等待直到条件满足"""
         while not condition():
-            yield
+            yield NEXT_FRAME
 
     # ==================== 辅助方法 ====================
 
@@ -524,6 +523,9 @@ class SpellCardContext:
     def is_time_stopped(self, domain: str) -> bool:
         """Minimal legacy contexts have no system time-stop controller."""
         return False
+
+    def get_simulation_rate(self, domain: str) -> float:
+        return 0.0 if self.is_time_stopped(domain) else 1.0
 
     def create_bullet(self, **kwargs):
         """创建子弹"""

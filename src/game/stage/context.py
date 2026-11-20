@@ -22,6 +22,9 @@ from ..audio import AudioManager
 from ..events import EventBus, EventBusError, LifecycleEvent
 from ..bullet.batch import BulletSnapshot, normalize_scalar
 from ..state import RunState, TimeControl
+from ..screen_effects import ScreenEffects
+from ..background import BackgroundState
+from ..overlay import StageOverlay
 from ..bullet.tags import BOMB_PROTECTED_TAGS
 from ..bullet import (
     FLAG_BOUNCE_X, FLAG_BOUNCE_Y, FLAG_IS_EMITTER, FLAG_RENDER_ANGLE_LOCKED,
@@ -122,25 +125,43 @@ class StageContext(SpellCardContext):
                  background_renderer=None,
                  event_bus: EventBus | None = None,
                  run_state: RunState | None = None,
-                 particle_pool=None):
+                 particle_pool=None, animation_assets=None):
+        from ..animation import AnimationCollection
+        from ..trail import TrailCollection
+        from ...resource.texture_asset import get_texture_asset_manager
+        self.animations = AnimationCollection(
+            animation_assets if animation_assets is not None else get_texture_asset_manager())
+        self.trails = TrailCollection(bullet_pool.sprite_registry)
         self.run_state = run_state if run_state is not None else RunState()
         self.time_control = TimeControl()
+        self._frame_rates = self.time_control.sample()
+        self._frame_stop_mask = 0
+        self._sampled_frame = None
+        self._simulation_time = 0.0
+        self._animation_effects_paused = False
         self.bullet_pool = bullet_pool
         self._player = player
         self._player_proxy = PlayerProxy(player)
         self._enemy_manager = enemy_manager
         self._laser_pool = laser_pool
         self._item_pool = item_pool
+        self._item_collection_rule_owned = False
+        self._item_collection_rule = None
+        self._previous_item_collection_rule = None
         self._particle_pool = particle_pool
         self._audio_manager = audio_manager
         self._background_renderer = background_renderer
         self._enemy_scripts: List[Any] = []
+        self._enemy_scripts_closed = False
         # Sparse authored-stage state. These are semantic controller records,
         # never per-bullet callbacks or scene-tree bullet objects.
         self._authored_node_positions: Dict[str, tuple[float, float]] = {}
         self._authored_node_properties: Dict[str, Dict[str, Any]] = {}
         self._timeline_events = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
         self._background_transitions: List[Dict[str, Any]] = []
+        self.screen_effects = ScreenEffects()
+        self.background = BackgroundState()
+        self.overlays = StageOverlay()
         self._lifecycle_trace = deque(maxlen=self.AUTHORING_TRACE_LIMIT)
         self._runtime_frame = 0
         self.seed = 0
@@ -154,6 +175,8 @@ class StageContext(SpellCardContext):
         self._event_bus: EventBus | None = None
         self._event_subscriptions: list[Any] = []
         self._bullet_conversions = {}
+        self._player_hit_rule = None
+        self._previous_hit_rule = None
 
         if not StageContext._aliases_loaded:
             StageContext.load_bullet_aliases()
@@ -186,7 +209,42 @@ class StageContext(SpellCardContext):
         return self.time_control.stop(*domains)
 
     def is_time_stopped(self, domain):
-        return self.time_control.is_stopped(domain)
+        return self.get_simulation_rate(domain) == 0.0
+
+    def get_simulation_rate(self, domain):
+        return self._frame_rates[domain]
+
+    def set_simulation_scale(self, scale, *domains):
+        """Set 0..1 simulation rate. Frame-start sampling applies it next frame.
+
+        Default domains include actor scripts and Boss countdown. This differs
+        from set_time_scale, which remains a per-enemy-bullet numerical setting.
+        """
+        self.time_control.set_scale(scale, *domains)
+
+    def slow_motion(self, scale, *domains):
+        return self.time_control.scale(scale, *domains)
+
+    def set_player_hit_rule(self, rule):
+        """Install a stage-owned rule(player, PlayerHit) -> HitDecision | None."""
+        self._release_player_hit_rule()
+        if rule is not None:
+            self._previous_hit_rule = self._player.hit_rule
+            self._player_hit_rule = rule
+            self._player.hit_rule = rule
+            self._player._hit_rule_scopes.append(self)
+
+    def _release_player_hit_rule(self):
+        if self._player_hit_rule is not None:
+            scopes = self._player._hit_rule_scopes
+            index = scopes.index(self)
+            if index+1 < len(scopes):
+                scopes[index+1]._previous_hit_rule = self._previous_hit_rule
+            if index == len(scopes)-1 and self._player.hit_rule is self._player_hit_rule:
+                self._player.hit_rule = self._previous_hit_rule
+            scopes.remove(self)
+            self._player_hit_rule = None
+            self._previous_hit_rule = None
 
     # ==================== 非碰撞粒子 API ====================
 
@@ -223,6 +281,50 @@ class StageContext(SpellCardContext):
         return (self._particle_pool.count if group is None
                 else self._particle_pool.count_group(group))
 
+    def attach_animation(self, owner, name, **options):
+        """Attach a sparse visual to an existing actor in this stage scope."""
+        if owner.ctx is not self:
+            raise ValueError('animation owner belongs to another stage context')
+        return self.animations.attach(owner, name, **options)
+
+    def play_animation(self, name, x, y, **options):
+        """Play an independent decoration, including a post-death animation."""
+        return self.animations.attach(None, name, x=x, y=y, **options)
+
+    def attach_trail(self, owner, sprite_id, **options):
+        """Attach a continuous non-colliding ribbon to an existing actor."""
+        if owner.ctx is not self:
+            raise ValueError('trail owner belongs to another stage context')
+        return self.trails.attach(owner, sprite_id, **options)
+
+    def update_animations(self):
+        self.animations.update(self._animation_effects_paused, self.get_simulation_rate('effects'))
+        self.trails.update(self.runtime_frame, self.get_simulation_rate('scripts'))
+        self.screen_effects.update(self.get_simulation_rate('effects'), frame=self.runtime_frame)
+
+    def shake_screen(self, frames=80, amplitude=8, *, seed=None):
+        """Cancellable playfield-only camera shake, amplitude in game pixels."""
+        return self.screen_effects.shake(frames, amplitude,
+                                         seed=self.seed if seed is None else seed,
+                                         frame=self.runtime_frame)
+
+    def flash_screen(self, color=(207 / 255, 207 / 255, 1.0, 208 / 255), frames=16):
+        """A cancellable linear pulse over the playfield, not the HUD.
+
+        Color is RGBA 0..1, duration is effects simulation frames. The formal
+        game and preview draw the same stage-owned collection explicitly.
+        """
+        return self.screen_effects.pulse(color, frames, frame=self.runtime_frame)
+
+    def configure_bullet_birth(self, group, *, warmup_frames=0.0, motion_factor=1.0,
+                               velocity_boost=0.0, boost_frames=0.0,
+                               offscreen_grace_frames=0.0):
+        return self.bullet_pool.configure_birth(
+            group, warmup_frames=warmup_frames, motion_factor=motion_factor,
+            velocity_boost=velocity_boost, boost_frames=boost_frames,
+            offscreen_grace_frames=offscreen_grace_frames,
+        )
+
     # ==================== 子弹 API ====================
 
     def capture_bullets(self, indices):
@@ -257,8 +359,9 @@ class StageContext(SpellCardContext):
         for name in ('vel', 'speed', 'acc', 'speed_accel'):
             if name in values:
                 values[name] = values[name] * 60.0
-        if 'angle' in values:
-            values['angle'] = np.rad2deg(values['angle'])
+        for name in ('angle', 'hitbox_angle', 'render_angle', 'render_angle_offset'):
+            if name in values:
+                values[name] = np.rad2deg(values[name])
         return BulletSnapshot(snapshot.group, values)
 
     def run_bullet_rule(self, rule, group=None, *, tag=None, fields=None, frames=None):
@@ -301,7 +404,10 @@ class StageContext(SpellCardContext):
                           time_scale=None, bullet_type=None, color='red',
                           render_scale=None, cooldown: int = 0, cooldown_key=None,
                           positions=None, velocities=None, vector_accel=None,
-                          sprite_indices=None, angle_accel=None):
+                          sprite_indices=None, angle_accel=None, hitbox=None,
+                          collision_shape=None, collision_radius=None,
+                          hitbox_size=None, hitbox_angle=None, render_angle_offset=None,
+                          render_flip_y=None):
         """Batch action; author angles are degrees, cooldown is game frames."""
         return self.bullet_pool.transform_bullets(
             group, tag=tag, region=self._bullet_region(region),
@@ -316,28 +422,41 @@ class StageContext(SpellCardContext):
             vector_accel=None if vector_accel is None else np.asarray(vector_accel) / 60.0,
             sprite_indices=sprite_indices,
             motion_angular_accel=None if angle_accel is None else np.deg2rad(angle_accel),
+            hitbox=hitbox, collision_shape=collision_shape, radius=collision_radius,
+            hitbox_size=hitbox_size,
+            hitbox_angle=None if hitbox_angle is None else np.deg2rad(hitbox_angle),
+            render_angle_offset=None if render_angle_offset is None else np.deg2rad(render_angle_offset),
+            render_flip_y=render_flip_y,
         )
 
     def set_bullet_behavior(self, group=None, *, tag: int | None = None, stages=()):
+        """Set timed movement segments, or cancel them with an empty sequence.
+
+        Numeric fields accept scalars or arrays aligned with the original fixed
+        group. ``vector_accel`` accepts (x, y) or an (N, 2) array. Expired slots
+        never shift a remaining bullet's parameter row. Units match the scalar
+        API: frames, author speed/acceleration, and degrees/second turn rate.
+        """
         converted = []
         supported = {'frames', 'speed', 'angle', 'aim', 'accel', 'turn_rate',
                      'bounce_x', 'bounce_y', 'bullet_type', 'color', 'vector_accel',
-                     'homing', 'max_turn_rate', 'wrap_x', 'wrap_y'}
+                     'homing', 'max_turn_rate', 'wrap_x', 'wrap_y',
+                     'angle_offset', 'velocity_scale_end'}
         for stage in stages:
             values = dict(stage)
             unknown = set(values) - supported
             if unknown:
                 raise TypeError(f"unsupported bullet stage fields: {', '.join(sorted(unknown))}")
             frame_count = values.pop('frames', None)
-            values['duration'] = None if frame_count is None else frame_count / 60.0
+            values['duration'] = None if frame_count is None else np.asarray(frame_count) / 60.0
             for field in ('speed', 'accel'):
                 if field in values:
-                    values[field] /= 60.0
+                    values[field] = np.asarray(values[field]) / 60.0
             if 'vector_accel' in values:
                 values['vector_accel'] = np.asarray(values['vector_accel']) / 60.0
-            for field in ('angle', 'turn_rate', 'max_turn_rate'):
+            for field in ('angle', 'angle_offset', 'turn_rate', 'max_turn_rate'):
                 if field in values:
-                    values[field] = math.radians(values[field])
+                    values[field] = np.deg2rad(values[field])
             color = values.pop('color', 'red')
             if 'bullet_type' in values:
                 values['sprite_id'] = self._resolve_sprite_id(values.pop('bullet_type'), color)
@@ -407,6 +526,8 @@ class StageContext(SpellCardContext):
                       curve_params: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
                       delay: int = 0,
                       vector_accel=None,
+                      render_angle_offset: float = 0.0,
+                      render_flip_y: bool = False,
                       **kwargs) -> int:
         """
         创建一颗直线运动子弹。
@@ -425,6 +546,8 @@ class StageContext(SpellCardContext):
             bounce_x/bounce_y: 边界反弹
             spin: 渲染角角速度（度/秒）
             render_angle: 初始渲染朝向（度，None=跟随运动角）
+            render_angle_offset: 额外视觉偏置（度；持续叠加，不改变运动或锁角）
+            render_flip_y: 仅翻转渲染UV的Y轴；默认不改变既有内容
             render_scale: 渲染尺寸倍率
             max_lifetime: 最长存活秒数（0=无限）
             collision_radius: 归一化碰撞半径
@@ -466,6 +589,8 @@ class StageContext(SpellCardContext):
             flags=flags,
             angular_vel=math.radians(spin),
             render_angle=ra,
+            render_angle_offset=math.radians(render_angle_offset),
+            render_flip_y=render_flip_y,
             render_scale=render_scale,
             max_lifetime=max_lifetime,
             radius=collision_radius,
@@ -509,6 +634,9 @@ class StageContext(SpellCardContext):
         curve_type: int = 0,
         curve_params: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
         vector_accel=(0.0, 0.0),
+        hitbox=None, collision_shape=0, hitbox_size=(0.0, 0.0), hitbox_angle=0.0,
+        render_angle_offset: float = 0.0,
+        render_flip_y: bool = False,
     ) -> np.ndarray:
         """Create a heterogeneous formal-runtime burst in one pool operation.
 
@@ -546,6 +674,10 @@ class StageContext(SpellCardContext):
             radius=collision_radius, tag=tag, friction=friction, time_scale=time_scale, flags=flags,
             angular_vel=np.deg2rad(spin), render_angles=render_angles, max_lifetime=max_lifetime,
             render_scale=render_scale, curve_type=curve_type, curve_param=curve_params,
+            hitbox=hitbox, collision_shape=collision_shape, hitbox_size=hitbox_size,
+            hitbox_angle=np.deg2rad(hitbox_angle),
+            render_angle_offset=np.deg2rad(render_angle_offset),
+            render_flip_y=render_flip_y,
         )
 
         result = np.asarray(indices, dtype=np.intp)
@@ -762,7 +894,7 @@ class StageContext(SpellCardContext):
         if self._item_pool:
             self._item_pool.spawn_drop(x, y, **kwargs)
 
-    def spawn_item(self, x, y, item_type, *, speed=None, angle=None):
+    def spawn_item(self, x, y, item_type, *, speed=None, angle=None, tag=0):
         """Spawn any ItemType; optional speed is units/second, angle is degrees."""
         if self._item_pool is None:
             raise RuntimeError('ItemPool is not bound to current StageContext')
@@ -770,6 +902,7 @@ class StageContext(SpellCardContext):
             x, y, item_type,
             speed=None if speed is None else speed / 60.0,
             angle=angle,
+            tag=tag,
         )
 
     def add_score(self, amount: int):
@@ -791,10 +924,26 @@ class StageContext(SpellCardContext):
         return self._item_pool.config
 
     def set_item_collection_rule(self, handler):
-        """Replace sparse item collection policy; None restores legacy rules."""
+        """Replace sparse collection policy; return False for the default.
+
+        None removes the handler. Existing handlers returning None continue to
+        replace collection. ItemCollection.tag preserves content-owned labels.
+        """
         if self._item_pool is None:
             raise RuntimeError('ItemPool is not bound to current StageContext')
+        if not self._item_collection_rule_owned:
+            self._previous_item_collection_rule = self._item_pool.collection_handler
+            self._item_collection_rule_owned = True
+        self._item_collection_rule = handler
         self._item_pool.collection_handler = handler
+
+    def _release_item_collection_rule(self):
+        if self._item_collection_rule_owned:
+            if self._item_pool.collection_handler is self._item_collection_rule:
+                self._item_pool.collection_handler = self._previous_item_collection_rule
+            self._item_collection_rule_owned = False
+            self._item_collection_rule = None
+            self._previous_item_collection_rule = None
 
     def cancel_bullets_for_bomb(self, *, to_items=True):
         """Public batch Bomb cancellation, preserving protected tags/reason."""
@@ -812,8 +961,15 @@ class StageContext(SpellCardContext):
         return self._player_proxy
 
     def bind_player(self, player):
+        rule = self._player_hit_rule
+        self._release_player_hit_rule()
+        cancel_hit = getattr(self._player, 'cancel_pending_hit', None)
+        if cancel_hit is not None:
+            cancel_hit(discard_result=True)
         self._player = player
         self._player_proxy = PlayerProxy(player)
+        if rule is not None:
+            self.set_player_hit_rule(rule)
 
     def get_enemies(self) -> list:
         """获取当前活跃的敌人列表"""
@@ -824,23 +980,42 @@ class StageContext(SpellCardContext):
     # ==================== 敌人脚本管理 API ====================
 
     def add_enemy_script(self, enemy_script):
+        if self._enemy_scripts_closed:
+            enemy_script.dispose()
+            return
         self._enemy_scripts.append(enemy_script)
 
     def update_enemy_scripts(self):
-        write = 0
-        for i in range(len(self._enemy_scripts)):
-            if self._enemy_scripts[i].update():
-                self._enemy_scripts[write] = self._enemy_scripts[i]
-                write += 1
-        del self._enemy_scripts[write:]
+        enemies = self._enemy_scripts
+        survivors = []
+        count = len(enemies)
+        for i in range(count):
+            enemy = enemies[i]
+            alive = enemy.update()
+            # A running actor may clear the whole collection. Its replacement
+            # list owns any finally-spawned actors; never resurrect this pass.
+            if self._enemy_scripts is not enemies:
+                return
+            if alive:
+                survivors.append(enemy)
+        # Actor Tasks may append children during this pass. Compact only the
+        # original prefix; the newborn suffix starts on the next control frame.
+        enemies[:count] = survivors
 
     def get_enemy_scripts(self) -> List[Any]:
         return self._enemy_scripts
 
     def clear_enemy_scripts(self):
-        for enemy in tuple(self._enemy_scripts):
-            enemy.dispose()
-        self._enemy_scripts.clear()
+        enemies, self._enemy_scripts = self._enemy_scripts, []
+        first_error = None
+        for enemy in enemies:
+            try:
+                enemy.dispose()
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
 
     @property
     def ctx(self):
@@ -849,18 +1024,22 @@ class StageContext(SpellCardContext):
 
     @property
     def time(self):
-        return self._runtime_frame
+        return self._simulation_time
 
     def wait(self, frames: int):
         from ..tasks import wait_frames
         return wait_frames(frames)
+
+    def wait_control(self, frames):
+        from ..tasks import wait_frames
+        return wait_frames(frames, clock='control')
 
     def spawn_task(self, coroutine):
         from ..tasks import spawn_task
         return spawn_task(self, coroutine)
 
     async def wait_event(self, event_type: str, *, owner: str | None = None,
-                         timeout: int | None = None):
+                         timeout: int | None = None, clock='simulation'):
         """Wait for a sparse next-frame event and always release subscription."""
         if self._event_bus is None:
             raise RuntimeError("event waiting requires a bound EventBus")
@@ -871,12 +1050,14 @@ class StageContext(SpellCardContext):
                 received.append(event)
 
         subscription = self._event_bus.subscribe(event_type, accept)
-        started = self.time
+        from ..tasks import wait_frames
+        read_clock = (lambda: self.runtime_frame) if clock == 'control' else (lambda: self.time)
+        started = read_clock()
         try:
             while not received:
-                if timeout is not None and self.time - started >= timeout:
+                if timeout is not None and read_clock() - started >= timeout:
                     raise TimeoutError(f"event {event_type!r} was not received within {timeout} frames")
-                await self.wait(1)
+                await wait_frames(1, clock=clock)
             return received[0]
         finally:
             subscription.cancel()
@@ -886,21 +1067,44 @@ class StageContext(SpellCardContext):
         pump_tasks(self)
 
     def dispose(self):
-        self.clear_enemy_scripts()
+        self._enemy_scripts_closed = True
+        first_error = None
+
+        def cleanup(action, *args, **kwargs):
+            nonlocal first_error
+            try:
+                action(*args, **kwargs)
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+
+        # A failed actor finally must not strand the Context's remaining tasks,
+        # subscriptions or time-control leases. Report the error after cleanup.
+        cleanup(self.clear_enemy_scripts)
         group = getattr(self, '_frame_tasks', None)
         if group is not None:
-            group.cancel(close=True)
+            cleanup(group.cancel, close=True)
         for token in tuple(self._bullet_conversions):
-            self.cancel_bullet_conversion(token)
-        self.bind_event_bus(None)
-        self._script_event_handlers.clear()
-        self._reaction_actions.clear()
-        self.time_control.clear()
+            cleanup(self.cancel_bullet_conversion, token)
+        cleanup(self.bind_event_bus, None)
+        cleanup(self._script_event_handlers.clear)
+        cleanup(self._reaction_actions.clear)
+        cleanup(self.time_control.clear)
         if self._particle_pool is not None:
-            self._particle_pool.clear()
-        # Closing tasks emits their final Trace boundaries.  The manager must
-        # drain these after disposal, before this context becomes unreachable.
-        self.clear_authored_stage_state(preserve_authoring_trace=True)
+            cleanup(self._particle_pool.clear)
+        # Closing tasks emits final Trace boundaries, drained by StageManager.
+        cleanup(self.clear_authored_stage_state, preserve_authoring_trace=True)
+        cleanup(self._release_player_hit_rule)
+        cleanup(self._release_item_collection_rule)
+        cancel_hit = getattr(self._player, 'cancel_pending_hit', None)
+        if cancel_hit is not None:
+            cleanup(cancel_hit, discard_result=True)
+        # Includes effects created by task finally blocks, even if one fails.
+        for collection in (self.animations, self.trails, self.screen_effects,
+                           self.background, self.overlays):
+            cleanup(collection.clear)
+        if first_error is not None:
+            raise first_error
 
     # ==================== 稀疏事件与生命周期 API ====================
 
@@ -949,7 +1153,24 @@ class StageContext(SpellCardContext):
     def set_runtime_frame(self, frame: int) -> None:
         if isinstance(frame, bool) or not isinstance(frame, int) or frame < 0:
             raise ValueError("runtime frame must be a non-negative integer")
+        if self._sampled_frame is not None and frame < self._sampled_frame:
+            raise ValueError('runtime frame must not rewind a live stage context')
+        if frame != self._sampled_frame:
+            self._frame_rates = self.time_control.sample()
+            self._frame_stop_mask = self.time_control.mask
+            elapsed = 0 if self._sampled_frame is None else frame - self._sampled_frame
+            self.background.update(elapsed * self._frame_rates['background'])
+            self.overlays.update(elapsed * self._frame_rates['effects'], frame=frame)
+            if self._sampled_frame is None:
+                self._simulation_time = float(frame)
+            else:
+                self._simulation_time += (frame - self._sampled_frame) * self._frame_rates['scripts']
+            self._sampled_frame = frame
         self._runtime_frame = frame
+        self.animations.frame = frame
+        # Actors advance before their scripts, attachments after all scripts.
+        # Sample once so a mid-frame lease change affects both next frame.
+        self._animation_effects_paused = self._frame_rates['effects'] == 0.0
 
     def set_timeline_origin(self, runtime_frame: int) -> None:
         self.set_runtime_frame(runtime_frame)
@@ -1209,10 +1430,19 @@ class StageContext(SpellCardContext):
             return self._audio_manager.play_danmaku_se(name, volume, min_interval=min_interval)
         return False
 
-    def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0) -> bool:
+    def play_bgm(self, name: str, loops: int = -1, fade_ms: int = 0, *, start=0.0,
+                 loop_start_frame=None, loop_end_frame=None) -> bool:
         if self._audio_manager:
-            return self._audio_manager.play_bgm(name, loops, fade_ms)
+            return self._audio_manager.play_bgm(name, loops, fade_ms, start=start,
+                                                 loop_start_frame=loop_start_frame,
+                                                 loop_end_frame=loop_end_frame)
         return False
+
+    def seek_bgm(self, seconds):
+        return self._audio_manager.seek_bgm(seconds) if self._audio_manager else False
+
+    def get_bgm_position(self):
+        return self._audio_manager.get_bgm_position() if self._audio_manager else None
 
     def stop_bgm(self, fade_ms: int = 0):
         if self._audio_manager:
@@ -1227,6 +1457,18 @@ class StageContext(SpellCardContext):
             self._audio_manager.unpause_bgm()
 
     # ==================== 背景 API ====================
+
+    def show_text(self, text, **options):
+        """Show cancellable stage text; positions use 384x448 playfield pixels.
+
+        Text is stage-owned and advances on the effects clock, including seek.
+        Use layer='hud' only for explicitly screen-space annotations.
+        """
+        return self.overlays.show_text(text, frame=self.runtime_frame, **options)
+
+    def show_title(self, title, subtitle='', **options):
+        """Show a finite title/subtitle group without blocking gameplay."""
+        return self.overlays.show_title(title, subtitle, frame=self.runtime_frame, **options)
 
     @property
     def background_renderer(self):

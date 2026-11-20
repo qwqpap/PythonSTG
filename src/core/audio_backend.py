@@ -8,6 +8,7 @@ Replaces pygame.mixer.
 import os
 import array
 import threading
+import numpy as np
 from typing import Optional
 
 try:
@@ -73,11 +74,14 @@ class AudioBackend:
         self._playing: list = []
         self._lock = threading.Lock()
 
-        self._bgm_generator = None
+        self._bgm_stream = None
         self._bgm_playing = False
         self._bgm_volume = 1.0
         self._bgm_fade_total = 0
         self._bgm_fade_pos = 0
+        self._bgm_fade_in_total = 0
+        self._bgm_fade_in_pos = 0
+        self.last_bgm_error = None
 
         self._device = None
 
@@ -107,26 +111,29 @@ class AudioBackend:
         required_frames = yield b""
         while True:
             n_samples = required_frames * self._nchannels
-            mixed = array.array('h', bytes(n_samples * 2))
+            mixed = np.zeros(n_samples, np.float32)
 
             with self._lock:
                 self._mix_se(mixed, required_frames)
                 self._mix_bgm(mixed, required_frames)
 
-            required_frames = yield mixed.tobytes()
+            np.clip(mixed, -32768, 32767, out=mixed)
+            required_frames = yield mixed.astype(np.int16).tobytes()
 
-    def _mix_se(self, mixed: array.array, num_frames: int):
+    def _mix_se(self, mixed, num_frames: int):
         alive = []
         for ps in self._playing:
             if not ps.active:
                 continue
-            s = ps.sound._samples
+            s = np.frombuffer(ps.sound._samples, np.int16)
             total = len(s)
             needed = num_frames * ps.sound.nchannels
             pos = ps.position
             vol = ps.volume
 
             wrote = 0
+            if total == 0:
+                ps.active = False
             while wrote < needed and ps.active:
                 avail = total - pos
                 if avail <= 0:
@@ -139,11 +146,9 @@ class AudioBackend:
                     avail = total
 
                 chunk = min(needed - wrote, avail)
-                for i in range(chunk):
-                    idx = wrote + i
-                    if idx < len(mixed):
-                        v = mixed[idx] + int(s[pos + i] * vol)
-                        mixed[idx] = max(-32768, min(32767, v))
+                take = min(chunk, len(mixed)-wrote)
+                if take > 0:
+                    mixed[wrote:wrote+take] += s[pos:pos+take] * vol
                 pos += chunk
                 wrote += chunk
 
@@ -152,41 +157,36 @@ class AudioBackend:
                 alive.append(ps)
         self._playing = alive
 
-    def _mix_bgm(self, mixed: array.array, num_frames: int):
-        if not self._bgm_playing or self._bgm_generator is None:
+    def _mix_bgm(self, mixed, num_frames: int):
+        if not self._bgm_playing or self._bgm_stream is None:
             return
 
         try:
-            bgm_chunk = self._bgm_generator.send(num_frames)
-            if not bgm_chunk:
-                return
-            if isinstance(bgm_chunk, array.array):
-                bgm = bgm_chunk
-            else:
-                bgm = array.array('h')
-                if isinstance(bgm_chunk, bytes):
-                    bgm.frombytes(bgm_chunk)
+            bgm = self._bgm_stream.read(num_frames)
+            count = min(len(mixed), len(bgm)) // self._nchannels
+            if count:
+                samples = bgm[:count*self._nchannels].reshape(count, self._nchannels)
+                if self._bgm_fade_total or self._bgm_fade_in_total:
+                    offsets = np.arange(count, dtype=np.float32)
+                    gains = np.full(count, self._bgm_volume, np.float32)
+                    if self._bgm_fade_in_total:
+                        gains *= np.minimum(1.0, (self._bgm_fade_in_pos+offsets) / self._bgm_fade_in_total)
+                        self._bgm_fade_in_pos += count
+                        if self._bgm_fade_in_pos >= self._bgm_fade_in_total:
+                            self._bgm_fade_in_total = 0
+                    if self._bgm_fade_total:
+                        gains *= np.maximum(0.0, 1.0-(self._bgm_fade_pos+offsets) / self._bgm_fade_total)
+                        self._bgm_fade_pos += count
+                    mixed[:count*self._nchannels] += (samples * gains[:, None]).reshape(-1)
                 else:
-                    bgm.frombytes(bytes(bgm_chunk))
-
-            vol = self._bgm_volume
-
-            if self._bgm_fade_total > 0:
-                fade_left = self._bgm_fade_total - self._bgm_fade_pos
-                if fade_left <= 0:
-                    self._bgm_playing = False
-                    self._bgm_generator = None
-                    self._bgm_fade_total = 0
-                    return
-                self._bgm_fade_pos += len(bgm)
-                vol *= max(0.0, fade_left / self._bgm_fade_total)
-
-            for i in range(min(len(mixed), len(bgm))):
-                v = mixed[i] + int(bgm[i] * vol)
-                mixed[i] = max(-32768, min(32767, v))
-        except StopIteration:
-            self._bgm_playing = False
-            self._bgm_generator = None
+                    mixed[:count*self._nchannels] += bgm[:count*self._nchannels] * self._bgm_volume
+            if (self._bgm_stream.finished or (self._bgm_fade_total > 0
+                    and self._bgm_fade_pos >= self._bgm_fade_total)):
+                self._close_bgm()
+        except Exception as error:
+            self.last_bgm_error = str(error)
+            print(f'[AudioBackend] BGM stream failed: {error}')
+            self._close_bgm()
 
     # ---------- SE methods ----------
 
@@ -242,24 +242,27 @@ class AudioBackend:
     # ---------- BGM methods ----------
 
     def load_and_play_bgm(self, path: str, loops: int = -1,
-                          start: float = 0.0, fade_ms: int = 0) -> bool:
+                          start: float = 0.0, fade_ms: int = 0, *,
+                          loop_start_frame=None, loop_end_frame=None) -> bool:
         if not self._initialized or not os.path.exists(path):
             return False
         try:
-            gen = miniaudio.stream_file(
-                path,
-                output_format=miniaudio.SampleFormat.SIGNED16,
-                nchannels=self._nchannels,
-                sample_rate=self._sample_rate,
-            )
+            from .bgm_stream import BgmStream
+            stream = BgmStream(path, sample_rate=self._sample_rate, nchannels=self._nchannels,
+                               loops=loops, start=start, loop_start_frame=loop_start_frame,
+                               loop_end_frame=loop_end_frame)
             with self._lock:
-                self._bgm_generator = gen
-                next(self._bgm_generator)  # Prime generator
+                self._close_bgm()
+                self._bgm_stream = stream
                 self._bgm_playing = True
                 self._bgm_fade_total = 0
                 self._bgm_fade_pos = 0
+                self._bgm_fade_in_total = max(0, round(self._sample_rate * fade_ms / 1000))
+                self._bgm_fade_in_pos = 0
+                self.last_bgm_error = None
             return True
         except Exception as e:
+            self.last_bgm_error = str(e)
             print(f"[AudioBackend] BGM failed {path}: {e}")
             return False
 
@@ -269,7 +272,7 @@ class AudioBackend:
 
     def unpause_bgm(self):
         with self._lock:
-            if self._bgm_generator is not None:
+            if self._bgm_stream is not None:
                 self._bgm_playing = True
 
     def stop_bgm(self, fade_ms: int = 0):
@@ -277,12 +280,29 @@ class AudioBackend:
             if fade_ms > 0 and self._bgm_playing:
                 self._bgm_fade_total = int(
                     self._sample_rate * fade_ms / 1000
-                ) * self._nchannels
+                )
                 self._bgm_fade_pos = 0
             else:
-                self._bgm_playing = False
-                self._bgm_generator = None
-                self._bgm_fade_total = 0
+                self._close_bgm()
+
+    def _close_bgm(self):
+        if self._bgm_stream is not None:
+            self._bgm_stream.close()
+            self._bgm_stream = None
+        self._bgm_playing = False
+        self._bgm_fade_total = self._bgm_fade_in_total = 0
+
+    def seek_bgm(self, seconds):
+        with self._lock:
+            if self._bgm_stream is None:
+                return False
+            self._bgm_stream.seek(seconds)
+            self._bgm_fade_total = 0
+            return True
+
+    def get_bgm_position(self):
+        with self._lock:
+            return self._bgm_stream.position if self._bgm_stream is not None else None
 
     def set_bgm_volume(self, volume: float):
         self._bgm_volume = max(0.0, min(1.0, volume))
@@ -294,8 +314,7 @@ class AudioBackend:
 
     def cleanup(self):
         with self._lock:
-            self._bgm_playing = False
-            self._bgm_generator = None
+            self._close_bgm()
             self._playing.clear()
         if self._device:
             try:

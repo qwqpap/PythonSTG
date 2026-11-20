@@ -5,7 +5,7 @@ Replay（重放）系统：录制和回放玩家输入。
 --------
 1. 确定性：依赖固定 60fps 时间步 + 单一 RNG 种子。
 2. 紧凑：每帧仅记录玩家相关按键的位掩码（1 字节/帧）。
-3. 自洽：文件中保存 stage_id、character、rng_seed、起始版本号。
+3. 自洽：文件中保存 stage_id、character、difficulty、rng_seed、起始版本号。
 
 回放工作原理
 -----------
@@ -80,6 +80,7 @@ class Replay:
         self.created_at: str = str(data.get("created_at", ""))
         self.stage: str = str(data.get("stage", ""))
         self.character: str = str(data.get("character", "tao"))
+        self.difficulty: str = str(data.get("difficulty", "normal"))
         self.rng_seed: int = int(data.get("rng_seed", 0))
         self.frame_count: int = int(data.get("frame_count", 0))
         self.result: Dict[str, Any] = dict(data.get("result", {}))
@@ -103,13 +104,13 @@ class Replay:
 
     def __repr__(self) -> str:
         return (
-            f"<Replay stage={self.stage} char={self.character} "
+            f"<Replay stage={self.stage} char={self.character} difficulty={self.difficulty} "
             f"frames={self.frame_count} seed={self.rng_seed}>"
         )
 
 
 def list_replays() -> List[Dict[str, Any]]:
-    """扫描 replay 目录，返回 [{path, stage, character, frame_count, created_at}, ...]。"""
+    """扫描目录，返回包含 stage、character、difficulty 等信息的录像元数据。"""
     out: List[Dict[str, Any]] = []
     if not os.path.isdir(REPLAY_DIR):
         return out
@@ -125,6 +126,7 @@ def list_replays() -> List[Dict[str, Any]]:
                 "filename": filename,
                 "stage": head.get("stage", ""),
                 "character": head.get("character", ""),
+                "difficulty": head.get("difficulty", "normal"),
                 "frame_count": int(head.get("frame_count", 0)),
                 "created_at": head.get("created_at", ""),
                 "result": head.get("result", {}),
@@ -152,9 +154,17 @@ class ReplayRecorder:
     游戏结束后调用 save() 写入磁盘。
     """
 
-    def __init__(self, stage_id: str, character: str, rng_seed: int):
+    def __init__(
+        self,
+        stage_id: str,
+        character: str,
+        rng_seed: int,
+        *,
+        difficulty: str = "normal",
+    ):
         self.stage_id = stage_id
         self.character = character
+        self.difficulty = str(difficulty)
         self.rng_seed = int(rng_seed)
         self._buffer = bytearray()
 
@@ -172,6 +182,7 @@ class ReplayRecorder:
             "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             "stage": self.stage_id,
             "character": self.character,
+            "difficulty": self.difficulty,
             "rng_seed": self.rng_seed,
             "frame_count": self.frame_count,
             "result": dict(result or {}),
@@ -225,6 +236,10 @@ class ReplayPlayback:
     @property
     def character(self) -> str:
         return self.replay.character
+
+    @property
+    def difficulty(self) -> str:
+        return self.replay.difficulty
 
     @property
     def rng_seed(self) -> int:

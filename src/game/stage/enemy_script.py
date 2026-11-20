@@ -47,7 +47,9 @@ from typing import Optional, Callable, List, Any, Tuple, TYPE_CHECKING
 
 from .danmaku_audio import resolve_fire_sound
 from .motion import ActorControls
-from ..tasks import FrameTaskOwner, cancel_tasks, pump_tasks
+from ..damage import DamageHit
+from .enemy_render import ActorAnimationControls
+from ..tasks import FrameTaskOwner, cancel_tasks, pump_tasks, wait_frames
 from ..bullet.behavior import BulletGroup
 
 if TYPE_CHECKING:
@@ -55,7 +57,7 @@ if TYPE_CHECKING:
     from .enemy_render import EnemyRenderObject
 
 
-class EnemyScript(ActorControls, FrameTaskOwner, ABC):
+class EnemyScript(ActorAnimationControls, ActorControls, FrameTaskOwner, ABC):
     """
     敌人行为脚本基类
 
@@ -72,6 +74,7 @@ class EnemyScript(ActorControls, FrameTaskOwner, ABC):
     clear_bullets_on_death: bool = False # 死亡时是否清除自身发射的子弹
 
     def __init__(self):
+        self.last_damage_hit = None
         self.x: float = 0.0
         self.y: float = 0.0
         self.ctx: Optional['SpellCardContext'] = None
@@ -89,7 +92,7 @@ class EnemyScript(ActorControls, FrameTaskOwner, ABC):
         self.on_out_of_bounds: Optional[Callable] = None
 
     @property
-    def time(self) -> int:
+    def time(self) -> float:
         """存活帧数"""
         return self._time
 
@@ -134,14 +137,11 @@ class EnemyScript(ActorControls, FrameTaskOwner, ABC):
         if not self._active:
             return False
 
-        self._time += 1
+        self._advance_clock()
         try:
             pump_tasks(self)
             # 计算X速度并更新贴图对象动画
-            vx = self.x - self._prev_x
-            self._prev_x = self.x
-            if self._render_obj:
-                self._render_obj.update(vx, 1.0 / 60.0)
+            self.update_animation()
             if self._active and not self._step_main():
                 self.dispose()
             pump_tasks(self)
@@ -150,10 +150,12 @@ class EnemyScript(ActorControls, FrameTaskOwner, ABC):
             raise
         return self._active
 
-    def damage(self, amount: int):
+    def damage(self, amount: int, *, source='shot', attack_index=-1,
+               attack_generation=-1, region=0):
         """受到伤害"""
         if not self._active or not self.interactable:
             return
+        self.last_damage_hit = DamageHit(amount, source, attack_index, attack_generation, region)
         if type(self).on_hit is not EnemyScript.on_hit:
             # Advance one actual hit event immediately; delayed actions continue
             # on this enemy's update loop, never on individual bullets.
@@ -205,6 +207,12 @@ class EnemyScript(ActorControls, FrameTaskOwner, ABC):
     def _close_hit_tasks(self):
         cancel_tasks(self)
 
+    def dispose(self):
+        try:
+            super().dispose()
+        finally:
+            self._dispose_animations()
+
     # ==================== 贴图对象 ====================
 
     def _init_render_object(self):
@@ -213,8 +221,7 @@ class EnemyScript(ActorControls, FrameTaskOwner, ABC):
             return
         try:
             from .enemy_render import EnemyRenderObject
-            from src.resource.texture_asset import get_texture_asset_manager
-            asset_manager = get_texture_asset_manager()
+            asset_manager = self.ctx.animations.assets
             render_obj = EnemyRenderObject(self.sprite, asset_manager)
             if render_obj.is_valid:
                 self._render_obj = render_obj
@@ -412,8 +419,7 @@ class EnemyScript(ActorControls, FrameTaskOwner, ABC):
     @types.coroutine
     def wait(self, frames: int):
         """等待指定帧数"""
-        for _ in range(frames):
-            yield
+        yield from wait_frames(frames)
 
     @types.coroutine
     def wait_seconds(self, seconds: float):

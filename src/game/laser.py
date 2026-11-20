@@ -91,13 +91,17 @@ def _check_laser_collision_jit(px: float, py: float, radius: float,
 @jit(nopython=True, cache=True)
 def _check_bent_laser_collision_jit(px: float, py: float, radius: float,
                                     path_x: np.ndarray, path_y: np.ndarray,
-                                    width: float, path_len: int) -> bool:
+                                    width: float, path_len: int, start: int = 0) -> bool:
     """JIT优化的曲线激光碰撞检测"""
     collision_dist_sq = (width * 0.5 + radius) ** 2
-
+    index = start
     for i in range(path_len - 1):
-        x1, y1 = path_x[i], path_y[i]
-        x2, y2 = path_x[i + 1], path_y[i + 1]
+        next_index = index + 1
+        if next_index == len(path_x):
+            next_index = 0
+        x1, y1 = path_x[index], path_y[index]
+        x2, y2 = path_x[next_index], path_y[next_index]
+        index = next_index
 
         dx = x2 - x1
         dy = y2 - y1
@@ -370,6 +374,8 @@ class Laser:
     def _update_lifecycle(self):
         warning, active, fade, hit_delay, hit_fade, warning_width, _ = self._lifecycle
         t = self.timer
+        if abs(t-round(t)) < 1e-8:
+            t = float(round(t))
         if t < warning:
             self.phase = 'warning'
             self.alpha = 1.0
@@ -454,14 +460,14 @@ class Laser:
         self.dw = -self.current_width / time
         self.collidable = False
 
-    def update(self):
+    def update(self, frames=1.0):
         """每帧更新"""
         if not self.alive:
             return
 
-        self.timer += 1
+        self.timer += frames
         if self._moving_segment:
-            delta = self.speed / 60.0
+            delta = self.speed * frames / 60.0
             self.end_offset = max(0.0, self.end_offset + delta)
             tail = self.start_offset + min(0.0, delta)
             self.start_offset = max(0.0, min(tail, self.end_offset),
@@ -471,9 +477,12 @@ class Laser:
             return
 
         if self.counter > 0:
-            self.counter -= 1
-            self.current_width += self.dw
-            self.alpha += self.da
+            step = min(self.counter, frames)
+            self.counter = max(0.0, self.counter - step)
+            if self.counter < 1e-8:
+                self.counter = 0.0
+            self.current_width += self.dw * step
+            self.alpha += self.da * step
 
             # 状态转换
             if self.counter == 0:
@@ -491,12 +500,11 @@ class Laser:
         self.alpha = max(0.0, min(1.0, self.alpha))
         self.current_width = max(0.0, self.current_width)
 
-    def check_collision(self, px: float, py: float, radius: float) -> bool:
-        """检查碰撞"""
+    def _collision_geometry(self):
         if not self.collidable or not self.alive or not self.collision_enabled:
-            return False
+            return None
         if self._lifecycle is None and self.alpha < 0.999:
-            return False
+            return None
 
         angle_rad = math.radians(self.angle)
         x, y, lengths = self._segment_geometry()
@@ -510,11 +518,44 @@ class Laser:
             y += math.sin(angle_rad) * offset
             lengths = (0.0, self.current_width, 0.0)
             width = self.max_width
+        return x, y, lengths, width, angle_rad
+
+    def check_collision(self, px: float, py: float, radius: float) -> bool:
+        """检查碰撞"""
+        geometry = self._collision_geometry()
+        if geometry is None:
+            return False
+        x, y, lengths, width, angle_rad = geometry
         return _check_laser_collision_jit(
             float(px), float(py), float(radius),
             x, y, angle_rad,
             *lengths, width
         )
+
+    def check_box_collision(self, px, py, half, angle):
+        from ..core.collision_shapes import polygon_box_overlap
+        geometry = self._collision_geometry()
+        if geometry is None:
+            return False
+        x, y, lengths, width, theta = geometry
+        l1, l2, l3 = lengths
+        hw = width*.5
+        segments = []
+        if l1 > 0:
+            segments.append(((0., 0.), (l1, -hw), (l1, hw)))
+        if l2 > 0:
+            segments.append(((l1, -hw), (l1+l2, -hw), (l1+l2, hw), (l1, hw)))
+        if l3 > 0:
+            segments.append(((l1+l2, -hw), (l1+l2+l3, 0.), (l1+l2, hw)))
+        ca, sa = math.cos(theta), math.sin(theta)
+        for segment in segments:
+            points = np.asarray(segment, np.float64)
+            world = np.empty_like(points)
+            world[:, 0] = x+points[:, 0]*ca-points[:, 1]*sa
+            world[:, 1] = y+points[:, 0]*sa+points[:, 1]*ca
+            if polygon_box_overlap(world, px, py, half[0], half[1], angle):
+                return True
+        return False
 
     def get_texture_rects(self) -> Optional[Dict]:
         """获取纹理rect数据（带缓存）"""
@@ -601,6 +642,7 @@ class BentLaser:
         self.path_y.fill(y)
         self.path_index = 0
         self.path_count = 1
+        self._next_sample_time = 0.0
 
         # 头部位置
         self.head_x = x
@@ -624,7 +666,8 @@ class BentLaser:
         self.head_x = x
         self.head_y = y
 
-        if self.timer % self.sample_rate == 0:
+        if self.timer + 1e-8 >= self._next_sample_time:
+            self._next_sample_time = (math.floor((self.timer+1e-8)/self.sample_rate)+1)*self.sample_rate
             self.path_index = (self.path_index + 1) % self.length
             self.path_x[self.path_index] = x
             self.path_y[self.path_index] = y
@@ -645,17 +688,20 @@ class BentLaser:
         self.dw = -self.current_width / time
         self.collidable = False
 
-    def update(self):
+    def update(self, frames=1.0):
         """每帧更新"""
         if not self.alive:
             return
 
-        self.timer += 1
+        self.timer += frames
 
         if self.counter > 0:
-            self.counter -= 1
-            self.current_width += self.dw
-            self.alpha += self.da
+            step = min(self.counter, frames)
+            self.counter = max(0.0, self.counter - step)
+            if self.counter < 1e-8:
+                self.counter = 0.0
+            self.current_width += self.dw * step
+            self.alpha += self.da * step
 
             if self.counter == 0:
                 if self.alpha >= 0.99:
@@ -675,21 +721,27 @@ class BentLaser:
         if self.path_count < 2:
             return False
 
-        # 构建有效路径数组
+        # Read the existing ring directly; no per-query arrays/Python reorder.
         valid_count = min(self.path_count, self.length)
-        path_x = np.zeros(valid_count, dtype=np.float64)
-        path_y = np.zeros(valid_count, dtype=np.float64)
-
-        for i in range(valid_count):
-            idx = (self.path_index - valid_count + 1 + i + self.length) % self.length
-            path_x[i] = self.path_x[idx]
-            path_y[i] = self.path_y[idx]
-
+        start = (self.path_index - valid_count + 1) % self.length
         return _check_bent_laser_collision_jit(
             float(px), float(py), float(radius),
-            path_x, path_y,
-            self.current_width, valid_count
+            self.path_x, self.path_y,
+            self.current_width, valid_count, start
         )
+
+    def check_box_collision(self, px, py, half, angle):
+        from ..core.collision_shapes import capsule_box
+        if not self.alive or not self.collidable or self.path_count < 2:
+            return False
+        count = min(self.path_count, self.length)
+        for i in range(count-1):
+            a = (self.path_index-count+1+i+self.length) % self.length
+            b = (a+1) % self.length
+            if capsule_box(self.path_x[a], self.path_y[a], self.path_x[b], self.path_y[b],
+                           self.current_width*.5, px, py, half[0], half[1], angle):
+                return True
+        return False
 
     def get_render_data(self) -> Optional[Dict]:
         """获取渲染数据"""
@@ -770,12 +822,12 @@ class LaserPool:
         self.bent_lasers.append(laser)
         return laser
 
-    def update(self):
+    def update(self, frames=1.0):
         """更新所有激光"""
         for laser in self.lasers:
-            laser.update()
+            laser.update(frames)
         for laser in self.bent_lasers:
-            laser.update()
+            laser.update(frames)
 
         # 清理死亡的激光
         self.lasers = [l for l in self.lasers if l.alive]
@@ -813,7 +865,7 @@ class LaserPool:
         timings['straight_collision'] = (time.perf_counter() - start) * 1000.0
         start = time.perf_counter()
         samples = np.zeros(2, dtype=np.float64)
-        _check_bent_laser_collision_jit(0.0, 0.0, 0.01, samples, samples, 0.03, 2)
+        _check_bent_laser_collision_jit(0.0, 0.0, 0.01, samples, samples, 0.03, 2, 0)
         timings['bent_collision'] = (time.perf_counter() - start) * 1000.0
         return timings
 

@@ -13,14 +13,45 @@ from typing import Mapping
 import numpy as np
 from numba import njit
 
-from src.game.bullet.behavior import BulletGroup
+from src.game.bullet.behavior import BulletGroup, compile_stages
 
 
-VECTOR_FIELDS = frozenset({'pos', 'vel', 'acc'})
+VECTOR_FIELDS = frozenset({'pos', 'vel', 'acc', 'hitbox_size'})
 SCALAR_FIELDS = frozenset({
     'angle', 'speed', 'speed_accel', 'sprite_idx', 'tag', 'time_scale', 'lifetime',
+    'collision_shape', 'radius', 'hitbox_angle',
+    'render_angle', 'render_angle_offset', 'render_flip_y',
 })
 SNAPSHOT_FIELDS = VECTOR_FIELDS | SCALAR_FIELDS
+
+_SCALAR_LIMITS = {}
+
+
+def scalar_parameter(value, name, dtype=np.float32):
+    """Convert one numeric scalar without NumPy array reductions/broadcasts."""
+    target = np.dtype(dtype)
+    limits = _SCALAR_LIMITS.get(target)
+    if limits is None:
+        if target.kind not in {'f', 'i', 'u'}:
+            raise TypeError('bullet scalar dtype must be numeric')
+        info = np.finfo(target) if target.kind == 'f' else np.iinfo(target)
+        limits = (info.min, info.max)
+        _SCALAR_LIMITS[target] = limits
+    number = value.item() if isinstance(value, (np.ndarray, np.generic)) else value
+    if not math.isfinite(number):
+        raise ValueError(f'bullet {name} must be finite and representable as {target}')
+    if target.kind in {'i', 'u'}:
+        if number != math.floor(number) or number < limits[0] or number > limits[1]:
+            raise ValueError(f'bullet {name} requires integers representable as {target}')
+    elif number < limits[0] or number > limits[1]:
+        # Preserve representable rounding near a dtype limit, but reject an
+        # actual overflow before it can be written to a live pool slot.
+        with np.errstate(over='ignore', invalid='ignore'):
+            converted = target.type(number)
+        if not math.isfinite(converted):
+            raise ValueError(f'bullet {name} must be finite and representable as {target}')
+        return converted
+    return target.type(number)
 
 
 @dataclass(frozen=True, eq=False)
@@ -107,6 +138,8 @@ def normalize_scalar(value, count, name, *, source_count=None,
     target = np.dtype(dtype)
     if target.kind not in {'f', 'i', 'u'}:
         raise TypeError('bullet scalar dtype must be numeric')
+    if raw.ndim == 0 and raw.dtype.kind in {'b', 'i', 'u', 'f'}:
+        return np.full(count, scalar_parameter(raw, name, target), dtype=target)
     if target.kind in {'i', 'u'}:
         numeric = np.asarray(value, dtype=np.float64)
         limits = np.iinfo(target)
@@ -138,6 +171,59 @@ def normalize_vector(value, count, name, *, source_count=None, survivor_mask=Non
     if mask is not None:
         array = array[mask]
     return np.ascontiguousarray(array)
+
+
+def compile_batch_stages(stages, register_sprite, count, *, source_count=None,
+                         survivor_mask=None):
+    """Pack shared commands and optional original-row-aligned parameters.
+
+    Only an explicitly supplied length-N parameter allocates per-row stages.
+    The ordinary scalar program remains a small shared table. Parameter rows
+    are bullet-major so the existing stage cursor can read them without Python
+    callbacks, array lookups by tag, or a task for each projectile.
+    """
+    numeric = {'duration', 'speed', 'angle', 'angle_offset', 'velocity_scale_end',
+               'accel', 'turn_rate', 'max_turn_rate', 'vector_accel'}
+    shared = []
+    overrides = []
+    for stage_index, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            raise TypeError('each bullet stage must be a dictionary')
+        values = dict(stage)
+        for name in numeric & values.keys():
+            value = values[name]
+            if name == 'duration' and value is None:
+                continue
+            array = np.asarray(value)
+            vector = name == 'vector_accel'
+            if (vector and array.shape == (2,)) or (not vector and array.ndim == 0):
+                continue
+            if vector:
+                normalized = normalize_vector(
+                    value, count, name, source_count=source_count,
+                    survivor_mask=survivor_mask,
+                )
+                values[name] = (0.0, 0.0)
+            else:
+                normalized = normalize_scalar(
+                    value, count, name, source_count=source_count,
+                    survivor_mask=survivor_mask,
+                    dtype=np.float64 if name == 'duration' else np.float32,
+                )
+                if name in {'duration', 'speed', 'max_turn_rate'} and np.any(normalized < 0):
+                    raise ValueError('bullet stage ' + name + ' must be non-negative')
+                if name == 'turn_rate' and values.get('homing') is not None and np.any(normalized != 0):
+                    raise ValueError('bullet stage homing cannot be combined with turn_rate')
+                values[name] = 0.0
+            overrides.append((stage_index, name, normalized))
+        shared.append(values)
+    rows = compile_stages(shared, register_sprite)
+    if not overrides:
+        return rows, None
+    parameters = np.broadcast_to(rows, (count, len(rows))).copy()
+    for stage_index, name, values in overrides:
+        parameters[name][:, stage_index] = values
+    return rows, parameters.reshape(-1)
 
 
 @njit(cache=True)

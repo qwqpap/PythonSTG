@@ -87,6 +87,7 @@ class ItemCollection:
     x: float
     y: float
     attracting: bool
+    tag: int = 0
 
 
 @dataclass
@@ -180,11 +181,12 @@ class GameStats:
                 return mult
         return 1.0
 
-    def tick_collect_timer(self):
+    def tick_collect_timer(self, frames=1.0):
         """每帧调用，管理收集连击计时"""
         if self._collect_timer > 0:
-            self._collect_timer -= 1
-            if self._collect_timer <= 0:
+            self._collect_timer -= frames
+            if self._collect_timer <= 1e-8:
+                self._collect_timer = 0
                 # 连击结束，结算 faith bonus
                 mult = self.get_collect_multiplier()
                 if mult > 1.0:
@@ -257,9 +259,9 @@ def _update_items_numba(
         if alive[i] == 0:
             continue
 
-        timer[i] += 1
+        timer[i] += dt_scale
 
-        if timer[i] < 24:
+        if timer[i] < 24-1e-8:
             vy[i] -= 0.001 * dt_scale
         else:
             dx = player_x - x[i]
@@ -316,11 +318,12 @@ class ItemPool:
         self.y = np.zeros(max_items, dtype=np.float32)
         self.vx = np.zeros(max_items, dtype=np.float32)
         self.vy = np.zeros(max_items, dtype=np.float32)
-        self.timer = np.zeros(max_items, dtype=np.int32)
+        self.timer = np.zeros(max_items, dtype=np.float64)
         self.alive = np.zeros(max_items, dtype=np.uint8)
         self.attracting = np.zeros(max_items, dtype=np.uint8)
         self.item_type = np.zeros(max_items, dtype=np.int32)
         self.sprite_index = np.zeros(max_items, dtype=np.int32)
+        self.tag = np.zeros(max_items, dtype=np.int32)
 
         self._count = 0  # high-water mark for active region
 
@@ -335,14 +338,17 @@ class ItemPool:
 
     def _warmup_numba(self):
         """触发 Numba JIT 编译（或加载缓存），避免首次掉落卡顿。"""
-        n = 1
+        # Match the actual SoA dtypes, including the fractional float64 timer.
+        # Empty views prepare the real signature without advancing live items,
+        # collection statistics or random state, even when called again later.
+        cfg = self.config
         _update_items_numba(
-            np.zeros(n, dtype=np.float32), np.zeros(n, dtype=np.float32),
-            np.zeros(n, dtype=np.float32), np.zeros(n, dtype=np.float32),
-            np.zeros(n, dtype=np.int32), np.zeros(n, dtype=np.uint8),
-            np.zeros(n, dtype=np.uint8),
+            self.x[:0], self.y[:0], self.vx[:0], self.vy[:0],
+            self.timer[:0], self.alive[:0], self.attracting[:0],
             0.0, 0.0, 1.0,
-            0.4, 0.15, 0.025, 0.04, 0.02, 0.03, -1.1
+            float(cfg.collect_line_y), cfg.attract_radius,
+            cfg.attract_speed, cfg.max_attract_speed,
+            cfg.max_fall_speed, cfg.collect_radius, cfg.despawn_y,
         )
 
     def _alloc_slot(self) -> int:
@@ -376,7 +382,7 @@ class ItemPool:
         return np.concatenate(slots).astype(np.intp)
 
     def spawn(self, x: float, y: float, item_type: ItemType,
-              speed: float = None, angle: float = None) -> Optional[int]:
+              speed: float = None, angle: float = None, *, tag=0) -> Optional[int]:
         """
         生成一个掉落物，返回 slot index 或 None（池满时）。
         """
@@ -400,6 +406,7 @@ class ItemPool:
         self.attracting[idx] = 0
         self.item_type[idx] = int(item_type)
         self.sprite_index[idx] = ITEM_TEXTURE_INDEX.get(item_type, 0)
+        self.tag[idx] = tag
         return idx
 
     def spawn_drop(self, x: float, y: float,
@@ -461,6 +468,7 @@ class ItemPool:
         self.attracting[slots] = 0
         self.item_type[slots] = int(item_type)
         self.sprite_index[slots] = ITEM_TEXTURE_INDEX.get(item_type, 0)
+        self.tag[slots] = 0
 
     def spawn_points_from_positions(self, positions, attract: bool = True) -> int:
         """Spawn POINT items at bullet positions using the SoA batch allocator."""
@@ -486,12 +494,13 @@ class ItemPool:
         self.attracting[slots] = 1 if attract else 0
         self.item_type[slots] = int(ItemType.POINT)
         self.sprite_index[slots] = ITEM_TEXTURE_INDEX.get(ItemType.POINT, 0)
+        self.tag[slots] = 0
         return n
 
     def update(self, player_x, player_y, dt: float = 1/60):
         """更新所有物品（直接操作 SoA 数组，零拷贝）"""
         # 每帧更新收集连击计时器
-        self.stats.tick_collect_timer()
+        self.stats.tick_collect_timer(dt * 60.0)
 
         if self._count == 0:
             return
@@ -536,9 +545,9 @@ class ItemPool:
             if self.alive[i] == 0:
                 continue
 
-            self.timer[i] += 1
+            self.timer[i] += dt_scale
 
-            if self.timer[i] < 24:
+            if self.timer[i] < 24-1e-8:
                 self.vy[i] -= 0.001 * dt_scale
             else:
                 dx = player_x - self.x[i]
@@ -586,14 +595,17 @@ class ItemPool:
 
         if self.collection_handler is not None:
             old_power, old_lives, old_bombs = stats.power, stats.lives, stats.bombs
-            self.collection_handler(stats, ItemCollection(
+            handled = self.collection_handler(stats, ItemCollection(
                 ItemType(t), float(self.x[idx]), float(self.y[idx]), bool(self.attracting[idx]),
+                int(self.tag[idx]),
             ))
-            if old_power != stats.power and self.on_power_up:
+            if handled is False:
+                self._apply_default_collection(idx, t)
+            if handled is not False and old_power != stats.power and self.on_power_up:
                 self.on_power_up(old_power, stats.power)
-            if old_lives < stats.lives and self.on_extend:
+            if handled is not False and old_lives < stats.lives and self.on_extend:
                 self.on_extend()
-            if old_bombs < stats.bombs and self.on_bomb_get:
+            if handled is not False and old_bombs < stats.bombs and self.on_bomb_get:
                 self.on_bomb_get()
         else:
             self._apply_default_collection(idx, t)

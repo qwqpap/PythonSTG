@@ -27,10 +27,8 @@ from src.game.bullet.optimized_pool import OptimizedBulletPool
 from src.game.laser import get_laser_texture_data
 from src.game.state import RunState
 from src.game.stage.context import StageContext
-from src.render.laser_renderer import LaserRenderer
 from src.render.item_renderer import ItemRenderer
-from src.render.optimized_bullet_renderer import OptimizedBulletRenderer
-from src.render.particle_renderer import ParticleRenderer
+from src.render.renderer import Renderer
 from src.resource.sprite import SpriteManager
 from src.resource.service import init_resource_service
 from src.ui.ui_renderer import UIRenderer
@@ -271,6 +269,8 @@ def run(args) -> int:
     laser_renderer = None
     item_renderer = None
     particle_renderer = None
+    background_renderer = None
+    player_renderer = None
     ui = None
     watchers: list[SpellFileWatcher] = []
     runtime = None
@@ -287,21 +287,33 @@ def run(args) -> int:
         print(f"[preview] Laser warmup (ms): {runtime.session.laser_pool.warmup()}")
         print(f"[preview] Particle warmup (ms): {runtime.session.particle_pool.warmup()}")
         runtime.load(script_path, class_name, config_overrides=_cli_overrides(args))
+        print(f"[preview] Player attacks warmup (ms): {runtime.session.player.bullet_pool.warmup()}")
+        print(f"[preview] Hit geometry warmup (ms): {runtime.session._collision_manager.warmup(runtime.bullet_pool)}")
         if args.start_frame:
             runtime.seek(args.start_frame)
         watchers = _create_watchers(runtime)
-        bullet_renderer = OptimizedBulletRenderer(ctx, textures)
         if not get_laser_texture_data().load_config(str(PROJECT_ROOT / "assets/images/laser/laser_config.json")):
             raise RuntimeError("failed to load laser texture config")
-        laser_renderer = LaserRenderer(ctx, (384, 448))
-        particle_renderer = ParticleRenderer(ctx, textures)
+        sprite_manager = SpriteManager()
+        sprite_manager._sync_from_asset_manager()
+        player_renderer = Renderer(ctx, (384, 448), sprite_manager, textures, {})
+        # Draw with the same GPU objects that prepare_resources actually warms.
+        bullet_renderer = player_renderer.optimized_bullet_renderer
+        laser_renderer = player_renderer.laser_renderer
+        particle_renderer = player_renderer.particle_renderer
+        from src.game.background_render import BackgroundRenderer
+        background_renderer = BackgroundRenderer(ctx, (384, 448), textures=textures)
         item_renderer = ItemRenderer(ctx)
         item_renderer.load_texture(str(PROJECT_ROOT / 'assets/images/item/item.png'), asset_manager)
         ui = UIRenderer(ctx, WINDOW_W, WINDOW_H)
+        player_renderer.prepare_resources(runtime.session.player, trail_vertices=16 * 47 * 6,
+                                          item_renderer=item_renderer)
         clock = FrameClock()
         print(f"[preview] {runtime.status} from {runtime.target.script_path}")
 
         running = True
+        actor_draws = []
+        prepared_player = runtime.session.player
         while running and not window.should_close():
             clock.tick(60)
             for event in window.poll_events():
@@ -356,26 +368,70 @@ def run(args) -> int:
                     print(f"[preview:error] {exc}")
 
             try:
+                if prepared_player is not runtime.session.player:
+                    player_renderer.prepare_resources(runtime.session.player,
+                                                       trail_vertices=16 * 47 * 6)
+                    prepared_player = runtime.session.player
                 runtime.update()
             except Exception as exc:
                 print(f"[preview:error] {exc}")
 
             render_start = time.perf_counter()
+            effects = runtime.session.stage_context.screen_effects
+            content_viewport = player_renderer.game_content_viewport(GAME_VIEWPORT, effects)
             ctx.viewport = window.viewport
+            ctx.scissor = None
             ctx.clear(0.02, 0.025, 0.04, 1.0)
-            ctx.viewport = GAME_VIEWPORT
+            ctx.viewport = content_viewport
+            ctx.scissor = GAME_VIEWPORT
+            background_renderer.bind_state(runtime.session.stage_context.background)
+            if runtime.session.stage_context.background.active:
+                background_renderer.render(target_viewport=content_viewport,
+                                           clip_viewport=GAME_VIEWPORT)
+            animations = runtime.session.stage_context.animations
+            trails = runtime.session.stage_context.trails
+            data, keys = animations.prepare_render_data('back')
+            particle_renderer.render_instances(data, keys, animations.batch.texture_path,
+                                               pixel_scale=1.0/192.0)
+            actor_draws.clear()
+            particle_renderer.render_trails(trails, 'back')
+            for actor in (runtime.session.boss, *runtime.session.stage_context.get_enemy_scripts()):
+                if not actor.visible or not actor._active or trails.hides_owner(actor):
+                    continue
+                frame, path = actor.get_render_frame()
+                if frame is not None:
+                    visual = actor.visual
+                    actor_draws.append(((actor.x+visual.offset[0], actor.y+visual.offset[1]),
+                                       frame, path, visual))
+            data, keys = animations.batch.prepare(actor_draws)
+            particle_renderer.render_instances(data, keys, animations.batch.texture_path,
+                                               pixel_scale=1.0/192.0, alpha_cutoff=0.1)
+            particle_renderer.render_trails(trails, 'main')
+            data, keys = animations.prepare_render_data('front')
+            particle_renderer.render_instances(data, keys, animations.batch.texture_path,
+                                               pixel_scale=1.0/192.0)
+            particle_renderer.render_trails(trails, 'front')
             particle_renderer.render_from_pool(runtime.session.particle_pool, 'back')
             items = runtime.session.item_pool
             item_renderer.render_items_soa(items.x, items.y, items.timer,
                                            items.sprite_index, items.alive, items._count)
+            if runtime.session.player.bullet_pool.active_count:
+                player_renderer.render_player_attacks(runtime.session.player)
             bullet_renderer.render_from_pool(runtime.bullet_pool)
             lasers, bent_lasers = runtime.session.laser_pool.get_all_lasers()
             laser_renderer.render_lasers(lasers)
             laser_renderer.render_bent_lasers(bent_lasers)
             particle_renderer.render_from_pool(runtime.session.particle_pool, 'front')
             ctx.viewport = window.viewport
+            ctx.scissor = None
+            player_renderer.render_screen_effects(
+                effects,
+                viewport_rect=GAME_VIEWPORT)
+            ui.render_stage_overlay(runtime.session.stage_context.overlays,
+                                    GAME_VIEWPORT, window.framebuffer_size)
             for enemy in runtime.session.stage_context.get_enemy_scripts():
-                if enemy.visible:
+                frame, _path = enemy.get_render_frame()
+                if enemy.visible and (frame is None or runtime.show_hitbox):
                     _render_crosshair(ui, enemy.x, enemy.y, (210, 190, 255), type(enemy).__name__)
             _render_overlay(
                 ui,
@@ -389,14 +445,12 @@ def run(args) -> int:
         _close_watchers(watchers)
         if runtime is not None:
             runtime.close()
-        if bullet_renderer is not None:
-            bullet_renderer.cleanup()
-        if laser_renderer is not None:
-            laser_renderer.cleanup()
         if item_renderer is not None:
             item_renderer.cleanup()
-        if particle_renderer is not None:
-            particle_renderer.cleanup()
+        if player_renderer is not None:
+            player_renderer.cleanup()
+        if background_renderer is not None:
+            background_renderer.cleanup()
         if ui is not None:
             ui.cleanup()
         if asset_manager is not None:

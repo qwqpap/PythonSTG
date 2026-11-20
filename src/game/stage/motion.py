@@ -7,6 +7,7 @@ in the NumPy/Numba pool; there is no per-bullet task here.
 import math
 import operator
 import types
+from ..tasks import NEXT_FRAME, simulation_rate
 
 
 EASINGS = {
@@ -27,6 +28,24 @@ class ActorControls:
     interactable = True
     visible = True
     movement_bounds = None
+    hitbox = None
+    secondary_hitbox = None
+    contact_enabled = False
+    contact_hitbox = None
+    contact_offsets = ((0.0, 0.0),)
+
+    def set_hitbox(self, hitbox):
+        self.hitbox = hitbox
+
+    def set_secondary_hitbox(self, hitbox=None):
+        """Optional second shot region; primary wins, damage policy is separate."""
+        self.secondary_hitbox = hitbox
+
+    def set_contact_hitbox(self, hitbox=None, *, enabled=True, offsets=((0.0, 0.0),)):
+        """Opt-in body/trail contact, independent of player-shot targetability."""
+        self.contact_hitbox = hitbox
+        self.contact_enabled = bool(enabled)
+        self.contact_offsets = tuple(tuple(offset) for offset in offsets)
 
     def set_interaction(self, *, collidable=None, damageable=None,
                         interactable=None, visible=None):
@@ -59,7 +78,7 @@ class ActorControls:
 
     @types.coroutine
     def move_to(self, x, y, duration=60, *, easing='smoothstep'):
-        """Move over exactly duration yields. Zero duration is a teleport."""
+        """Move smoothly over simulation frames. Zero duration is a teleport."""
         curve = EASINGS[easing]
         duration = operator.index(duration)
         if duration < 0:
@@ -68,11 +87,13 @@ class ActorControls:
             self.set_position(x, y)
             return
         start_x, start_y = self.x, self.y
-        for frame in range(duration):
-            t = curve((frame + 1) / duration)
+        elapsed = 0.0
+        while elapsed + 1e-8 < duration:
+            elapsed = min(float(duration), elapsed + simulation_rate(self))
+            t = curve(elapsed / duration)
             self.set_position(start_x + (x - start_x) * t,
                               start_y + (y - start_y) * t)
-            yield
+            yield NEXT_FRAME
 
     @types.coroutine
     def move_linear(self, dx, dy, duration=60):
@@ -89,14 +110,19 @@ class ActorControls:
         if remaining is not None and remaining < 0:
             raise ValueError('movement frames must be non-negative')
         while remaining is None or remaining > 0:
-            angle += turn_rate / 60.0
-            speed += accel / 60.0
-            theta = math.radians(angle)
-            self.set_position(self.x + math.cos(theta) * speed / 60.0,
-                              self.y + math.sin(theta) * speed / 60.0)
+            step = simulation_rate(self)
             if remaining is not None:
-                remaining -= 1
-            yield
+                step = min(remaining, step)
+            angle += turn_rate * step / 60.0
+            speed += accel * step / 60.0
+            theta = math.radians(angle)
+            self.set_position(self.x + math.cos(theta) * speed * step / 60.0,
+                              self.y + math.sin(theta) * speed * step / 60.0)
+            if remaining is not None:
+                remaining = max(0.0, remaining - step)
+                if remaining < 1e-8:
+                    remaining = 0.0
+            yield NEXT_FRAME
 
 
 __all__ = ['ActorControls', 'EASINGS']

@@ -15,6 +15,7 @@
 """
 
 from typing import Optional, Tuple, TYPE_CHECKING
+from ..animation import AnimationPlayback, SpriteVisual, resolve_animation
 
 if TYPE_CHECKING:
     from src.resource.texture_asset import TextureAssetManager, SpriteFrame
@@ -50,13 +51,29 @@ class EnemyRenderObject:
         self.move_frames = 0
         self._last_dir = 0  # -1=左, 0=静止, 1=右
         self.full_tilt_frames = 8
+        self._manual = None
+        self._resume_auto = True
+        self.paused = False
+
+    def play(self, name, *, loop=None, speed=1.0, resume_auto=True):
+        candidate = AnimationPlayback(resolve_animation(self.asset_manager, name),
+                                      loop=loop, speed=speed)
+        self.stop()
+        self._manual = candidate
+        self._resume_auto = bool(resume_auto)
+        return candidate
+
+    def stop(self):
+        if self._manual is not None:
+            self._manual.stop()
+        self._manual = None
 
     @property
     def is_valid(self) -> bool:
         """是否成功加载了动画"""
         return self.directional or self.simple_anim is not None
 
-    def update(self, vx: float, dt: float):
+    def update(self, vx: float, dt: float, *, runtime_frame=None):
         """
         每帧更新：根据X速度自动选择动画状态
         支持两阶段：静止→加速(move_left/right)→全速(move_left_full/right_full)
@@ -65,6 +82,11 @@ class EnemyRenderObject:
             vx: X方向速度（正=右移，负=左移）
             dt: 时间步长（秒）
         """
+        if self.paused:
+            return
+        if (self._manual is not None and (runtime_frame is None
+                or self._manual._born_frame != runtime_frame)):
+            self._manual.advance(dt * 60.0)
         self.anim_time += dt
 
         if not self.directional:
@@ -109,6 +131,9 @@ class EnemyRenderObject:
         Returns:
             (SpriteFrame, texture_path) 或 (None, None)
         """
+        if (self._manual is not None and not self._manual.cancelled
+                and (not self._manual.finished or not self._resume_auto)):
+            return self._manual.get_render_frame()
         anim = self._get_current_animation()
         if anim is None:
             return None, None
@@ -132,3 +157,63 @@ class EnemyRenderObject:
         if s == 'move_right_full':
             return self.right_full_anim if self.has_full_tilt else self.right_anim
         return self.idle_anim
+
+
+class ActorAnimationControls:
+    """Shared public visual API for the existing EnemyScript and BossBase."""
+
+    @property
+    def visual(self):
+        if not hasattr(self, '_visual'):
+            self._visual = SpriteVisual()
+        return self._visual
+
+    def set_visual(self, **values):
+        """Visual-only offset/rotation/scale/color/alpha/blend; never changes hitboxes."""
+        return self.visual.set(**values)
+
+    def _animation_object(self):
+        if self._render_obj is None:
+            if self.ctx is None:
+                raise RuntimeError('animation control requires a bound stage context')
+            name = getattr(self, 'sprite', getattr(self, 'texture', ''))
+            self._render_obj = EnemyRenderObject(name, self.ctx.animations.assets)
+        return self._render_obj
+
+    def play_animation(self, name, *, loop=None, speed=1.0, resume_auto=True):
+        playback = self._animation_object().play(name, loop=loop, speed=speed,
+                                                resume_auto=resume_auto)
+        if self.ctx is not None:
+            playback._born_frame = self.ctx.runtime_frame
+        return playback
+
+    def stop_animation(self):
+        if self._render_obj is not None:
+            self._render_obj.stop()
+
+    def pause_animation(self):
+        self._animation_object().paused = True
+
+    def resume_animation(self):
+        self._animation_object().paused = False
+
+    def attach_animation(self, name, **options):
+        if self.ctx is None:
+            raise RuntimeError('attached animation requires a bound stage context')
+        return self.ctx.attach_animation(self, name, **options)
+
+    def update_animation(self):
+        vx = self.x - self._prev_x
+        self._prev_x = self.x
+        if self._render_obj is not None:
+            if self.ctx is None:
+                self._render_obj.update(vx, 1.0/60.0)
+            elif not self.ctx._animation_effects_paused:
+                self._render_obj.update(vx, self.ctx.get_simulation_rate('effects')/60.0,
+                                        runtime_frame=self.ctx.runtime_frame)
+
+    def _dispose_animations(self):
+        self.stop_animation()
+        if self.ctx is not None:
+            self.ctx.animations.remove_owner(self)
+            self.ctx.trails.remove_owner(self)

@@ -31,14 +31,15 @@ from src.core.sprite_registry import SpriteRegistry, get_sprite_registry
 from src.core.config import get_config
 from src.game.bullet.tags import BOMB_PROTECTED_TAGS
 from src.game.bullet.behavior import (
-    BulletGroup, STAGE_DTYPE, advance_stages, compile_stages, region_mask,
+    BulletGroup, STAGE_DTYPE, NO_STAGE_PARAMETERS, advance_stages, region_mask,
 )
 from src.game.bullet.batch import (
-    BulletSnapshot, normalize_scalar, normalize_vector,
-    distance_acceleration, neighbor_activation,
+    BulletSnapshot, normalize_scalar, normalize_vector, scalar_parameter,
+    compile_batch_stages, distance_acceleration, neighbor_activation,
 )
 from src.game.bullet.motion import post_bounds
 from src.game.bullet.termination import TerminationQueue
+from src.core.collision_shapes import hitbox_values
 
 
 # ============= Flags 位常量 =============
@@ -88,6 +89,9 @@ class SpawnRequest:
     render_scale: float = 1.0
     curve_type: int = 0
     curve_param: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    hitbox: Any = None
+    render_angle_offset: float = 0.0
+    render_flip_y: bool = False
 
 
 @dataclass
@@ -150,6 +154,8 @@ class OptimizedBulletPool:
             ('acc', 'f4', 2),           # 加速度 (ax, ay)
             ('angle', 'f4'),            # 运动方向角（弧度，由 vel 重算）
             ('render_angle', 'f4'),     # 渲染朝向角（可自转）
+            ('render_angle_offset', 'f4'), # visual-only radians, added during packing
+            ('render_flip_y', 'u1'),    # visual-only UV reflection; default unchanged
             ('angular_vel', 'f4'),      # render_angle 的角速度（弧度/秒）
             ('render_scale', 'f4'),     # per-bullet render size multiplier
             ('speed', 'f4'),            # 标量速度
@@ -160,8 +166,17 @@ class OptimizedBulletPool:
             ('sprite_idx', 'u2'),       # 精灵索引
             ('flags', 'u2'),            # 位标志 (bounce, emitter, render_angle_locked, ...)
             ('radius', 'f4'),           # 碰撞半径
+            ('collision_shape', 'u1'),
+            ('hitbox_size', 'f4', 2),  # full world dimensions
+            ('hitbox_angle', 'f4'),    # independent radians
             ('lifetime', 'f4'),         # 已存活秒数
             ('max_lifetime', 'f4'),     # ≤0 无限存活
+            ('warmup_duration', 'f4'), # birth movement, seconds; commands/collision wait
+            ('warmup_motion', 'f4'),   # multiplier of the original birth velocity
+            ('velocity_boost', 'f4'),  # temporary additive world speed, units/second
+            ('boost_duration', 'f4'),  # linear boost envelope after warmup, seconds
+            ('cull_grace', 'f4'),      # seconds since birth before out-of-bounds removal
+            ('motion_velocity_scale', 'f4'), # temporary slowdown without losing base speed
             ('friction', 'f4'),         # 摩擦/阻尼系数
             ('tag', 'i4'),              # 分组标签
             ('time_scale', 'f4'),       # 时间缩放 (1.0=正常)
@@ -223,6 +238,11 @@ class OptimizedBulletPool:
         self._behavior_table = np.empty(0, dtype=STAGE_DTYPE)
         self._behavior_programs = {}
         self._behavior_gc_at = 128
+        self._behavior_parameter_bases = None
+        self._behavior_parameter_table = np.empty(0, dtype=STAGE_DTYPE)
+        self._behavior_parameter_buffer = self._behavior_parameter_table
+        self._behavior_parameter_count = 0
+        self._behavior_parameter_gc_at = 4096
 
         # ===== 渲染优化相关 =====
         self._render_positions = np.zeros((max_bullets, 2), dtype='f4')
@@ -290,6 +310,9 @@ class OptimizedBulletPool:
         render_scale: float = 1.0,
         curve_type: int = 0,
         curve_param: Tuple[float, float, float, float] = None,
+        hitbox=None,
+        render_angle_offset: float = 0.0,
+        render_flip_y: bool = False,
         **kwargs
     ) -> int:
         """
@@ -302,6 +325,8 @@ class OptimizedBulletPool:
             flags: 位标志 (FLAG_BOUNCE_X, FLAG_BOUNCE_Y, FLAG_IS_EMITTER, FLAG_RENDER_ANGLE_LOCKED)
             angular_vel: render_angle 角速度（弧度/秒）
             render_angle: 初始渲染朝向（None = 跟随 angle）
+            render_angle_offset: 额外视觉偏置（弧度，不改变跟随/自转或运动角）
+            render_flip_y: 仅翻转渲染UV的Y轴，不修改素材、运动或碰撞
             curve_type: 内置曲线类型
             curve_param: 曲线参数 (amp, freq, phase, base)
         """
@@ -327,6 +352,9 @@ class OptimizedBulletPool:
                 flags=flags, angular_vel=angular_vel, render_angle=render_angle,
                 render_scale=render_scale,
                 curve_type=curve_type, curve_param=curve_param,
+                hitbox=hitbox,
+                render_angle_offset=render_angle_offset,
+                render_flip_y=render_flip_y,
             ))
             return -1
 
@@ -338,7 +366,9 @@ class OptimizedBulletPool:
                            motion_angular_accel, sprite_idx, radius,
                            max_lifetime, friction, tag, time_scale, flags,
                            angular_vel, render_angle, render_scale,
-                           curve_type, curve_param)
+                           curve_type, curve_param, hitbox,
+                           render_angle_offset=render_angle_offset,
+                           render_flip_y=render_flip_y)
 
         if on_death:
             self.death_handlers[idx] = on_death
@@ -353,7 +383,8 @@ class OptimizedBulletPool:
     def _write_bullet(self, idx, x, y, angle, speed, acc, speed_accel,
                       motion_angular_accel, sprite_idx, radius,
                       max_lifetime, friction, tag, time_scale, flags,
-                      angular_vel, render_angle, render_scale, curve_type, curve_param):
+                      angular_vel, render_angle, render_scale, curve_type, curve_param, hitbox=None,
+                      render_angle_offset=0.0, render_flip_y=False):
         """写入子弹数据到指定 slot"""
         vx = math.cos(angle) * speed
         vy = math.sin(angle) * speed
@@ -364,6 +395,8 @@ class OptimizedBulletPool:
         d['acc'][idx] = acc
         d['angle'][idx] = angle
         d['render_angle'][idx] = render_angle
+        d['render_angle_offset'][idx] = render_angle_offset
+        d['render_flip_y'][idx] = bool(render_flip_y)
         d['angular_vel'][idx] = angular_vel
         d['render_scale'][idx] = render_scale
         d['speed'][idx] = speed
@@ -371,7 +404,11 @@ class OptimizedBulletPool:
         d['motion_angular_vel'][idx] = 0.0
         d['motion_angular_accel'][idx] = motion_angular_accel
         d['sprite_idx'][idx] = sprite_idx
+        shape, radius, half, box_angle = hitbox_values(hitbox, radius)
         d['radius'][idx] = radius
+        d['collision_shape'][idx] = shape
+        d['hitbox_size'][idx] = (half[0]*2, half[1]*2)
+        d['hitbox_angle'][idx] = box_angle
         d['lifetime'][idx] = 0.0
         d['max_lifetime'][idx] = max_lifetime
         d['friction'][idx] = friction
@@ -433,6 +470,8 @@ class OptimizedBulletPool:
         d['acc'][use_indices, 1] = acc[1]
         d['angle'][use_indices] = angles[:n]
         d['render_angle'][use_indices] = angles[:n]
+        d['render_angle_offset'][use_indices] = 0.0
+        d['render_flip_y'][use_indices] = 0
         d['angular_vel'][use_indices] = 0.0
         d['render_scale'][use_indices] = 1.0
         d['speed'][use_indices] = speed
@@ -441,6 +480,9 @@ class OptimizedBulletPool:
         d['motion_angular_accel'][use_indices] = 0.0
         d['sprite_idx'][use_indices] = sprite_idx
         d['radius'][use_indices] = radius
+        d['collision_shape'][use_indices] = 0
+        d['hitbox_size'][use_indices] = 0.0
+        d['hitbox_angle'][use_indices] = 0.0
         d['lifetime'][use_indices] = 0.0
         d['max_lifetime'][use_indices] = max_lifetime
         d['friction'][use_indices] = friction
@@ -482,6 +524,9 @@ class OptimizedBulletPool:
         render_scale: float = 1.0,
         curve_type: int = CURVE_NONE,
         curve_param: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+        hitbox=None, collision_shape=0, hitbox_size=(0.0, 0.0), hitbox_angle=0.0,
+        render_angle_offset: float = 0.0,
+        render_flip_y: bool = False,
     ) -> np.ndarray:
         """Spawn heterogeneous bullets with one vectorized pool write.
 
@@ -517,12 +562,19 @@ class OptimizedBulletPool:
         if np.ndim(sprite_idx) == 0 and sprite_idx < 0:
             sprite_idx = self.register_sprite(sprite_id) if sprite_id else 0
 
+        if hitbox is not None:
+            collision_shape, radius, half, hitbox_angle = hitbox_values(hitbox)
+            hitbox_size = (half[0]*2, half[1]*2)
+
         parameters = {
             'acc': self._batch_parameter(acc, count, 'acc', vector=True),
             'speed_accel': self._batch_parameter(speed_accel, count, 'speed_accel'),
             'motion_angular_accel': self._batch_parameter(motion_angular_accel, count, 'motion_angular_accel'),
             'sprite_idx': self._batch_parameter(sprite_idx, count, 'sprite_idx', dtype=np.uint16),
             'radius': self._batch_parameter(radius, count, 'radius'),
+            'collision_shape': self._batch_parameter(collision_shape, count, 'collision_shape', dtype=np.uint8),
+            'hitbox_size': self._batch_parameter(hitbox_size, count, 'hitbox_size', vector=True),
+            'hitbox_angle': self._batch_parameter(hitbox_angle, count, 'hitbox_angle'),
             'max_lifetime': self._batch_parameter(max_lifetime, count, 'max_lifetime'),
             'friction': self._batch_parameter(friction, count, 'friction'),
             'tag': self._batch_parameter(tag, count, 'tag', dtype=np.int32),
@@ -530,6 +582,8 @@ class OptimizedBulletPool:
             'flags': self._batch_parameter(flags, count, 'flags', dtype=np.uint16),
             'angular_vel': self._batch_parameter(angular_vel, count, 'angular_vel'),
             'render_scale': self._batch_parameter(render_scale, count, 'render_scale'),
+            'render_angle_offset': self._batch_parameter(render_angle_offset, count, 'render_angle_offset'),
+            'render_flip_y': self._batch_parameter(render_flip_y, count, 'render_flip_y', dtype=np.uint8),
             'curve_type': self._batch_parameter(curve_type, count, 'curve_type', dtype=np.uint8),
         }
         curve_array = np.asarray(curve_param, dtype=np.float32)
@@ -555,7 +609,7 @@ class OptimizedBulletPool:
         d['lifetime'][use_indices] = 0.0
         d['curve_param'][use_indices] = curve_array[:available] if curve_array.ndim == 2 else curve_array
         for name, parameter in parameters.items():
-            d[name][use_indices] = parameter[:available] if np.ndim(parameter) > (1 if name == 'acc' else 0) else parameter
+            d[name][use_indices] = parameter[:available] if np.ndim(parameter) > (1 if name in {'acc', 'hitbox_size'} else 0) else parameter
         d['alive'][use_indices] = 1
         self._reset_spawn_state(use_indices)
         self.batch_spawn_calls += 1
@@ -580,17 +634,37 @@ class OptimizedBulletPool:
         del self.free_indices[-count:]
         return indices
 
-    def _release_behavior_state(self, indices):
+    def _release_behavior_state(self, indices, *, cancel_motion=False):
         if self._behavior_stage is not None:
+            if cancel_motion:
+                # A finite behavior must not become an infinite spawn bounce
+                # when its remaining count is reset to the -1 sentinel.
+                for remaining, flag in ((self._bounce_remaining_x, FLAG_BOUNCE_X),
+                                        (self._bounce_remaining_y, FLAG_BOUNCE_Y)):
+                    owned = indices[remaining[indices] >= 0]
+                    self.data['flags'][owned] &= np.uint16(65535 ^ flag)
             self._behavior_count -= int(np.count_nonzero(self._behavior_stage[indices] >= 0))
             self._behavior_stage[indices] = -1
             self._bounce_remaining_x[indices] = -1
             self._bounce_remaining_y[indices] = -1
+        if self._behavior_parameter_bases is not None:
+            self._behavior_parameter_count -= int(np.count_nonzero(
+                self._behavior_parameter_bases[indices] != NO_STAGE_PARAMETERS,
+            ))
+            self._behavior_parameter_bases[indices] = NO_STAGE_PARAMETERS
+            if not self._behavior_parameter_count and len(self._behavior_parameter_table):
+                self._behavior_parameter_table = np.empty(0, dtype=STAGE_DTYPE)
         if self._wrap_remaining_x is not None:
             self._wrap_remaining_x[indices] = -1
             self._wrap_remaining_y[indices] = -1
 
     def _reset_spawn_state(self, indices):
+        self.data['warmup_duration'][indices] = 0.0
+        self.data['warmup_motion'][indices] = 1.0
+        self.data['velocity_boost'][indices] = 0.0
+        self.data['boost_duration'][indices] = 0.0
+        self.data['cull_grace'][indices] = 0.0
+        self.data['motion_velocity_scale'][indices] = 1.0
         self._release_behavior_state(indices)
         self.generations[indices] += np.uint32(1)
         # Gameplay controllers run after pool.update and before collision.
@@ -646,10 +720,43 @@ class OptimizedBulletPool:
     def count_bullets(self, group=None, *, tag=None, region=None) -> int:
         return len(self._resolve_indices(group, tag=tag, region=region))
 
+    def configure_birth(self, group, *, warmup_frames=0.0, motion_factor=1.0,
+                        velocity_boost=0.0, boost_frames=0.0,
+                        offscreen_grace_frames=0.0):
+        """Configure a numeric birth phase, never delayed creation.
+
+        The bullet exists and moves immediately. During warmup its initial
+        velocity is scaled, commands and collisions wait. Boost is an additive
+        *world units/second* envelope after warmup, leaving base speed intact.
+        Out-of-bounds grace never disables collision. Frame durations follow
+        the individual bullet's simulation clock. Slot generations are checked.
+        """
+        original, keep = self._batch_selection(group)
+        indices, source_count = original[keep], len(original)
+        count = len(indices)
+        values = {}
+        for key, value in (('warmup_duration', warmup_frames),
+                           ('warmup_motion', motion_factor),
+                           ('velocity_boost', velocity_boost),
+                           ('boost_duration', boost_frames),
+                           ('cull_grace', offscreen_grace_frames)):
+            array = self._batch_parameter(value, count, key, source_count=source_count,
+                                          survivor_mask=keep)
+            if np.any(array < 0):
+                raise ValueError(key + ' must be non-negative')
+            values[key] = array if key in {'warmup_motion', 'velocity_boost'} else array / 60.0
+        for key, array in values.items():
+            self.data[key][indices] = array
+        return count
+
     @staticmethod
     def _batch_parameter(value, count, name, *, source_count=None, survivor_mask=None,
                          vector=False, dtype=np.float32):
+        if not vector and isinstance(value, (int, float, np.integer, np.floating, np.bool_)):
+            return scalar_parameter(value, name, dtype)
         array = np.asarray(value)
+        if not vector and array.ndim == 0 and array.dtype.kind in {'b', 'i', 'u', 'f'}:
+            return scalar_parameter(array, name, dtype)
         if (vector and array.shape == (2,)) or (not vector and array.ndim == 0):
             if not np.all(np.isfinite(array)):
                 raise ValueError(name + ' must be finite')
@@ -680,10 +787,13 @@ class OptimizedBulletPool:
         return original, keep
 
     def read_bullets(self, group=None, *, tag=None, region=None, fields=None):
-        names = tuple(fields or ('pos', 'vel', 'angle', 'speed', 'acc', 'speed_accel',
-                                 'sprite_idx', 'tag', 'time_scale', 'lifetime'))
+        names = (('pos', 'vel', 'angle', 'speed', 'acc', 'speed_accel',
+                  'sprite_idx', 'tag', 'time_scale', 'lifetime')
+                 if fields is None else tuple(fields))
         allowed = {'pos', 'vel', 'angle', 'speed', 'acc', 'speed_accel',
-                   'sprite_idx', 'tag', 'time_scale', 'lifetime'}
+                   'sprite_idx', 'tag', 'time_scale', 'lifetime',
+                   'collision_shape', 'radius', 'hitbox_size', 'hitbox_angle',
+                   'render_angle', 'render_angle_offset', 'render_flip_y'}
         if set(names) - allowed:
             raise ValueError('unsupported snapshot fields: ' + ', '.join(sorted(set(names) - allowed)))
         indices = self._resolve_indices(group, tag=tag, region=region)
@@ -695,6 +805,9 @@ class OptimizedBulletPool:
         aim=None, speed_accel=None, time_scale=None, sprite_id=None,
         render_scale=None, cooldown=0.0, cooldown_key=None, positions=None,
         velocities=None, vector_accel=None, sprite_indices=None, motion_angular_accel=None,
+        hitbox=None, collision_shape=None, radius=None, hitbox_size=None, hitbox_angle=None,
+        render_angle_offset=None,
+        render_flip_y=None,
     ) -> int:
         """Apply one batch operation. Angles are radians; cooldown is seconds.
 
@@ -702,6 +815,9 @@ class OptimizedBulletPool:
         installs per-bullet callbacks or publishes per-bullet events.
         """
         original, keep = self._batch_selection(group, tag=tag, region=region)
+        if hitbox is not None:
+            collision_shape, radius, half, hitbox_angle = hitbox_values(hitbox)
+            hitbox_size = (half[0]*2, half[1]*2)
         if sprite_id is not None and sprite_indices is not None:
             raise ValueError('sprite_id and sprite_indices cannot both be set')
         if velocities is not None and (speed is not None or angle is not None or aim is not None):
@@ -729,12 +845,17 @@ class OptimizedBulletPool:
         indices = original[keep]
         updates = {'speed': speed, 'angle': angle, 'speed_accel': speed_accel,
                    'time_scale': time_scale, 'render_scale': render_scale,
+                   'render_angle_offset': render_angle_offset,
+                   'render_flip_y': render_flip_y,
                    'pos': positions, 'vel': velocities, 'acc': vector_accel,
-                   'sprite_idx': sprite_indices, 'motion_angular_accel': motion_angular_accel}
+                   'sprite_idx': sprite_indices, 'motion_angular_accel': motion_angular_accel,
+                   'collision_shape': collision_shape, 'radius': radius,
+                   'hitbox_size': hitbox_size, 'hitbox_angle': hitbox_angle}
         updates = {
             name: self._batch_parameter(value, len(indices), name, source_count=len(original),
-                                       survivor_mask=keep, vector=name in {'pos', 'vel', 'acc'},
-                                       dtype=np.uint16 if name == 'sprite_idx' else np.float32)
+                                       survivor_mask=keep, vector=name in {'pos', 'vel', 'acc', 'hitbox_size'},
+                                       dtype=(np.uint16 if name == 'sprite_idx' else
+                                              np.uint8 if name in {'collision_shape', 'render_flip_y'} else np.float32))
             for name, value in updates.items() if value is not None
         }
         for name in ('speed', 'time_scale', 'render_scale'):
@@ -798,14 +919,23 @@ class OptimizedBulletPool:
         times['motion_behavior_ms'] = (perf_counter() - start) * 1000.0
         start = perf_counter()
         advance_stages(data, table, stages, stages, elapsed, entered,
-                       bounces, bounces, 1.0 / 60.0, 0.0, 0.0, None, None)
+                       bounces, bounces, 1.0 / 60.0, 0.0, 0.0, None, None, None, None)
         times['stage_ms'] = (perf_counter() - start) * 1000.0
         start = perf_counter()
         advance_stages(data, table, stages, stages, elapsed, entered,
-                       bounces, bounces, 1.0 / 60.0, 0.0, 0.0, bounces, bounces)
+                       bounces, bounces, 1.0 / 60.0, 0.0, 0.0, bounces, bounces, None, None)
         _update_bullets_optimized(data, 1.0 / 60.0, bounces, bounces, False)
-        post_bounds(data, bounces, bounces)
+        post_bounds(data, bounces, bounces, 1.0 / 60.0)
         times['wrap_ms'] = (perf_counter() - start) * 1000.0
+        start = perf_counter()
+        parameter_bases = np.empty(0, dtype=np.int64)
+        advance_stages(data, table, stages, stages, elapsed, entered,
+                       bounces, bounces, 1.0 / 60.0, 0.0, 0.0, None, None,
+                       parameter_bases, table)
+        advance_stages(data, table, stages, stages, elapsed, entered,
+                       bounces, bounces, 1.0 / 60.0, 0.0, 0.0, bounces, bounces,
+                       parameter_bases, table)
+        times['stage_parameters_ms'] = (perf_counter() - start) * 1000.0
         start = perf_counter()
         region_mask(data, {'kind': 'circle', 'radius': 1.0})
         times['region_ms'] = (perf_counter() - start) * 1000.0
@@ -826,9 +956,26 @@ class OptimizedBulletPool:
         return times
 
     def set_bullet_behavior(self, group=None, *, tag=None, stages) -> int:
-        """Replace movement with a shared stage table; no Python bullet tasks."""
-        rows = compile_stages(stages, self.register_sprite)
-        indices = self._resolve_indices(group, tag=tag)
+        """Assign shared/row-parameterized movement, or cancel with no stages.
+
+        Parameter arrays retain their original fixed-group row alignment across
+        death and slot reuse. Empty stages stop behavior-driven acceleration,
+        turning and speed scaling, retaining position, base speed and direction.
+        A temporary movement multiplier is reset, not baked into base speed.
+        """
+        stages = tuple(stages)
+        original, keep = self._batch_selection(group, tag=tag)
+        indices = original[keep]
+        if not stages:
+            self._release_behavior_state(indices, cancel_motion=True)
+            self._reset_behavior_motion(indices)
+            if not self._behavior_parameter_count:
+                self._behavior_parameter_table = np.empty(0, dtype=STAGE_DTYPE)
+            return len(indices)
+        rows, parameters = compile_batch_stages(
+            stages, self.register_sprite, len(indices),
+            source_count=len(original), survivor_mask=keep,
+        )
         if not len(indices):
             return 0
         if self._wrap_remaining_x is None and (np.any(rows['wrap_x'] > 0) or np.any(rows['wrap_y'] > 0)):
@@ -841,12 +988,17 @@ class OptimizedBulletPool:
             self._behavior_entered = np.zeros(self.max_bullets, dtype=np.bool_)
             self._bounce_remaining_x = np.full(self.max_bullets, -1, dtype=np.int16)
             self._bounce_remaining_y = np.full(self.max_bullets, -1, dtype=np.int16)
-        self._release_behavior_state(indices)
+        self._release_behavior_state(indices, cancel_motion=True)
         if not self._behavior_count:
             self._behavior_table = np.empty(0, dtype=STAGE_DTYPE)
             self._behavior_programs.clear()
             self._behavior_gc_at = 128
-        elif len(self._behavior_programs) >= self._behavior_gc_at:
+        if not self._behavior_parameter_count:
+            self._behavior_parameter_table = np.empty(0, dtype=STAGE_DTYPE)
+            self._behavior_parameter_gc_at = 4096
+        elif len(self._behavior_parameter_table) >= self._behavior_parameter_gc_at:
+            self._compact_behavior_parameters()
+        if len(self._behavior_programs) >= self._behavior_gc_at:
             self._compact_behavior_programs()
         key = rows.tobytes()
         if key not in self._behavior_programs:
@@ -859,6 +1011,21 @@ class OptimizedBulletPool:
         self._behavior_elapsed[indices] = 0.0
         self._behavior_entered[indices] = False
         self._behavior_count += len(indices)
+        if parameters is not None:
+            if self._behavior_parameter_bases is None:
+                self._behavior_parameter_bases = np.full(
+                    self.max_bullets, NO_STAGE_PARAMETERS, dtype=np.int64,
+                )
+            parameter_start = len(self._behavior_parameter_table)
+            self._append_behavior_parameters(parameters)
+            self._behavior_parameter_bases[indices] = (
+                parameter_start + np.arange(len(indices), dtype=np.int64) * len(rows) - start
+            )
+            self._behavior_parameter_count += len(indices)
+        self._reset_behavior_motion(indices)
+        return len(indices)
+
+    def _reset_behavior_motion(self, indices):
         # A replacement does not accidentally retain curves/old acceleration.
         self.data['curve_type'][indices] = CURVE_NONE
         self.data['acc'][indices] = 0.0
@@ -866,11 +1033,34 @@ class OptimizedBulletPool:
         self.data['speed_accel'][indices] = 0.0
         self.data['motion_angular_vel'][indices] = 0.0
         self.data['motion_angular_accel'][indices] = 0.0
+        self.data['motion_velocity_scale'][indices] = 1.0
         polar = indices[(self.data['flags'][indices] & FLAG_IS_POLAR) != 0]
         for index in polar.tolist():
             self.polar_motions.pop(index, None)
         self.data['flags'][indices] &= np.uint16(65535 ^ FLAG_IS_POLAR)
-        return len(indices)
+
+    def _append_behavior_parameters(self, parameters):
+        used = len(self._behavior_parameter_table)
+        needed = used + len(parameters)
+        if needed > len(self._behavior_parameter_buffer):
+            capacity = max(1024, needed, len(self._behavior_parameter_buffer) * 2)
+            buffer = np.empty(capacity, dtype=STAGE_DTYPE)
+            buffer[:used] = self._behavior_parameter_table
+            self._behavior_parameter_buffer = buffer
+        self._behavior_parameter_buffer[used:needed] = parameters
+        self._behavior_parameter_table = self._behavior_parameter_buffer[:needed]
+
+    def _compact_behavior_parameters(self):
+        """Reclaim obsolete parameter rows only during command assignment."""
+        indices = np.flatnonzero(self._behavior_parameter_bases != NO_STAGE_PARAMETERS)
+        counts = self._behavior_end[indices] - self._behavior_stage[indices]
+        offsets = np.cumsum(counts, dtype=np.int64) - counts
+        starts = self._behavior_parameter_bases[indices] + self._behavior_stage[indices]
+        gather = np.repeat(starts - offsets, counts) + np.arange(int(np.sum(counts)))
+        self._behavior_parameter_buffer[:len(gather)] = self._behavior_parameter_table[gather]
+        self._behavior_parameter_table = self._behavior_parameter_buffer[:len(gather)]
+        self._behavior_parameter_bases[indices] = offsets - self._behavior_stage[indices]
+        self._behavior_parameter_gc_at = max(4096, len(gather) * 2)
 
     def _compact_behavior_programs(self):
         """Drop unused shared definitions during assignment, never each tick."""
@@ -885,7 +1075,11 @@ class OptimizedBulletPool:
                 continue
             rows.append(self._behavior_table[start:end])
             selected = active & (old_ends == end)
-            self._behavior_stage[selected] += position - start
+            delta = position - start
+            self._behavior_stage[selected] += delta
+            if self._behavior_parameter_bases is not None:
+                parameterized = selected & (self._behavior_parameter_bases != NO_STAGE_PARAMETERS)
+                self._behavior_parameter_bases[parameterized] -= delta
             self._behavior_end[selected] = position + end - start
             programs[key] = (position, position + end - start)
             position += end - start
@@ -1032,22 +1226,32 @@ class OptimizedBulletPool:
         self._clock += dt
         self.last_alive[:] = self.data['alive']
         self.collision_eligible[:] = self.last_alive != 0
+        self.collision_eligible &= (
+            self.data['lifetime'] + 1e-8 >= self.data['warmup_duration']
+        )
         self._in_update = True
         try:
             if self._behavior_count:
-                self._behavior_count, wrapping = advance_stages(
+                parameter_bases = (self._behavior_parameter_bases
+                                   if self._behavior_parameter_count else None)
+                parameter_table = (self._behavior_parameter_table
+                                   if self._behavior_parameter_count else None)
+                self._behavior_count, wrapping, self._behavior_parameter_count = advance_stages(
                     self.data, self._behavior_table, self._behavior_stage,
                     self._behavior_end, self._behavior_elapsed, self._behavior_entered,
                     self._bounce_remaining_x, self._bounce_remaining_y, dt,
                     self._player_target[0], self._player_target[1],
                     self._wrap_remaining_x, self._wrap_remaining_y,
+                    parameter_bases, parameter_table,
                 )
+                if not self._behavior_parameter_count and len(self._behavior_parameter_table):
+                    self._behavior_parameter_table = np.empty(0, dtype=STAGE_DTYPE)
                 self._wrap_live_count = max(self._wrap_live_count, wrapping)
             if self._wrap_live_count:
                 _update_bullets_optimized(self.data, dt, self._bounce_remaining_x,
                                           self._bounce_remaining_y, False)
                 self._wrap_live_count = post_bounds(self.data, self._wrap_remaining_x,
-                                                    self._wrap_remaining_y)
+                                                    self._wrap_remaining_y, dt)
             else:
                 _update_bullets_optimized(self.data, dt, self._bounce_remaining_x,
                                           self._bounce_remaining_y)
@@ -1056,7 +1260,7 @@ class OptimizedBulletPool:
             self._collect_deaths()
             self._process_termination_batch_reactions()
             self._process_death_queue()
-            self._process_spawn_queue()
+            self._process_spawn_queue(dt * 60.0)
         finally:
             self._in_update = False
 
@@ -1258,12 +1462,12 @@ class OptimizedBulletPool:
         self.lifecycle_batches.clear()
         return values
 
-    def _process_spawn_queue(self):
+    def _process_spawn_queue(self, frames=1.0):
         pending = self.spawn_queue
         self.spawn_queue = []
         for req in pending:
-            req.delay -= 1
-            if req.delay <= 0:
+            req.delay -= frames
+            if req.delay <= 1e-8:
                 self._spawn_from_request(req)
             else:
                 self.spawn_queue.append(req)
@@ -1278,7 +1482,9 @@ class OptimizedBulletPool:
                            req.sprite_idx, req.radius, req.max_lifetime,
                            req.friction, req.tag, req.time_scale, req.flags,
                            req.angular_vel, req.render_angle, req.render_scale,
-                           req.curve_type, req.curve_param)
+                           req.curve_type, req.curve_param, req.hitbox,
+                           render_angle_offset=req.render_angle_offset,
+                           render_flip_y=req.render_flip_y)
 
         if req.on_death:
             self.death_handlers[idx] = req.on_death
@@ -1299,7 +1505,7 @@ class OptimizedBulletPool:
         active_data = self.data[active_mask]
 
         positions = active_data['pos']
-        angles = active_data['render_angle']  # v2: 使用 render_angle
+        angles = active_data['render_angle'] + active_data['render_angle_offset']
         sprite_indices = active_data['sprite_idx']
 
         uv_array = self.sprite_registry._uv_array
@@ -1308,6 +1514,8 @@ class OptimizedBulletPool:
         tex_idx_array = self.sprite_registry._texture_idx_array
 
         uvs = uv_array[sprite_indices]
+        flip_y = active_data['render_flip_y'] != 0
+        uvs[flip_y, 1], uvs[flip_y, 3] = uvs[flip_y, 3], uvs[flip_y, 1]
         scales = size_array[sprite_indices] * active_data['render_scale'][:, None] * self._scale_factor
         categories = category_array[sprite_indices]
         tex_indices = tex_idx_array[sprite_indices]
@@ -1400,7 +1608,7 @@ class OptimizedBulletPool:
 
         positions = active_data['pos']
         colors = np.zeros((len(active_data), 3), dtype='f4')
-        angles = active_data['render_angle']  # v2: render_angle
+        angles = active_data['render_angle'] + active_data['render_angle_offset']
 
         sprite_ids = np.array([
             self.sprite_registry.get_id(idx)
@@ -1429,6 +1637,12 @@ class OptimizedBulletPool:
         self._behavior_table = np.empty(0, dtype=STAGE_DTYPE)
         self._behavior_programs.clear()
         self._behavior_gc_at = 128
+        if self._behavior_parameter_bases is not None:
+            self._behavior_parameter_bases[:] = NO_STAGE_PARAMETERS
+        self._behavior_parameter_table = np.empty(0, dtype=STAGE_DTYPE)
+        self._behavior_parameter_count = 0
+        self._behavior_parameter_buffer = self._behavior_parameter_table
+        self._behavior_parameter_gc_at = 4096
         self._cooldowns.clear()
         self._wrap_live_count = 0
         if self._wrap_remaining_x is not None:
@@ -1625,11 +1839,12 @@ def _prepare_render_data_sorted_numba(
         dst = bucket_write_offsets[key]
         positions_out[dst, 0] = data[i]['pos'][0]
         positions_out[dst, 1] = data[i]['pos'][1]
-        angles_out[dst] = data[i]['render_angle']
+        angles_out[dst] = data[i]['render_angle'] + data[i]['render_angle_offset']
         uvs_out[dst, 0] = uv_array[sprite_idx, 0]
-        uvs_out[dst, 1] = uv_array[sprite_idx, 1]
+        flip_y = data[i]['render_flip_y'] != 0
+        uvs_out[dst, 1] = uv_array[sprite_idx, 3 if flip_y else 1]
         uvs_out[dst, 2] = uv_array[sprite_idx, 2]
-        uvs_out[dst, 3] = uv_array[sprite_idx, 3]
+        uvs_out[dst, 3] = uv_array[sprite_idx, 1 if flip_y else 3]
         render_scale = data[i]['render_scale']
         scales_out[dst, 0] = size_array[sprite_idx, 0] * render_scale * scale_factor
         scales_out[dst, 1] = size_array[sprite_idx, 1] * render_scale * scale_factor
@@ -1664,12 +1879,21 @@ def _update_bullets_optimized(data, dt, bounce_remaining_x=None, bounce_remainin
                 data[i]['alive'] = 0
             continue
 
+        age_before = data[i]['lifetime']
         data[i]['lifetime'] += local_dt
 
         # 生命周期检查
         max_life = data[i]['max_lifetime']
         if max_life > 0.0 and data[i]['lifetime'] >= max_life:
             data[i]['alive'] = 0
+            continue
+
+        if age_before + 1e-8 < data[i]['warmup_duration']:
+            # This is motion, not a spawn queue. Initial commands do not run
+            # until ready, matching generic warned/appearing projectiles.
+            factor = data[i]['warmup_motion']
+            data[i]['pos'][0] += data[i]['vel'][0] * local_dt * factor
+            data[i]['pos'][1] += data[i]['vel'][1] * local_dt * factor
             continue
 
         # ---- 内置数学曲线 ----
@@ -1722,8 +1946,14 @@ def _update_bullets_optimized(data, dt, bounce_remaining_x=None, bounce_remainin
         data[i]['vel'][1] += data[i]['acc'][1] * local_dt
 
         # ---- 位置 ----
-        data[i]['pos'][0] += data[i]['vel'][0] * local_dt
-        data[i]['pos'][1] += data[i]['vel'][1] * local_dt
+        boost = 0.0
+        duration = data[i]['boost_duration']
+        if duration > 0.0:
+            elapsed = max(0.0, age_before - data[i]['warmup_duration'])
+            boost = data[i]['velocity_boost'] * max(0.0, 1.0 - elapsed / duration)
+        motion_scale = data[i]['motion_velocity_scale']
+        data[i]['pos'][0] += (data[i]['vel'][0] * motion_scale + boost * math.cos(angle)) * local_dt
+        data[i]['pos'][1] += (data[i]['vel'][1] * motion_scale + boost * math.sin(angle)) * local_dt
 
         # ---- 重算 speed / angle ----
         vx = data[i]['vel'][0]
@@ -1778,7 +2008,8 @@ def _update_bullets_optimized(data, dt, bounce_remaining_x=None, bounce_remainin
                     data[i]['flags'] &= 65533
 
         # 非反弹子弹的屏幕外消亡
-        if cull_outside and not (data[i]['flags'] & 3):
+        if (cull_outside and not (data[i]['flags'] & 3)
+                and data[i]['lifetime'] + 1e-8 >= data[i]['cull_grace']):
             x = data[i]['pos'][0]
             y = data[i]['pos'][1]
             if x < -1.5 or x > 1.5 or y < -1.5 or y > 1.5:

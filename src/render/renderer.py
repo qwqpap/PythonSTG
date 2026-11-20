@@ -23,6 +23,7 @@ import os
 from .laser_renderer import LaserRenderer
 from .optimized_bullet_renderer import OptimizedBulletRenderer
 from .particle_renderer import ParticleRenderer
+from ..game.animation import SpriteBatch, SpriteVisual
 
 
 # 子弹大小分类常量（用于高效分桶排序）
@@ -127,6 +128,11 @@ class Renderer:
         # 优化版敌弹渲染器（仅当 bullet_pool 支持 prepare_render_data_sorted 时启用）
         self.optimized_bullet_renderer = OptimizedBulletRenderer(ctx, textures)
         self.particle_renderer = ParticleRenderer(ctx, textures, base_size)
+        self._actor_batch = SpriteBatch(sprite_manager.asset_manager)
+        self._actor_draws = []
+        self._batching_actors = False
+        self._default_visual = SpriteVisual()
+        self._static_actor_frames = {}
 
         # 全窗口背景图（UI背景，叠在游戏内容下层）
         self._window_bg_texture = None
@@ -134,6 +140,9 @@ class Renderer:
         self._window_bg_vbo = None
         self._window_bg_vao = None
         self._init_window_bg_shader()
+        self._screen_effect_program = None
+        self._screen_effect_vbo = None
+        self._screen_effect_vao = None
 
     def _build_sprite_size_cache(self):
         """构建精灵大小分类缓存"""
@@ -445,16 +454,24 @@ class Renderer:
         """
         try:
             from PIL import Image
-            img = Image.open(path).convert("RGBA")
+            with Image.open(path) as source:
+                img = source.convert("RGBA")
             # 不翻转：PIL行0（顶部）→ OpenGL行0（底部）恰好与 UV v=0→底部对应
             # 我们在 quad 中把 NDC y=+1（顶）对应 uv_v=0，y=-1（底）对应 uv_v=1，
             # 即不翻转图片就能让图片顶部显示在屏幕顶部
             w, h = img.size
             data = img.tobytes("raw", "RGBA")
             tex = self.ctx.texture((w, h), 4, data)
-            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            try:
+                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                self._window_bg_program['u_alpha'].value = alpha
+            except BaseException:
+                tex.release()
+                raise
+            previous = self._window_bg_texture
             self._window_bg_texture = tex
-            self._window_bg_program['u_alpha'].value = alpha
+            if previous is not None:
+                previous.release()
             print(f"已加载全窗口背景图: {path} ({w}x{h})")
             return True
         except Exception as e:
@@ -580,6 +597,127 @@ class Renderer:
         """
         self.background_renderer = background_renderer
 
+    def _ensure_screen_effect_resources(self):
+        if self._screen_effect_program is None:
+            self._screen_effect_program = self.ctx.program(
+                vertex_shader='''
+                    #version 330
+                    in vec2 in_vert;
+                    uniform vec4 u_rect;
+                    void main() {
+                        vec2 pos = mix(u_rect.xy, u_rect.zw, in_vert * .5 + .5);
+                        gl_Position = vec4(pos, 0.0, 1.0);
+                    }
+                ''',
+                fragment_shader='''
+                    #version 330
+                    uniform vec4 u_color;
+                    out vec4 f_color;
+                    void main() { f_color = u_color; }
+                ''',
+            )
+            vertices = np.array([
+                [-1., -1.], [1., -1.], [-1., 1.],
+                [-1., 1.], [1., -1.], [1., 1.],
+            ], dtype=np.float32)
+            self._screen_effect_vbo = self.ctx.buffer(vertices.tobytes())
+            self._screen_effect_vao = self.ctx.vertex_array(
+                self._screen_effect_program,
+                [(self._screen_effect_vbo, '2f', 'in_vert')],
+            )
+    def prepare_resources(self, player, *, trail_vertices=0, item_renderer=None):
+        """Prepare first-use visuals during loading, never advance gameplay."""
+        from PIL import Image
+
+        self.particle_renderer.prepare_resources(trail_vertices=trail_vertices)
+        self._ensure_screen_effect_resources()
+        self._ensure_hitbox_texture()
+        from ..game.laser import get_laser_texture_data
+        laser_data = get_laser_texture_data()
+        for description in (*laser_data.textures.values(), laser_data.bent_laser_data):
+            path = description.get('file')
+            if path:
+                self.laser_renderer.load_texture(path)
+        path = getattr(player, 'bullet_texture_path', '') or ''
+        if path and self.player_bullet_texture is None and os.path.exists(path):
+            with Image.open(path) as source:
+                img = source.convert('RGBA')
+            self.player_bullet_texture = self.ctx.texture(img.size, 4, img.tobytes())
+            self.player_bullet_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+            self.player_bullet_texture_size = img.size
+        if getattr(self, '_prepared_player', None) is player:
+            return
+        viewport, scissor = self.ctx.viewport, self.ctx.scissor
+        target = self.ctx.texture((8, 8), 4)
+        framebuffer = self.ctx.framebuffer([target])
+        try:
+            with self.ctx.scope(framebuffer=framebuffer):
+                self.ctx.viewport, self.ctx.scissor = (0, 0, 8, 8), None
+                # These render functions only read the player's current frame;
+                # no fake bullets, input, clocks or effect handles are created.
+                self._render_player(player)
+                self._render_options(player)
+                texture = next(iter(self.textures.values()), None)
+                if texture is not None:
+                    self.optimized_bullet_renderer._render_batch_data(
+                        texture, np.zeros((1, 2), np.float32), np.zeros(1, np.float32),
+                        np.array([[0, 0, 1, 1]], np.float32),
+                        np.full((1, 2), .1, np.float32), 1)
+                    texture.use(0)
+                    laser = self.laser_renderer
+                    laser.vbo_vert.write(np.array([[0, 0], [8, 0], [0, 8]], np.float32))
+                    laser.vbo_texcoord.write(np.array([[0, 0], [1, 0], [0, 1]], np.float32))
+                    laser.vbo_color.write(np.ones((3, 4), np.float32))
+                    laser.vao.render(moderngl.TRIANGLES, vertices=3)
+                if item_renderer is not None and item_renderer.texture is not None:
+                    item_renderer._upload_and_draw(
+                        np.zeros((1, 2), np.float32), np.full(1, .1, np.float32),
+                        np.array([[0, 0, 1, 1]], np.float32), 1)
+                self._screen_effect_program['u_rect'].value = (-1., -1., 1., 1.)
+                self._screen_effect_program['u_color'].value = (1., 1., 1., 1.)
+                self._screen_effect_vao.render(moderngl.TRIANGLES)
+                self.ctx.finish()
+            self._prepared_player = player
+        finally:
+            self.ctx.viewport, self.ctx.scissor = viewport, scissor
+            framebuffer.release()
+            target.release()
+
+    def render_screen_effects(self, effects, *, viewport_rect=None):
+        """Composite stage pulses over the playfield, never the HUD."""
+        colors = effects.colors
+        if not colors:
+            return 0
+        self._ensure_screen_effect_resources()
+        rect = (-1.0, -1.0, 1.0, 1.0)
+        if viewport_rect is not None:
+            vx, vy, vw, vh = self.ctx.viewport
+            x, y, width, height = viewport_rect
+            rect = (2.0 * (x - vx) / vw - 1.0,
+                    2.0 * (y - vy) / vh - 1.0,
+                    2.0 * (x + width - vx) / vw - 1.0,
+                    2.0 * (y + height - vy) / vh - 1.0)
+        self._screen_effect_program['u_rect'].value = rect
+        self.ctx.enable(moderngl.BLEND)
+        self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+        try:
+            for color in colors:
+                self._screen_effect_program['u_color'].value = color
+                self._screen_effect_vao.render(moderngl.TRIANGLES)
+        finally:
+            self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+        return len(colors)
+
+    @staticmethod
+    def game_content_viewport(viewport_rect, effects):
+        """Move game imagery in source pixels; the clip/HUD rectangle stays fixed."""
+        if viewport_rect is None or effects is None:
+            return viewport_rect
+        dx, dy = effects.offset
+        x, y, width, height = viewport_rect
+        return (x + round(dx * width / 384),
+                y - round(dy * height / 448), width, height)
+
     def render_frame(self, bullet_pool, player, stage_manager, laser_pool=None, viewport_rect=None,
                      item_renderer=None, items=None, dt=0.0, enemy_scripts=None, item_pool=None,
                      profile_segments=None, particle_pool=None):
@@ -588,7 +726,7 @@ class Renderer:
 
         渲染顺序（从底到顶）：
         0. 背景（2D卷轴/3D场景）
-        1. 敌人/Boss
+        1. 后层附属动画 → 敌人/Boss → 前层附属动画
         2. 道具（在敌弹下层）
         3. 自机子弹（TODO: 分离玩家子弹）
         4. 自机Options
@@ -612,7 +750,11 @@ class Renderer:
 
         # 保存并切换视口到游戏区域
         prev_viewport = self.ctx.viewport
+        prev_scissor = self.ctx.scissor
         win_w, win_h = prev_viewport[2], prev_viewport[3]
+        screen_context = getattr(stage_manager, 'current_context', None)
+        content_viewport = self.game_content_viewport(
+            viewport_rect, screen_context.screen_effects if screen_context is not None else None)
         if viewport_rect:
             # 先清除整个窗口背景（覆盖边框区域）
             self.ctx.viewport = (0, 0, win_w, win_h)
@@ -621,10 +763,10 @@ class Renderer:
             self._render_window_bg()
             # 切换到游戏视口，用 scissor 限制 clear 只影响游戏区域
             # （OpenGL 的 clear 不受 viewport 约束，必须用 scissor 限制范围）
-            self.ctx.viewport = viewport_rect
+            self.ctx.viewport = content_viewport
             self.ctx.scissor = viewport_rect
             self.ctx.clear(0.1, 0.1, 0.1)
-            self.ctx.scissor = None  # 关闭 scissor，恢复全屏渲染
+            self.ctx.scissor = viewport_rect
         else:
             # 无视口分割时正常清屏
             self.ctx.clear(0.1, 0.1, 0.1)
@@ -633,21 +775,38 @@ class Renderer:
         seg_start = time.perf_counter() if do_profile else 0.0
         if self.background_renderer:
             context = stage_manager.current_context
-            if context is None or not context.is_time_stopped('background'):
-                self.background_renderer.update(dt)
-            self.background_renderer.render(target_viewport=viewport_rect)
+            if dt > 0:
+                self.background_renderer.update(dt * (
+                    context.get_simulation_rate('background') if context is not None else 1.0))
+            self.background_renderer.render(target_viewport=content_viewport,
+                                            clip_viewport=viewport_rect)
             # 背景渲染器可能在后处理路径里切换 framebuffer/screen。
             # 这里把 viewport 重新设回游戏视口，保证后续敌人/子弹/激光/玩家
             # 的 NDC 映射仍然落在正确的游戏区域。
             if viewport_rect:
-                self.ctx.viewport = viewport_rect
+                self.ctx.viewport = content_viewport
+                self.ctx.scissor = viewport_rect
         if do_profile:
             profile_segments['render_bg'] = profile_segments.get('render_bg', 0.0) + (time.perf_counter() - seg_start)
 
         # ===== 层级 1: 敌人/Boss =====
         seg_start = time.perf_counter() if do_profile else 0.0
-        self._render_boss(stage_manager)
-        self._render_enemies(stage_manager, enemy_scripts)
+        animation_context = getattr(stage_manager, 'current_context', None)
+        self._render_attached_animations(animation_context, 'back')
+        if animation_context is not None:
+            self.particle_renderer.render_trails(animation_context.trails, 'back')
+        self._batching_actors = True
+        try:
+            self._render_boss(stage_manager)
+            self._render_enemies(stage_manager, enemy_scripts)
+        finally:
+            self._batching_actors = False
+            self._flush_actor_sprites()
+        if animation_context is not None:
+            self.particle_renderer.render_trails(animation_context.trails, 'main')
+        self._render_attached_animations(animation_context, 'front')
+        if animation_context is not None:
+            self.particle_renderer.render_trails(animation_context.trails, 'front')
         if do_profile:
             profile_segments['render_enemy'] = profile_segments.get('render_enemy', 0.0) + (time.perf_counter() - seg_start)
 
@@ -713,6 +872,7 @@ class Renderer:
 
         # 还原视口
         self.ctx.viewport = prev_viewport
+        self.ctx.scissor = prev_scissor
 
         # 绘制游戏视口边框（在窗口坐标空间）
         if viewport_rect:
@@ -1296,6 +1456,10 @@ class Renderer:
             uv_data[mask] = uv
             scale_data[mask] = scale
 
+        scale_data *= active['scale'][:, None]
+        explicit_size = np.all(active['render_size'] > 0, axis=1)
+        scale_data[explicit_size] = active['render_size'][explicit_size] * active['scale'][explicit_size, None]
+
         # ---------- 发送到 GPU ----------
         self.instance_vbo.write(positions.tobytes())
         self.angle_vbo.write(angles.tobytes())
@@ -1308,6 +1472,10 @@ class Renderer:
         self.bullet_vao.render(moderngl.TRIANGLES, instances=count)
         if 'u_alpha' in self.bullet_program:
             self.bullet_program['u_alpha'].value = 1.0
+
+    def render_player_attacks(self, player):
+        """Shared draw entry for the formal game and standalone spell preview."""
+        self._render_player_bullets(player)
 
     def _render_player_fallback(self, player):
         """备用：纯色渲染玩家"""
@@ -1323,6 +1491,29 @@ class Renderer:
         self.player_vbo.write(player_vertices.tobytes())
         self.player_vao.render(moderngl.TRIANGLES)
 
+    def _render_attached_animations(self, context, layer):
+        if context is not None:
+            animations = context.animations
+            data, keys = animations.prepare_render_data(layer)
+            self.particle_renderer.render_instances(
+                data, keys, animations.batch.texture_path, pixel_scale=1.0/192.0)
+
+    def _queue_actor_sprite(self, actor, frame, path):
+        visual = getattr(actor, 'visual', self._default_visual)
+        x, y = (actor.pos if hasattr(actor, 'pos') else (actor.x, actor.y))
+        self._actor_draws.append(((x+visual.offset[0], y+visual.offset[1]),
+                                 frame, path, visual))
+        if not self._batching_actors:
+            self._flush_actor_sprites()
+
+    def _flush_actor_sprites(self):
+        if self._actor_draws:
+            data, keys = self._actor_batch.prepare(self._actor_draws)
+            self.particle_renderer.render_instances(
+                data, keys, self._actor_batch.texture_path, pixel_scale=1.0/192.0,
+                alpha_cutoff=0.1)
+            self._actor_draws.clear()
+
     def _render_boss(self, stage_manager):
         """渲染Boss（优先使用精灵动画，fallback 到纯色占位）"""
         # 程序化关卡中 Boss 由 StageScript._current_boss 持有，
@@ -1334,6 +1525,9 @@ class Renderer:
         if active_boss is None:
             active_boss = stage_manager.get_active_boss()
         if not (active_boss and active_boss.alive and getattr(active_boss, 'visible', True)):
+            return
+        context = getattr(active_boss, 'ctx', None)
+        if context is not None and context.trails.hides_owner(active_boss):
             return
 
         # BossBase 用 x/y，旧 Boss 用 pos；兼容两种
@@ -1347,27 +1541,9 @@ class Renderer:
             frame, texture_path = active_boss.get_render_frame()
 
         if frame is not None and texture_path and texture_path in self.textures:
-            rect = list(frame.rect)
-            tex_w, tex_h = self.textures[texture_path].size
-            u0 = rect[0] / tex_w
-            u1 = (rect[0] + rect[2]) / tex_w
-            v0 = 1.0 - (rect[1] + rect[3]) / tex_h
-            v1 = 1.0 - rect[1] / tex_h
-            # boss sprites are 96px on a ~384px-wide field → /192 gives 0.5 units (good for boss)
-            sw = rect[2] / 192.0
-            sh = rect[3] / 192.0
-            vertices = np.array([
-                bx - sw/2, by - sh/2, u0, v0,
-                bx + sw/2, by - sh/2, u1, v0,
-                bx + sw/2, by + sh/2, u1, v1,
-                bx - sw/2, by - sh/2, u0, v0,
-                bx + sw/2, by + sh/2, u1, v1,
-                bx - sw/2, by + sh/2, u0, v1,
-            ], dtype='f4')
-            self.player_tex_vbo.write(vertices.tobytes())
-            self.textures[texture_path].use(0)
-            self.player_tex_vao.render(moderngl.TRIANGLES)
+            self._queue_actor_sprite(active_boss, frame, texture_path)
         else:
+            self._flush_actor_sprites()
             boss_size = 0.05
             boss_vertices = np.array([
                 bx - boss_size, by + boss_size,
@@ -1390,6 +1566,7 @@ class Renderer:
 
         # 旧的敌人系统（Enemy对象）- fallback
         active_enemies = stage_manager.get_active_enemies()
+        self._flush_actor_sprites()
         for enemy in active_enemies:
             if enemy.alive:
                 enemy_size = 0.03
@@ -1406,6 +1583,9 @@ class Renderer:
 
     def _render_enemy_sprite(self, enemy):
         """使用纹理渲染单个敌人（支持贴图对象自动动画）"""
+        context = getattr(enemy, 'ctx', None)
+        if context is not None and context.trails.hides_owner(enemy):
+            return
         # 优先使用贴图对象（EnemyRenderObject）
         frame = None
         texture_path = None
@@ -1428,6 +1608,7 @@ class Renderer:
                 if animation and hasattr(animation, 'frames') and len(animation.frames) > 0:
                     enemy_time = getattr(enemy, '_time', 0) / 60.0
                     current_frame = animation.get_frame_at_time(enemy_time)
+                    frame = current_frame
                     sprite_data = {
                         'rect': list(current_frame.rect),
                         'center': list(current_frame.center)
@@ -1447,34 +1628,18 @@ class Renderer:
 
             rect = sprite_data.get('rect', [0, 0, 32, 32])
 
-        # 计算UV坐标（纹理以flip_y=True加载，需要翻转V坐标）
-        tex_w, tex_h = self.textures[texture_path].size
-        u0 = rect[0] / tex_w
-        u1 = (rect[0] + rect[2]) / tex_w
-        v0 = 1.0 - (rect[1] + rect[3]) / tex_h
-        v1 = 1.0 - rect[1] / tex_h
-
-        # 计算屏幕尺寸
-        sprite_w = rect[2] / 192.0
-        sprite_h = rect[3] / 192.0
-
-        px, py = enemy.x, enemy.y
-
-        vertices = np.array([
-            px - sprite_w/2, py - sprite_h/2, u0, v0,
-            px + sprite_w/2, py - sprite_h/2, u1, v0,
-            px + sprite_w/2, py + sprite_h/2, u1, v1,
-            px - sprite_w/2, py - sprite_h/2, u0, v0,
-            px + sprite_w/2, py + sprite_h/2, u1, v1,
-            px - sprite_w/2, py + sprite_h/2, u0, v1,
-        ], dtype='f4')
-
-        self.player_tex_vbo.write(vertices.tobytes())
-        self.textures[texture_path].use(0)
-        self.player_tex_vao.render(moderngl.TRIANGLES)
+        if frame is None:
+            from ..resource.texture_asset import SpriteFrame
+            key = (texture_path, tuple(rect), tuple(sprite_data.get('center', (0, 0))))
+            frame = self._static_actor_frames.get(key)
+            if frame is None:
+                frame = SpriteFrame(key[1], key[2])
+                self._static_actor_frames[key] = frame
+        self._queue_actor_sprite(enemy, frame, texture_path)
 
     def _render_enemy_fallback(self, enemy):
         """备用：纯色渲染敌人"""
+        self._flush_actor_sprites()
         enemy_size = 0.03
         enemy_vertices = np.array([
             enemy.x - enemy_size, enemy.y + enemy_size,
@@ -1543,11 +1708,26 @@ class Renderer:
         self.player_tex_vao.render(moderngl.TRIANGLES)
 
     def cleanup(self):
-        """清理渲染资源"""
-        # ModernGL的资源会自动释放，但可以显式释放
-        if hasattr(self, 'optimized_bullet_renderer') and self.optimized_bullet_renderer:
-            self.optimized_bullet_renderer.cleanup()
-        self.particle_renderer.cleanup()
-        if self.hitbox_texture is not None:
-            self.hitbox_texture.release()
-            self.hitbox_texture = None
+        """Release only owned GPU resources; safe after an earlier cleanup."""
+        for name in ('optimized_bullet_renderer', 'laser_renderer', 'particle_renderer'):
+            renderer = getattr(self, name, None)
+            if renderer is not None:
+                renderer.cleanup()
+                setattr(self, name, None)
+        # textures/sprite_manager and background_renderer are borrowed. Their
+        # owning resource service/engine session releases them separately.
+        for name in (
+            'bullet_vao', 'player_vao', 'player_tex_vao', 'circle_vao', 'border_vao',
+            '_window_bg_vao', '_screen_effect_vao',
+            'bullet_vbo', 'instance_vbo', 'angle_vbo', 'uv_vbo', 'scale_vbo',
+            'player_vbo', 'player_color_vbo', 'player_tex_vbo', 'circle_vbo', 'border_vbo',
+            '_window_bg_vbo', '_screen_effect_vbo',
+            'bullet_program', 'player_program', 'player_tex_program', 'circle_program',
+            'border_program', '_window_bg_program', '_screen_effect_program',
+            'player_texture', 'player_bullet_texture', 'hitbox_texture', '_window_bg_texture',
+        ):
+            resource = getattr(self, name, None)
+            if resource is not None:
+                resource.release()
+                setattr(self, name, None)
+        self._prepared_player = None

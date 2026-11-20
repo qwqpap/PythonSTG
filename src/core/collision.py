@@ -15,6 +15,7 @@ from numba import njit
 from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 import math
+from .collision_shapes import shapes_overlap, hitbox_values, BOX
 
 # Both pool formats use bit 2 for non-colliding emitter controllers. Keep
 # this numerical kernel independent of the pool module (core imports first).
@@ -38,6 +39,9 @@ class BulletCollisionResult:
     target_idx: int
     damage: float
     position: Tuple[float, float]
+    source: str = 'shot'
+    attack_generation: int = -1
+    region: int = 0
 
 
 # ============= Numba JIT 加速函数 =============
@@ -73,6 +77,40 @@ def _check_player_vs_bullets(
             return i
 
     return -1
+
+
+@njit(cache=True)
+def _check_player_vs_shapes(px, py, kind, radius, hx, hy, angle, data, eligible):
+    for i in range(len(data)):
+        b = data[i]
+        if not b['alive'] or not eligible[i] or b['flags'] & _FLAG_IS_EMITTER:
+            continue
+        if shapes_overlap(px, py, kind, radius, hx, hy, angle,
+                          b['pos'][0], b['pos'][1], b['collision_shape'], b['radius'],
+                          b['hitbox_size'][0]*.5, b['hitbox_size'][1]*.5, b['hitbox_angle']):
+            return i
+    return -1
+
+
+@njit(cache=True)
+def _graze_shapes(px, py, graze_radius, data, eligible, grazed):
+    count = 0
+    for i in range(len(data)):
+        b = data[i]
+        if not b['alive'] or not eligible[i] or grazed[i] or b['flags'] & _FLAG_IS_EMITTER:
+            continue
+        # Preserve legacy circular graze (center-distance only). Boxes use
+        # their actual region, otherwise long thin bullets cannot be grazed.
+        if b['collision_shape'] == BOX:
+            hit = shapes_overlap(px, py, 0, graze_radius, 0., 0., 0.,
+                                 b['pos'][0], b['pos'][1], BOX, 0.,
+                                 b['hitbox_size'][0]*.5, b['hitbox_size'][1]*.5, b['hitbox_angle'])
+        else:
+            hit = (b['pos'][0]-px)**2+(b['pos'][1]-py)**2 < graze_radius**2
+        if hit:
+            grazed[i] = 1
+            count += 1
+    return count
 
 
 @njit(cache=True)
@@ -290,6 +328,19 @@ class CollisionManager:
         self._graze_generations = None
         self._graze_pool = None
 
+    def warmup(self, bullet_pool):
+        from time import perf_counter
+        from .collision_shapes import capsule_box, polygon_box_overlap
+        start = perf_counter()
+        data = bullet_pool.data[:0]
+        eligible = np.empty(0, np.bool_)
+        _check_player_vs_shapes(0., 0., 0, .01, 0., 0., 0., data, eligible)
+        _graze_shapes(0., 0., .05, data, eligible, np.empty(0, np.int32))
+        shapes_overlap(0., 0., 0, .01, 0., 0., 0., 1., 1., 1, 0., .1, .1, 0.)
+        capsule_box(0., 0., 1., 1., .01, 0., 0., .02, .02, 0.)
+        polygon_box_overlap(np.zeros((3, 2), np.float64), 0., 0., .02, .02, 0.)
+        return {'geometry_ms': (perf_counter()-start)*1000}
+
     def _ensure_graze_array(self, size: int):
         """确保擦弹标记数组大小足够"""
         if self._graze_flags is None or self._graze_flags_size < size:
@@ -308,6 +359,7 @@ class CollisionManager:
         player_y: float,
         player_radius: float,
         bullet_pool,
+        *, player_hitbox=None,
     ) -> CollisionResult:
         """
         检查玩家与敌弹碰撞
@@ -328,10 +380,15 @@ class CollisionManager:
         radius = data['radius']
 
         # 调用JIT函数
-        hit_idx = _check_player_vs_bullets(
-            player_x, player_y, player_radius,
-            positions, radius, alive, data['flags'], getattr(bullet_pool, 'collision_eligible', alive)
-        )
+        if 'collision_shape' in data.dtype.names:
+            kind, pr, half, angle = hitbox_values(player_hitbox, player_radius)
+            hit_idx = _check_player_vs_shapes(
+                float(player_x), float(player_y), kind, pr, half[0], half[1], angle, data,
+                getattr(bullet_pool, 'collision_eligible', alive))
+        else:
+            hit_idx = _check_player_vs_bullets(
+                player_x, player_y, player_radius,
+                positions, radius, alive, data['flags'], getattr(bullet_pool, 'collision_eligible', alive))
 
         if hit_idx >= 0:
             return CollisionResult(
@@ -376,6 +433,9 @@ class CollisionManager:
             np.copyto(self._graze_generations[:n], generations)
         np.multiply(self._graze_flags[:n], data['alive'], out=self._graze_flags[:n])
 
+        if 'collision_shape' in data.dtype.names:
+            return _graze_shapes(float(player_x), float(player_y), float(graze_radius), data,
+                                 getattr(bullet_pool, 'collision_eligible', data['alive']), self._graze_flags)
         graze_count = _check_player_vs_bullets_graze(
             player_x, player_y, graze_radius,
             data['pos'], data['alive'], self._graze_flags, data['flags'],
@@ -408,6 +468,8 @@ class CollisionManager:
         enemies = enemy_manager.get_active_enemies()
         if not enemies:
             return []
+        if hasattr(bullet_pool, 'collide_targets'):
+            return self.check_player_bullets_vs_targets(bullet_pool, enemies, hit_radius)[0]
 
         # 构建敌人数组
         n_enemies = len(enemies)
@@ -464,13 +526,12 @@ class CollisionManager:
         Returns:
             (碰撞结果列表, 活跃目标列表)
         """
-        if not targets:
-            return [], []
-
         active = [t for t in targets
                   if getattr(t, '_active', getattr(t, 'alive', True))
                   and getattr(t, 'collidable', True)
                   and getattr(t, 'interactable', True)]
+        if hasattr(bullet_pool, 'collide_targets'):
+            return bullet_pool.collide_targets(active, tracked_targets=targets, hit_radius=hit_radius), active
         if not active:
             return [], active
 
@@ -511,12 +572,32 @@ class CollisionManager:
 
         return results, active
 
+    def check_player_vs_contacts(self, player, targets):
+        """Opt-in actor-body/trail contact. Uses the same hit decision chain."""
+        px, py = player.get_hit_position()
+        pk, pr, ph, pa = hitbox_values(getattr(player, 'hitbox', None), player.hit_radius)
+        for i, target in enumerate(targets):
+            if (not getattr(target, '_active', getattr(target, 'alive', True))
+                    or not getattr(target, 'contact_enabled', False)
+                    or not getattr(target, 'interactable', True)):
+                continue
+            tk, tr, th, ta = hitbox_values(getattr(target, 'contact_hitbox', None),
+                                          getattr(target, 'hitbox_radius', getattr(target, 'hit_radius', .05)))
+            pos = getattr(target, 'pos', None)
+            x, y = pos if pos is not None else (target.x, target.y)
+            for dx, dy in getattr(target, 'contact_offsets', ((0.0, 0.0),)):
+                if shapes_overlap(px, py, pk, pr, ph[0], ph[1], pa,
+                                  x+dx, y+dy, tk, tr, th[0], th[1], ta):
+                    return CollisionResult(True, i, (x+dx, y+dy))
+        return CollisionResult()
+
     def check_player_vs_lasers(
         self,
         player_x: float,
         player_y: float,
         player_radius: float,
         laser_pool,
+        *, player_hitbox=None,
     ) -> CollisionResult:
         """
         检查玩家与激光碰撞
@@ -533,13 +614,15 @@ class CollisionManager:
             return CollisionResult(occurred=False)
 
         lasers, bent_lasers = laser_pool.get_all_lasers()
+        kind, radius, half, angle = hitbox_values(player_hitbox, player_radius)
 
         # 检查直线激光
         for i, laser in enumerate(lasers):
             if not getattr(laser, 'alive', False):
                 continue
 
-            if laser.check_collision(player_x, player_y, player_radius):
+            if (laser.check_box_collision(player_x, player_y, half, angle) if kind == BOX
+                    else laser.check_collision(player_x, player_y, radius)):
                 return CollisionResult(
                     occurred=True,
                     index=i,
@@ -551,7 +634,8 @@ class CollisionManager:
             if not getattr(bent_laser, 'alive', False):
                 continue
 
-            if bent_laser.check_collision(player_x, player_y, player_radius):
+            if (bent_laser.check_box_collision(player_x, player_y, half, angle) if kind == BOX
+                    else bent_laser.check_collision(player_x, player_y, radius)):
                 return CollisionResult(
                     occurred=True,
                     index=len(lasers) + i,  # 曲线激光索引偏移

@@ -9,17 +9,28 @@ BOMB_INVINCIBLE_SECONDS = 3.0
 BOMB_POWER_SECONDS = 5.0
 
 
-def trigger_player_bomb(player, bullet_pool, item_pool, stage_manager=None) -> int:
+def trigger_player_bomb(player, bullet_pool, item_pool, stage_manager=None, *, context=None, boss=None) -> int:
     """Apply the shared Bomb effect and return the number of canceled bullets."""
-    if stage_manager is not None and stage_manager.run_state.bomb_handler is not None:
+    if stage_manager is not None:
+        context = stage_manager.current_context
+        stage = stage_manager.current_stage
+        boss = getattr(stage, '_current_boss', None) if stage is not None else None
+    run_state = stage_manager.run_state if stage_manager is not None else (context.run_state if context else None)
+
+    def notify():
+        if stage_manager is not None:
+            stage_manager.notify_player_event('player.bomb_used')
+        elif context is not None:
+            run_state.notify('player.bomb_used')
+            context.emit_event('player.bomb_used', {'bombs_used': run_state.bombs_used})
+        if boss is not None and boss._active:
+            boss.on_player_bomb()
+
+    if run_state is not None and run_state.bomb_handler is not None:
         # A content rule replaces the legacy global buff/clear/collect. Player
         # scripts still supply the actual character Bomb visuals/projectiles.
-        canceled_count = int(stage_manager.run_state.bomb_handler(
-            player, stage_manager.current_context,
-        ))
-        stage_manager.notify_player_event('player.bomb_used')
-        if stage_manager.current_stage and stage_manager.current_stage._current_boss:
-            stage_manager.current_stage._current_boss.on_player_bomb()
+        canceled_count = int(run_state.bomb_handler(player, context))
+        notify()
         return canceled_count
     player.invincible_timer = max(player.invincible_timer, BOMB_INVINCIBLE_SECONDS)
     player.spell_cooldown = max(player.spell_cooldown, BOMB_POWER_SECONDS)
@@ -35,12 +46,6 @@ def trigger_player_bomb(player, bullet_pool, item_pool, stage_manager=None) -> i
 
     item_pool.collect_all(player.pos[0], player.pos[1])
 
-    if stage_manager:
-        stage_manager.notify_player_event('player.bomb_used')
-
-    if stage_manager and stage_manager.current_stage and stage_manager.current_stage._current_boss:
-        boss = stage_manager.current_stage._current_boss
-        if boss._active:
-            boss.on_player_bomb()
+    notify()
 
     return canceled_count

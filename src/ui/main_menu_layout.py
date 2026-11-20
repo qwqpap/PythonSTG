@@ -10,6 +10,31 @@ from typing import Dict, Any
 
 from src.core.atomic_io import atomic_write_json
 
+
+DIFFICULTY_OPTIONS = (
+    ('easy', 'Easy  简单'),
+    ('normal', 'Normal  普通'),
+    ('hard', 'Hard  困难'),
+    ('lunatic', 'Lunatic  疯狂'),
+)
+
+
+def difficulty_layout(screen_height: int) -> Dict[str, Any]:
+    """Four standard choices using the existing cached menu renderer."""
+    scale = screen_height / 960.0
+    return {
+        'title': {'text': '选择难度', 'font_size': max(28, round(56 * scale)),
+                  'color': [220, 220, 255], 'y_ratio': 0.16},
+        'options': [{'text': label} for _, label in DIFFICULTY_OPTIONS],
+        'option_font_size': max(24, round(40 * scale)),
+        'option_spacing': max(44, round(80 * scale)),
+        'option_colors': {'normal': [220, 220, 235], 'selected': [255, 255, 120]},
+        'hint': {'text': '↑↓ 选择难度   Z / Enter 确认   Esc 返回',
+                 'font_size': max(16, round(20 * scale)), 'color': [220, 220, 235],
+                 'y_offset': -max(36, round(54 * scale))},
+    }
+
+
 def default_layout() -> Dict[str, Any]:
     """返回默认主菜单布局，与 MainMenuRenderer 原硬编码值一致。"""
     return {

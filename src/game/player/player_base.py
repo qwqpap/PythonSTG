@@ -20,20 +20,22 @@ from .player_animation import PlayerAnimationStateMachine
 from .player_script import PlayerScript, load_player_script
 from .option_entity import OptionManager
 from .skill_manager import SkillSlotManager
+from .hit import HitDecision, HitResult, HitStatus, PlayerHit
 
 
 class PlayerBase(Entity):
     """可配置的玩家基类"""
-    
+
     def __init__(self, config: dict = None):
         super().__init__([0.0, -0.8], 'player')
-        
+
         self.name = "Player"
         self.hit_radius = 0.01
         self.graze_radius = 0.05
+        self.hitbox = None
         self.speed_high = 0.02
         self.speed_low = 0.008
-        
+
         self._power = 1.00
         self.max_power = 4.00
         self.score = 0
@@ -46,7 +48,7 @@ class PlayerBase(Entity):
 
         self.hitbox_offset_x: float = 0.0
         self.hitbox_offset_y: float = 0.0
-        
+
         self.is_focused = False
         self.is_shooting = False
         self.invincible_timer = 0.0
@@ -56,14 +58,23 @@ class PlayerBase(Entity):
         self.death_timer = 0.0
         self.is_dead = False
         self.is_respawning = False
-        
+        self.deathbomb_window_frames = 0
+        self.deathbomb_invulnerability_frames = 60
+        self.hit_rule = None
+        self._hit_rule_scopes = []
+        self._pending_hit = None
+        self._pending_hit_frames = 0.0
+        self._hit_results = []
+        self._script_credit = 0.0
+        self._simulation_ticks = 0
+
         self.texture_path = ""
         self.bullet_texture_path = ""
         self.sprites = {}
         self.bullet_sprites = {}
-        
+
         self.last_pos_x = 0.0
-        
+
         # 子系统
         self.bullet_pool = PlayerBulletPool(max_bullets=2000)
         self.shot_system = PlayerShotSystem(self.bullet_pool)
@@ -75,7 +86,7 @@ class PlayerBase(Entity):
         self.bullet_anims: Dict[str, dict] = {}
         self.option_anims: Dict[str, dict] = {}
         self._config_version: str = "2.0"
-        
+
         self.key_up = [KEY_UP, KEY_w]
         self.key_down = [KEY_DOWN, KEY_s]
         self.key_left = [KEY_LEFT, KEY_a]
@@ -83,41 +94,41 @@ class PlayerBase(Entity):
         self.key_focus = [KEY_LSHIFT, KEY_RSHIFT]
         self.key_shoot = [KEY_z]
         self.key_bomb = [KEY_x]
-        
+
         self.on_death: Optional[Callable[[], None]] = None
         self.on_bomb_callback: Optional[Callable[[], None]] = None
         self.on_graze: Optional[Callable[[int], None]] = None
         self.on_get_item: Optional[Callable[[str, Any], None]] = None
-        
+
         self.spellcards: dict = {}
         self.spell_cooldown = 0.0
-        
+
         self.script: Optional[PlayerScript] = None
         self._config_base_path: str = ""
-        
+
         self.option_positions: List[Tuple[float, float]] = []
-        
+
         if config:
             self.load_config(config)
-    
+
     @property
     def power(self) -> float:
         return self._power
-    
+
     @power.setter
     def power(self, value: float):
         old_power = self._power
         self._power = min(self.max_power, max(0, value))
         if self.script and old_power != self._power:
             self.script.on_power_change(old_power, self._power)
-    
+
     def load_config(self, config: dict):
         """从配置字典加载玩家设置（支持 v2 和 v3）"""
         self._config_base_path = config.get('_base_path', '')
         self._config_version = config.get('version', '2.0')
-        
+
         self.name = config.get('name', self.name)
-        
+
         # 纹理路径
         if 'textures' in config and self._config_base_path:
             tex_map = config['textures']
@@ -136,7 +147,7 @@ class PlayerBase(Entity):
                 self.render_size_px = None
         if 'render_downsample' in config:
             self.render_downsample = bool(config.get('render_downsample', False))
-        
+
         if 'sprites' in config:
             self.sprites = config['sprites']
             # 自动将 source="bullet" 的精灵也放入 bullet_sprites
@@ -145,18 +156,18 @@ class PlayerBase(Entity):
                     self.bullet_sprites[sname] = sdata
         if 'bullet_sprites' in config:
             self.bullet_sprites.update(config['bullet_sprites'])
-        
+
         # 属性
         stats = config.get('stats', {})
         self.speed_high = stats.get('speed_high', self.speed_high)
         self.speed_low = stats.get('speed_low', self.speed_low)
-        
+
         pixel_to_norm = 1.0 / 192.0
         if 'hitbox_radius' in stats:
             self.hit_radius = stats['hitbox_radius'] * pixel_to_norm
         elif 'hit_radius' in stats:
             self.hit_radius = stats['hit_radius']
-        
+
         if 'graze_radius' in stats:
             self.graze_radius = stats['graze_radius'] * pixel_to_norm
 
@@ -178,15 +189,15 @@ class PlayerBase(Entity):
                 self.hitbox_offset_y = -float(stats['hitbox_offset_y']) * _offset_scale
             except Exception:
                 self.hitbox_offset_y = 0.0
-        
+
         initial = config.get('initial', {})
         self.lives = initial.get('lives', self.lives)
         self.bombs = initial.get('bombs', self.bombs)
         self._power = initial.get('power', self._power)
-        
+
         if 'animations' in config:
             self.animation.load_from_dict(config)
-        
+
         # v2 射击类型（仍支持作为 fallback）
         if 'shot_types' in config:
             shot_types = config['shot_types']
@@ -196,13 +207,13 @@ class PlayerBase(Entity):
                     shot_types.get('focused', shot_types['unfocused'])
                 )
                 self.shot_system.set_shot_types(unfocused, focused)
-        
+
         if 'options' in config and config['options']:
             options = create_options_from_config(config['options'])
             self.shot_system.set_options(options)
-        
+
         self.spellcards = config.get('spellcards', {})
-        
+
         # 输入映射
         if 'keybindings' in config:
             kb = config['keybindings']
@@ -220,7 +231,7 @@ class PlayerBase(Entity):
                 self.key_shoot = [key_name_to_code(k) for k in kb['shoot']]
             if 'bomb' in kb:
                 self.key_bomb = [key_name_to_code(k) for k in kb['bomb']]
-        
+
         # ========== v3: 加载 bullet_anims ==========
         if 'bullet_anims' in config:
             self.bullet_anims = config['bullet_anims']
@@ -267,63 +278,58 @@ class PlayerBase(Entity):
             return False
         return type(self.script).on_shoot is not PlayerScript.on_shoot
 
-    def update(self, dt: float, keys, enemies=None):
+    def update(self, dt: float, keys, enemies=None, *, control_dt=None):
+        # Rescue windows use the unscaled input clock, not slow-motion time.
+        if control_dt is None:
+            control_dt = dt
         if self.invincible_timer > 0:
             self.invincible_timer -= dt
-        
+
         if self.spell_cooldown > 0:
             self.spell_cooldown -= dt
-        
+
         if self.bomb_power_timer > 0:
             self.bomb_power_timer -= dt
-        
+
         if self.is_dead:
             self.death_timer += dt
             self.animation.update(dt, 0)
             return
-        
+
         self.last_pos_x = self.pos[0]
-        
+
         self._handle_input(dt, keys)
-        
+        self.advance_hit_window(control_dt * 60.0)
+        if self.is_dead:
+            return
+
         # 更新技能冷却
         self.skill_manager.update(dt)
 
-        # 调用脚本每帧更新
+        # Legacy player scripts count calls as frames. Keep their cadence in
+        # simulation ticks while motion/projectile integration stays smooth.
+        self._script_credit += dt * 60.0
+        script_ticks = int(self._script_credit + 1e-8)
+        self._simulation_ticks = script_ticks
+        self._script_credit = max(0.0, self._script_credit - script_ticks)
         if self.script:
-            self.script.on_update(dt)
-        
+            for _ in range(script_ticks):
+                self.script.on_update(1.0 / 60.0)
+                if self.is_shooting and self._has_v3_script_shooting():
+                    self.script.on_shoot(self.is_focused)
+
         # ========== 射击：v3 脚本优先 ==========
-        if self.is_shooting:
-            if self._has_v3_script_shooting():
-                self.script.on_shoot(self.is_focused)
-            else:
-                # v2 fallback: 使用 ShotSystem
-                shot_params = {}
-                if self.script:
-                    shot_params = self.script.get_shot_params() or {}
-                self.shot_system.update(
-                    dt, self.pos[0], self.pos[1],
-                    self.is_shooting, self.is_focused, self.power,
-                    spread_range=shot_params.get('spread_range'),
-                    target_angle=shot_params.get('target_angle'),
-                    damage_bonus=shot_params.get('damage_bonus', 1.0),
-                    projectile_multiplier=self.get_bomb_shot_multiplier(),
-                )
-        else:
-            # 不射击时仍需更新 shot_system（option 位置 lerp 等）
-            if not self._has_v3_script_shooting():
-                shot_params = {}
-                if self.script:
-                    shot_params = self.script.get_shot_params() or {}
-                self.shot_system.update(
-                    dt, self.pos[0], self.pos[1],
-                    False, self.is_focused, self.power,
-                    spread_range=shot_params.get('spread_range'),
-                    target_angle=shot_params.get('target_angle'),
-                    damage_bonus=shot_params.get('damage_bonus', 1.0),
-                    projectile_multiplier=self.get_bomb_shot_multiplier(),
-                )
+        if not self._has_v3_script_shooting():
+            # v2 keeps its continuous dt integration, including idle options.
+            shot_params = (self.script.get_shot_params() or {}) if self.script else {}
+            self.shot_system.update(
+                dt, self.pos[0], self.pos[1],
+                self.is_shooting, self.is_focused, self.power,
+                spread_range=shot_params.get('spread_range'),
+                target_angle=shot_params.get('target_angle'),
+                damage_bonus=shot_params.get('damage_bonus', 1.0),
+                projectile_multiplier=self.get_bomb_shot_multiplier(),
+            )
 
         # 更新僚机位置和动画（v3）
         self.option_manager.update(
@@ -337,24 +343,24 @@ class PlayerBase(Entity):
                 for name, cfg in self.option_anims.items()
             } if self.option_anims else None
         )
-        
+
         # 更新子弹（传入敌人列表用于追踪弹）
         self.bullet_pool.update(dt, enemies=enemies)
-        
+
         # 更新动画
         move_x = self.pos[0] - self.last_pos_x
         self.animation.update(dt, move_x)
-    
+
     def _handle_input(self, dt: float, keys):
         self.is_focused = any(keys[k] for k in self.key_focus)
         self.is_shooting = any(keys[k] for k in self.key_shoot)
-        
+
         if any(keys[k] for k in self.key_bomb):
             self._use_bomb()
-        
+
         current_speed = self.speed_low if self.is_focused else self.speed_high
         move_multiplier = dt * 60
-        
+
         if any(keys[k] for k in self.key_up):
             self.pos[1] += current_speed * move_multiplier
         if any(keys[k] for k in self.key_down):
@@ -363,11 +369,11 @@ class PlayerBase(Entity):
             self.pos[0] -= current_speed * move_multiplier
         if any(keys[k] for k in self.key_right):
             self.pos[0] += current_speed * move_multiplier
-        
+
         aspect_ratio = 384.0 / 448.0
         self.pos[0] = np.clip(self.pos[0], -1.0, 1.0)
         self.pos[1] = np.clip(self.pos[1], -1.0 / aspect_ratio, 1.0 / aspect_ratio)
-    
+
     def _use_bomb(self):
         if self.bombs > 0 and not self.is_dead and self.spell_cooldown <= 0:
             # v3: 尝试技能系统
@@ -375,22 +381,25 @@ class PlayerBase(Entity):
                 if self.skill_manager.try_activate('bomb'):
                     if self.script and self.script.on_skill('bomb'):
                         self.bombs -= 1
+                        self.rescue_hit()
                         if self.on_bomb_callback:
                             self.on_bomb_callback()
                         return
-            
+
             if self.script and self.script.on_bomb(self.is_focused):
                 self.bombs -= 1
+                self.rescue_hit()
                 if self.on_bomb_callback:
                     self.on_bomb_callback()
                 return
-            
+
             self.bombs -= 1
             spellcard = self.spellcards.get('focused' if self.is_focused else 'unfocused', {})
             invincible_time = spellcard.get('invincible_time', 300) / 60.0
             cooldown = spellcard.get('duration', 300) / 60.0
             self.invincible_timer = invincible_time
             self.spell_cooldown = cooldown
+            self.rescue_hit()
             if self.on_bomb_callback:
                 self.on_bomb_callback()
 
@@ -402,18 +411,18 @@ class PlayerBase(Entity):
 
     def get_bomb_damage_multiplier(self) -> float:
         return self.bomb_damage_multiplier if self.is_bomb_power_active() else 1.0
-    
+
     def set_target(self, target_pos: Optional[Tuple[float, float]]):
         self.target_pos = target_pos
-    
+
     def find_nearest_enemy(self, enemies: list):
         if not enemies:
             self.target_pos = None
             return
-        
+
         min_dist = float('inf')
         nearest = None
-        
+
         for enemy in enemies:
             if hasattr(enemy, 'pos'):
                 ex, ey = enemy.pos[0], enemy.pos[1]
@@ -430,7 +439,7 @@ class PlayerBase(Entity):
                 min_dist = dist
                 nearest = (ex, ey)
         self.target_pos = nearest
-    
+
     def get_option_render_data(self) -> List[Tuple[float, float, int]]:
         """获取子机渲染数据（v3 优先使用 option_manager）"""
         # v3: 使用 option_manager
@@ -443,13 +452,13 @@ class PlayerBase(Entity):
             if positions:
                 frame = int((self.animation.frame_timer * 60 / 3) % 16) if hasattr(self.animation, 'frame_timer') else 0
                 return [(pos[0], pos[1], frame) for pos in positions]
-        
+
         result = []
         frame = int((self.animation.frame_timer * 60 / 3) % 16) if hasattr(self.animation, 'frame_timer') else 0
         for pos in self.shot_system.option_positions:
             result.append((pos[0], pos[1], frame))
         return result
-    
+
     def get_state_info(self) -> dict:
         info = {
             'name': self.name,
@@ -469,12 +478,88 @@ class PlayerBase(Entity):
             info['target_angle'] = shot_params.get('target_angle', 90.0)
             info['damage_bonus'] = shot_params.get('damage_bonus', 1.0)
         return info
-    
-    def take_damage(self) -> bool:
-        if self.invincible_timer > 0 or self.is_dead:
+
+    @property
+    def pending_hit(self):
+        return self._pending_hit
+
+    @property
+    def deathbomb_frames_remaining(self):
+        return self._pending_hit_frames
+
+    def receive_hit(self, hit=None) -> HitResult:
+        """Decide a sparse hit. Only a committed MISS consumes a life.
+
+        A rule returns HitDecision or None to defer to the player script/default.
+        Drain outcomes at the engine's settlement point, never infer miss from
+        a consumed collision. The source projectile can be removed immediately.
+        """
+        hit = hit if hit is not None else PlayerHit(position=tuple(self.pos))
+        if self.is_invincible() or self.is_dead:
+            return HitResult(HitStatus.IGNORED, hit)
+        decision = self.hit_rule(self, hit) if self.hit_rule is not None else None
+        if decision is None and self.script is not None:
+            decision = self.script.on_receive_hit(hit)
+        if decision is None:
+            decision = (HitDecision.pending(self.deathbomb_window_frames)
+                        if self.deathbomb_window_frames > 0
+                        else HitDecision(HitStatus.MISS))
+        if not isinstance(decision, HitDecision):
+            raise TypeError('hit rule must return HitDecision or None')
+        if decision.status is HitStatus.IGNORED:
+            return HitResult(HitStatus.IGNORED, hit)
+        if decision.status is HitStatus.MISS:
+            return self._commit_miss(hit)
+        if decision.status is HitStatus.PENDING:
+            if decision.window_frames <= 0:
+                raise ValueError('deathbomb window must be positive')
+            self._pending_hit = hit
+            self._pending_hit_frames = float(decision.window_frames)
+        elif decision.status is HitStatus.HANDLED:
+            self.invincible_timer = max(
+                self.invincible_timer, decision.invulnerability_frames / 60.0)
+        else:
+            raise ValueError('hit decisions must be ignored, handled, pending or miss')
+        result = HitResult(decision.status, hit, decision.fail_capture)
+        self._hit_results.append(result)
+        return result
+
+    def advance_hit_window(self, frames=1.0):
+        if self._pending_hit is not None:
+            self._pending_hit_frames -= frames
+            if self._pending_hit_frames <= 0:
+                hit = self._pending_hit
+                self.cancel_pending_hit()
+                self._commit_miss(hit)
+
+    def rescue_hit(self):
+        """Called only after a Bomb/skill has actually been accepted."""
+        if self._pending_hit is None:
             return False
-        if self.script and self.script.on_hit():
-            return True
+        hit = self._pending_hit
+        self.cancel_pending_hit()
+        self.invincible_timer = max(
+            self.invincible_timer, self.deathbomb_invulnerability_frames / 60.0)
+        self._hit_results.append(HitResult(HitStatus.RESCUED, hit))
+        return True
+
+    def cancel_pending_hit(self, *, discard_result=False):
+        hit = self._pending_hit
+        if discard_result and hit is not None:
+            self._hit_results[:] = [r for r in self._hit_results
+                                   if not (r.hit is hit and r.status is HitStatus.PENDING)]
+        self._pending_hit = None
+        self._pending_hit_frames = 0.0
+
+    def drain_hit_results(self):
+        results, self._hit_results = tuple(self._hit_results), []
+        return results
+
+    def take_damage(self) -> bool:
+        """Legacy wrapper: True now means a real life loss, never handled/pending."""
+        return self.receive_hit().missed
+
+    def _commit_miss(self, hit):
         self.lives -= 1
         if self.lives <= 0:
             self.is_dead = True
@@ -487,21 +572,23 @@ class PlayerBase(Entity):
             self.pos = np.array([0.0, -0.8], dtype='f4')
             self.power = max(1.0, self.power - 1.0)
             self.is_respawning = True
-        return True
-    
+        result = HitResult(HitStatus.MISS, hit)
+        self._hit_results.append(result)
+        return result
+
     def add_power(self, amount: float):
         self.power = min(self.max_power, self.power + amount)
-    
+
     def add_score(self, amount: int):
         self.score += amount
-    
+
     def add_graze(self, amount: int = 1):
         self.graze += amount
         if self.script:
             self.script.on_graze(amount)
         if self.on_graze:
             self.on_graze(amount)
-    
+
     def get_current_sprite(self) -> dict:
         sprite_id = self.animation.get_current_sprite()
         if not sprite_id:
@@ -509,27 +596,34 @@ class PlayerBase(Entity):
         if sprite_id and sprite_id in self.sprites:
             return self.sprites[sprite_id]
         return None
-    
+
     def is_invincible(self) -> bool:
-        return self.invincible_timer > 0
-    
+        return self.invincible_timer > 0 or self._pending_hit is not None
+
     def get_render_alpha(self) -> float:
         if self.invincible_timer > 0:
             return 0.5 + 0.5 * np.sin(self.invincible_timer * 20)
         return 1.0
-    
+
     def get_hit_position(self) -> tuple:
         return (self.pos[0] + self.hitbox_offset_x, self.pos[1] + self.hitbox_offset_y)
-    
+
+    def set_hitbox(self, hitbox):
+        self.hitbox = hitbox
+
     def get_option_positions(self) -> list:
         if self.option_manager.options:
             return self.option_manager.get_positions()
         return self.shot_system.option_positions
-    
+
     def check_bullet_collisions(self, enemies) -> list:
         return self.bullet_pool.check_collision_with_enemies(enemies)
-    
+
     def reset(self):
+        self.cancel_pending_hit()
+        self._hit_results.clear()
+        self._script_credit = 0.0
+        self._simulation_ticks = 0
         self.pos = np.array([0.0, -0.8], dtype='f4')
         self.power = 1.00
         self.score = 0

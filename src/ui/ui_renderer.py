@@ -9,10 +9,11 @@ UI渲染器 - 使用ModernGL渲染UI元素
 
 import moderngl
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict
 import os
-from ..core.image_loader import SoftwareSurface, FontRenderer, load_image_rgba
-from .bitmap_font import BitmapFont, get_font_manager
+from collections import OrderedDict
+from ..core.image_loader import FontRenderer, load_image_rgba
+from .bitmap_font import get_font_manager
 
 
 class UIRenderer:
@@ -36,11 +37,16 @@ class UIRenderer:
 
         # UI背景纹理缓存 {path: texture}
         self.bg_textures: Dict[str, moderngl.Texture] = {}
-        self._overlay_fonts: Dict[int, FontRenderer] = {}
-        self._overlay_textures: Dict[tuple, tuple] = {}
-        self._overlay_font_path = os.path.join("assets", "fonts", "SourceHanSansCN-Bold.otf")
+        self._overlay_fonts = OrderedDict()
+        self._overlay_textures = OrderedDict()
+        self._overlay_texture_bytes = 0
+        self._overlay_cache_limit = 128
+        self._overlay_cache_bytes_limit = 16 * 1024 * 1024
+        font_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), "assets", "fonts")
+        self._overlay_font_path = os.path.join(font_root, "SourceHanSansCN-Bold.otf")
         if not os.path.exists(self._overlay_font_path):
-            self._overlay_font_path = os.path.join("assets", "fonts", "wqy-microhei-mono.ttf")
+            self._overlay_font_path = os.path.join(font_root, "wqy-microhei-mono.ttf")
         if not os.path.exists(self._overlay_font_path):
             self._overlay_font_path = None
 
@@ -51,21 +57,21 @@ class UIRenderer:
 
         # 字体管理器
         self.font_manager = get_font_manager()
-    
+
     def _init_text_shader(self):
         """初始化文本渲染着色器"""
         vertex_shader = """
         #version 330
-        
+
         uniform vec2 u_screen_size;
-        
+
         in vec2 in_position;  // 屏幕像素坐标
         in vec2 in_uv;
         in vec4 in_color;
-        
+
         out vec2 v_uv;
         out vec4 v_color;
-        
+
         void main() {
             // 将像素坐标转换为NDC [-1, 1]
             vec2 ndc = (in_position / u_screen_size) * 2.0 - 1.0;
@@ -75,39 +81,39 @@ class UIRenderer:
             v_color = in_color;
         }
         """
-        
+
         fragment_shader = """
         #version 330
-        
+
         uniform sampler2D u_texture;
-        
+
         in vec2 v_uv;
         in vec4 v_color;
-        
+
         out vec4 f_color;
-        
+
         void main() {
             vec4 tex_color = texture(u_texture, v_uv);
             f_color = tex_color * v_color;
         }
         """
-        
+
         self.text_program = self.ctx.program(
             vertex_shader=vertex_shader,
             fragment_shader=fragment_shader
         )
         self.text_program['u_texture'].value = 0
         self.text_program['u_screen_size'].value = (self.screen_width, self.screen_height)
-        
+
         # 动态顶点缓冲区（足够渲染大量字符）
         # 每个字符6个顶点，每个顶点8个float (position.xy, uv.xy, color.rgba)
         self.text_vbo = self.ctx.buffer(reserve=4096 * 6 * 8 * 4)
-        
+
         self.text_vao = self.ctx.vertex_array(
             self.text_program,
             [(self.text_vbo, '2f 2f 4f', 'in_position', 'in_uv', 'in_color')]
         )
-    
+
     def _init_textured_rect_shader(self):
         """初始化纹理背景矩形着色器（用于UI面板背景图片）"""
         vertex_shader = """
@@ -163,14 +169,14 @@ class UIRenderer:
         """初始化矩形渲染着色器（用于条形图等）"""
         vertex_shader = """
         #version 330
-        
+
         uniform vec2 u_screen_size;
-        
+
         in vec2 in_position;
         in vec4 in_color;
-        
+
         out vec4 v_color;
-        
+
         void main() {
             vec2 ndc = (in_position / u_screen_size) * 2.0 - 1.0;
             ndc.y = -ndc.y;
@@ -178,32 +184,32 @@ class UIRenderer:
             v_color = in_color;
         }
         """
-        
+
         fragment_shader = """
         #version 330
-        
+
         in vec4 v_color;
         out vec4 f_color;
-        
+
         void main() {
             f_color = v_color;
         }
         """
-        
+
         self.rect_program = self.ctx.program(
             vertex_shader=vertex_shader,
             fragment_shader=fragment_shader
         )
         self.rect_program['u_screen_size'].value = (self.screen_width, self.screen_height)
-        
+
         # 矩形顶点缓冲区
         self.rect_vbo = self.ctx.buffer(reserve=256 * 6 * 6 * 4)  # position.xy, color.rgba
-        
+
         self.rect_vao = self.ctx.vertex_array(
             self.rect_program,
             [(self.rect_vbo, '2f 4f', 'in_position', 'in_color')]
         )
-    
+
     def load_bg_texture(self, path: str) -> bool:
         """
         加载UI背景图片到GPU纹理
@@ -262,42 +268,76 @@ class UIRenderer:
         size = max(1, int(size))
         if size not in self._overlay_fonts:
             self._overlay_fonts[size] = FontRenderer(self._overlay_font_path, size)
+            if len(self._overlay_fonts) > 32:
+                self._overlay_fonts.popitem(last=False)
+        else:
+            self._overlay_fonts.move_to_end(size)
         return self._overlay_fonts[size]
+
+    def _cached_overlay_text(self, text, size, color, stroke_width, stroke_color):
+        key = (text, int(size), tuple(color), int(stroke_width), tuple(stroke_color))
+        cached = self._overlay_textures.get(key)
+        if cached is None:
+            font = self._get_overlay_font(size)
+            surface = font.render(text, True, color, stroke_width=stroke_width,
+                                  stroke_color=stroke_color)
+            texture = self.ctx.texture(surface.get_size(), 4,
+                                       surface.to_bytes("RGBA", flip_y=False))
+            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            cached = (texture, surface.get_width(), surface.get_height())
+            self._overlay_textures[key] = cached
+            self._overlay_texture_bytes += cached[1] * cached[2] * 4
+        else:
+            self._overlay_textures.move_to_end(key)
+        return cached
+
+    def _trim_overlay_cache(self):
+        while (len(self._overlay_textures) > self._overlay_cache_limit or
+               self._overlay_texture_bytes > self._overlay_cache_bytes_limit):
+            _, (old, width, height) = self._overlay_textures.popitem(last=False)
+            self._overlay_texture_bytes -= width * height * 4
+            old.release()
+
+    def prepare_texts(self, specifications):
+        """Fill the normal bounded cache without drawing or creating overlays."""
+        for spec in specifications:
+            for line in spec['text'].split('\n'):
+                if line:
+                    self._cached_overlay_text(
+                        line, spec.get('size', 24), spec.get('color', (255, 255, 255)),
+                        spec.get('stroke_width', 2), spec.get('stroke_color', (0, 0, 0)))
+                    self._trim_overlay_cache()
 
     def render_ttf_text(self, text: str, x: float, y: float,
                         size: int = 24, color: tuple = (255, 255, 255),
                         alpha: float = 1.0, align: str = 'left',
                         stroke_width: int = 2,
-                        stroke_color: tuple = (0, 0, 0)) -> None:
+                        stroke_color: tuple = (0, 0, 0),
+                        scale=1.0, line_spacing: float = 1.2) -> None:
+        """Draw cached TTF text. Position/opacity/scale never rasterize again.
+
+        ``size`` is the source font size; ``scale`` may be a scalar or (x, y).
+        Newlines share alignment but have separate cached line textures.
+        """
         if not text:
             return
+        if isinstance(scale, (int, float)):
+            scale_x = scale_y = float(scale)
+        else:
+            scale_x, scale_y = scale
+        if '\n' in text:
+            line_height = self._get_overlay_font(size).get_linesize() * line_spacing * scale_y
+            for index, line in enumerate(text.split('\n')):
+                self.render_ttf_text(
+                    line, x, y + index * line_height, size, color, alpha, align,
+                    stroke_width, stroke_color, (scale_x, scale_y), line_spacing,
+                )
+            return
 
-        key = (
-            text,
-            int(size),
-            tuple(color),
-            int(stroke_width),
-            tuple(stroke_color),
-        )
-        cached = self._overlay_textures.get(key)
-        if cached is None:
-            font = self._get_overlay_font(size)
-            surface = font.render(
-                text,
-                True,
-                color,
-                stroke_width=stroke_width,
-                stroke_color=stroke_color,
-            )
-            texture = self.ctx.texture(
-                surface.get_size(), 4,
-                surface.to_bytes("RGBA", flip_y=False)
-            )
-            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            cached = (texture, surface.get_width(), surface.get_height())
-            self._overlay_textures[key] = cached
+        cached = self._cached_overlay_text(text, size, color, stroke_width, stroke_color)
 
         texture, width, height = cached
+        width, height = width * scale_x, height * scale_y
         draw_x = x
         if align == 'center':
             draw_x -= width / 2
@@ -317,24 +357,71 @@ class UIRenderer:
         self.textured_rect_program['u_alpha'].value = alpha
         texture.use(0)
         self.textured_rect_vao.render(moderngl.TRIANGLES, vertices=6)
+        # Evict after rendering: even an oversized single label is valid for
+        # this draw, but cannot leave an unbounded allocation in the cache.
+        self._trim_overlay_cache()
+
+    def render_stage_overlay(self, overlay, game_viewport, window_size,
+                             playfield_size=(384, 448), layer=None) -> None:
+        """Render stage text without leaking viewport/scissor/shader state.
+
+        ``game_viewport`` is a framebuffer OpenGL (bottom-left x/y/w/h) rect;
+        ``window_size`` is the framebuffer size. Playfield labels use top-left
+        game pixels, HUD labels use full-framebuffer top-left pixels. Optional
+        ``layer`` lets callers draw playfield labels before the regular HUD.
+        """
+        items = overlay.items
+        if not items:
+            return
+        window_width, window_height = window_size
+        viewport_x, viewport_y, viewport_width, viewport_height = game_viewport
+        scale_x = viewport_width / playfield_size[0]
+        scale_y = viewport_height / playfield_size[1]
+        top = window_height - viewport_y - viewport_height
+        old_viewport, old_scissor = self.ctx.viewport, self.ctx.scissor
+        old_screen_size = self.textured_rect_program['u_screen_size'].value
+        old_alpha = self.textured_rect_program['u_alpha'].value
+        try:
+            self.ctx.viewport = (0, 0, window_width, window_height)
+            self.textured_rect_program['u_screen_size'].value = window_size
+            for item in items:
+                if (layer is not None and item.layer != layer) or item.opacity <= 0:
+                    continue
+                if item.layer == 'playfield':
+                    self.ctx.scissor = tuple(int(value) for value in game_viewport)
+                    x, y = viewport_x + item.x * scale_x, top + item.y * scale_y
+                    scale = (scale_x, scale_y)
+                else:
+                    self.ctx.scissor = (0, 0, window_width, window_height)
+                    x, y, scale = item.x, item.y, 1.0
+                self.render_ttf_text(
+                    item.text, x, y, size=item.size, color=item.color,
+                    alpha=item.opacity, align=item.align,
+                    stroke_width=item.stroke_width, stroke_color=item.stroke_color,
+                    scale=scale, line_spacing=item.line_spacing,
+                )
+        finally:
+            self.ctx.viewport, self.ctx.scissor = old_viewport, old_scissor
+            self.textured_rect_program['u_screen_size'].value = old_screen_size
+            self.textured_rect_program['u_alpha'].value = old_alpha
 
     def load_font_texture(self, font_name: str) -> bool:
         """
         加载字体纹理到GPU
-        
+
         Args:
             font_name: 字体名称
-            
+
         Returns:
             bool: 是否成功
         """
         font = self.font_manager.get_font(font_name)
         if font is None or font.texture_surface is None:
             return False
-        
+
         if font_name in self.font_textures:
             return True  # 已加载
-        
+
         try:
             img = font.texture_surface
             texture = self.ctx.texture(
@@ -348,14 +435,14 @@ class UIRenderer:
         except Exception as e:
             print(f"加载字体纹理失败 {font_name}: {e}")
             return False
-    
-    def render_text(self, text: str, x: float, y: float, 
+
+    def render_text(self, text: str, x: float, y: float,
                     font_name: str = 'score', scale: float = 1.0,
                     color: tuple = (255, 255, 255), alpha: float = 1.0,
                     align: str = 'left') -> None:
         """
         渲染文本
-        
+
         Args:
             text: 要渲染的文本
             x, y: 屏幕像素坐标（左上角）
@@ -368,12 +455,12 @@ class UIRenderer:
         font = self.font_manager.get_font(font_name)
         if font is None:
             return
-        
+
         # 确保字体纹理已加载
         if font_name not in self.font_textures:
             if not self.load_font_texture(font_name):
                 return
-        
+
         # 计算对齐偏移
         if align == 'center':
             text_width = font.get_text_width(text, scale)
@@ -381,32 +468,31 @@ class UIRenderer:
         elif align == 'right':
             text_width = font.get_text_width(text, scale)
             x -= text_width
-        
+
         # 构建顶点数据
         vertices = []
         r, g, b = color[0] / 255.0, color[1] / 255.0, color[2] / 255.0
-        
-        tex_h = font.texture_surface.get_height()
+
         cursor_x = x
-        
+
         for char in text:
             char_data = font.get_char_data(char)
             if char_data is None:
                 continue
-            
+
             # 字符尺寸（缩放后）
             char_w = char_data['width'] * scale
             char_h = char_data['height'] * scale
-            
+
             # UV坐标（注意：OpenGL纹理原点在左下，但我们使用tobytes的flip）
             uv = font.get_char_uv(char)
             if uv is None:
                 continue
             u0, v0, u1, v1 = uv
-            
+
             # 翻转V坐标（因为tobytes使用flip=True）
             v0, v1 = 1.0 - v0, 1.0 - v1
-            
+
             # 构建四边形的6个顶点（两个三角形）
             # 左上
             vertices.extend([cursor_x, y, u0, v0, r, g, b, alpha])
@@ -420,25 +506,25 @@ class UIRenderer:
             vertices.extend([cursor_x, y + char_h, u0, v1, r, g, b, alpha])
             # 右下
             vertices.extend([cursor_x + char_w, y + char_h, u1, v1, r, g, b, alpha])
-            
+
             # 移动光标
             cursor_x += (char_data['width'] + char_data['xoffset']) * scale
-        
+
         if not vertices:
             return
-        
+
         # 上传顶点数据并渲染
         vertex_data = np.array(vertices, dtype='f4')
         self.text_vbo.write(vertex_data.tobytes())
-        
+
         self.font_textures[font_name].use(0)
         self.text_vao.render(moderngl.TRIANGLES, vertices=len(vertices) // 8)
-    
+
     def render_rect(self, x: float, y: float, width: float, height: float,
                     color: tuple = (255, 255, 255), alpha: float = 1.0) -> None:
         """
         渲染填充矩形
-        
+
         Args:
             x, y: 左上角像素坐标
             width, height: 尺寸
@@ -446,7 +532,7 @@ class UIRenderer:
             alpha: 透明度
         """
         r, g, b = color[0] / 255.0, color[1] / 255.0, color[2] / 255.0
-        
+
         vertices = [
             # 三角形1
             x, y, r, g, b, alpha,
@@ -457,17 +543,17 @@ class UIRenderer:
             x, y + height, r, g, b, alpha,
             x + width, y + height, r, g, b, alpha,
         ]
-        
+
         vertex_data = np.array(vertices, dtype='f4')
         self.rect_vbo.write(vertex_data.tobytes())
         self.rect_vao.render(moderngl.TRIANGLES, vertices=6)
-    
+
     def render_bar(self, x: float, y: float, width: float, height: float,
                    value: float, color_bg: tuple = (32, 32, 32),
                    color_fill: tuple = (255, 255, 255), alpha: float = 1.0) -> None:
         """
         渲染条形图（如HP条、Power条）
-        
+
         Args:
             x, y: 左上角坐标
             width, height: 总尺寸
@@ -478,24 +564,24 @@ class UIRenderer:
         """
         # 渲染背景
         self.render_rect(x, y, width, height, color_bg, alpha)
-        
+
         # 渲染填充部分
         fill_width = width * max(0.0, min(1.0, value))
         if fill_width > 0:
             self.render_rect(x, y, fill_width, height, color_fill, alpha)
-    
+
     def render_hud(self, hud) -> None:
         """
         渲染完整的HUD
-        
+
         Args:
             hud: HUD对象
         """
         elements = hud.get_render_elements()
-        
+
         for elem in elements:
             elem_type = elem.get('type', '')
-            
+
             if elem_type == 'text':
                 self.render_text(
                     text=elem['text'],
@@ -536,7 +622,7 @@ class UIRenderer:
                     texture_path=elem['texture_path'],
                     alpha=elem.get('alpha', 1.0)
                 )
-    
+
     def cleanup(self) -> None:
         """清理资源"""
         # ModernGL会自动管理资源，但可以显式释放纹理
@@ -560,3 +646,4 @@ class UIRenderer:
         self.bg_textures.clear()
         self._overlay_textures.clear()
         self._overlay_fonts.clear()
+        self._overlay_texture_bytes = 0

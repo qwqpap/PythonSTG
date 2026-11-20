@@ -24,6 +24,13 @@ from src.game.tasks import wait_frames
 from src.game.state import RunState, TIME_DOMAINS
 from src.game.item import ItemPool
 from src.game.particle import ParticlePool
+from src.game.player.player_base import PlayerBase
+from src.game.player.hit import commit_player_hits
+from src.core.input_manager import KeyboardState
+from src.core.collision import CollisionManager
+from src.game.player.hit import PlayerHit, HitStatus
+from src.game.bomb import trigger_player_bomb
+from src.game.damage import DamageHit, dispatch_damage_hits
 
 
 FIXED_DT = 1.0 / 60.0
@@ -92,9 +99,10 @@ class PreviewStats:
     item_count: int = 0
 
 
-class PreviewPlayer:
+class PreviewPlayer(PlayerBase):
     def __init__(self, x: float = 0.0, y: float = -0.8):
-        self.pos = [float(x), float(y)]
+        super().__init__()
+        self.pos[:] = float(x), float(y)
 
     @property
     def x(self) -> float:
@@ -117,6 +125,7 @@ class PreviewBoss(BossBase):
         self.max_hp = 999999
         self.hp = self.max_hp
         self.x, self.y = float(x), float(y)
+        self._active = True
 
     @property
     def pos(self) -> tuple[float, float]:
@@ -449,6 +458,7 @@ class SpellPreviewSession:
         self.particle_pool = ParticlePool(sprite_registry=bullet_pool.sprite_registry)
         self.event_bus = EventBus()
         self.player = PreviewPlayer(*player_pos)
+        self._sync_player_stats(self.player, self.item_pool)
         self.boss = PreviewBoss(boss_name, *boss_pos)
         self._boss_start_pos = boss_pos
         self.seed = seed
@@ -457,9 +467,24 @@ class SpellPreviewSession:
         self.spell: SpellCard | None = None
         self.spell_class: Type[SpellCard] | None = None
         self.frame = 0
+        self.player_collisions = False  # pattern viewer by default, opt-in live hit rules
+        self._collision_manager = CollisionManager()
+        self.player.on_bomb_callback = self._on_player_bomb
+
+    @staticmethod
+    def _sync_player_stats(player, items):
+        player.lives = items.stats.lives
+        player.bombs = items.stats.bombs
+        player.power = items.stats.get_power_float()
+        player.score = items.stats.score
+
+    def _on_player_bomb(self):
+        self.item_pool.stats.bombs = self.player.bombs
+        trigger_player_bomb(self.player, self.bullet_pool, self.item_pool,
+                            context=self.stage_context, boss=self.boss)
 
     def _create_context(self, player, bus, *, bullet_pool=None, laser_pool=None, item_pool=None,
-                        particle_pool=None):
+                        particle_pool=None, animation_assets=None):
         context = StageContext(
             bullet_pool=self.bullet_pool if bullet_pool is None else bullet_pool,
             player=player,
@@ -468,6 +493,7 @@ class SpellPreviewSession:
             item_pool=self.item_pool if item_pool is None else item_pool,
             run_state=deepcopy(self._initial_run_state),
             particle_pool=self.particle_pool if particle_pool is None else particle_pool,
+            animation_assets=animation_assets,
         )
         context.seed = int(self.seed or 0)
         return context
@@ -510,10 +536,12 @@ class SpellPreviewSession:
         )
         next_lasers = LaserPool(self.laser_pool.max_lasers, self.laser_pool.max_bent)
         next_items = ItemPool(self.item_pool.max_items)
+        self._sync_player_stats(next_player, next_items)
         next_particles = ParticlePool(self.particle_pool.max_particles, self.bullet_pool.sprite_registry)
         next_context = self._create_context(
             next_player, next_bus, bullet_pool=next_pool, laser_pool=next_lasers, item_pool=next_items,
             particle_pool=next_particles,
+            animation_assets=self.stage_context.animations.assets,
         )
         next_context.seed = int(next_seed or 0)
         next_boss.ctx = next_context
@@ -532,14 +560,19 @@ class SpellPreviewSession:
                 if next_spell is not None:
                     next_spell.dispose()
             finally:
-                next_context.dispose()
-                next_bus.close()
-                next_pool.clear_all()
-                next_lasers.clear()
-                next_items.clear()
-                next_particles.clear()
-                random.setstate(random_state)
-                np.random.set_state(numpy_state)
+                try:
+                    try:
+                        next_boss.dispose()
+                    finally:
+                        next_context.dispose()
+                finally:
+                    next_bus.close()
+                    next_pool.clear_all()
+                    next_lasers.clear()
+                    next_items.clear()
+                    next_particles.clear()
+                    random.setstate(random_state)
+                    np.random.set_state(numpy_state)
             raise
 
         self.close()
@@ -556,6 +589,8 @@ class SpellPreviewSession:
         self.seed = next_seed
         self.spell_class = target_class
         self.spell = next_spell
+        self.boss.current_spellcard = next_spell
+        self.player.on_bomb_callback = self._on_player_bomb
         self.frame = 0
 
     def close(self) -> None:
@@ -566,7 +601,10 @@ class SpellPreviewSession:
                 spell.dispose()
         finally:
             try:
-                self.stage_context.dispose()
+                try:
+                    self.boss.dispose()
+                finally:
+                    self.stage_context.dispose()
             finally:
                 self.event_bus.close()
                 self.clear_bullets()
@@ -579,7 +617,7 @@ class SpellPreviewSession:
         if hasattr(self.stage_context, "_bullet_indices"):
             self.stage_context._bullet_indices.clear()
 
-    def step_one(self) -> bool:
+    def step_one(self, keys=None) -> bool:
         if self.spell is None:
             return False
         reaction = self.spell.end_reaction
@@ -589,17 +627,22 @@ class SpellPreviewSession:
         try:
             # Match the game loop: existing projectiles integrate first; bullets
             # born in actor/task code do not move until the next simulation step.
-            self.bullet_pool.set_player_target(self.player.x, self.player.y)
-            mask = context.time_control.mask
-            if not mask & TIME_DOMAINS['bullets']:
-                self.bullet_pool.update(FIXED_DT)
-            if not mask & TIME_DOMAINS['lasers']:
-                self.laser_pool.update()
-            if not mask & TIME_DOMAINS['items']:
-                self.item_pool.update(self.player.x, self.player.y, FIXED_DT)
-            if not mask & TIME_DOMAINS['effects']:
-                self.particle_pool.update()
             context.set_runtime_frame(self.frame)
+            rates = context._frame_rates
+            if not context._frame_stop_mask & TIME_DOMAINS['player']:
+                self.player.update(FIXED_DT * rates['player'],
+                                   KeyboardState({}) if keys is None else keys,
+                                   context.get_enemy_scripts(), control_dt=FIXED_DT)
+                commit_player_hits(self.player, self.item_pool.stats, boss=self.boss, context=context)
+            self.bullet_pool.set_player_target(self.player.x, self.player.y)
+            if rates['bullets'] > 0:
+                self.bullet_pool.update(FIXED_DT * rates['bullets'])
+            if rates['lasers'] > 0:
+                self.laser_pool.update(rates['lasers'])
+            if rates['items'] > 0:
+                self.item_pool.update(self.player.x, self.player.y, FIXED_DT * rates['items'])
+            if rates['effects'] > 0:
+                self.particle_pool.update(rates['effects'])
             context.flush_lifecycle_events()
             self.event_bus.dispatch_frame()
             if self.event_bus.errors:
@@ -607,8 +650,49 @@ class SpellPreviewSession:
                 raise RuntimeError(f"runtime event handler failed for {event.type!r}") from error
             context.update_tasks()
             context.update_enemy_scripts()
+            self.boss.update_animation()
             if self.spell._active:
                 self.spell.update()
+            context.update_animations()
+            targets = [*context.get_enemy_scripts(), self.boss]
+            if (self.player_collisions and rates['player'] > 0
+                    and not self.player.is_invincible() and not self.player.is_dead):
+                px, py = self.player.get_hit_position()
+                hit = self._collision_manager.check_player_vs_bullets(
+                    px, py, self.player.hit_radius, self.bullet_pool, player_hitbox=self.player.hitbox)
+                if hit.occurred:
+                    source = self.bullet_pool.capture_group([hit.index])
+                    result = self.player.receive_hit(PlayerHit('bullet', (px, py), hit.index))
+                    if result.status is not HitStatus.IGNORED:
+                        self.bullet_pool.remove_bullets(source, reason='hit')
+                if not self.player.is_invincible():
+                    hit = self._collision_manager.check_player_vs_lasers(
+                        px, py, self.player.hit_radius, self.laser_pool, player_hitbox=self.player.hitbox)
+                    if hit.occurred:
+                        self.player.receive_hit(PlayerHit('laser', (px, py), hit.index))
+                if not self.player.is_invincible():
+                    hit = self._collision_manager.check_player_vs_contacts(self.player, targets)
+                    if hit.occurred:
+                        self.player.receive_hit(PlayerHit('enemy_contact', (px, py), hit.index))
+            commit_player_hits(self.player, self.item_pool.stats, boss=self.boss, context=context)
+            hits, active_targets = self._collision_manager.check_player_bullets_vs_targets(
+                self.player.bullet_pool, targets, hit_radius=.02)
+            target_hits = []
+            raw_hit_damage = {
+                (hit.bullet_idx, hit.attack_generation): hit.damage for hit in hits
+            }
+            for hit in hits:
+                target = active_targets[hit.target_idx]
+                target_hits.append((target, DamageHit(
+                    hit.damage * self.player.get_bomb_damage_multiplier(),
+                    hit.source, hit.bullet_idx, hit.attack_generation, hit.region)))
+            def on_attack_hit(target, hit):
+                if self.player.script:
+                    self.player.script.on_bullet_hit_enemy(
+                        hit.attack_index, target,
+                        raw_hit_damage[(hit.attack_index, hit.attack_generation)])
+            dispatch_damage_hits(target_hits, on_hit=on_attack_hit)
+            self._sync_player_stats(self.player, self.item_pool)
             reaction = self.spell.end_reaction
             # End hooks live on Context, just as they do in a normal stage.
             # Drain the explicit reaction (including awaited child tasks), not
@@ -617,7 +701,10 @@ class SpellPreviewSession:
             context.flush_bullet_conversions()
             context.flush_lifecycle_events()
             if not active:
-                context.dispose()
+                try:
+                    self.boss.dispose()
+                finally:
+                    context.dispose()
                 self.event_bus.close()
             self.frame += 1
             return active

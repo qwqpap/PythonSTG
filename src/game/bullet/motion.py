@@ -33,7 +33,7 @@ def wrap_axis(position, remaining, lower, upper):
 
 
 @njit(cache=True)
-def post_bounds(data, wrap_remaining_x=None, wrap_remaining_y=None):
+def post_bounds(data, wrap_remaining_x=None, wrap_remaining_y=None, dt=0.0):
     """Apply finite wrap at the existing playfield edges, then normal culling.
 
     X uses [-1, 1], Y uses [-1.14, 1], matching existing bounce semantics.
@@ -52,7 +52,9 @@ def post_bounds(data, wrap_remaining_x=None, wrap_remaining_y=None):
             y, count = wrap_axis(data[i]['pos'][1], wrap_remaining_y[i], -1.14, 1.0)
             data[i]['pos'][1] = y
             wrap_remaining_y[i] = count
-        if not data[i]['flags'] & 3:
+        if (not data[i]['flags'] & 3
+                and data[i]['lifetime'] - dt * data[i]['time_scale'] + 1e-8 >= data[i]['warmup_duration']
+                and data[i]['lifetime'] + 1e-8 >= data[i]['cull_grace']):
             x, y = data[i]['pos'][0], data[i]['pos'][1]
             if x < -1.5 or x > 1.5 or y < -1.5 or y > 1.5:
                 data[i]['alive'] = 0

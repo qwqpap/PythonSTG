@@ -8,7 +8,10 @@ from enum import Enum
 import inspect
 import json
 import os
+import operator
 from .motion import ActorControls
+from .enemy_render import ActorAnimationControls
+from ..damage import DamageHit
 
 if TYPE_CHECKING:
     from .spellcard import SpellCard, SpellCardContext
@@ -32,6 +35,12 @@ class BossPhase:
     practice_unlock: bool = False
     bonus_rule: Optional[Any] = None         # callable(boss, spell) -> int
     finish_rule: Optional[Any] = None        # callable(boss, SpellResult)
+    declaration_blocks_spell: bool = True   # Legacy opening pauses spell/timer
+    hp_threshold: Optional[int] = None      # Strict threshold; restore its HP on transition
+    carry_hp: bool = False                  # Keep HP from the previous phase
+    transition_rule: Optional[Any] = None   # callable(boss, SpellResult) -> next phase index
+    damage_rule: Optional[Any] = None       # callable(boss, DamageHit) -> HP damage
+    auto_declaration: bool = True          # Content may explicitly declare after a prelude
 
     # 运行时
     spellcard: Optional['SpellCard'] = None
@@ -44,14 +53,15 @@ class SpellResult:
     reason: str
     phase_type: BossPhaseType
     hp: int
-    elapsed_frames: int
+    elapsed_frames: float
     bonus: int
     no_miss: bool
     no_bomb: bool
     is_survival: bool
+    capture_failure_reason: str | None = None
 
 
-class BossBase(ActorControls):
+class BossBase(ActorAnimationControls, ActorControls):
     """
     Boss 基类
 
@@ -84,6 +94,8 @@ class BossBase(ActorControls):
         self._spell_bonus: int = 0         # 当前符卡 bonus（逐帧衰减）
         self._spell_no_miss: bool = True   # 当前符卡期间玩家未被击中
         self._spell_no_bomb: bool = True   # 当前符卡期间玩家未使用 bomb
+        self._capture_failure_reason = None
+        self.last_damage_hit: Optional[DamageHit] = None
 
         # ===== 符卡宣言（装饰动画） =====
         # 在宣言期间暂停符卡 update，让动画完整播放完再开始弹幕
@@ -118,7 +130,11 @@ class BossBase(ActorControls):
                 script_path=os.path.join(spellcard_dir, phase_cfg['script'] + '.py'),
                 name=phase_cfg.get('name'),
                 bonus=phase_cfg.get('bonus', 0),
-                practice_unlock=phase_cfg.get('practice_unlock', False)
+                practice_unlock=phase_cfg.get('practice_unlock', False),
+                declaration_blocks_spell=phase_cfg.get('declaration_blocks_spell', True),
+                hp_threshold=phase_cfg.get('hp_threshold'),
+                carry_hp=phase_cfg.get('carry_hp', False),
+                auto_declaration=phase_cfg.get('auto_declaration', True),
             )
             boss.phases.append(phase)
 
@@ -149,6 +165,7 @@ class BossBase(ActorControls):
 
     def _start_phase(self, index: int):
         """开始指定阶段"""
+        has_previous_phase = self.current_spellcard is not None
         if self.current_spellcard is not None:
             self.current_spellcard.dispose()
             self.current_spellcard = None
@@ -158,13 +175,15 @@ class BossBase(ActorControls):
 
         phase = self.phases[index]
         self.current_phase_index = index
-        self.hp = phase.hp
+        if not phase.carry_hp or not has_previous_phase:
+            self.hp = phase.hp
         self.max_hp = phase.hp
 
         # 重置符卡积分追踪
         self._spell_bonus = phase.bonus
         self._spell_no_miss = True
         self._spell_no_bomb = True
+        self._capture_failure_reason = None
 
         # 加载并启动符卡：优先使用 script_class，回退到 script_path
         if phase.script_class:
@@ -187,7 +206,7 @@ class BossBase(ActorControls):
             phase.spellcard = spellcard
 
             # 符卡开始事件
-            if phase.phase_type == BossPhaseType.SPELLCARD:
+            if phase.phase_type == BossPhaseType.SPELLCARD and phase.auto_declaration:
                 self._on_spellcard_start(phase)
 
     def _load_spellcard(self, script_path: str) -> Optional['SpellCard']:
@@ -221,7 +240,9 @@ class BossBase(ActorControls):
         if not self.texture:
             return
         from .enemy_render import EnemyRenderObject
-        self._render_obj = EnemyRenderObject(self.texture, asset_manager)
+        candidate = EnemyRenderObject(self.texture, asset_manager)
+        self.stop_animation()
+        self._render_obj = candidate
 
     def get_render_frame(self):
         """供 renderer 调用，返回 (SpriteFrame, texture_path) 或 (None, None)"""
@@ -234,23 +255,32 @@ class BossBase(ActorControls):
         if not self._active:
             return
 
-        if self._render_obj is not None:
-            vx = self.x - self._prev_x
-            self._render_obj.update(vx=vx, dt=1 / 60.0)
-        self._prev_x = self.x
+        self.update_animation()
 
         # 符卡宣言开场期间暂停符卡推进；到位后继续显示，但不再挡住符卡逻辑。
         if self._declaration is not None and self._declaration.active:
-            self._declaration.update(1.0 / 60.0)
-            if getattr(self._declaration, 'blocks_spell_update', False):
+            self._declaration.update((self.ctx.get_simulation_rate('effects')
+                                      if self.ctx is not None else 1.0) / 60.0)
+            if (self.phases[self.current_phase_index].declaration_blocks_spell
+                    and getattr(self._declaration, 'blocks_spell_update', False)):
                 return
 
         if self.current_spellcard:
+            phase = self.phases[self.current_phase_index]
+            spell = self.current_spellcard
+            if phase.hp_threshold is not None and spell._active:
+                if 0 < self.hp < phase.hp_threshold:
+                    self.hp = phase.hp_threshold
+                    spell.end('threshold')
+                else:
+                    timer_rate = (self.ctx.get_simulation_rate('boss_timer')
+                                  if self.ctx is not None else 1.0)
+                    if spell.timer_frames + timer_rate + 1e-8 >= spell.time_limit * 60.0:
+                        self.hp = phase.hp_threshold
             spell_running = self.current_spellcard.update()
             # 逐帧衰减符卡 bonus（从 max 线性衰减到 base = max/2）
             # Read the final timer/HP state too: timeout can end in this update,
             # and defeat can have happened in the preceding collision pass.
-            phase = self.phases[self.current_phase_index]
             if phase.bonus_rule is not None:
                 self._spell_bonus = int(phase.bonus_rule(self, self.current_spellcard))
             elif phase.bonus > 0:
@@ -263,11 +293,19 @@ class BossBase(ActorControls):
                     self._spell_bonus = max(base_bonus, self._spell_bonus)
 
             if not spell_running:
+                if spell.end_reason == 'timeout' and phase.hp_threshold is not None:
+                    self.hp = phase.hp_threshold
                 # 当前符卡结束，进入下一阶段
-                self._on_phase_end()
-                self._start_phase(self.current_phase_index + 1)
+                result = self._on_phase_end()
+                next_phase = self.current_phase_index + 1
+                if phase.transition_rule is not None:
+                    next_phase = operator.index(phase.transition_rule(self, result))
+                    if not 0 <= next_phase <= len(self.phases):
+                        raise ValueError('boss transition phase index is out of range')
+                self._start_phase(next_phase)
 
-    def damage(self, amount: int):
+    def damage(self, amount: int, *, source='shot', attack_index=-1,
+               attack_generation=-1, region=0):
         """受到伤害"""
         if not self._active or not self.current_spellcard or not self.interactable:
             return
@@ -275,6 +313,8 @@ class BossBase(ActorControls):
         spell = self.current_spellcard
         if not spell._active:
             return
+        hit = DamageHit(amount, source, attack_index, attack_generation, region)
+        self.last_damage_hit = hit
         if type(spell).on_hit is not SpellCard.on_hit:
             try:
                 spell.spawn_task(spell.on_hit(amount), immediate=True)
@@ -284,6 +324,9 @@ class BossBase(ActorControls):
         if (not self._active or not spell._active or not self.interactable
                 or not self.damageable or spell.is_survival):
             return
+        phase = self.phases[self.current_phase_index]
+        if phase.damage_rule is not None:
+            amount = phase.damage_rule(self, hit)
         self.hp -= amount
         if self.hp <= 0:
             self.hp = 0
@@ -293,21 +336,25 @@ class BossBase(ActorControls):
         """Stop a Boss without awards or an accidental next phase."""
         self._active = False
         self._declaration = None
-        if self.current_spellcard is not None:
-            self.current_spellcard.dispose()
+        try:
+            if self.current_spellcard is not None:
+                self.current_spellcard.dispose()
+        finally:
             self.current_spellcard = None
+            self._dispose_animations()
 
     def _on_phase_end(self):
         """阶段结束 - 结算积分、掉落道具、子弹转化"""
         phase = self.phases[self.current_phase_index]
+        spell = self.current_spellcard
+        result = SpellResult(
+            spell.end_reason or 'completed', phase.phase_type, self.hp,
+            spell.timer_frames, self._spell_bonus,
+            self._spell_no_miss, self._spell_no_bomb, spell.is_survival,
+            self._capture_failure_reason,
+        )
 
         if phase.finish_rule is not None:
-            spell = self.current_spellcard
-            result = SpellResult(
-                spell.end_reason or 'completed', phase.phase_type, self.hp,
-                spell.timer_frames, self._spell_bonus,
-                self._spell_no_miss, self._spell_no_bomb, spell.is_survival,
-            )
             reaction = phase.finish_rule(self, result)
             if inspect.isawaitable(reaction) or inspect.isgenerator(reaction):
                 if self.ctx is None:
@@ -316,18 +363,19 @@ class BossBase(ActorControls):
                 self.ctx.spawn_task(reaction)
             if phase.phase_type == BossPhaseType.SPELLCARD:
                 self._on_spellcard_end(phase)
-            return
+            return result
 
         # 1. 结算符卡 bonus
         defeated = (self.hp <= 0)
-        if defeated and self._spell_no_miss and self._spell_no_bomb and phase.bonus > 0:
+        if (defeated and self._spell_no_miss and self._spell_no_bomb
+                and self._capture_failure_reason is None and phase.bonus > 0):
             # 取整到 10 的倍数
             awarded = self._spell_bonus - (self._spell_bonus % 10)
             if self.ctx and awarded > 0:
                 self.ctx.add_score(awarded)
             print(f"Spell Bonus! +{awarded:,}")
         elif phase.bonus > 0:
-            print(f"Spell Failed (miss={not self._spell_no_miss}, bomb={not self._spell_no_bomb})")
+            print(f"Spell Failed (miss={not self._spell_no_miss}, bomb={not self._spell_no_bomb}, rule={self._capture_failure_reason})")
 
         # 2. 子弹转化为道具
         if self.current_spellcard:
@@ -347,18 +395,27 @@ class BossBase(ActorControls):
 
         if phase.phase_type == BossPhaseType.SPELLCARD:
             self._on_spellcard_end(phase)
+        return result
 
     def _on_spellcard_start(self, phase: BossPhase):
         """符卡开始（可覆盖）"""
         print(f"符卡开始: {phase.name}")
         # 启动符卡宣言动画（仅有名字的符卡才播放）
-        if phase.name:
-            try:
-                from .spell_declaration import SpellDeclaration
-                self._declaration = SpellDeclaration(phase.name)
-            except Exception as e:
-                print(f"[Boss] 无法启动符卡宣言: {e}")
-                self._declaration = None
+        self.declare_spell(phase.name)
+
+    def declare_spell(self, name=None):
+        """Show the current spell's declaration without restarting its tasks.
+
+        Delayed introductions opt out with BossPhase.auto_declaration=False.
+        Countdown reset is separate and explicit via current_spell.set_timer.
+        """
+        if name is None:
+            name = self.phases[self.current_phase_index].name
+        if not name:
+            return None
+        from .spell_declaration import SpellDeclaration
+        self._declaration = SpellDeclaration(name)
+        return self._declaration
 
     @property
     def declaration(self):
@@ -386,6 +443,7 @@ class BossBase(ActorControls):
         """所有阶段完成 - 收集所有道具"""
         self._active = False
         self._declaration = None
+        self._dispose_animations()
         # Boss 击破时，吸收场上所有道具
         if (self.collect_items_on_defeat and self.ctx
                 and hasattr(self.ctx, '_item_pool') and self.ctx._item_pool):
@@ -403,6 +461,15 @@ class BossBase(ActorControls):
     def on_player_bomb(self):
         """玩家使用 bomb 时由引擎调用"""
         self._spell_no_bomb = False
+
+    def invalidate_capture(self, reason='content_rule'):
+        """Fail capture independently of stocks/miss/Bomb counters (e.g. Border)."""
+        if self._capture_failure_reason is None:
+            self._capture_failure_reason = str(reason)
+
+    @property
+    def capture_failure_reason(self):
+        return self._capture_failure_reason
 
     @property
     def alive(self) -> bool:
@@ -443,7 +510,7 @@ class BossBase(ActorControls):
     @property
     def spell_bonus_display(self) -> int:
         """当前可获得的符卡 bonus（HUD 显示用，逐帧衰减值）"""
-        if self._spell_no_miss and self._spell_no_bomb:
+        if self._spell_no_miss and self._spell_no_bomb and self._capture_failure_reason is None:
             return self._spell_bonus
         return 0
 
@@ -468,7 +535,10 @@ class BossBase(ActorControls):
 # ==================== 阶段定义辅助函数 ====================
 
 def nonspell(script_class: type, hp: int, time: float, bonus: int = 100000,
-             *, bonus_rule=None, finish_rule=None) -> BossPhase:
+             *, bonus_rule=None, finish_rule=None,
+             declaration_blocks_spell: bool = True, hp_threshold=None,
+             carry_hp: bool = False, transition_rule=None,
+             damage_rule=None, auto_declaration=True) -> BossPhase:
     """创建非符阶段定义"""
     return BossPhase(
         phase_type=BossPhaseType.NONSPELL,
@@ -478,12 +548,18 @@ def nonspell(script_class: type, hp: int, time: float, bonus: int = 100000,
         bonus=bonus,
         practice_unlock=False,
         bonus_rule=bonus_rule, finish_rule=finish_rule,
+        declaration_blocks_spell=declaration_blocks_spell,
+        hp_threshold=hp_threshold, carry_hp=carry_hp, transition_rule=transition_rule,
+        damage_rule=damage_rule, auto_declaration=auto_declaration,
     )
 
 
 def spellcard(script_class: type, name: str, hp: int, time: float,
               bonus: int = 1000000, practice: bool = True,
-              *, bonus_rule=None, finish_rule=None) -> BossPhase:
+              *, bonus_rule=None, finish_rule=None,
+              declaration_blocks_spell: bool = True, hp_threshold=None,
+              carry_hp: bool = False, transition_rule=None,
+              damage_rule=None, auto_declaration=True) -> BossPhase:
     """创建符卡阶段定义"""
     return BossPhase(
         phase_type=BossPhaseType.SPELLCARD,
@@ -494,4 +570,7 @@ def spellcard(script_class: type, name: str, hp: int, time: float,
         bonus=bonus,
         practice_unlock=practice,
         bonus_rule=bonus_rule, finish_rule=finish_rule,
+        declaration_blocks_spell=declaration_blocks_spell,
+        hp_threshold=hp_threshold, carry_hp=carry_hp, transition_rule=transition_rule,
+        damage_rule=damage_rule, auto_declaration=auto_declaration,
     )

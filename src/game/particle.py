@@ -91,22 +91,26 @@ class ParticleSnapshot:
 
 @njit(cache=True)
 def _step(active, count, free, free_count, alive, age, lifetime, origin,
-          position, velocity, acceleration, direction, radius, radial_step, radial):
+          position, velocity, acceleration, direction, radius, radial_step, radial, manual, frames):
     retained = 0
     for j in range(count):
         i = active[j]
-        age[i] += 1
-        if not alive[i] or age[i] >= lifetime[i]:
+        if manual[i] and alive[i]:
+            active[retained] = i
+            retained += 1
+            continue
+        age[i] += frames
+        if not alive[i] or age[i] + 1e-8 >= lifetime[i]:
             alive[i] = False
             free[free_count] = i
             free_count += 1
             continue
         # Explicit Euler: integrate position BEFORE changing velocity.
         for axis in range(2):
-            origin[i, axis] += velocity[i, axis]
-            velocity[i, axis] += acceleration[i, axis]
+            origin[i, axis] += velocity[i, axis] * frames
+            velocity[i, axis] += acceleration[i, axis] * frames
         if radial[i]:
-            radius[i] += radial_step[i]
+            radius[i] += radial_step[i] * frames
             for axis in range(2):
                 position[i, axis] = origin[i, axis] + direction[i, axis] * radius[i]
         else:
@@ -141,7 +145,7 @@ def _pack(active, count, age, start, layer, position, rotation, color, scale,
     back, front = 0, back_count
     for j in range(count):
         i = active[j]
-        frame = start[i] + age[i]
+        frame = start[i] + int(age[i] + 1e-8)
         if layer[i] == 0:
             dst = back
             back += 1
@@ -182,10 +186,11 @@ class ParticlePool:
         self._radius = np.zeros(n, np.float32)
         self._radial_step = np.zeros(n, np.float32)
         self._radial = np.zeros(n, np.bool_)
+        self._manual = np.zeros(n, np.bool_)
         self._rotation = np.zeros(n, np.float32)
         self._color = np.ones((n, 4), np.float32)
         self._scale = np.ones((n, 2), np.float32)
-        self.age = np.zeros(n, np.int32)
+        self.age = np.zeros(n, np.float64)
         self._lifetime = np.zeros(n, np.int32)
         self._start = np.zeros(n, np.int32)
         self._layer = np.zeros(n, np.uint8)
@@ -257,6 +262,11 @@ class ParticlePool:
         self._effects[effect] = cached
         return cached
 
+    def prepare_effects(self, effects):
+        """Cache known visual tables without births, time advancement or RNG."""
+        for effect in effects:
+            self._compile_effect(effect)
+
     def emit(self, effect, x, y, *, count=1, velocity=(0.0, 0.0),
              acceleration=(0.0, 0.0), rotation=0.0, color=(1.0, 1.0, 1.0, 1.0),
              motion='linear', radius=0.0, radial_speed=0.0, direction=0.0):
@@ -265,10 +275,12 @@ class ParticlePool:
         x/y and scalar fields broadcast to count; velocity/acceleration/color
         accept a constant vector or count-by-dimension array. Radial motion
         uses x/y as centers and direction as degrees, without clamping radius.
+        Manual motion is a generation-safe visual batch: its content owner
+        controls transforms and clears it; this pool does not move or age it.
         """
         count = int(count)
-        if count < 0 or motion not in ('linear', 'radial'):
-            raise ValueError('particle count must be nonnegative; motion linear/radial')
+        if count < 0 or motion not in ('linear', 'radial', 'manual'):
+            raise ValueError('particle count must be nonnegative; motion linear/radial/manual')
         xs = self._values(x, (count,), 'x')
         ys = self._values(y, (count,), 'y')
         vel = self._values(velocity, (count, 2), 'velocity') / 60.0
@@ -291,6 +303,7 @@ class ParticlePool:
         self._scale[indices] = 1.0
         self._radius[indices], self._radial_step[indices] = radii[:n], dr[:n]
         self._radial[indices] = motion == 'radial'
+        self._manual[indices] = motion == 'manual'
         self._direction[indices, 0], self._direction[indices, 1] = np.cos(headings[:n]), np.sin(headings[:n])
         if motion == 'radial':
             self.position[indices] += self._direction[indices] * radii[:n, None]
@@ -391,15 +404,16 @@ class ParticlePool:
         self._render_dirty = True
         return removed
 
-    def _step(self):
+    def _step(self, frames=1.0):
         self._count, self._free_count = _step(
             self._active, self._count, self._free, self._free_count, self.alive,
             self.age, self._lifetime, self._origin, self.position, self._velocity,
-            self._acceleration, self._direction, self._radius, self._radial_step, self._radial)
+            self._acceleration, self._direction, self._radius, self._radial_step,
+            self._radial, self._manual, frames)
 
-    def update(self):
-        if self._count:
-            self._step()
+    def update(self, frames=1.0):
+        if self._count and frames > 0:
+            self._step(frames)
             self._render_dirty = True
 
     def _pack(self):

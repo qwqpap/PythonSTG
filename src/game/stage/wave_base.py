@@ -33,7 +33,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING
 
 from .danmaku_audio import resolve_fire_sound
-from ..tasks import FrameTaskOwner, pump_tasks
+from ..tasks import FrameTaskOwner, pump_tasks, wait_frames, NEXT_FRAME, simulation_rate
 
 if TYPE_CHECKING:
     from .spellcard import SpellCardContext
@@ -70,7 +70,7 @@ class Wave(FrameTaskOwner, ABC):
         self.ctx = ctx
 
     @property
-    def time(self) -> int:
+    def time(self) -> float:
         """当前帧数"""
         return self._time
 
@@ -93,12 +93,14 @@ class Wave(FrameTaskOwner, ABC):
         self._coroutine = self.run()
         try:
             while self._active:
+                self._task_frame += 1
                 pump_tasks(self)
                 if not self._active or not self._step_main():
                     break
                 pump_tasks(self)
-                self._time += 1
-                yield
+                rate = simulation_rate(self)
+                self._time += 1 if rate == 1.0 else rate
+                yield NEXT_FRAME
         finally:
             self.dispose()
 
@@ -222,8 +224,7 @@ class Wave(FrameTaskOwner, ABC):
     @types.coroutine
     def wait(self, frames: int):
         """等待指定帧数"""
-        for _ in range(frames):
-            yield
+        yield from wait_frames(frames)
 
     @types.coroutine
     def wait_seconds(self, seconds: float):

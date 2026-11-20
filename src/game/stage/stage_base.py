@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from abc import abstractmethod
 import types
 
-from ..tasks import FrameTaskOwner, cancel_tasks, pump_tasks
+from ..tasks import FrameTaskOwner, cancel_tasks, pump_tasks, wait_frames, NEXT_FRAME
 
 if TYPE_CHECKING:
     from .boss_base import BossBase
@@ -25,6 +25,7 @@ class BossDef:
     texture: str
     phases: list       # List[BossPhase] - 使用 list 避免导入循环
     animations: dict = field(default_factory=dict)
+    boss_class: Optional[type] = None  # trusted content subclass; default runtime unchanged
 
 
 class _ImageOverlayRenderer:
@@ -103,13 +104,22 @@ class StageScript(FrameTaskOwner):
         self._init_tasks()
 
     @property
-    def time(self) -> int:
+    def time(self) -> float:
         """当前帧数"""
         return self._time
 
     def bind(self, ctx: 'SpellCardContext'):
         """绑定上下文"""
         self.ctx = ctx
+
+    def presentation_resources(self):
+        """Known presentation data to prepare while the loading screen is up.
+
+        Optional keys: spell_names, texts, bgm_names, particle_effects, trail_vertices.
+        Plain data only: no renderer imports, drawing, tasks or clock updates.
+        Dynamic resources remain supported through the normal cache-miss path.
+        """
+        return {'bgm_names': tuple(name for name in (self.bgm, self.boss_bgm) if name)}
 
     def start(self):
         """开始关卡"""
@@ -140,7 +150,7 @@ class StageScript(FrameTaskOwner):
         if not self._active:
             return
 
-        self._time += 1
+        self._advance_clock()
 
         try:
             # Keep the existing enemy-before-stage update order.
@@ -231,7 +241,10 @@ class StageScript(FrameTaskOwner):
             self._play_bgm(self.boss_bgm)
 
         # 从 BossDef 创建 Boss 实例
-        boss = BossBase.create(boss_def, self.ctx)
+        boss_class = boss_def.boss_class or BossBase
+        if not issubclass(boss_class, BossBase):
+            raise TypeError('BossDef.boss_class must inherit BossBase')
+        boss = boss_class.create(boss_def, self.ctx)
         try:
             from src.resource.texture_asset import get_texture_asset_manager
             boss.setup_render_obj(get_texture_asset_manager())
@@ -250,7 +263,7 @@ class StageScript(FrameTaskOwner):
         # 等待 Boss 战结束
         while boss._active:
             boss.update()
-            yield
+            yield NEXT_FRAME
 
         self._current_boss = None
 
@@ -444,8 +457,7 @@ class StageScript(FrameTaskOwner):
         """等待指定帧数"""
         if self._debug_skip_target:
             return
-        for _ in range(frames):
-            yield
+        yield from wait_frames(frames)
 
     @types.coroutine
     def wait_seconds(self, seconds: float):

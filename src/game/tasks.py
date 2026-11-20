@@ -7,18 +7,55 @@ No wall clock, threads or asyncio event loop participates in their execution.
 from __future__ import annotations
 
 import types
+from dataclasses import dataclass
 from typing import Any
 
 
 FRAME_RATE = 60
 FRAME_DT = 1.0 / FRAME_RATE
+NEXT_FRAME = object()
+
+
+@dataclass(frozen=True)
+class ClockWait:
+    frames: float
+    clock: str = 'simulation'
+
+
+def owner_frame(owner):
+    frame = getattr(owner, '_task_frame', None)
+    if frame is None:
+        frame = getattr(owner, 'runtime_frame', None)
+    return int(getattr(owner, 'time', 0)) if frame is None else frame
+
+
+def owner_clock(owner, clock):
+    return float(owner_frame(owner) if clock == 'control' else owner.time)
+
+
+def simulation_rate(owner, domain='scripts'):
+    ctx = getattr(owner, 'ctx', None)
+    return ctx.get_simulation_rate(domain) if ctx is not None else 1.0
+
+
+def _suspension(owner, value):
+    if value is NEXT_FRAME:
+        clock, frames = 'control', 1.0
+    elif isinstance(value, ClockWait):
+        clock, frames = value.clock, value.frames
+    else:
+        # Legacy bare yield still means ONE simulation frame.
+        clock, frames = 'simulation', 1.0
+    return clock, owner_clock(owner, clock) + frames
 
 
 @types.coroutine
-def wait_frames(frames: int):
-    """Suspend for the same number of gameplay updates as existing wait()."""
-    for _ in range(max(0, int(frames))):
-        yield
+def wait_frames(frames: float, *, clock='simulation'):
+    """Fractional simulation deadline, or an explicit unscaled control wait."""
+    if clock not in {'simulation', 'control'}:
+        raise ValueError('wait clock must be simulation or control')
+    if frames > 0:
+        yield ClockWait(float(frames), clock)
 
 
 class TaskCancelled(RuntimeError):
@@ -31,6 +68,7 @@ class TaskHandle:
     __slots__ = (
         "_group", "_iterator", "_done", "_cancelled", "_result", "_error",
         "_last_frame", "_eligible_frame", "_running", "_cancel_requested",
+        "_wait_clock", "_due",
     )
 
     def __init__(self, group, coroutine):
@@ -43,7 +81,9 @@ class TaskHandle:
         self._result = None
         self._error = None
         self._last_frame = None
-        self._eligible_frame = int(getattr(group.owner, "time", 0))
+        self._eligible_frame = owner_frame(group.owner)
+        self._wait_clock = 'control'
+        self._due = 0.0
         self._running = False
         self._cancel_requested = False
 
@@ -81,10 +121,13 @@ class TaskHandle:
     def _step(self, frame: int) -> None:
         if self._done or self._last_frame == frame or frame < self._eligible_frame:
             return
+        if owner_clock(self._group.owner, self._wait_clock) + 1e-8 < self._due:
+            return
         self._last_frame = frame
         self._running = True
         try:
-            self._iterator.send(None)
+            value = self._iterator.send(None)
+            self._wait_clock, self._due = _suspension(self._group.owner, value)
         except StopIteration as stop:
             self._done = True
             self._result = stop.value
@@ -101,7 +144,7 @@ class TaskHandle:
     def join(self):
         """Await completion without advancing this task from its waiter."""
         while not self._done:
-            yield
+            yield NEXT_FRAME
         return self.result()
 
     def __await__(self):
@@ -148,7 +191,7 @@ class FrameTaskGroup:
         self._revision += 1
         if immediate:
             try:
-                handle._step(int(getattr(self.owner, "time", 0)))
+                handle._step(owner_frame(self.owner))
             except BaseException:
                 self.cancel()
                 raise
@@ -157,7 +200,7 @@ class FrameTaskGroup:
     def pump(self) -> None:
         if self._closed or self._pumping or not self._tasks:
             return
-        frame = int(getattr(self.owner, "time", 0))
+        frame = owner_frame(self.owner)
         if self._last_pump_frame == frame and self._last_pump_revision == self._revision:
             return
         self._last_pump_frame = frame
@@ -250,6 +293,19 @@ class FrameTaskOwner:
         self._frame_tasks = FrameTaskGroup(self)
         self._coroutine_driving = False
         self._close_main_requested = False
+        self._task_frame = 0
+        self._main_wait_clock = 'control'
+        self._main_due = 0.0
+        self._main_last_frame = None
+
+    def _advance_clock(self):
+        self._task_frame += 1
+        rate = simulation_rate(self)
+        self._time += 1 if rate == 1.0 else rate
+
+    def wait_control(self, frames):
+        """Unscaled gameplay input frames; menus pause the entire update loop."""
+        return wait_frames(frames, clock='control')
 
     def spawn_task(self, coroutine, *, immediate: bool = False) -> TaskHandle:
         return spawn_task(self, coroutine, immediate=immediate)
@@ -271,9 +327,15 @@ class FrameTaskOwner:
         coroutine = self._coroutine
         if coroutine is None:
             return False
+        frame = owner_frame(self)
+        if (self._main_last_frame == frame
+                or owner_clock(self, self._main_wait_clock) + 1e-8 < self._main_due):
+            return True
+        self._main_last_frame = frame
         self._coroutine_driving = True
         try:
-            coroutine.send(None)
+            value = coroutine.send(None)
+            self._main_wait_clock, self._main_due = _suspension(self, value)
             return True
         except StopIteration:
             self._coroutine = None
@@ -307,4 +369,5 @@ __all__ = [
     "FRAME_RATE", "FRAME_DT", "TaskCancelled", "TaskHandle", "FrameTaskGroup",
     "FrameTaskOwner", "wait_frames", "spawn_task", "pump_tasks", "cancel_tasks",
     "await_task", "parallel_tasks", "task_group",
+    "NEXT_FRAME", "ClockWait", "simulation_rate",
 ]

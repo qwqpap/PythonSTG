@@ -157,8 +157,7 @@ class StageManager:
         for _ in range(wait_frames):
             yield
 
-        # ===== 阶段 2：开始关卡 =====
-        self.loading_info = None
+        # ===== 阶段 2：在加载画面下准备关卡，再开始仿真 =====
 
         # 创建上下文：将引擎对象包装成内容脚本可用的统一接口
         ctx = StageContext(
@@ -175,33 +174,35 @@ class StageManager:
         )
         ctx.seed = int(self._engine_refs.get('seed', 0))
 
-        # 将 ctx 保存到 stage_manager，供渲染器访问
-        self.current_context = ctx
-        ctx.set_timeline_origin(self.frame_count)
         ctx.set_runtime_frame(self.frame_count)
-        self._last_timeline_frame = 0
-        self.timeline_stage_id = getattr(stage_class, 'id', None)
-        ctx.authoring_stage_id = self.timeline_stage_id
-
-        # 使用程序化关卡脚本
         stage = stage_class()
-        stage.bind(ctx)
-
-        # Debug: 传入跳转目标
-        if self.debug_skip_to:
-            stage._debug_skip_target = self.debug_skip_to
-            self.debug_skip_to = None  # 只用一次
-            print(f"[Debug] 跳转目标已设置: {stage._debug_skip_target}")
-
-        stage.start()
-
-        # 保存 stage 对象到 stage_manager，供对话渲染使用
-        self.current_stage = stage
-
         stage_name = getattr(stage_class, 'name', stage_class.__name__)
-        print(f"=== {stage_name} 开始 ===")
-
         try:
+            stage.bind(ctx)
+            self.loading_info['hint'] = 'Preparing presentation...'
+            yield
+            resources = stage.presentation_resources()
+            self.particle_pool.prepare_effects(resources.get('particle_effects', ()))
+            prepare = self._engine_refs.get('prepare_presentation')
+            if prepare is not None:
+                prepare(stage, ctx, resources)
+            # Finish the preparation frame as a loading frame. Publish/start
+            # the stage on the next update, with a fresh timeline origin.
+            yield
+            ctx.set_timeline_origin(self.frame_count)
+            ctx.set_runtime_frame(self.frame_count)
+            self.current_context = ctx
+            self._last_timeline_frame = 0
+            self.timeline_stage_id = getattr(stage_class, 'id', None)
+            ctx.authoring_stage_id = self.timeline_stage_id
+            if self.debug_skip_to:
+                stage._debug_skip_target = self.debug_skip_to
+                self.debug_skip_to = None
+                print(f"[Debug] 跳转目标已设置: {stage._debug_skip_target}")
+            stage.start()
+            self.current_stage = stage
+            self.loading_info = None
+            print(f"=== {stage_name} 开始 ===")
             while stage._active:
                 stage.update()
                 yield
@@ -294,9 +295,14 @@ class StageManager:
             self.clear()
             raise
 
-    def _update_frame(self, dt, bullet_pool, player):
+    def begin_frame(self):
+        """Sample rates before player/projectile updates; repeated calls are inert."""
         if self.current_context is not None:
             self.current_context.set_runtime_frame(self.frame_count)
+
+    def _update_frame(self, dt, bullet_pool, player):
+        self.begin_frame()
+        if self.current_context is not None:
             self._last_timeline_frame = self.current_context.timeline_frame
             self.current_context.flush_lifecycle_events()
         self.event_bus.dispatch_frame()
@@ -328,6 +334,7 @@ class StageManager:
         self.coroutines = new_coroutines
         if self.current_context is not None:
             self.current_context.flush_bullet_conversions()
+            self.current_context.update_animations()
             self._collect_authoring_trace(self.current_context)
             self.current_context.flush_lifecycle_events()
         self.frame_count += 1

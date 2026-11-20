@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 import os
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional, Tuple, TYPE_CHECKING
 
@@ -283,6 +284,10 @@ class SpellDeclarationRenderer:
         self._name_texture = None
         self._name_text: str = ""
         self._name_tex_size: Tuple[int, int] = (1, 1)
+        self._name_cache = OrderedDict()
+        self._name_cache_bytes = 0
+        self._name_cache_limit = 64
+        self._name_cache_bytes_limit = 16 * 1024 * 1024
 
         self._band_texture = None
         self._band_tex_size: Tuple[int, int] = (1, 1)
@@ -382,8 +387,17 @@ class SpellDeclarationRenderer:
 
     # ----- 资源上传 -----
     def _ensure_name_texture(self, name: str):
-        """懒加载/更新符卡名纹理。"""
+        """Reuse prepared names; unknown dynamic names retain the miss path."""
         if name == self._name_text and self._name_texture is not None:
+            return
+        if self._name_texture is not None and self._name_text not in self._name_cache:
+            self._name_texture.release()
+            self._name_texture = None
+        cached = self._name_cache.get(name)
+        if cached is not None:
+            self._name_cache.move_to_end(name)
+            self._name_texture, self._name_tex_size = cached
+            self._name_text = name
             return
         surf = self._name_font.render(
             name if name else " ",
@@ -394,16 +408,32 @@ class SpellDeclarationRenderer:
         )
         data = surf.to_bytes("RGBA", flip_y=True)
         w, h = surf.get_size()
-        if self._name_texture is not None:
-            try:
-                self._name_texture.release()
-            except Exception:
-                pass
         tex = self.ctx.texture((w, h), 4, data)
         tex.filter = (self._moderngl.LINEAR, self._moderngl.LINEAR)
         self._name_texture = tex
         self._name_tex_size = (w, h)
         self._name_text = name
+        size = w * h * 4
+        if size <= self._name_cache_bytes_limit:
+            self._name_cache[name] = (tex, (w, h))
+            self._name_cache_bytes += size
+            while (len(self._name_cache) > self._name_cache_limit or
+                   self._name_cache_bytes > self._name_cache_bytes_limit):
+                _, (old, (ow, oh)) = self._name_cache.popitem(last=False)
+                self._name_cache_bytes -= ow * oh * 4
+                old.release()
+
+    def prepare_names(self, names):
+        """Rasterize/upload known names without starting or drawing a spell."""
+        for name in dict.fromkeys(names):
+            if name:
+                self._ensure_name_texture(name)
+        # An oversized dynamic label can be drawn, but not retained by preload.
+        if self._name_texture is not None and self._name_text not in self._name_cache:
+            self._name_texture.release()
+        # Preloading must not select a visible name for a later empty declaration.
+        self._name_texture = None
+        self._name_text = ''
 
     def _ensure_band_texture(self):
         """预渲染带状文字（一整行 "SpellCard Attack!! SpellCard Attack!! …"）。"""
@@ -677,12 +707,17 @@ class SpellDeclarationRenderer:
 
     # ----- 清理 -----
     def cleanup(self):
-        try:
-            if self._name_texture is not None:
-                self._name_texture.release()
-            if self._band_texture is not None:
-                self._band_texture.release()
-        except Exception:
-            pass
+        if self._name_texture is not None and self._name_text not in self._name_cache:
+            self._name_texture.release()
+        for texture, _ in self._name_cache.values():
+            texture.release()
+        self._name_cache.clear()
+        self._name_cache_bytes = 0
+        for name in ('_band_texture', '_quad_vao', '_quad_vbo', '_quad_prog',
+                     '_col_vao', '_col_vbo', '_col_prog'):
+            resource = getattr(self, name, None)
+            if resource is not None:
+                resource.release()
+                setattr(self, name, None)
         self._name_texture = None
-        self._band_texture = None
+        self._name_text = ''

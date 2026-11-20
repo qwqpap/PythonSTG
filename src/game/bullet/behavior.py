@@ -28,6 +28,8 @@ STAGE_DTYPE = np.dtype([
     ('duration', 'f8'),
     ('speed', 'f4'),
     ('angle', 'f4'),
+    ('angle_offset', 'f4'),
+    ('velocity_scale_end', 'f4'),
     ('aim', 'i1'),
     ('target', 'f4', 2),
     ('accel', 'f4'),
@@ -43,6 +45,9 @@ STAGE_DTYPE = np.dtype([
     ('sprite_idx', 'i4'),
 ])
 
+# Offsets may legitimately be negative after shared-table compaction.
+NO_STAGE_PARAMETERS = -(1 << 62)
+
 
 def compile_stages(stages, register_sprite):
     """Validate and pack a finite stage sequence once, not once per bullet."""
@@ -52,6 +57,7 @@ def compile_stages(stages, register_sprite):
     rows = np.zeros(len(stages), dtype=STAGE_DTYPE)
     for name in ('speed', 'angle'):
         rows[name] = np.nan
+    rows['velocity_scale_end'] = np.nan
     for name in ('bounce_x', 'bounce_y', 'wrap_x', 'wrap_y'):
         rows[name] = -1
     rows['sprite_idx'] = -1
@@ -72,7 +78,8 @@ def compile_stages(stages, register_sprite):
             if not math.isfinite(duration) or duration < 0:
                 raise ValueError('bullet stage duration must be finite and non-negative')
             rows['duration'][index] = duration
-        for name in ('speed', 'angle', 'accel', 'turn_rate', 'max_turn_rate'):
+        for name in ('speed', 'angle', 'angle_offset', 'velocity_scale_end',
+                     'accel', 'turn_rate', 'max_turn_rate'):
             if name in stage:
                 value = float(stage[name])
                 if not math.isfinite(value) or (name in {'speed', 'max_turn_rate'} and value < 0):
@@ -130,19 +137,28 @@ def compile_stages(stages, register_sprite):
 @njit(cache=True)
 def advance_stages(data, table, stages, ends, elapsed, entered,
                    bounce_x, bounce_y, dt, player_x, player_y,
-                   wrap_remaining_x=None, wrap_remaining_y=None):
+                   wrap_remaining_x=None, wrap_remaining_y=None,
+                   parameter_bases=None, parameter_table=None):
     """Apply entry commands before this frame's existing movement kernel."""
     active = 0
     wrapping = 0
+    parameterized = 0
     for i in range(len(data)):
         stage = stages[i]
         if stage < 0 or data[i]['alive'] == 0:
+            continue
+        if data[i]['lifetime'] + 1e-8 < data[i]['warmup_duration']:
+            active += 1
+            if parameter_bases is not None and parameter_bases[i] != NO_STAGE_PARAMETERS:
+                parameterized += 1
             continue
         end = ends[i]
         # At most 64 entries can be processed.  Zero-duration stages cannot
         # create a busy loop, and timers belong to individual bullet slots.
         while stage < end:
             row = table[stage]
+            if parameter_bases is not None and parameter_bases[i] != NO_STAGE_PARAMETERS:
+                row = parameter_table[parameter_bases[i] + stage]
             if not entered[i]:
                 if not math.isnan(row['speed']):
                     data[i]['speed'] = row['speed']
@@ -154,6 +170,7 @@ def advance_stages(data, table, stages, ends, elapsed, entered,
                 elif row['aim'] == 2:
                     data[i]['angle'] = math.atan2(row['target'][1] - data[i]['pos'][1],
                                                  row['target'][0] - data[i]['pos'][0])
+                data[i]['angle'] += row['angle_offset']
                 if not math.isnan(row['accel']):
                     data[i]['speed_accel'] = row['accel']
                 data[i]['acc'][0] = row['vector_accel'][0]
@@ -203,11 +220,26 @@ def advance_stages(data, table, stages, ends, elapsed, entered,
             wrapping += 1
         if stage == end:
             stages[i] = -1
+            data[i]['motion_velocity_scale'] = 1.0
+            data[i]['speed_accel'] = 0.0
+            data[i]['motion_angular_vel'] = 0.0
+            data[i]['motion_angular_accel'] = 0.0
+            data[i]['acc'][0] = 0.0
+            data[i]['acc'][1] = 0.0
+            if parameter_bases is not None:
+                parameter_bases[i] = NO_STAGE_PARAMETERS
             continue
         # The existing stage index is also the homing state: leaving a stage
         # immediately stops tracking, without another per-bullet side array.
         row = table[stage]
+        if parameter_bases is not None and parameter_bases[i] != NO_STAGE_PARAMETERS:
+            row = parameter_table[parameter_bases[i] + stage]
+            parameterized += 1
         local_dt = dt * data[i]['time_scale']
+        data[i]['motion_velocity_scale'] = 1.0
+        if not math.isnan(row['velocity_scale_end']) and row['duration'] > 0.0:
+            progress = min(1.0, elapsed[i] / row['duration'])
+            data[i]['motion_velocity_scale'] = 1.0 + (row['velocity_scale_end'] - 1.0) * progress
         if row['homing'] != 0 and local_dt > 0:
             tx, ty = player_x, player_y
             if row['homing'] == 2:
@@ -221,7 +253,7 @@ def advance_stages(data, table, stages, ends, elapsed, entered,
         stages[i] = stage
         elapsed[i] += local_dt
         active += 1
-    return active, wrapping
+    return active, wrapping, parameterized
 
 
 @njit(cache=True)

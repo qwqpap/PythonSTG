@@ -363,3 +363,5 @@ class OptimizedBulletRenderer:
             self.uv_vbo.release()
         if hasattr(self, 'scale_vbo') and self.scale_vbo:
             self.scale_vbo.release()
+        if hasattr(self, 'program') and self.program:
+            self.program.release()
